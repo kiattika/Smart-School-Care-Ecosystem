@@ -1,0 +1,164 @@
+{
+  "entities": {
+    "AdminPeriodConfig": {
+      "title": "AdminPeriodConfig",
+      "description": "Bell schedule period time setting configured by administrators (Periods 0-8)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Document ID matching period number" },
+        "periodNumber": { "type": "integer", "description": "Period index (0 to 8)" },
+        "periodName": { "type": "string", "description": "Label such as คาบ 0 โฮมรูม" },
+        "startTime": { "type": "string", "description": "HH:MM format start time" },
+        "endTime": { "type": "string", "description": "HH:MM format end time" }
+      },
+      "required": ["id", "periodNumber", "periodName", "startTime", "endTime"]
+    },
+    "Teacher": {
+      "title": "Teacher",
+      "description": "Teacher demographic and operational profile",
+      "type": "object",
+      "properties": {
+        "teacherId": { "type": "string", "description": "Unique identifier for the teacher" },
+        "email": { "type": "string", "description": "Teacher official school email" },
+        "fullName": { "type": "string", "description": "Full name of the teacher" },
+        "role": { "type": "string", "enum": ["TEACHER", "HOMEROOM", "ADMIN"], "description": "Access control role" },
+        "roomResponsibility": { "type": "string", "description": "E.g., ม.5/8 if they are homeroom teacher" }
+      },
+      "required": ["teacherId", "email", "fullName", "role"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Student academic and behavioral tracking profile",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "Unique school student ID" },
+        "fullName": { "type": "string", "description": "Firstname and Lastname" },
+        "nickname": { "type": "string", "description": "Thai nickname" },
+        "room": { "type": "string", "description": "Classroom designation (e.g. ม.5/8)" },
+        "behaviorScore": { "type": "integer", "description": "Behavioral points remaining (0 to 100)" },
+        "riskLevel": { "type": "string", "enum": ["NORMAL", "WARNING", "CRITICAL"], "description": "Derived behavioral alert risk tier" },
+        "parentId": { "type": "string", "description": "LINE/Firebase ID of the guardian/parent" }
+      },
+      "required": ["studentId", "fullName", "room", "behaviorScore", "riskLevel", "parentId"]
+    },
+    "Schedule": {
+      "title": "Schedule",
+      "description": "Weekly period timetable allocation for teaching schedules",
+      "type": "object",
+      "properties": {
+        "dayOfWeek": { "type": "string", "enum": ["monday", "tuesday", "wednesday", "thursday", "friday"], "description": "Lowercase weekday name" },
+        "periodNumber": { "type": "integer", "description": "Configured period slot (0 to 8)" },
+        "subjectCode": { "type": "string", "description": "E.g., ค32101" },
+        "subjectType": { "type": "string", "enum": ["MAIN", "ACTIVITY"], "description": "Academic course vs extracurricular/homeroom" },
+        "teacherIds": { "type": "array", "description": "Array of teacherId strings teaching this course" },
+        "room": { "type": "string", "description": "Assigned classroom room" }
+      },
+      "required": ["dayOfWeek", "periodNumber", "subjectCode", "subjectType", "teacherIds", "room"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Classroom student attendance record for a specific date and period",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique record id" },
+        "date": { "type": "string", "description": "YYYY-MM-DD date" },
+        "room": { "type": "string", "description": "Classroom designation (e.g. ม.5/8)" },
+        "checkedByTeacherId": { "type": "string", "description": "ID of teacher checking attendance" },
+        "checkedByName": { "type": "string", "description": "Name of checker" },
+        "periodNumber": { "type": "integer", "description": "0 for homeroom, 1-8 for academic courses" },
+        "checkedAt": { "type": "string", "description": "ISO timestamp" },
+        "isLocked": { "type": "boolean", "description": "Lock status to prevent post-homeroom alterations" },
+        "students": { "type": "object", "description": "Map of studentId to status string (PRESENT, LATE, ABSENT, LEAVE)" }
+      },
+      "required": ["id", "date", "room", "checkedByTeacherId", "checkedByName", "periodNumber", "checkedAt", "students"]
+    },
+    "DisciplineLog": {
+      "title": "DisciplineLog",
+      "description": "Log entry tracking point deductions or additions",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "Associated student ID" },
+        "studentName": { "type": "string", "description": "Cached student name" },
+        "type": { "type": "string", "enum": ["deduction", "addition"], "description": "Point transaction category" },
+        "points": { "type": "integer", "description": "Points value deducted (negative) or restored (positive)" },
+        "reason": { "type": "string", "description": "Infraction or good deed description" },
+        "timestamp": { "type": "string", "description": "ISO timestamp or ServerTimestamp" },
+        "date": { "type": "string", "description": "YYYY-MM-DD date" },
+        "recordedBy": { "type": "string", "description": "Teacher/Admin name" }
+      },
+      "required": ["studentId", "studentName", "type", "points", "reason", "timestamp", "date"]
+    },
+    "ParentNotification": {
+      "title": "ParentNotification",
+      "description": "Push notification documents delivered to parents",
+      "type": "object",
+      "properties": {
+        "parentId": { "type": "string", "description": "Receiving parent ID" },
+        "studentId": { "type": "string", "description": "Child student ID" },
+        "studentName": { "type": "string", "description": "Cached child name" },
+        "title": { "type": "string", "description": "Alert title" },
+        "message": { "type": "string", "description": "Detailed text content" },
+        "status": { "type": "string", "enum": ["unread", "read"], "description": "Read state" },
+        "createdAt": { "type": "string", "description": "ISO timestamp or ServerTimestamp" },
+        "pointsDeducted": { "type": "integer", "description": "Deduction value in this incident" },
+        "remainingScore": { "type": "integer", "description": "Current behavior score of child" },
+        "type": { "type": "string", "enum": ["info", "warning", "critical"], "description": "Urgency rating" }
+      },
+      "required": ["parentId", "studentId", "studentName", "title", "message", "status", "createdAt"]
+    },
+    "ParentConference": {
+      "title": "ParentConference",
+      "description": "Interactive meeting invitation with school administration when behavior is critical",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "Student ID" },
+        "studentName": { "type": "string", "description": "Student full name" },
+        "parentId": { "type": "string", "description": "Parent ID" },
+        "status": { "type": "string", "enum": ["PENDING", "SCHEDULED", "COMPLETED"], "description": "Meeting state" },
+        "title": { "type": "string", "description": "Invitation title" },
+        "message": { "type": "string", "description": "Invitation instructions" },
+        "createdAt": { "type": "string", "description": "Creation timestamp" },
+        "remainingScore": { "type": "integer", "description": "Behavior score triggering the conference" },
+        "scheduledDate": { "type": "string", "description": "E.g., วันจันทร์ที่ 27 ก.ค. 2569" },
+        "scheduledTime": { "type": "string", "description": "E.g., 09:00 - 10:00 น." },
+        "availableSlots": { "type": "array", "description": "Allowed booking times" },
+        "notes": { "type": "string", "description": "Admin or parent annotations" }
+      },
+      "required": ["studentId", "studentName", "parentId", "status", "title", "message", "createdAt", "remainingScore", "availableSlots"]
+    }
+  },
+  "firestore": {
+    "/admin_periods_config/{periodId}": {
+      "schema": "AdminPeriodConfig",
+      "description": "Period time schedules (คาบ 0 ถึง คาบ 8)"
+    },
+    "/teachers/{teacherId}": {
+      "schema": "Teacher",
+      "description": "Teacher registries"
+    },
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Student behavior scores and parent references"
+    },
+    "/schedules/{scheduleId}": {
+      "schema": "Schedule",
+      "description": "Weekly timetables"
+    },
+    "/attendance_records/{recordId}": {
+      "schema": "AttendanceRecord",
+      "description": "Daily student roll call attendance logs"
+    },
+    "/discipline_logs/{logId}": {
+      "schema": "DisciplineLog",
+      "description": "Discipline logs for points change"
+    },
+    "/parent_notifications/{notificationId}": {
+      "schema": "ParentNotification",
+      "description": "Parent notification messages"
+    },
+    "/parent_conferences/{conferenceId}": {
+      "schema": "ParentConference",
+      "description": "Conference appointments triggered by critical behavioral thresholds"
+    }
+  }
+}

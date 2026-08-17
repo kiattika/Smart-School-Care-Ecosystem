@@ -1,0 +1,19 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Kanit:wght@300;400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-dark-bg: #0b0d14;
+  --font-sans: "Kanit", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --animate-shimmer: shimmer 2s infinite;
+  
+  @keyframes shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+}
+
+body {
+  @apply bg-[#0b0d14] text-white;
+}
+
