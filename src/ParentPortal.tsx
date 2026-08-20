@@ -11,6 +11,7 @@ import {
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { updateParentConferenceSchedule } from './services/firestoreService';
+import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 
 export function ParentPortal() {
   const { 
@@ -27,10 +28,15 @@ export function ParentPortal() {
     adjustBehaviorScore
   } = useStore();
   
-  // Student mapping to studentId '38502' (สมชาย ใจดี)
-  const student = students.find(s => s.studentId === '38502');
-  const studentAnalytics = analytics.find(a => a.studentId === '38502');
-  const todayStatus = attendanceRecords['1']?.['38502'] || 'UNMARKED';
+  // Selected student state with safe fallback
+  const [selectedStudentId, setSelectedStudentId] = useState<string>(() => {
+    const defaultStudent = students.find(s => s.studentId === '38502') || students[0];
+    return defaultStudent ? defaultStudent.studentId : '38502';
+  });
+
+  const student = students.find(s => s.studentId === selectedStudentId) || students.find(s => s.studentId === '38502') || students[0];
+  const studentAnalytics = student ? analytics.find(a => a.studentId === student.studentId) : null;
+  const todayStatus = student ? (attendanceRecords['1']?.[student.studentId] || 'UNMARKED') : 'UNMARKED';
 
   // Live Firestore state for real-time behavior score
   const [liveFsScore, setLiveFsScore] = useState<number | null>(null);
@@ -50,6 +56,7 @@ export function ParentPortal() {
   }, [student?.studentId]);
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'leave' | 'gradebook'>('dashboard');
+  const [viewDetailModal, setViewDetailModal] = useState(false);
   const [leaveReason, setLeaveReason] = useState('');
   const [leaveType, setLeaveType] = useState('ลาป่วย');
   const [leaveDate, setLeaveDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -83,14 +90,28 @@ export function ParentPortal() {
     <div className="flex flex-col h-screen sm:h-[800px] w-full sm:max-w-[400px] sm:rounded-[2.5rem] bg-[#f5f6f8] text-slate-800 overflow-hidden font-sans relative shadow-2xl border-[8px] border-black">
       {/* Header LINE Style */}
       <header className="h-14 bg-white flex items-center justify-between px-4 shrink-0 shadow-sm z-10 relative">
-        <div className="flex items-center gap-3">
-          <ChevronLeft className="w-6 h-6 text-slate-700" />
-          <h1 className="text-lg font-semibold text-slate-800">Smart School Care</h1>
+        <div className="flex items-center gap-2">
+          <ChevronLeft className="w-5 h-5 text-slate-700 cursor-pointer" />
+          <div>
+            <h1 className="text-sm font-bold text-slate-800">Smart School Care</h1>
+            <p className="text-[10px] text-slate-500">ระบบติดตามและดูแลนักเรียนสำหรับผู้ปกครอง</p>
+          </div>
         </div>
-        <div className="text-xs font-medium text-emerald-600 bg-emerald-100 px-2 py-1 rounded-full flex items-center gap-1">
-          <ShieldCheck className="w-3 h-3" />
-          LINE Verified
-        </div>
+        
+        {/* Child Switcher */}
+        {students.length > 1 && (
+          <select
+            value={student.studentId}
+            onChange={(e) => setSelectedStudentId(e.target.value)}
+            className="text-xs bg-slate-100 border border-slate-300 rounded-lg px-2 py-1 font-semibold text-slate-700 outline-none max-w-[130px] truncate"
+          >
+            {students.map(s => (
+              <option key={s.studentId} value={s.studentId}>
+                {s.fullName || s.name}
+              </option>
+            ))}
+          </select>
+        )}
       </header>
 
       {/* Main Scrollable Content */}
@@ -373,6 +394,34 @@ export function ParentPortal() {
 
               </div>
             </div>
+
+            {/* Learner DNA Card (Self-Assessment) */}
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-100 rounded-xl p-4 shadow-sm relative overflow-hidden">
+              <div className="flex items-start gap-3 relative z-10">
+                <div className="w-10 h-10 rounded-xl bg-blue-600/10 text-blue-600 flex items-center justify-center shrink-0">
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 bg-blue-100 px-2 py-0.5 rounded">
+                      Learner DNA
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-800 mt-1">สรุปข้อมูลวิเคราะห์บุตรหลาน</h4>
+                  <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
+                    ผลการประเมิน 30 ข้อ เพื่อให้ท่านทราบเป้าหมาย อุปสรรค และสไตล์การเรียนรู้ของบุตรหลาน
+                  </p>
+                  
+                  <button
+                    onClick={() => setViewDetailModal(true)}
+                    className="mt-3 text-xs bg-white border border-blue-200 text-blue-700 font-semibold px-3 py-1.5 rounded-lg hover:bg-blue-50 transition-all shadow-sm flex items-center gap-1"
+                  >
+                    ดูรายละเอียดแบบประเมินทั้งหมด
+                  </button>
+                </div>
+              </div>
+            </div>
+
           </div>
         )}
         
@@ -568,6 +617,23 @@ export function ParentPortal() {
           <span className="text-[10px] font-bold">ลางาน</span>
         </button>
       </nav>
+
+      {/* Detail Modal */}
+      {viewDetailModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto w-full h-full sm:absolute flex items-end sm:items-center justify-center sm:p-4">
+          <div className="fixed inset-0 bg-black/60 transition-opacity" onClick={() => setViewDetailModal(false)}></div>
+          <div className="relative w-full h-[90vh] sm:h-auto sm:max-h-[85vh] bg-white sm:rounded-2xl rounded-t-2xl shadow-xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-10 sm:slide-in-from-bottom-0 sm:fade-in duration-300">
+             <div className="overflow-y-auto flex-1 w-full relative">
+               <StudentAssessmentDetailModal
+                 student={student}
+                 assessment={useStore.getState().selfAssessments[student.studentId]}
+                 viewerRole="PARENT"
+                 onClose={() => setViewDetailModal(false)}
+               />
+             </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

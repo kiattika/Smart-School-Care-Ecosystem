@@ -1,5 +1,5 @@
 {
-  "name": "Smart School Care Ecosystem",
+  "name": "Smart School Care Platform",
   "description": "A comprehensive school management and student care platform with RBAC and real-time cross-classroom data syncing.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

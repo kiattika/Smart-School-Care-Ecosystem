@@ -14,6 +14,8 @@ import {
   Activity
 } from 'lucide-react';
 import { UserRole, Permission, UserProfile, ROLE_PERMISSIONS } from '../types/auth';
+import { useStore } from '../store';
+import { HeaderRealTimeClock } from './HeaderRealTimeClock';
 
 // สีของ Badge และธีมประจำแต่ละบทบาท
 interface RoleVisualConfig {
@@ -150,53 +152,58 @@ export function NavbarWithRoleSwitcher({
   };
 
   return (
-    <nav className="w-full bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800 text-slate-100 px-6 py-4 flex items-center justify-between sticky top-0 z-50 shadow-lg">
+    <nav className="w-full bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800 text-slate-100 px-3 sm:px-6 py-2.5 sm:py-3.5 flex items-center justify-between sticky top-0 z-50 shadow-lg">
       
       {/* ฝั่งซ้าย: โลโก้และชื่อระบบ */}
-      <div className="flex items-center gap-3">
-        <div className="relative group cursor-pointer">
+      <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <div className="relative group cursor-pointer shrink-0">
           <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-emerald-500 rounded-xl blur opacity-30 group-hover:opacity-60 transition duration-300"></div>
-          <div className="relative w-10 h-10 bg-gradient-to-br from-indigo-600 to-slate-900 border border-slate-700 rounded-xl flex items-center justify-center shadow-lg">
-            <Building className="w-5.5 h-5.5 text-indigo-400 group-hover:scale-110 transition duration-300" />
+          <div className="relative w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-indigo-600 to-slate-900 border border-slate-700 rounded-xl flex items-center justify-center shadow-lg">
+            <Building className="w-4 h-4 sm:w-5.5 sm:h-5.5 text-indigo-400 group-hover:scale-110 transition duration-300" />
           </div>
         </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <span className="font-bold text-sm sm:text-base md:text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent truncate">
               ระบบบริหารจัดการสถานศึกษา
             </span>
-            <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-md font-semibold">
+            <span className="text-[9px] sm:text-[10px] uppercase font-mono px-1.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-md font-semibold shrink-0">
               SMS Pro
             </span>
           </div>
-          <p className="text-xs text-slate-400 font-light">School Management & Student Care System</p>
+          <p className="text-[10px] sm:text-xs text-slate-400 font-light hidden sm:block truncate">School Management & Student Care System</p>
         </div>
       </div>
 
-      {/* ฝั่งขวา: โปรไฟล์ผู้ใช้ และ Role Switcher */}
-      <div className="flex items-center gap-4">
+      {/* ฝั่งขวา: โปรไฟล์ผู้ใช้, นาฬิกา Real-time และ Role Switcher */}
+      <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+        
+        {/* Real-time live digital clock and active class period (hidden on small mobile to conserve space) */}
+        <div className="hidden lg:flex">
+          <HeaderRealTimeClock />
+        </div>
         
         {/* Role Switcher Selector */}
         <div className="relative" ref={roleDropdownRef}>
           <button
             onClick={() => setIsRoleDropdownOpen(!isRoleDropdownOpen)}
-            className="flex items-center gap-2.5 bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 rounded-xl px-3.5 py-2 text-xs font-medium transition-all shadow-md cursor-pointer hover:border-slate-700 group"
+            className="flex items-center gap-1.5 sm:gap-2.5 bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 rounded-xl px-2 sm:px-3.5 py-1.5 sm:py-2 text-xs font-medium transition-all shadow-md cursor-pointer hover:border-slate-700 group"
           >
-            <div className={`w-2 h-2 rounded-full ${activeVisual.badgeBg.replace('/10', '/100')} animate-pulse`} />
+            <div className={`w-2 h-2 rounded-full ${activeVisual.badgeBg.replace('/10', '/100')} animate-pulse shrink-0`} />
             <div className="text-left">
-              <p className="text-[10px] text-slate-400 font-normal">บทบาทปัจจุบัน</p>
-              <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-slate-200">
+              <p className="text-[9px] sm:text-[10px] text-slate-400 font-normal hidden sm:block">บทบาทปัจจุบัน</p>
+              <div className="flex items-center gap-1">
+                <span className="font-semibold text-xs text-slate-200">
                   {activeVisual.label}
                 </span>
                 {getRoleContextDetails(activeRole) && (
-                  <span className="text-[11px] text-slate-400 font-light bg-slate-800/80 px-1 py-0.2 rounded border border-slate-700/50">
+                  <span className="text-[10px] sm:text-[11px] text-slate-400 font-light bg-slate-800/80 px-1 py-0.2 rounded border border-slate-700/50 hidden md:inline">
                     {getRoleContextDetails(activeRole)}
                   </span>
                 )}
               </div>
             </div>
-            <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-slate-300 transition-transform duration-200 ml-1" />
+            <ChevronDown className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 group-hover:text-slate-300 transition-transform duration-200 ml-0.5" />
           </button>
 
           {/* เมนูดรอปดาวน์สำหรับเปลี่ยนบทบาท (Role Switcher Dropdown) */}
@@ -252,6 +259,39 @@ export function NavbarWithRoleSwitcher({
                     </button>
                   );
                 })}
+              </div>
+
+              {/* Portal Views (Parent & Student) */}
+              <div className="border-t border-slate-800/80 pt-2 mt-2 space-y-1">
+                <div className="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                  มุมมองระบบอื่นๆ (Portal Views)
+                </div>
+                <button
+                  onClick={() => {
+                    const { setUser, user: currentUser } = useStore.getState();
+                    if (currentUser) {
+                      setUser({ ...currentUser, role: 'parent' });
+                    }
+                    setIsRoleDropdownOpen(false);
+                  }}
+                  className="w-full text-left p-2 rounded-xl hover:bg-emerald-500/10 border border-transparent hover:border-emerald-500/20 transition-all flex items-center gap-2.5 cursor-pointer text-emerald-400 text-xs font-semibold"
+                >
+                  <Users className="w-4 h-4 text-emerald-400" />
+                  <span>มุมมองผู้ปกครอง (Parent Module)</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const { setUser, user: currentUser } = useStore.getState();
+                    if (currentUser) {
+                      setUser({ ...currentUser, role: 'student' });
+                    }
+                    setIsRoleDropdownOpen(false);
+                  }}
+                  className="w-full text-left p-2 rounded-xl hover:bg-indigo-500/10 border border-transparent hover:border-indigo-500/20 transition-all flex items-center gap-2.5 cursor-pointer text-indigo-400 text-xs font-semibold"
+                >
+                  <GraduationCap className="w-4 h-4 text-indigo-400" />
+                  <span>มุมมองนักเรียน (Student Portal)</span>
+                </button>
               </div>
             </div>
           )}

@@ -53,6 +53,25 @@ export interface StudentAnalytics {
   behaviorScore: number;
 }
 
+export type ActiveLearningCategory = 
+  | 'ANSWER'         // ตอบคำถามในชั้นเรียน
+  | 'COLLABORATION'  // ความร่วมมือและการทำงานกลุ่ม
+  | 'PRESENTATION'   // การนำเสนอผลงาน
+  | 'LEADERSHIP'     // ความเป็นผู้นำและการแก้ปัญหา
+  | 'HELPING_PEERS'  // การช่วยเหลือและอธิบายให้เพื่อน
+  | 'CREATIVITY'     // ความคิดสร้างสรรค์และนวัตกรรม
+  | 'GENERAL';       // คะแนนทั่วไป
+
+export interface ActiveLearningRecord {
+  id: string;
+  studentId: string;
+  courseId?: string;
+  points: number;
+  category: ActiveLearningCategory;
+  note?: string;
+  awardedAt: string; // ISO string
+}
+
 export interface AttendanceRecord {
   studentId: string;
   status: AttendanceStatus;
@@ -227,6 +246,69 @@ export interface ParentNotification {
   type?: 'info' | 'warning' | 'critical';
 }
 
+export interface StudentSelfAssessment {
+  id?: string;
+  studentId: string;
+  studentName?: string;
+  submittedAt?: string;
+  updatedAt?: string;
+  isCompleted: boolean;
+  
+  // ส่วนที่ 1: ข้อมูลพื้นฐานและการติดต่อ (Basic Information)
+  basicInfo: {
+    titleFullName: string;       // ข้อ 1: คำนำหน้านาม ชื่อ-นามสกุล
+    nickname: string;            // ข้อ 2: ชื่อเล่นที่อยากให้ครูเรียก
+    gradeRoom: string;           // ข้อ 3: ระดับชั้น / ห้องเรียน (ม.4, ม.5, ม.6)
+    studentNo: string;           // ข้อ 4: เลขที่
+    contactChannels: string[];   // ข้อ 5: ช่องทางการติดต่อที่สะดวกที่สุด
+    contactDetail: string;       // ข้อ 6: ระบุ ID / ข้อมูลติดต่อ
+  };
+
+  // ส่วนที่ 2: ภูมิหลัง บริบทครอบครัว และการเดินทาง (Background & Context)
+  familyBackground: {
+    livingWith: string;          // ข้อ 7: ปัจจุบันพักอาศัยอยู่กับใคร
+    transportation: string;      // ข้อ 8: การเดินทางมาโรงเรียนส่วนใหญ่ใช้พาหนะใด
+    travelTime: string;          // ข้อ 9: ระยะเวลาที่ใช้ในการเดินทางมาโรงเรียน
+    responsibilities: string[];  // ข้อ 10: ภาระงานนอกเหนือจากการเรียนที่ต้องรับผิดชอบประจำ
+    consultPerson: string;       // ข้อ 11: เมื่อมีเรื่องสบายใจ/ไม่สบายใจ ปรึกษาใครบ่อยที่สุด
+  };
+
+  // ส่วนที่ 3: ตัวตน นิสัย และความสนใจ (Identity & Interests)
+  identity: {
+    threeWords: string;          // ข้อ 12: เลือก 3 คำที่อธิบายความเป็นตัวตน
+    hobbies: string[];           // ข้อ 13: งานอดิเรก หรือกิจกรรมที่ชอบทำมากที่สุดยามว่าง
+    specialSkills: string;       // ข้อ 14: ทักษะ ความสามารถพิเศษ หรือจุดแข็งที่ภาคภูมิใจ
+    groupRole: string;           // ข้อ 15: เมื่อต้องทำงานกลุ่ม ถนัดทำหน้าที่ใดมากที่สุด
+  };
+
+  // ส่วนที่ 4: สไตล์การเรียนรู้และทักษะยุคใหม่ (Learning Style & AI)
+  learningStyle: {
+    preferredStyles: string[];   // ข้อ 16: รูปแบบการเรียนรู้ที่ทำให้เข้าใจเนื้อหาได้ดีที่สุด
+    learningObstacles: string[]; // ข้อ 17: ข้อจำกัดหรือสิ่งที่รู้สึกว่าเป็นอุปสรรคต่อการเรียนรู้
+    primaryDevices: string[];    // ข้อ 18: อุปกรณ์หลักที่ใช้นอกเวลาเรียนเพื่อทำรายงาน
+    aiExperience: string;        // ข้อ 19: ประสบการณ์การใช้เครื่องมือ AI (เช่น ChatGPT) ช่วยเรียน
+    teacherStyle: string;        // ข้อ 20: สไตล์ครูผู้สอนที่ทำให้นักเรียนเรียนได้อย่างมีความสุข
+  };
+
+  // ส่วนที่ 5: ความสัมพันธ์ โซเชียลมีเดีย และความปลอดภัย (Social Media & Bullying)
+  socialAndSafety: {
+    topSocialMedia: string[];    // ข้อ 21: โซเชียลมีเดียที่ใช้บ่อยที่สุด 2 อันดับแรก
+    schoolBullyingExperience: string; // ข้อ 22: ประสบการณ์พบเห็นหรือโดนบูลลี่ในโรงเรียน
+    cyberbullyingExperience: string;  // ข้อ 23: ประสบการณ์ Cyberbullying บนโลกออนไลน์
+    schoolSafetyScore: number;        // ข้อ 24: ระดับความรู้สึกปลอดภัยและสบายใจเมื่ออยู่โรงเรียน (1-5)
+    socialComparisonStress: string;   // ข้อ 25: เคยรู้สึกเครียดจากการเปรียบเทียบตัวเองบนโซเชียลไหม
+    messageToTeacherSafety: string;   // ข้อ 26: พื้นที่ฝากบอกครู: เรื่องแกล้งกันหรือออนไลน์ที่อยากให้ครูสอดส่อง
+  };
+
+  // ส่วนที่ 6: เป้าหมาย อนาคต และข้อความถึงครู (Goals & Expectations)
+  futureGoals: {
+    careerGoals: string;             // ข้อ 27: เป้าหมายการศึกษาต่อหรืออาชีพในอนาคตที่สนใจ
+    selfImprovement: string;         // ข้อ 28: สิ่งสำคัญที่อยากพัฒนาตัวเองให้ดีขึ้นในระดับ ม.ปลาย
+    supportNeeded: string;           // ข้อ 29: สิ่งที่อยากให้ครูหรือโรงเรียนช่วยเหลือ/สนับสนุนมากที่สุด
+    privateMessageToTeacher: string; // ข้อ 30: สิ่งที่อยากบอกครูเพิ่มเติม (ข้อมูลลับส่วนตัว)
+  };
+}
+
 export interface StoreState {
   user: User | null;
   currentDate: Date;
@@ -255,8 +337,14 @@ export interface StoreState {
 
   parentConferences: ParentConference[];
   parentNotifications: ParentNotification[];
+  selfAssessments: Record<string, StudentSelfAssessment>;
   
+  // Active Learning Points & Leaderboard
+  activeLearningPoints: Record<string, number>; // studentId -> cumulative points
+  activeLearningLogs: ActiveLearningRecord[];
+
   // Actions
+  addActiveLearningPoints: (studentId: string, points: number, category?: ActiveLearningCategory, note?: string, courseId?: string) => void;
   setUser: (user: User | null) => void;
   setCurrentDate: (date: Date) => void;
   setCurrentPeriod: (period: string) => void;
@@ -266,6 +354,8 @@ export interface StoreState {
   submitLeaveRequest: (studentId: string, date: Date, reason: string) => void;
   updateLeaveRequestStatus: (id: string, status: 'APPROVED' | 'REJECTED') => void;
   moveStudentSeat: (studentId: string, newSeatIndex: number | null) => void;
+  resetClassroomSeats: (room?: string) => void;
+  autoAssignClassroomSeats: (room?: string, capacity?: number) => void;
   submitLateAttendanceRequest: (req: Omit<LateAttendanceRequest, 'id' | 'status'>) => void;
   updateLateAttendanceRequestStatus: (id: string, status: 'APPROVED' | 'REJECTED') => void;
   setScheduleConfig: (config: ScheduleConfig) => void;
@@ -296,4 +386,5 @@ export interface StoreState {
   // New Actions for Parent Engagement
   scheduleConference: (conferenceId: string, date: string, time: string) => void;
   addMockParentNotification: (notif: Omit<ParentNotification, 'id' | 'createdAt' | 'status'>) => void;
+  saveSelfAssessment: (assessment: StudentSelfAssessment) => Promise<void>;
 }

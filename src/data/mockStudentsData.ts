@@ -294,6 +294,180 @@ export const mockStudentsData: Student[] = [
       checkInTime: '07:34 น.'
     }
   },
+  {
+    id: 'STU-508-11',
+    studentId: '6950811',
+    studentCode: '6950811',
+    title: 'นางสาว',
+    firstName: 'ชนิกานต์',
+    lastName: 'วิเศษสมบัติ',
+    name: 'นางสาวชนิกานต์ วิเศษสมบัติ',
+    fullName: 'นางสาวชนิกานต์ วิเศษสมบัติ',
+    nickname: 'พลอย',
+    grade: 'ม.5',
+    room: '5/8',
+    number: 11,
+    studentNo: 11,
+    status: 'ACTIVE',
+    avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950811',
+    photoUrl: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950811',
+    seatIndex: null,
+    homeLocation: {
+      address: '18/4 หมู่ 2 ต.ท่าเสา อ.เมือง จ.อุตรดิตถ์',
+      coordinates: [17.627, 100.092],
+      routeImage: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=800&q=80'
+    },
+    attendance: {
+      morningStatus: 'PRESENT',
+      checkInMethod: 'SCAN',
+      checkInTime: '07:30 น.'
+    }
+  },
+  {
+    id: 'STU-508-12',
+    studentId: '6950812',
+    studentCode: '6950812',
+    title: 'นาย',
+    firstName: 'ภานุวัฒน์',
+    lastName: 'ตันติวิวัฒน์',
+    name: 'นายภานุวัฒน์ ตันติวิวัฒน์',
+    fullName: 'นายภานุวัฒน์ ตันติวิวัฒน์',
+    nickname: 'วิน',
+    grade: 'ม.5',
+    room: '5/8',
+    number: 12,
+    studentNo: 12,
+    status: 'ACTIVE',
+    avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950812',
+    photoUrl: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950812',
+    seatIndex: null,
+    homeLocation: {
+      address: '92/1 ต.งิ้วงาม อ.เมือง จ.อุตรดิตถ์',
+      coordinates: [17.643, 100.075],
+      routeImage: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=800&q=80'
+    },
+    attendance: {
+      morningStatus: 'PRESENT',
+      checkInMethod: 'SCAN',
+      checkInTime: '07:36 น.'
+    }
+  },
+  {
+    id: 'STU-508-13',
+    studentId: '6950813',
+    studentCode: '6950813',
+    title: 'นางสาว',
+    firstName: 'กานต์พิชชา',
+    lastName: 'จงประเสริฐ',
+    name: 'นางสาวกานต์พิชชา จงประเสริฐ',
+    fullName: 'นางสาวกานต์พิชชา จงประเสริฐ',
+    nickname: 'มิว',
+    grade: 'ม.5',
+    room: '5/8',
+    number: 13,
+    studentNo: 13,
+    status: 'ACTIVE',
+    avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950813',
+    photoUrl: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950813',
+    seatIndex: null,
+    homeLocation: {
+      address: '41 หมู่ 5 ต.ทุ่งยั้ง อ.เมือง จ.อุตรดิตถ์',
+      coordinates: [17.587, 100.125],
+      routeImage: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=800&q=80'
+    },
+    attendance: {
+      morningStatus: 'PRESENT',
+      checkInMethod: 'SCAN',
+      checkInTime: '07:25 น.'
+    }
+  },
+  {
+    id: 'STU-508-14',
+    studentId: '6950814',
+    studentCode: '6950814',
+    title: 'นาย',
+    firstName: 'ธนภูมิ',
+    lastName: 'วงศ์สุวรรณ',
+    name: 'นายธนภูมิ วงศ์สุวรรณ',
+    fullName: 'นายธนภูมิ วงศ์สุวรรณ',
+    nickname: 'ภูมิ',
+    grade: 'ม.5',
+    room: '5/8',
+    number: 14,
+    studentNo: 14,
+    status: 'ACTIVE',
+    avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950814',
+    photoUrl: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950814',
+    seatIndex: null,
+    homeLocation: {
+      address: '67/2 ต.ในเมือง อ.เมือง จ.อุตรดิตถ์',
+      coordinates: [17.622, 100.096],
+      routeImage: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=800&q=80'
+    },
+    attendance: {
+      morningStatus: 'PRESENT',
+      checkInMethod: 'GEOFENCE',
+      checkInTime: '07:41 น.'
+    }
+  },
+  {
+    id: 'STU-508-15',
+    studentId: '6950815',
+    studentCode: '6950815',
+    title: 'นางสาว',
+    firstName: 'อภิชญา',
+    lastName: 'ศิริโรจน์',
+    name: 'นางสาวอภิชญา ศิริโรจน์',
+    fullName: 'นางสาวอภิชญา ศิริโรจน์',
+    nickname: 'ใบเตย',
+    grade: 'ม.5',
+    room: '5/8',
+    number: 15,
+    studentNo: 15,
+    status: 'ACTIVE',
+    avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950815',
+    photoUrl: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950815',
+    seatIndex: null,
+    homeLocation: {
+      address: '10/3 หมู่ 1 ต.ป่าเซ่า อ.เมือง จ.อุตรดิตถ์',
+      coordinates: [17.598, 100.086],
+      routeImage: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=800&q=80'
+    },
+    attendance: {
+      morningStatus: 'LATE',
+      checkInMethod: 'SCAN',
+      checkInTime: '07:48 น.'
+    }
+  },
+  {
+    id: 'STU-508-16',
+    studentId: '6950816',
+    studentCode: '6950816',
+    title: 'นาย',
+    firstName: 'วรเมธ',
+    lastName: 'ตั้งเจริญยิ่ง',
+    name: 'นายวรเมธ ตั้งเจริญยิ่ง',
+    fullName: 'นายวรเมธ ตั้งเจริญยิ่ง',
+    nickname: 'เมธ',
+    grade: 'ม.5',
+    room: '5/8',
+    number: 16,
+    studentNo: 16,
+    status: 'ACTIVE',
+    avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950816',
+    photoUrl: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950816',
+    seatIndex: null,
+    homeLocation: {
+      address: '3/9 ต.ท่าเสา อ.เมือง จ.อุตรดิตถ์',
+      coordinates: [17.629, 100.09],
+      routeImage: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&w=800&q=80'
+    },
+    attendance: {
+      morningStatus: 'PRESENT',
+      checkInMethod: 'SCAN',
+      checkInTime: '07:33 น.'
+    }
+  },
 
   // ==========================================
   // 🏫 ชั้น ม.5/9 (10 คน)

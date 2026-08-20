@@ -1,7 +1,7 @@
 import { cn } from "./lib/utils";
 import { mockImportedData } from "./data/mockData";
 import React, { useState } from 'react';
-import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, Mailbox, Edit3, Check, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell } from 'lucide-react';
+import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, Mailbox, Edit3, Check, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers } from 'lucide-react';
 import clsx, { ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useStore } from './store';
@@ -11,10 +11,13 @@ import { SystemSettingsAndLocksPage } from './components/SystemSettingsAndLocksP
 import { PeriodManagementPage } from './components/PeriodManagementPage';
 import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
 import { SubstituteTeachingAnalyticsModule } from './components/SubstituteTeachingAnalyticsModule';
+import { TeachingLoadTable } from './components/TeachingLoadTable';
 import { BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 
+
+import Papa from 'papaparse';
 
 const RAW_EXCEL_MOCK = [
   { TeacherName: "นาย ก", TeacherEmail: "teacher@utd.ac.th", CourseCode: "ท32101", CourseName: "ภาษาไทย 3", Room: "ม.5/1", Schedule: "จ1-2", Level: "ม.5", Homeroom: "ม.5/8" },
@@ -25,7 +28,7 @@ const RAW_EXCEL_MOCK = [
 ];
 
 export function AdminPortal() {
-  const [activeTab, setActiveTab] = useState<'import' | 'requests' | 'absence-sub' | 'sub-analytics' | 'users' | 'settings' | 'periods'>('import');
+  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'requests' | 'absence-sub' | 'sub-analytics' | 'users' | 'settings' | 'periods'>('teaching-load');
   const [importStatus, setImportStatus] = useState<'idle' | 'uploading' | 'preview' | 'syncing' | 'success'>('idle');
   const [importedData, setImportedData] = useState<GlobalCourse[]>([]);
   const [tempHomerooms, setTempHomerooms] = useState<Record<string, string>>({});
@@ -58,40 +61,59 @@ export function AdminPortal() {
     if (!e.target.files?.length) return;
     
     setImportStatus('uploading');
-    
-    setTimeout(() => {
-      const parsedCourses: GlobalCourse[] = [];
-      const hrAssignments: Record<string, string> = {};
-      
-      let currentTeacher = "";
-      let currentEmail = "";
+    const file = e.target.files[0];
 
-      RAW_EXCEL_MOCK.forEach((row, i) => {
-        if (row.TeacherName) currentTeacher = row.TeacherName;
-        if (row.TeacherEmail) currentEmail = row.TeacherEmail;
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        const parsedCourses: GlobalCourse[] = [];
+        const hrAssignments: Record<string, string> = {};
+        
+        let currentTeacher = "";
+        let currentEmail = "";
 
-        if (row.CourseCode === "รวมคาบสอน") return;
+        results.data.forEach((row: any, i: number) => {
+          // Map dynamic headers commonly used in Thai schools
+          const teacherName = row["Teacher Name"] || row["TeacherName"] || row["ชื่อครู"] || row.TeacherName || "";
+          const teacherEmail = row["Teacher Email"] || row["TeacherEmail"] || row["อีเมล"] || row.TeacherEmail || "";
+          const courseCode = row["Subject Code"] || row["Course Code"] || row["CourseCode"] || row["รหัสวิชา"] || row.CourseCode || "";
+          const courseName = row["Subject Name"] || row["Course Name"] || row["CourseName"] || row["ชื่อวิชา"] || row.CourseName || "";
+          const room = row["Room"] || row["ห้อง"] || row.Room || "";
+          const schedule = row["Schedule"] || row["คาบเรียน"] || row.Schedule || "";
+          const level = row["Level"] || row["ระดับชั้น"] || row.Level || "";
+          const homeroom = row["Homeroom"] || row["โฮมรูม"] || row.Homeroom || "";
 
-        if (row.Homeroom) {
-          hrAssignments[currentEmail] = row.Homeroom;
-        }
+          if (teacherName) currentTeacher = teacherName;
+          if (teacherEmail) currentEmail = teacherEmail;
 
-        parsedCourses.push({
-          courseId: `GC-${Date.now()}-${i}`,
-          code: row.CourseCode,
-          courseName: row.CourseName,
-          teacherName: currentTeacher,
-          teacherEmail: currentEmail,
-          roomName: row.Room,
-          scheduleString: row.Schedule,
-          level: row.Level
+          if (!courseCode || courseCode.includes("รวมคาบสอน")) return;
+
+          if (homeroom) {
+            hrAssignments[currentEmail] = homeroom;
+          }
+
+          parsedCourses.push({
+            courseId: `GC-${Date.now()}-${i}`,
+            code: courseCode,
+            courseName: courseName,
+            teacherName: currentTeacher,
+            teacherEmail: currentEmail,
+            roomName: room,
+            scheduleString: schedule,
+            level: level
+          });
         });
-      });
 
-      setImportedData(parsedCourses);
-      setTempHomerooms(hrAssignments);
-      setImportStatus('preview');
-    }, 1500);
+        setImportedData(parsedCourses);
+        setTempHomerooms(hrAssignments);
+        setImportStatus('preview');
+      },
+      error: (error) => {
+        console.error("Parse error:", error);
+        setImportStatus('idle');
+      }
+    });
   };
 
   const handleSync = () => {
@@ -156,6 +178,18 @@ export function AdminPortal() {
         
         {/* Sidebar */}
         <div className="w-64 shrink-0 flex flex-col gap-2 relative z-10">
+          <button 
+            onClick={() => setActiveTab('teaching-load')}
+            className={cn(
+              "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-300",
+              activeTab === 'teaching-load' 
+                ? "bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]" 
+                : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+            )}
+          >
+            <Layers className="w-4 h-4 text-blue-400" />
+            ตารางภาระงานสอน
+          </button>
           <button 
             onClick={() => setActiveTab('import')}
             className={cn(
@@ -262,6 +296,18 @@ export function AdminPortal() {
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
+              {activeTab === 'teaching-load' && (
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="flex justify-between items-end border-b border-white/5 pb-4">
+                    <div>
+                      <h2 className="text-2xl font-bold text-white tracking-tight">ตารางภาระงานสอนครู (Teaching Load Roster)</h2>
+                      <p className="text-slate-400 mt-1 text-sm">ข้อมูลภาระงานสอนอย่างเป็นทางการจากฐานข้อมูลตารางเรียน-ตารางสอนของโรงเรียน</p>
+                    </div>
+                  </div>
+                  <TeachingLoadTable />
+                </div>
+              )}
+
               {activeTab === 'import' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
               

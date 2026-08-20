@@ -9,32 +9,46 @@ export function LoginPage() {
   const handleLogin = (role: Role) => {
     let email = 'user@example.com';
     let displayName = 'User';
+    let profile: UserProfile | undefined = undefined;
+    let activeRole: UserRole | undefined = undefined;
+
+    const kiattisakProfile = MOCK_MULTI_ROLE_USERS.find(p => p.id === 'teacher-kiattisak') || MOCK_MULTI_ROLE_USERS[0];
 
     if (role === 'teacher') {
-      email = 'kiattisak@utd.ac.th';
-      displayName = 'Mr.Kiattisak';
+      email = kiattisakProfile.email;
+      displayName = 'Mr. Kiattisak (ครูผู้สอน)';
+      profile = kiattisakProfile;
+      activeRole = 'SUBJECT_TEACHER';
     } else if (role === 'advisor') {
-      email = 'kiattisak@utd.ac.th'; // Same email so they have a homeroom assignment
-      displayName = 'Mr.Kiattisak (Advisor)';
+      email = kiattisakProfile.email;
+      displayName = 'Mr. Kiattisak (ที่ปรึกษา ม.5/8)';
+      profile = kiattisakProfile;
+      activeRole = 'HOMEROOM_TEACHER';
     } else if (role === 'parent') {
       email = 'parent@example.com';
       displayName = 'ผู้ปกครอง สมชาย';
     } else if (role === 'executive') {
       email = 'exec@utd.ac.th';
       displayName = 'ผู้อำนวยการ';
+      profile = MOCK_MULTI_ROLE_USERS.find(p => p.roles.includes('EXECUTIVE'));
+      activeRole = 'EXECUTIVE';
     } else if (role === 'student') {
       email = 'student@utd.ac.th';
       displayName = 'ด.ช. นักเรียน';
     } else if (role === 'admin') {
       email = 'admin@utd.ac.th';
       displayName = 'Admin';
+      profile = MOCK_MULTI_ROLE_USERS.find(p => p.roles.includes('SUPER_ADMIN'));
+      activeRole = 'SUPER_ADMIN';
     }
 
     const mockUser: UserType = {
-      uid: Math.random().toString(36).substring(7),
+      uid: profile ? profile.id : Math.random().toString(36).substring(7),
       role: role,
       email: email,
       displayName: displayName,
+      profile: profile,
+      activeRole: activeRole
     };
     setUser(mockUser);
   };

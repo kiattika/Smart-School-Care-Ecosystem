@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { collection, onSnapshot, getDocs, doc, setDoc, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { TEACHING_LOAD_DATA } from '../data/teachingLoadData';
+import { parseThaiSchedule } from '../lib/utils';
 
 export interface AdminPeriodConfig {
   id: string;
@@ -22,7 +24,7 @@ export interface ScheduleItem {
   type: 'MAIN' | 'ACTIVITY';
   teacherEmail: string;
   teacherName: string;
-  teachingPartner?: string;
+  teachingPartner?: string | null;
   partnerCheckedAttendance?: boolean;
   attendanceTaken?: boolean;
   studentsCount?: number;
@@ -40,128 +42,60 @@ const DEFAULT_ADMIN_PERIODS: AdminPeriodConfig[] = [
   { id: 'p8', periodNumber: 8, periodName: 'คาบเรียนวิชาการที่ 7', startTime: '14:20', endTime: '15:10', periodType: 'MAIN' }
 ];
 
-// Helper to generate the default schedules for both email possibilities to be foolproof
+export const isTeacherEmailMatch = (email1?: string, email2?: string): boolean => {
+  if (!email1 || !email2) return false;
+  if (email1.toLowerCase() === email2.toLowerCase()) return true;
+  const kiattisakEmails = ['kiattisak@utd.ac.th', 'kiattika@utd.ac.th', 'kiattika@gmail.com', 'teacher@utd.ac.th'];
+  if (kiattisakEmails.includes(email1.toLowerCase()) && kiattisakEmails.includes(email2.toLowerCase())) return true;
+  return false;
+};
+
+// Helper to generate the default schedules cleanly
 const getSchedulesToSeed = (): ScheduleItem[] => {
-  const emails = ['kiattika@utd.ac.th', 'kiattisak@utd.ac.th'];
   const items: ScheduleItem[] = [];
 
-  emails.forEach(email => {
-    // 1. HR Activity: Mon - Fri for M.5/8
-    for (let day = 1; day <= 5; day++) {
-      const daySuffix = ['mon', 'tue', 'wed', 'thu', 'fri'][day - 1];
-      items.push({
-        id: `sched-hr-${daySuffix}-${email.replace(/[@.]/g, '-')}`,
-        courseCode: 'HR',
-        courseName: 'HomeRoom (กิจกรรม)',
-        periodNumber: 0,
-        scheduleDay: day,
-        room: '943',
-        targetClass: 'M.5/8',
-        type: 'ACTIVITY',
-        teacherEmail: email,
-        teacherName: 'Mr.Kiattisak',
-        teachingPartner: 'Mrs.Koy Koy',
-        partnerCheckedAttendance: false,
-        attendanceTaken: false,
-        studentsCount: 40
+  TEACHING_LOAD_DATA.forEach(teacher => {
+    const email = teacher.teacherEmail || `${teacher.teacherName.toLowerCase().replace(/[^a-z0-9]/g, '')}@utd.ac.th`;
+
+    teacher.subjects.forEach((subj) => {
+      const segments = parseThaiSchedule(subj.schedule);
+      segments.forEach(seg => {
+        const daySuffix = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][seg.day === 0 ? 6 : seg.day - 1] || `d${seg.day}`;
+        const isAct = subj.subjectCode === 'HR' || subj.subjectCode === 'CZ';
+        const cleanEmail = email.replace(/[@.]/g, '-');
+        const cleanCode = subj.subjectCode.replace(/[^a-zA-Z0-9\u0E00-\u0E7F]/g, '');
+        const cleanClass = subj.level.replace(/[^a-zA-Z0-9]/g, '');
+
+        const itemData: ScheduleItem = {
+          id: `sched-${cleanEmail}-${cleanCode}-${cleanClass}-${daySuffix}-p${seg.periodIndex}`,
+          courseCode: subj.subjectCode,
+          courseName: subj.subjectName,
+          periodNumber: seg.periodIndex,
+          scheduleDay: seg.day,
+          room: subj.room,
+          targetClass: subj.level,
+          type: isAct ? 'ACTIVITY' : 'MAIN',
+          teacherEmail: email,
+          teacherName: teacher.teacherName,
+          teachingPartner: subj.subjectCode === 'HR' ? 'Mrs. Koy K.' : null,
+          partnerCheckedAttendance: false,
+          attendanceTaken: false,
+          studentsCount: subj.level.includes('5/8') ? 40 : subj.level.includes('5/9') ? 38 : subj.level.includes('5/11') ? 42 : 35
+        };
+
+        items.push(itemData);
       });
-    }
-
-    // 2. ค32101 คณิตศาสตร์พื้นฐาน (MAIN) - วันจันทร์/อังคาร คาบ 8 (M.5/8)
-    items.push({
-      id: `sched-m58-math-mon-${email.replace(/[@.]/g, '-')}`,
-      courseCode: 'ค32101',
-      courseName: 'คณิตศาสตร์พื้นฐาน',
-      periodNumber: 8,
-      scheduleDay: 1,
-      room: '943',
-      targetClass: 'M.5/8',
-      type: 'MAIN',
-      teacherEmail: email,
-      teacherName: 'Mr.Kiattisak',
-      attendanceTaken: false,
-      studentsCount: 40
-    });
-    items.push({
-      id: `sched-m58-math-tue-${email.replace(/[@.]/g, '-')}`,
-      courseCode: 'ค32101',
-      courseName: 'คณิตศาสตร์พื้นฐาน',
-      periodNumber: 8,
-      scheduleDay: 2,
-      room: '943',
-      targetClass: 'M.5/8',
-      type: 'MAIN',
-      teacherEmail: email,
-      teacherName: 'Mr.Kiattisak',
-      attendanceTaken: false,
-      studentsCount: 40
-    });
-
-    // 3. Other typical Kiattisak schedule items to populate the UI beautifully:
-    // ค32201 คณิตเพิ่มเติม M.5/8 on Thursday period 1
-    items.push({
-      id: `sched-m58-mathadd-thu-${email.replace(/[@.]/g, '-')}`,
-      courseCode: 'ค32201',
-      courseName: 'คณิตศาสตร์เพิ่มเติม',
-      periodNumber: 1,
-      scheduleDay: 4,
-      room: '943',
-      targetClass: 'M.5/8',
-      type: 'MAIN',
-      teacherEmail: email,
-      teacherName: 'Mr.Kiattisak',
-      attendanceTaken: false,
-      studentsCount: 40
-    });
-
-    // ค32101 คณิตศาสตร์พื้นฐาน M.5/8 on Monday period 6 & 7
-    items.push({
-      id: `sched-m58-math6-mon-${email.replace(/[@.]/g, '-')}`,
-      courseCode: 'ค32101',
-      courseName: 'คณิตศาสตร์พื้นฐาน',
-      periodNumber: 6,
-      scheduleDay: 1,
-      room: '943',
-      targetClass: 'M.5/8',
-      type: 'MAIN',
-      teacherEmail: email,
-      teacherName: 'Mr.Kiattisak',
-      attendanceTaken: false,
-      studentsCount: 40
-    });
-    items.push({
-      id: `sched-m58-math7-mon-${email.replace(/[@.]/g, '-')}`,
-      courseCode: 'ค32101',
-      courseName: 'คณิตศาสตร์พื้นฐาน',
-      periodNumber: 7,
-      scheduleDay: 1,
-      room: '943',
-      targetClass: 'M.5/8',
-      type: 'MAIN',
-      teacherEmail: email,
-      teacherName: 'Mr.Kiattisak',
-      attendanceTaken: false,
-      studentsCount: 40
-    });
-
-    // ส30223 การป้องกันการทุจริต M.5/8 on Thursday period 6
-    items.push({
-      id: `sched-m58-corrupt-thu-${email.replace(/[@.]/g, '-')}`,
-      courseCode: 'ส30223',
-      courseName: 'การป้องกันการทุจริต',
-      periodNumber: 6,
-      scheduleDay: 4,
-      room: '943',
-      targetClass: 'M.5/8',
-      type: 'MAIN',
-      teacherEmail: email,
-      teacherName: 'Mr.Kiattisak',
-      attendanceTaken: false,
-      studentsCount: 40
     });
   });
 
   return items;
+};
+
+// Helper to remove any undefined properties from an object before saving to Firestore
+const sanitizeForFirestore = <T extends Record<string, any>>(obj: T): Partial<T> => {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([_, v]) => v !== undefined)
+  ) as Partial<T>;
 };
 
 export function useTeacherFirestoreSchedule() {
@@ -184,17 +118,25 @@ export function useTeacherFirestoreSchedule() {
         if (periodSnap.empty) {
           console.log("Seeding admin_periods_config collection in Firestore...");
           for (const p of DEFAULT_ADMIN_PERIODS) {
-            await setDoc(doc(db, 'admin_periods_config', p.id), p);
+            await setDoc(doc(db, 'admin_periods_config', p.id), sanitizeForFirestore(p));
           }
         }
 
-        // Check and seed schedules
+        // Check and seed/merge schedules
         const scheduleSnap = await getDocs(schedulesColRef);
+        const batchToSeed = getSchedulesToSeed();
         if (scheduleSnap.empty) {
           console.log("Seeding schedules collection in Firestore...");
-          const batchToSeed = getSchedulesToSeed();
           for (const s of batchToSeed) {
-            await setDoc(doc(db, 'schedules', s.id), s);
+            await setDoc(doc(db, 'schedules', s.id), sanitizeForFirestore(s));
+          }
+        } else {
+          // Upsert any missing schedule docs (e.g. Wednesday periods 4 & 8)
+          const existingIds = new Set(scheduleSnap.docs.map(d => d.id));
+          for (const s of batchToSeed) {
+            if (!existingIds.has(s.id)) {
+              await setDoc(doc(db, 'schedules', s.id), sanitizeForFirestore(s), { merge: true });
+            }
           }
         }
 

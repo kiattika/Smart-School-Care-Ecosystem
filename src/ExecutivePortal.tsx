@@ -27,8 +27,14 @@ import {
   Star,
   Trophy,
   Award,
-  Search
+  Search,
+  BarChart3,
+  Sparkles,
+  TrendingUp,
+  ArrowUpRight
 } from 'lucide-react';
+import { ExecutiveLearnerAnalytics } from './components/ExecutiveLearnerAnalytics';
+import { ExecutiveEngagementDashboard } from './components/ExecutiveEngagementDashboard';
 import { useStore } from './store';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
@@ -63,8 +69,19 @@ const createCustomIcon = (pin: any) => L.divIcon({
 
 
 export function ExecutivePortal() {
-  const { lateAttendanceRequests, updateLateAttendanceRequestStatus, homeVisits, schoolDuties, administrativeTasks, postTeachingRecords } = useStore();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'gis' | 'health' | 'policy' | 'reports' | 'import' | 'approvals'>('dashboard');
+  const { 
+    lateAttendanceRequests, 
+    updateLateAttendanceRequestStatus, 
+    homeVisits, 
+    schoolDuties, 
+    administrativeTasks, 
+    postTeachingRecords,
+    students, 
+    selfAssessments,
+    activeLearningPoints,
+    activeLearningLogs
+  } = useStore();
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'policy' | 'reports' | 'import' | 'approvals' | 'analytics'>('dashboard');
   
   // States for Import & Reports
   const [isProcessing, setIsProcessing] = useState(false);
@@ -128,6 +145,28 @@ export function ExecutivePortal() {
           >
             <Activity className="w-5 h-5" />
             ภาพรวม (Dashboard)
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('engagement')}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200",
+              activeTab === 'engagement' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[inset_4px_0_0_rgba(16,185,129,1)] font-bold" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+            )}
+          >
+            <BarChart3 className="w-5 h-5 text-emerald-400" />
+            การมีส่วนร่วม (Engagement IQ)
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('analytics')}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200",
+              activeTab === 'analytics' ? "bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)] font-bold" : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
+            )}
+          >
+            <Users className="w-5 h-5" />
+            บทสรุปผู้เรียน (Learner DNA)
           </button>
 
           <button 
@@ -210,6 +249,8 @@ export function ExecutivePortal() {
         <header className="h-16 border-b border-white/10 flex items-center px-8 shrink-0 bg-[#0a0d14]/80 backdrop-blur-md z-10">
           <h2 className="text-xl font-bold text-slate-100">
             {activeTab === 'dashboard' && 'The Strategic Command Center'}
+            {activeTab === 'engagement' && 'Student Engagement & Grade-Level Trends (Recharts Dashboard)'}
+            {activeTab === 'analytics' && 'Executive Learner Insights'}
             {activeTab === 'gis' && 'Spatial Intelligence (School GIS)'}
             {activeTab === 'health' && 'Student Wellness & Correlation Analytics'}
             {activeTab === 'policy' && 'Policy Action Center'}
@@ -233,6 +274,20 @@ export function ExecutivePortal() {
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
             >
+              {activeTab === 'engagement' && (
+                <div className="max-w-7xl mx-auto pb-12 relative z-10">
+                  <ExecutiveEngagementDashboard 
+                    students={students} 
+                    activeLearningPoints={activeLearningPoints} 
+                    activeLearningLogs={activeLearningLogs} 
+                  />
+                </div>
+              )}
+              {activeTab === 'analytics' && (
+                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10 w-full h-full pb-10">
+                  <ExecutiveLearnerAnalytics students={students} assessments={selfAssessments} />
+                </div>
+              )}
               {activeTab === 'dashboard' && (
             <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
               
@@ -335,6 +390,89 @@ export function ExecutivePortal() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+
+                {/* Grade-Level Engagement Trends Spotlight (Recharts) */}
+                <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="bg-emerald-500/10 text-emerald-400 text-xs px-2.5 py-0.5 rounded-full font-bold border border-emerald-500/20">
+                          Live Recharts Visualizer
+                        </span>
+                      </div>
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2 mt-1">
+                        <BarChart3 className="w-5 h-5 text-emerald-400" />
+                        ภาพรวมการมีส่วนร่วมและคะแนน Active Learning รายระดับชั้น (ม.1 - ม.6)
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        เปรียบเทียบแนวโน้มการมีส่วนร่วมในห้องเรียน อัตราการปฏิสัมพันธ์ และสมรรถนะผู้เรียนตามระดับชั้น
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setActiveTab('engagement')}
+                      className="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shrink-0 self-start sm:self-auto"
+                    >
+                      ดูรายงานวิเคราะห์ฉบับเต็ม <ArrowUpRight className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+                    <div className="lg:col-span-8 h-[220px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart 
+                          data={[
+                            { grade: 'ม.1', avgPts: 32.2, participation: 86 },
+                            { grade: 'ม.2', avgPts: 29.4, participation: 79 },
+                            { grade: 'ม.3', avgPts: 30.8, participation: 83 },
+                            { grade: 'ม.4', avgPts: 34.1, participation: 89 },
+                            { grade: 'ม.5', avgPts: 35.8, participation: 92 },
+                            { grade: 'ม.6', avgPts: 30.2, participation: 84 },
+                          ]} 
+                          margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+                          <XAxis dataKey="grade" stroke="#94a3b8" tick={{ fill: '#cbd5e1', fontSize: 12, fontWeight: 'bold' }} />
+                          <YAxis stroke="#94a3b8" tick={{ fill: '#94a3b8', fontSize: 11 }} unit=" pts" />
+                          <RechartsTooltip 
+                            contentStyle={{ backgroundColor: '#0a0d14', borderColor: '#334155', borderRadius: '12px' }}
+                            formatter={(val: any) => [`${val} คะแนน/คน`, 'คะแนนเฉลี่ย']}
+                          />
+                          <Bar dataKey="avgPts" radius={[6, 6, 0, 0]} fill="#10b981">
+                            {['ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'].map((g, i) => (
+                              <Cell key={i} fill={g === 'ม.5' ? '#10b981' : g === 'ม.4' ? '#3b82f6' : '#8b5cf6'} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div className="lg:col-span-4 space-y-3 bg-black/30 p-4 rounded-xl border border-white/5">
+                      <div className="text-xs font-bold text-slate-300 uppercase tracking-wider">สรุปไฮไลท์สำคัญ</div>
+                      <div className="space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">ระดับชั้นอันดับ 1:</span>
+                          <span className="text-emerald-400 font-bold">ม.5 (35.8 pts / 92%)</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">การเติบโตเร็วสุด:</span>
+                          <span className="text-blue-400 font-bold">ม.4 (+14.2% MoM)</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">อัตราเฉลี่ยรวม รร.:</span>
+                          <span className="text-white font-bold">85.5% ร่วมกิจกรรม</span>
+                        </div>
+                      </div>
+                      <div className="pt-2 border-t border-white/5">
+                        <button
+                          onClick={() => setActiveTab('engagement')}
+                          className="w-full text-center text-xs text-emerald-400 font-bold hover:underline"
+                        >
+                          เปิด Recharts Interactive Dashboard →
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

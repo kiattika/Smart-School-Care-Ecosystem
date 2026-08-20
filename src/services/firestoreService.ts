@@ -13,6 +13,9 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { StudentSelfAssessment } from '../types';
+import { isSameRoom } from '../lib/utils';
+import { REAL_STUDENTS } from '../data/realStudents';
 
 export enum OperationType {
   CREATE = 'create',
@@ -429,14 +432,26 @@ export async function getStudentsByClass(className: string): Promise<any[]> {
 
     if (docs.length === 0) {
       // Client-side fallback matching room or className with normalization for "M.5/8" vs "ม.5/8"
-      const allSnap = await getDocs(studentsCol);
-      const normTarget = className.replace(/^M\./i, 'ม.').trim();
-      docs = allSnap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .filter(data => {
-          const r = ((data as any).className || (data as any).room || '').replace(/^M\./i, 'ม.').trim();
-          return r === normTarget;
-        });
+      try {
+        const allSnap = await getDocs(studentsCol);
+        docs = allSnap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(data => {
+            const r = (data as any).className || (data as any).room || '';
+            return isSameRoom(r, className);
+          });
+      } catch (err) {
+        console.warn('Notice: Firestore getDocs fallback error in getStudentsByClass', err);
+      }
+    }
+
+    // If still 0 documents, fallback to local REAL_STUDENTS dataset
+    if (docs.length === 0) {
+      let matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, className));
+      if (matched.length === 0) {
+        matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, 'ม.5/8'));
+      }
+      docs = matched;
     }
 
     // Sort by studentNumber / studentNo / number asc
@@ -510,5 +525,60 @@ export async function getGradebookScoresByClass(
     return {};
   }
 }
+
+/**
+ * Save student self-assessment record to 'student_self_assessments'
+ */
+export async function saveSelfAssessmentRecord(assessment: StudentSelfAssessment): Promise<void> {
+  const collectionPath = 'student_self_assessments';
+  const docId = assessment.studentId;
+  try {
+    const ref = doc(db, collectionPath, docId);
+    await setDoc(ref, {
+      ...assessment,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${docId}`);
+  }
+}
+
+/**
+ * Fetch a single student self-assessment
+ */
+export async function getSelfAssessmentRecord(studentId: string): Promise<StudentSelfAssessment | null> {
+  const collectionPath = 'student_self_assessments';
+  try {
+    const ref = doc(db, collectionPath, studentId);
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      return snap.data() as StudentSelfAssessment;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `${collectionPath}/${studentId}`);
+  }
+}
+
+/**
+ * Fetch all student self-assessments
+ */
+export async function getAllSelfAssessmentRecords(): Promise<Record<string, StudentSelfAssessment>> {
+  const collectionPath = 'student_self_assessments';
+  try {
+    const colRef = collection(db, collectionPath);
+    const snap = await getDocs(colRef);
+    const map: Record<string, StudentSelfAssessment> = {};
+    snap.docs.forEach(d => {
+      const data = d.data() as StudentSelfAssessment;
+      map[data.studentId || d.id] = data;
+    });
+    return map;
+  } catch (error) {
+    console.warn("Notice fetching all self-assessments:", error);
+    return {};
+  }
+}
+
 
 

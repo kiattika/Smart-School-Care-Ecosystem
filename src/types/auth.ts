@@ -89,8 +89,30 @@ export function hasPermission(
   return permissions.includes(requiredPermission);
 }
 
-// 5. Mock Data ของครู 3 คนที่มีบทบาทแบบ Multi-role สำหรับการทดสอบระบบ
+// 5. Mock Data ของครูที่มีบทบาทแบบ Multi-role สำหรับการทดสอบระบบ
 export const MOCK_MULTI_ROLE_USERS: UserProfile[] = [
+  {
+    id: 'teacher-kiattisak',
+    email: 'kiattisak@utd.ac.th',
+    prefix: 'นาย',
+    firstName: 'เกียรติศักดิ์',
+    lastName: 'สถิตการุณย์ (Mr. Kiattisak)',
+    position: 'ครู คศ.2 (กลุ่มสาระการเรียนรู้คณิตศาสตร์)',
+    roles: ['SUBJECT_TEACHER', 'HOMEROOM_TEACHER'],
+    assignments: {
+      departmentId: 'math-dept',
+      homeroomClass: 'M.5/8',
+      teachingSubjects: [
+        { subjectCode: 'ค32201', className: 'M.5/8' },
+        { subjectCode: 'ค32101', className: 'M.5/9' },
+        { subjectCode: 'ค32201', className: 'M.5/9' },
+        { subjectCode: 'ค32101', className: 'M.5/11' },
+        { subjectCode: 'ค32101', className: 'M.5/8' },
+        { subjectCode: 'HR', className: 'M.5/8' },
+        { subjectCode: 'CZ', className: 'M.5' }
+      ]
+    }
+  },
   {
     id: 'teacher-somchai',
     email: 'somchai.j@school.ac.th',

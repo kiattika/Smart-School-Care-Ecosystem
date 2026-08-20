@@ -2,6 +2,7 @@ import { cn } from "./lib/utils";
 import { MOCK_VISIT_STUDENTS } from "./data/mockData";
 import React, { useState } from 'react';
 import { useStore } from './store';
+import { GoogleMapsHomeVisit } from './components/GoogleMapsHomeVisit';
 import { 
   MapPin, 
   Camera, 
@@ -102,9 +103,9 @@ export function HomeVisitPortal() {
 
           <div className="p-4 space-y-6">
             {/* Check-In Section */}
-            <section className="bg-white/5 border border-white/10 rounded-xl p-4">
-              <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-emerald-400" /> พิกัดสถานที่
+            <section className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-emerald-400" /> พิกัดสถานที่ (Google Maps Platform)
               </h3>
               
               {!location ? (
@@ -115,7 +116,7 @@ export function HomeVisitPortal() {
                 >
                   {isLocating ? (
                     <span className="flex items-center gap-2 animate-pulse">
-                      <Navigation className="w-4 h-4 animate-spin" /> กำลังค้นหาพิกัด...
+                      <Navigation className="w-4 h-4 animate-spin" /> กำลังค้นหาพิกัด GPS...
                     </span>
                   ) : (
                     <>
@@ -124,14 +125,29 @@ export function HomeVisitPortal() {
                   )}
                 </button>
               ) : (
-                <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-lg p-3 flex items-center gap-3">
-                  <div className="w-10 h-10 bg-emerald-500/20 rounded-full flex items-center justify-center shrink-0">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                <div className="space-y-3">
+                  <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-lg p-3 flex items-center gap-3">
+                    <div className="w-10 h-10 bg-emerald-500/20 rounded-full flex items-center justify-center shrink-0">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs font-bold text-emerald-400">เช็คอินสำเร็จ</div>
+                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">Lat: {location.lat}, Lng: {location.lng}</div>
+                    </div>
+                    <button 
+                      onClick={() => setLocation(null)}
+                      className="text-xs text-slate-400 hover:text-slate-200 underline"
+                    >
+                      เปลี่ยน
+                    </button>
                   </div>
-                  <div className="flex-1">
-                    <div className="text-xs font-bold text-emerald-400">เช็คอินสำเร็จ</div>
-                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">Lat: {location.lat}, Lng: {location.lng}</div>
-                  </div>
+                  
+                  {/* Google Maps View */}
+                  <GoogleMapsHomeVisit
+                    location={location}
+                    studentName={selectedStudent.name}
+                    onLocationSelect={(coords) => setLocation(coords)}
+                  />
                 </div>
               )}
             </section>

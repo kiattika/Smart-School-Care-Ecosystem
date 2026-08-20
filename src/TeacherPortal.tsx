@@ -1,7 +1,7 @@
 import { cn, parseThaiSchedule, isSameRoom } from "./lib/utils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { usePeriodsConfig } from './hooks/usePeriodsConfig';
-import { useTeacherFirestoreSchedule } from './hooks/useTeacherFirestoreSchedule';
+import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass } from './services/firestoreService';
 import { TeacherScheduleList, SubjectPeriod } from './components/TeacherScheduleList';
@@ -9,10 +9,16 @@ import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } fro
 import { th } from 'date-fns/locale';
 import { useStore } from './store';
 import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, PeriodSwap, SubstituteAssignment, Student } from './types';
-import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Edit3, Sparkles, Shuffle, Calendar, ArrowUpRight, FileText, AlertTriangle, ChevronRight } from 'lucide-react';
+import { REAL_STUDENTS } from './data/realStudents';
+import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Edit3, Sparkles, Shuffle, Calendar, ArrowUpRight, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { motion, AnimatePresence } from 'motion/react';
+import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
+import { ActiveLearningClassroom } from './components/ActiveLearningClassroom';
+import { TeachingLoadTable } from './components/TeachingLoadTable';
+import { ClassroomSeatingManager } from './components/ClassroomSeatingManager';
+import { ClassroomLeaderboard } from './components/ClassroomLeaderboard';
 
 // Helper for tailwind classes
 
@@ -37,6 +43,7 @@ export function TeacherPortal() {
     lateAttendanceRequests,
     courses,
     globalCourses,
+    activeLearningPoints,
     setCourses,
     markAttendanceDone,
     submitScheduleChangeRequest,
@@ -65,64 +72,96 @@ export function TeacherPortal() {
 
 
 
-  const myCourses: Course[] = useMemo(() => globalCourses
-    .filter(gc => {
-      // 1. Is original teacher
-      const isOriginal = gc.teacherEmail === user?.email;
-      
-      // 2. Is substitute teacher today
-      const isSub = substituteAssignments.some(sa => 
-        sa.courseId === gc.courseId && 
-        sa.substituteTeacherEmail === user?.email && 
-        sa.date === todayStr
-      );
+  const myCourses: Course[] = useMemo(() => {
+    const rawList = globalCourses
+      .filter(gc => {
+        // 1. Is original teacher
+        const isOriginal = isTeacherEmailMatch(gc.teacherEmail, user?.email);
+        
+        // 2. Is substitute teacher today
+        const isSub = substituteAssignments.some(sa => 
+          sa.courseId === gc.courseId && 
+          isTeacherEmailMatch(sa.substituteTeacherEmail, user?.email) && 
+          sa.date === todayStr
+        );
 
-      // 3. Is target of an approved swap for this course
-      const isSwapTarget = periodSwaps.some(ps => 
-        ps.targetCourseId === gc.courseId && 
-        ps.targetEmail === user?.email && 
-        ps.status === 'APPROVED'
-      );
-      // OR is requester of an approved swap and now teaches the target course instead
-      const isSwapRequester = periodSwaps.some(ps =>
-        ps.requesterCourseId === gc.courseId &&
-        ps.requesterEmail === user?.email &&
-        ps.status === 'APPROVED'
-      );
+        // 3. Is target of an approved swap for this course
+        const isSwapTarget = periodSwaps.some(ps => 
+          ps.targetCourseId === gc.courseId && 
+          isTeacherEmailMatch(ps.targetEmail, user?.email) && 
+          ps.status === 'APPROVED'
+        );
+        // OR is requester of an approved swap and now teaches the target course instead
+        const isSwapRequester = periodSwaps.some(ps =>
+          ps.requesterCourseId === gc.courseId &&
+          isTeacherEmailMatch(ps.requesterEmail, user?.email) && 
+          ps.status === 'APPROVED'
+        );
 
-      return isOriginal || isSub || isSwapTarget || isSwapRequester;
-    })
-    .map(gc => {
-      // Find original course if it exists to get `attendanceTaken` status
-      const originalCourse = courses.find(c => c.id === gc.courseId);
-      
-      let roleLabel = "";
-      const isSub = substituteAssignments.some(sa => sa.courseId === gc.courseId && sa.substituteTeacherEmail === user?.email && sa.date === todayStr);
-      if (isSub) {
-        roleLabel = "สอนแทน (Substitute)";
-      } else {
-        const isSwap = periodSwaps.some(ps => (ps.targetCourseId === gc.courseId || ps.requesterCourseId === gc.courseId) && ps.status === 'APPROVED');
-        if (isSwap) {
-          roleLabel = "สลับคาบเรียน (Swapped)";
+        return isOriginal || isSub || isSwapTarget || isSwapRequester;
+      })
+      .map(gc => {
+        // Find original course if it exists to get `attendanceTaken` status
+        const originalCourse = courses.find(c => 
+          c.id === gc.courseId || 
+          c.id.includes(gc.code) ||
+          (c.code === gc.code && isSameRoom(c.room, gc.roomName))
+        );
+        
+        const hasRecords = !!(
+          (attendanceRecords[gc.courseId] && Object.keys(attendanceRecords[gc.courseId]).length > 0) ||
+          (originalCourse && attendanceRecords[originalCourse.id] && Object.keys(attendanceRecords[originalCourse.id]).length > 0)
+        );
+
+        const isTaken = originalCourse?.attendanceTaken || hasRecords || false;
+        
+        let roleLabel = "";
+        const isSub = substituteAssignments.some(sa => sa.courseId === gc.courseId && isTeacherEmailMatch(sa.substituteTeacherEmail, user?.email) && sa.date === todayStr);
+        if (isSub) {
+          roleLabel = "สอนแทน (Substitute)";
+        } else {
+          const isSwap = periodSwaps.some(ps => (ps.targetCourseId === gc.courseId || ps.requesterCourseId === gc.courseId) && ps.status === 'APPROVED');
+          if (isSwap) {
+            roleLabel = "สลับคาบเรียน (Swapped)";
+          }
         }
+
+        return {
+          id: gc.courseId,
+          code: gc.code,
+          name: gc.courseName,
+          room: gc.roomName,
+          term: '1/2569',
+          studentsCount: gc.roomName.includes('5/8') ? 40 : gc.roomName.includes('5/9') ? 38 : gc.roomName.includes('5/11') ? 42 : 35,
+          schedule: gc.scheduleString,
+          attendanceTaken: isTaken,
+          teacherName: gc.teacherName,
+          roleLabel
+        };
+      });
+
+    // Deduplicate myCourses by unique code + room + schedule
+    const seenCourseKeys = new Set<string>();
+    const uniqueCourses: Course[] = [];
+    rawList.forEach(course => {
+      const key = `${course.code}_${course.room}_${course.schedule}`;
+      if (!seenCourseKeys.has(key)) {
+        seenCourseKeys.add(key);
+        uniqueCourses.push(course);
       }
+    });
 
-      return {
-        id: gc.courseId,
-        code: gc.code,
-        name: gc.courseName,
-        room: gc.roomName,
-        term: '1/2569',
-        studentsCount: 35,
-        schedule: gc.scheduleString,
-        attendanceTaken: originalCourse?.attendanceTaken || false,
-        teacherName: gc.teacherName,
-        roleLabel
-      };
-    }), [globalCourses, user?.email, substituteAssignments, todayStr, periodSwaps, courses]);
+    return uniqueCourses;
+  }, [globalCourses, user?.email, substituteAssignments, todayStr, periodSwaps, courses]);
 
-  const [view, setView] = useState<'dashboard' | 'class'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'class' | 'active_learning'>('dashboard');
   const [activeCourse, setActiveCourse] = useState<Course | null>(null);
+
+  const handleGoHome = () => {
+    setView('dashboard');
+    setActiveCourse(null);
+    setViewingRecord(null);
+  };
 
   const isHrActive = !!(activeCourse && (activeCourse.code === 'HR' || activeCourse.name?.toLowerCase().includes('homeroom')));
   const hrTodayStr = format(currentDate, 'yyyy-MM-dd');
@@ -136,6 +175,7 @@ export function TeacherPortal() {
 
   // New States for Seating random pick & behavior scoring
   const [selectedStudentForScore, setSelectedStudentForScore] = useState<Student | null>(null);
+  const [assessmentModalStudent, setAssessmentModalStudent] = useState<Student | null>(null);
   const [isShuffling, setIsShuffling] = useState(false);
   const [shufflingStudentIds, setShufflingStudentIds] = useState<string[]>([]);
   const [randomPickedStudent, setRandomPickedStudent] = useState<Student | null>(null);
@@ -150,7 +190,42 @@ export function TeacherPortal() {
   const [viewingRecord, setViewingRecord] = useState<PostTeachingRecord | null>(null);
 
   // New States for Dashboard Navigation
-  const [dashboardTab, setDashboardTab] = useState<'courses' | 'substitutions' | 'records' | 'gradebook'>('courses');
+  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook'>('courses');
+  
+  // Dynamic Role-Based Access Control (RBAC) Tab Filtering
+  const availableDashboardTabs = useMemo(() => {
+    const rawTabs: Array<{ 
+      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook'; 
+      label: string; 
+      count: number; 
+      hideForRoles?: string[] 
+    }> = [
+      { id: 'courses', label: 'ตารางสอนและการเข้าเรียน', count: myCourses.length },
+      { id: 'teaching-load', label: 'ตารางภาระงานสอน (Teaching Load)', count: 6, hideForRoles: ['SUBJECT_TEACHER'] },
+      { id: 'leaderboard', label: '🏆 กระดานคะแนน Active Learning (Leaderboard)', count: Object.values(activeLearningPoints).filter(p => p > 0).length },
+      { id: 'substitutions', label: 'จัดการภาระลา & สอนแทน', count: substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.date === todayStr).length + periodSwaps.filter(ps => ps.targetEmail === user?.email && ps.status === 'PENDING_TEACHER').length },
+      { id: 'records', label: 'ประวัติบันทึกหลังสอนทั้งหมด', count: postTeachingRecords.filter(r => myCourses.some(c => c.id === r.courseId)).length },
+      { id: 'gradebook', label: 'สมุดบันทึกคะแนน (Gradebook)', count: 0 }
+    ];
+
+    return rawTabs.filter(tab => {
+      // Hide teaching load specifically when active role is SUBJECT_TEACHER
+      const currentRole = user?.activeRole || 'SUBJECT_TEACHER';
+      if (tab.hideForRoles && tab.hideForRoles.includes(currentRole)) {
+        return false;
+      }
+      return true;
+    });
+  }, [user?.activeRole, myCourses.length, activeLearningPoints, substituteAssignments, user?.email, todayStr, periodSwaps, postTeachingRecords]);
+
+  // Seamless fallback when role changes and current tab is restricted
+  useEffect(() => {
+    const isCurrentTabValid = availableDashboardTabs.some(t => t.id === dashboardTab);
+    if (!isCurrentTabValid) {
+      setDashboardTab('courses');
+    }
+  }, [availableDashboardTabs, dashboardTab]);
+
   const [selectedGradebookCourseId, setSelectedGradebookCourseId] = useState<string>('');
   const [gradebookStudents, setGradebookStudents] = useState<any[]>([]);
   const [gradebookLoading, setGradebookLoading] = useState<boolean>(false);
@@ -159,6 +234,7 @@ export function TeacherPortal() {
   const [scoreSettingError, setScoreSettingError] = useState('');
   const [isCopyMode, setIsCopyMode] = useState(false);
   const [copyTargetCourses, setCopyTargetCourses] = useState<string[]>([]);
+  const [isEarlyWarningDrawerOpen, setIsEarlyWarningDrawerOpen] = useState(false);
 
   useEffect(() => {
     if (!selectedGradebookCourseId) {
@@ -217,11 +293,33 @@ export function TeacherPortal() {
   const [swapTargetCourseId, setSwapTargetCourseId] = useState('');
 
   // Dynamic classroom layout configuration
-  const courseStudents = activeCourse?.room
-    ? (students.filter(s => isSameRoom(s.room, activeCourse.room)).length > 0
-        ? students.filter(s => isSameRoom(s.room, activeCourse.room))
-        : students.filter(s => s.room === undefined || s.room === null || s.room === 'ม.1/1'))
-    : students;
+  const courseStudents = useMemo(() => {
+    const targetRoom = activeCourse?.room || 'ม.5/8';
+
+    // 1. Try exact/normalized room match from store students
+    let matched = (students || []).filter(s => 
+      isSameRoom(s.room, targetRoom) || 
+      isSameRoom((s as any).className, targetRoom)
+    );
+
+    // 2. Fallback to 5/8 in store students
+    if (matched.length === 0) {
+      matched = (students || []).filter(s => 
+        isSameRoom(s.room, 'ม.5/8') || 
+        isSameRoom(s.room, '5/8')
+      );
+    }
+
+    // 3. Fallback to REAL_STUDENTS dataset
+    if (matched.length === 0) {
+      matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, targetRoom));
+      if (matched.length === 0) {
+        matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, 'ม.5/8'));
+      }
+    }
+
+    return matched;
+  }, [activeCourse?.room, students]);
 
   const isM58 = isSameRoom(activeCourse?.room, 'ม.5/8');
   const layout = isM58 ? {
@@ -254,38 +352,16 @@ export function TeacherPortal() {
 
   const availableRooms = ['ม.1/1', 'ม.1/2', 'ม.1/3', 'ม.2/1', 'ม.2/2', 'ม.3/1'];
 
-  // Parse Thai Schedule Notation e.g. "จ1", "อ3-4"
-  const parseSchedule = (scheduleStr: string | undefined) => {
-    if (!scheduleStr) return [];
-    
-    const match = scheduleStr.match(/^([จอพศฤ]+)([\d\-]+)$/);
-    if (!match) return [];
-    
-    const dayStr = match[1];
-    const periodsStr = match[2];
-    
-    let targetDay = 1; // 1 = Monday, 5 = Friday
-    if (dayStr === 'จ') targetDay = 1;
-    else if (dayStr === 'อ') targetDay = 2;
-    else if (dayStr === 'พุ') targetDay = 3;
-    else if (dayStr === 'พฤ' || dayStr === 'ฤ') targetDay = 4;
-    else if (dayStr === 'ศ') targetDay = 5;
-
-    const periods: number[] = [];
-    if (periodsStr.includes('-')) {
-      const [start, end] = periodsStr.split('-').map(Number);
-      for(let i = start; i <= end; i++) periods.push(i);
-    } else {
-      periods.push(Number(periodsStr));
-    }
-    
-    return periods.map(p => ({ day: targetDay, periodIndex: p }));
-  };
+  // Parse Thai Schedule Notation e.g. "จ1", "อ3-4", "อ2, พ4, ฤ1, ศ3"
+  const parseSchedule = parseThaiSchedule;
 
   // Time Simulation Helpers
   const getPeriodTimes = (index: number) => {
     // 1. First try to find period configuration matching the periodNumber
-    const match = dbPeriods.find(p => p.periodNumber === index);
+    const match = (fsPeriods && fsPeriods.length > 0)
+      ? fsPeriods.find(p => p.periodNumber === index)
+      : dbPeriods.find(p => p.periodNumber === index);
+
     if (match) {
       const [sh, sm] = match.startTime.split(':').map(Number);
       const [eh, em] = match.endTime.split(':').map(Number);
@@ -294,28 +370,29 @@ export function TeacherPortal() {
       return { start, end };
     }
 
-    // 2. Fallback to default school schedule if not found in dbPeriods
-    const baseDuration = scheduleConfig.isActivityDay ? 50 - scheduleConfig.shortenMinutes : 50;
-    
-    // Start at 08:30 (8 * 60 + 30 = 510 mins)
-    let currentMins = 8 * 60 + 30; // 08:30
-    
-    for (let i = 0; i < index; i++) {
-      if (i === 0) currentMins += 20; // Homeroom
-      else if (i === 5) currentMins += 60; // Lunch
-      else currentMins += baseDuration;
+    // 2. Standard school period timetable
+    const standardPeriods: Record<number, { start: [number, number]; end: [number, number] }> = {
+      0: { start: [8, 0], end: [8, 30] },
+      1: { start: [8, 30], end: [9, 20] },
+      2: { start: [9, 20], end: [10, 10] },
+      3: { start: [10, 10], end: [11, 0] },
+      4: { start: [11, 0], end: [11, 50] },
+      5: { start: [11, 50], end: [12, 40] },
+      6: { start: [12, 40], end: [13, 30] },
+      7: { start: [13, 30], end: [14, 20] },
+      8: { start: [14, 20], end: [15, 10] },
+      9: { start: [15, 10], end: [16, 0] }
+    };
+
+    if (standardPeriods[index]) {
+      const { start: sTime, end: eTime } = standardPeriods[index];
+      const start = setMinutes(setHours(currentDate, sTime[0]), sTime[1]);
+      const end = setMinutes(setHours(currentDate, eTime[0]), eTime[1]);
+      return { start, end };
     }
-    
-    const startMins = currentMins;
-    let duration = baseDuration;
-    if (index === 0) duration = 20;
-    else if (index === 5) duration = 60;
-    
-    const endMins = startMins + duration;
-    
-    const start = setMinutes(setHours(currentDate, Math.floor(startMins / 60)), startMins % 60);
-    const end = setMinutes(setHours(currentDate, Math.floor(endMins / 60)), endMins % 60);
-    
+
+    const start = setMinutes(setHours(currentDate, 8 + Math.floor(index * 50 / 60)), (index * 50) % 60);
+    const end = setMinutes(setHours(currentDate, 8 + Math.floor((index * 50 + 50) / 60)), (index * 50 + 50) % 60);
     return { start, end };
   };
 
@@ -518,32 +595,51 @@ export function TeacherPortal() {
       )}
 
       {/* Header */}
-      <header className="h-16 border-b border-slate-800/80 bg-[#161f30] flex items-center justify-between px-6 shrink-0 shadow-lg relative">
+      <header className="h-14 sm:h-16 border-b border-slate-800/80 bg-[#161f30] flex items-center justify-between px-3 sm:px-6 shrink-0 shadow-lg relative z-20">
         <div className="absolute bottom-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent"></div>
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-emerald-600 rounded flex items-center justify-center font-bold text-white shadow-[0_0_10px_rgba(16,185,129,0.4)]">T</div>
-          <h1 className="text-lg font-bold tracking-tight text-white">
-            Smart School Care <span className="text-emerald-400 font-medium">| Subject Teacher</span>
+        {/* Interactive App Title & Home Button */}
+        <button
+          id="btn-teacher-portal-home"
+          type="button"
+          onClick={handleGoHome}
+          className="flex items-center gap-2 sm:gap-3 group text-left cursor-pointer focus:outline-none transition-all duration-150 hover:opacity-95 active:scale-[0.98] select-none rounded-xl p-1 -ml-1 hover:bg-white/5 min-w-0"
+          title="กลับไปยังหน้าหลัก (Dashboard ภาระงานสอน)"
+        >
+          <div className="w-8 h-8 bg-emerald-600 group-hover:bg-emerald-500 rounded-lg flex items-center justify-center font-bold text-white shadow-[0_0_10px_rgba(16,185,129,0.4)] group-hover:shadow-[0_0_16px_rgba(16,185,129,0.6)] transition-all duration-200 shrink-0">
+            T
+          </div>
+          <h1 className="text-sm sm:text-base md:text-lg font-bold tracking-tight text-white flex items-center gap-1.5 transition-colors truncate">
+            <span className="group-hover:text-emerald-300 transition-colors">Smart School Care</span>
+            <span className="text-emerald-400 font-medium group-hover:text-emerald-300 transition-colors truncate">
+              | {user?.activeRole === 'HOMEROOM_TEACHER' ? 'Homeroom' : user?.activeRole === 'HEAD_OF_DEPARTMENT' ? 'Head of Dept' : user?.activeRole === 'SUPERVISORY_TEACHER' ? 'Supervisor' : user?.activeRole === 'EXECUTIVE' ? 'Executive' : 'Subject Teacher'}
+            </span>
           </h1>
-        </div>
-        <div className="flex items-center gap-6">
+        </button>
+
+        <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+          {/* Config Modal Trigger Button */}
           <button 
             onClick={() => setShowConfigModal(true)}
-            className="flex items-center gap-2 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 px-3 py-1.5 rounded-lg text-sm text-blue-400 transition-colors font-medium"
+            title="ตั้งค่าชั่วโมง/ตารางกิจกรรม"
+            className="flex items-center gap-1.5 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 px-2 sm:px-2.5 py-1.5 rounded-lg text-xs text-blue-400 transition-colors font-medium cursor-pointer"
           >
-            <Clock className="w-4 h-4 text-amber-400" />
-            <span className="font-mono">{formatTime(currentDate)}</span>
+            <Settings className="w-3.5 h-3.5 text-blue-300" />
+            <span className="hidden sm:inline">ตั้งค่ากิจกรรม</span>
             {scheduleConfig.isActivityDay && (
-              <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 rounded ml-1 border border-amber-500/30">
+              <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 rounded ml-0.5 border border-amber-500/30">
                 -{scheduleConfig.shortenMinutes}m
               </span>
             )}
           </button>
-          <div className="text-sm text-slate-300 font-mono hidden sm:block">
-            {format(currentDate, 'd MMMM yyyy', { locale: th })}
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-slate-800/80 border border-emerald-800/50 flex items-center justify-center text-xs font-bold text-emerald-400">ครู เอ</div>
+
+          <div className="flex items-center gap-2.5 pl-2 border-l border-slate-800">
+            <div className="w-8 h-8 rounded-full bg-slate-800/80 border border-emerald-800/50 flex items-center justify-center text-xs font-bold text-emerald-400">
+              {user?.displayName ? (user.displayName.includes('Kiattisak') ? 'K' : user.displayName.slice(0, 2)) : 'K'}
+            </div>
+            <div className="hidden md:flex flex-col text-left">
+              <span className="text-xs font-bold text-slate-200">{user?.displayName || 'Mr. Kiattisak'}</span>
+              <span className="text-[10px] text-emerald-400 font-medium">กลุ่มสาระฯ คณิตศาสตร์</span>
+            </div>
           </div>
         </div>
       </header>
@@ -568,19 +664,14 @@ export function TeacherPortal() {
               </div>
             </div>
 
-            {/* Sub Tabs Selection */}
-            <div className="flex border-b border-slate-800/80 mb-8 gap-6">
-              {[
-                { id: 'courses', label: 'ตารางสอนและการเข้าเรียน', count: myCourses.length },
-                { id: 'substitutions', label: 'จัดการภาระลา & สอนแทน', count: substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.date === todayStr).length + periodSwaps.filter(ps => ps.targetEmail === user?.email && ps.status === 'PENDING_TEACHER').length },
-                { id: 'records', label: 'ประวัติบันทึกหลังสอนทั้งหมด', count: postTeachingRecords.filter(r => myCourses.some(c => c.id === r.courseId)).length },
-                { id: 'gradebook', label: 'สมุดบันทึกคะแนน (Gradebook)', count: 0 }
-              ].map(tab => (
+            {/* Sub Tabs Selection (RBAC Conditionally Filtered) */}
+            <div className="flex border-b border-slate-800/80 mb-8 gap-6 overflow-x-auto">
+              {availableDashboardTabs.map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setDashboardTab(tab.id as any)}
                   className={cn(
-                    "pb-3 text-sm font-bold transition-all relative",
+                    "pb-3 text-sm font-bold transition-all relative shrink-0 cursor-pointer",
                     dashboardTab === tab.id ? "text-emerald-400 border-b-2 border-emerald-400" : "text-slate-400 hover:text-slate-200"
                   )}
                 >
@@ -619,20 +710,21 @@ export function TeacherPortal() {
               const targetDayOfWeek = targetDate.getDay(); // 1 to 5
 
               // 2. Map and filter periods specifically for targetDayOfWeek
-              const mappedPeriods: SubjectPeriod[] = [];
+              const rawMappedPeriods: SubjectPeriod[] = [];
 
-              if (!fsLoading && fsSchedules.length > 0) {
+              const todayFsSchedules = (!fsLoading && fsSchedules.length > 0)
+                ? fsSchedules.filter(item => 
+                    isTeacherEmailMatch(item.teacherEmail, user?.email) && 
+                    item.scheduleDay === targetDayOfWeek
+                  )
+                : [];
+
+              if (todayFsSchedules.length > 0) {
                 // Use Firestore sync schedules & periods!
-                const todaySchedules = fsSchedules.filter(item => 
-                  (item.teacherEmail === user?.email) && 
-                  (item.scheduleDay === targetDayOfWeek)
-                );
-
-                todaySchedules.forEach(item => {
-                  // Find period times from fsPeriods matching item.periodNumber
-                  const pConfig = fsPeriods.find(p => p.periodNumber === item.periodNumber);
-                  const startTime = pConfig ? pConfig.startTime : "08:00";
-                  const endTime = pConfig ? pConfig.endTime : "08:30";
+                todayFsSchedules.forEach(item => {
+                  const { start, end } = getPeriodTimes(item.periodNumber);
+                  const startTime = formatTime(start);
+                  const endTime = formatTime(end);
 
                   // Find matching course in myCourses to get original id if available, or use a derived id
                   const matchedCourse = myCourses.find(c => 
@@ -641,12 +733,16 @@ export function TeacherPortal() {
                   );
 
                   const courseId = matchedCourse ? matchedCourse.id : item.id;
-                  const isAttendanceTaken = matchedCourse ? matchedCourse.attendanceTaken : !!item.attendanceTaken;
+                  const hasRecords = !!(
+                    (attendanceRecords[courseId] && Object.keys(attendanceRecords[courseId]).length > 0) ||
+                    (attendanceRecords[item.id] && Object.keys(attendanceRecords[item.id]).length > 0)
+                  );
+                  const isAttendanceTaken = (matchedCourse ? matchedCourse.attendanceTaken : false) || !!item.attendanceTaken || hasRecords;
 
                   const recordDate = format(targetDate, 'yyyy-MM-dd');
-                  const existingRecord = postTeachingRecords.find(r => r.courseId === courseId && r.date === recordDate);
+                  const existingRecord = postTeachingRecords.find(r => (r.courseId === courseId || r.courseId === item.id) && r.date === recordDate);
 
-                  mappedPeriods.push({
+                  rawMappedPeriods.push({
                     id: item.id,
                     courseId: courseId,
                     periodNumber: item.periodNumber,
@@ -655,7 +751,7 @@ export function TeacherPortal() {
                     subjectCode: item.courseCode,
                     subjectName: item.courseName,
                     className: item.targetClass,
-                    room: item.room || 'ห้องเรียน ม.5/8',
+                    room: item.room || (item.targetClass.includes('5/8') ? '[943] HR 5/8' : item.targetClass.includes('5/9') ? '[935] HR 5/9' : 'ห้องเรียน ' + item.targetClass),
                     attendanceTaken: isAttendanceTaken,
                     hasPostTeachingRecord: !!existingRecord,
                     roleLabel: item.type === 'ACTIVITY' ? 'กิจกรรม' : matchedCourse?.roleLabel || 'วิชาการ',
@@ -668,7 +764,7 @@ export function TeacherPortal() {
               } else {
                 // Fallback to local myCourses calculation
                 myCourses.forEach(course => {
-                  const segments = parseSchedule(course.schedule); // e.g. [{ day: 2, periodIndex: 2 }, ...]
+                  const segments = parseSchedule(course.schedule); // e.g. [{ day: 3, periodIndex: 0 }, { day: 3, periodIndex: 4 }, ...]
                   const todaySegments = segments.filter(seg => seg.day === targetDayOfWeek);
 
                   if (todaySegments.length > 0) {
@@ -698,9 +794,15 @@ export function TeacherPortal() {
                       const { end: latestEnd } = getPeriodTimes(endPIndex);
 
                       const recordDate = format(targetDate, 'yyyy-MM-dd');
-                      const existingRecord = postTeachingRecords.find(r => r.courseId === course.id && r.date === recordDate);
+                      const existingRecord = postTeachingRecords.find(r => (r.courseId === course.id || r.courseId === `${course.id}-${pIndex}`) && r.date === recordDate);
+                      const isAct = course.code === 'HR' || course.code === 'CZ' || course.name.includes('กิจกรรม');
 
-                      mappedPeriods.push({
+                      const hasRecords = !!(
+                        (attendanceRecords[course.id] && Object.keys(attendanceRecords[course.id]).length > 0) ||
+                        (attendanceRecords[`${course.id}-${pIndex}`] && Object.keys(attendanceRecords[`${course.id}-${pIndex}`]).length > 0)
+                      );
+
+                      rawMappedPeriods.push({
                         id: `${course.id}-${pIndex}`,
                         courseId: course.id,
                         periodNumber: pIndex,
@@ -709,113 +811,155 @@ export function TeacherPortal() {
                         subjectCode: course.code,
                         subjectName: course.name,
                         className: course.room || 'ม.5/8',
-                        room: course.room || 'อาคาร 3 ห้อง 321',
-                        attendanceTaken: course.attendanceTaken,
+                        room: course.room?.includes('5/8') ? '[943] HR 5/8' : course.room?.includes('5/9') ? '[935] HR 5/9' : (course.room || 'อาคาร 3 ห้อง 321'),
+                        attendanceTaken: course.attendanceTaken || hasRecords,
                         hasPostTeachingRecord: !!existingRecord,
-                        roleLabel: course.roleLabel,
-                        studentsCount: course.studentsCount
+                        roleLabel: isAct ? 'กิจกรรม' : (course.roleLabel || 'วิชาการ'),
+                        studentsCount: course.studentsCount,
+                        type: isAct ? 'ACTIVITY' : 'MAIN',
+                        teachingPartner: course.code === 'HR' ? 'Mrs. Koy K.' : undefined,
+                        partnerCheckedAttendance: false
                       });
                     });
                   }
                 });
               }
 
-              // Ensure they are sorted ascending by periodNumber
+              // Deduplicate schedule items by period slot (periodNumber + subjectCode + className)
+              const seenPeriodSlotKeys = new Set<string>();
+              const mappedPeriods: SubjectPeriod[] = [];
+              rawMappedPeriods.forEach(p => {
+                const slotKey = `${p.periodNumber}_${p.subjectCode}_${p.className?.replace(/^M\./i, 'ม.')}`;
+                if (!seenPeriodSlotKeys.has(slotKey)) {
+                  seenPeriodSlotKeys.add(slotKey);
+                  mappedPeriods.push(p);
+                }
+              });
+
+              // Ensure they are sorted ascending by periodNumber (e.g. 0, 4, 8)
               mappedPeriods.sort((a, b) => a.periodNumber - b.periodNumber);
 
+              const resolveCourseAndPeriod = (periodId: string) => {
+                const periodItem = mappedPeriods.find(p => p.id === periodId || p.courseId === periodId);
+                let course = myCourses.find(c => c.id === periodId);
+                if (!course && periodItem) {
+                  course = myCourses.find(c => 
+                    c.id === periodItem.courseId || 
+                    (c.code === periodItem.subjectCode && isSameRoom(c.room, periodItem.className))
+                  );
+                }
+                if (!course && periodItem) {
+                  course = {
+                    id: periodItem.courseId || periodItem.id,
+                    code: periodItem.subjectCode,
+                    name: periodItem.subjectName,
+                    room: periodItem.className,
+                    term: '1/2569',
+                    studentsCount: periodItem.studentsCount || 40,
+                    attendanceTaken: !!periodItem.attendanceTaken,
+                    periodIndex: periodItem.periodNumber
+                  };
+                }
+                const pIndex = periodItem ? periodItem.periodNumber : (course?.periodIndex || 1);
+                return { course, pIndex, periodItem };
+              };
+
               return (
-                <TeacherScheduleList
-                  periods={mappedPeriods}
-                  currentDate={currentDate}
-                  isNextDay={isNextDay}
-                  dayLabel={dayLabel}
-                  onTakeAttendance={(periodId) => {
-                    let course = myCourses.find(c => c.id === periodId);
-                    if (!course) {
-                      const matchedItem = fsSchedules.find(s => s.id === periodId);
-                      if (matchedItem) {
-                        course = {
-                          id: matchedItem.id,
-                          code: matchedItem.courseCode,
-                          name: matchedItem.courseName,
-                          room: matchedItem.targetClass,
-                          term: '1/2569',
-                          studentsCount: matchedItem.studentsCount || 40,
-                          attendanceTaken: !!matchedItem.attendanceTaken
-                        };
+                <div className="space-y-4">
+                  <div className="flex justify-end">
+                    <button
+                      onClick={async () => {
+                        if (mappedPeriods.length > 0) {
+                          for (const p of mappedPeriods) {
+                            markAttendanceDone(p.courseId);
+                            if (p.id) {
+                              markAttendanceDone(p.id);
+                              try {
+                                await updateScheduleAttendance(p.id, true);
+                              } catch(e) {
+                                console.warn("Could not update firestore schedule mock", e);
+                              }
+                            }
+                            if (p.subjectCode) {
+                              markAttendanceDone(p.subjectCode);
+                            }
+                          }
+                          
+                          setToast('จำลองเช็คชื่อสำเร็จแล้ว (ทุกคาบเรียน)');
+                          setTimeout(() => setToast(null), 3000);
+                        } else {
+                          setToast('ไม่มีคาบเรียนให้จำลองเช็คชื่อ');
+                          setTimeout(() => setToast(null), 3000);
+                        }
+                      }}
+                      className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold text-sm shadow-lg flex items-center gap-2"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      จำลองเช็คชื่อสำเร็จ (Simulate)
+                    </button>
+                  </div>
+                  <TeacherScheduleList
+                    periods={mappedPeriods}
+                    currentDate={currentDate}
+                    isNextDay={isNextDay}
+                    dayLabel={dayLabel}
+                    onTakeAttendance={(periodId) => {
+                      const { course, pIndex, periodItem } = resolveCourseAndPeriod(periodId);
+                      if (course) {
+                        setActiveCourse({
+                          ...course,
+                          periodIndex: pIndex,
+                          room: periodItem?.className || course.room
+                        });
+                        setCurrentPeriod(PERIODS[pIndex] || `คาบ ${pIndex}`);
+                        setView('class');
                       }
-                    }
-                    if (course) {
-                      const parsedSchedules = parseSchedule(course.schedule);
-                      let pIndex = course.periodIndex || 1;
-                      if (parsedSchedules && parsedSchedules.length > 0) {
-                        pIndex = parsedSchedules[0].periodIndex;
+                    }}
+                    onRequestLateAttendance={(periodId) => {
+                      const { course } = resolveCourseAndPeriod(periodId);
+                      if (course) {
+                        setLateCourse(course);
+                        setShowLateModal(true);
                       }
-                      setActiveCourse(course);
-                      setCurrentPeriod(PERIODS[pIndex] || 'คาบ 1');
-                      setView('class');
-                    }
-                  }}
-                  onRequestLateAttendance={(periodId) => {
-                    let course = myCourses.find(c => c.id === periodId);
-                    if (!course) {
-                      const matchedItem = fsSchedules.find(s => s.id === periodId);
-                      if (matchedItem) {
-                        course = {
-                          id: matchedItem.id,
-                          code: matchedItem.courseCode,
-                          name: matchedItem.courseName,
-                          room: matchedItem.targetClass,
-                          term: '1/2569',
-                          studentsCount: matchedItem.studentsCount || 40,
-                          attendanceTaken: !!matchedItem.attendanceTaken
-                        };
+                    }}
+                    onRecordPostTeaching={(periodId) => {
+                      const { course } = resolveCourseAndPeriod(periodId);
+                      if (course) {
+                        setPostTeachingCourse(course);
+                        setPtDate(format(targetDate, 'yyyy-MM-dd'));
+                        setShowPostTeachingModal(true);
                       }
-                    }
-                    if (course) {
-                      setLateCourse(course);
-                      setShowLateModal(true);
-                    }
-                  }}
-                  onRecordPostTeaching={(periodId) => {
-                    let course = myCourses.find(c => c.id === periodId);
-                    if (!course) {
-                      const matchedItem = fsSchedules.find(s => s.id === periodId);
-                      if (matchedItem) {
-                        course = {
-                          id: matchedItem.id,
-                          code: matchedItem.courseCode,
-                          name: matchedItem.courseName,
-                          room: matchedItem.targetClass,
-                          term: '1/2569',
-                          studentsCount: matchedItem.studentsCount || 40,
-                          attendanceTaken: !!matchedItem.attendanceTaken
-                        };
+                    }}
+                    onViewPostTeachingRecord={(periodId) => {
+                      const recordDate = format(targetDate, 'yyyy-MM-dd');
+                      const existingRecord = postTeachingRecords.find(r => (r.courseId === periodId || mappedPeriods.some(p => p.id === periodId && p.courseId === r.courseId)) && r.date === recordDate);
+                      if (existingRecord) {
+                        setViewingRecord(existingRecord);
                       }
-                    }
-                    if (course) {
-                      setPostTeachingCourse(course);
-                      setPtDate(format(targetDate, 'yyyy-MM-dd'));
-                      setShowPostTeachingModal(true);
-                    }
-                  }}
-                  onViewPostTeachingRecord={(periodId) => {
-                    const recordDate = format(targetDate, 'yyyy-MM-dd');
-                    const existingRecord = postTeachingRecords.find(r => r.courseId === periodId && r.date === recordDate);
-                    if (existingRecord) {
-                      setViewingRecord(existingRecord);
-                    }
-                  }}
-                  onTogglePartnerAttendance={async (periodId, currentStatus) => {
-                    try {
-                      await updatePartnerAttendance(periodId, currentStatus);
-                      setToast('ซิงค์ข้อมูลผู้สอนร่วมเรียบร้อยแล้ว!');
-                      setTimeout(() => setToast(null), 3000);
-                    } catch (err) {
-                      console.error("Failed to toggle partner attendance:", err);
-                    }
-                  }}
-                />
+                    }}
+                    onTogglePartnerAttendance={async (periodId, currentStatus) => {
+                      try {
+                        await updatePartnerAttendance(periodId, currentStatus);
+                        setToast('ซิงค์ข้อมูลผู้สอนร่วมเรียบร้อยแล้ว!');
+                        setTimeout(() => setToast(null), 3000);
+                      } catch (err) {
+                        console.error("Failed to toggle partner attendance:", err);
+                      }
+                    }}
+                    onEnterClassroom={(periodId) => {
+                      const { course, pIndex, periodItem } = resolveCourseAndPeriod(periodId);
+                      if (course) {
+                        setActiveCourse({
+                          ...course,
+                          periodIndex: pIndex,
+                          room: periodItem?.className || course.room
+                        });
+                        setCurrentPeriod(PERIODS[pIndex] || `คาบ ${pIndex}`);
+                        setView('class');
+                      }
+                    }}
+                  />
+                </div>
               );
             })()}
 
@@ -1226,7 +1370,28 @@ export function TeacherPortal() {
               </div>
             )}
 
-            {myCourses.length === 0 && (
+            {dashboardTab === 'teaching-load' && (
+              <div className="space-y-6 animate-in fade-in duration-300">
+                <div className="bg-[#161f30] border border-slate-800/80 rounded-2xl p-6 shadow-xl">
+                  <div className="mb-6 border-b border-slate-800 pb-4">
+                    <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                      <BookOpen className="w-5 h-5 text-emerald-400" />
+                      ตารางภาระงานสอนรายบุคคลและภาพรวมกลุ่มสาระการเรียนรู้
+                    </h3>
+                    <p className="text-slate-400 text-sm mt-1">
+                      สรุปรายวิชา คาบสอนวิชาการ คาบกิจกรรม และตารางห้องเรียนตามประกาศตารางสอนของโรงเรียน
+                    </p>
+                  </div>
+                  <TeachingLoadTable initialTeacherName={user?.displayName || 'Mr. Kiattisak'} />
+                </div>
+              </div>
+            )}
+
+            {dashboardTab === 'leaderboard' && (
+              <ClassroomLeaderboard />
+            )}
+
+            {myCourses.length === 0 && dashboardTab === 'courses' && (
               <div className="text-center py-20 border border-dashed border-white/10 rounded-2xl bg-[#151921]">
                 <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-4" />
                 <h3 className="text-lg font-bold text-slate-300 mb-2">ยังไม่มีรายวิชาที่สอน</h3>
@@ -1358,364 +1523,275 @@ export function TeacherPortal() {
 
         </main>
       ) : (
-        <div className="flex flex-1 min-h-0 animate-in fade-in duration-300">
+        <div className="flex flex-1 min-h-0 animate-in fade-in duration-300 relative overflow-hidden">
           
-          {/* Sidebar: Early Warning Hub */}
-          <aside className="w-72 border-r border-white/10 bg-[#0d0f17] flex flex-col shrink-0 overflow-y-auto">
-            
-            <div className="p-4 border-b border-white/10 flex items-center justify-between sticky top-0 bg-[#0d0f17] z-10">
-              <button 
-                onClick={() => setView('dashboard')}
-                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-green-400 transition-colors"
+          {/* Mobile Floating Button for Alerts & Warnings */}
+          <div className="lg:hidden absolute bottom-4 left-4 z-30">
+            <button
+              onClick={() => setIsEarlyWarningDrawerOpen(!isEarlyWarningDrawerOpen)}
+              className="px-3 py-2 bg-amber-500/90 hover:bg-amber-500 text-slate-950 font-bold text-xs rounded-full shadow-xl border border-amber-300/40 flex items-center gap-1.5 backdrop-blur-md"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>แจ้งเตือน ({criticalStudents.length + warningStudents.length})</span>
+            </button>
+          </div>
+
+          {/* Collapsible Left Sidebar / Drawer: Alerts & Warnings (Overlay on mobile, inline on desktop) */}
+          <aside 
+            className={cn(
+              "border-r border-white/10 bg-[#0d0f17] flex flex-col shrink-0 transition-all duration-300 ease-in-out select-none z-30",
+              // Desktop rules:
+              "hidden lg:flex",
+              isEarlyWarningDrawerOpen ? "lg:w-80 shadow-2xl" : "lg:w-12 bg-[#0a0c12] hover:bg-[#0f121d]"
+            )}
+          >
+            {isEarlyWarningDrawerOpen ? (
+              /* EXPANDED STATE */
+              <div className="flex flex-col h-full overflow-y-auto">
+                <div className="p-3.5 border-b border-white/10 flex items-center justify-between sticky top-0 bg-[#0d0f17] z-10">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20">
+                      <AlertTriangle className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h2 className="text-xs font-bold text-slate-200">Alerts & Warnings</h2>
+                      <p className="text-[10px] text-slate-400">ระบบแจ้งเตือน & เฝ้าระวัง</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setIsEarlyWarningDrawerOpen(false)}
+                      title="ย่อแถบแจ้งเตือน"
+                      className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors flex items-center text-xs gap-1"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      <span className="text-[11px]">ย่อแถบ</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 border-b border-white/10 bg-slate-900/40 flex items-center justify-between">
+                  <button 
+                    onClick={() => setView('dashboard')}
+                    className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-green-400 transition-colors py-0.5"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" /> กลับหน้าหลัก
+                  </button>
+                  {(criticalStudents.length > 0 || warningStudents.length > 0) && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30">
+                      {criticalStudents.length + warningStudents.length} รายการ
+                    </span>
+                  )}
+                </div>
+
+                {/* 1. EARLY WARNING HUB (วิกฤต) */}
+                <div className="p-4 border-b border-white/10 bg-red-500/10">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-xs font-bold uppercase tracking-widest text-red-400 flex items-center gap-1.5">
+                      <AlertOctagon className="w-3.5 h-3.5" /> Early Warning Hub (วิกฤต)
+                    </h2>
+                    {criticalStudents.length > 0 && (
+                      <span className="text-[10px] bg-red-500 text-white font-mono px-1.5 py-0.5 rounded-full font-bold">
+                        {criticalStudents.length}
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {criticalStudents.length === 0 ? (
+                      <div className="text-xs text-slate-500 py-1">ไม่มีนักเรียนในกลุ่มวิกฤต</div>
+                    ) : criticalStudents.map(a => {
+                      const student = students.find(s => s.studentId === a.studentId);
+                      return (
+                        <div key={student?.id || a.studentId} className="p-3 bg-red-950/40 border border-red-500/50 rounded-lg shadow-[0_0_15px_rgba(239,68,68,0.2)]">
+                          <div className="flex justify-between items-start mb-1">
+                            <span className="text-sm font-bold text-white">{student?.name || `รหัส ${a.studentId}`}</span>
+                            <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded font-mono">{a.subjectAttendanceRate}%</span>
+                          </div>
+                          <p className="text-[11px] text-red-300">ความเสี่ยงสูงเวลาเรียนไม่พอ</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 2. แจ้งเตือนระดับเฝ้าระวัง */}
+                <div className="p-4 flex-1 overflow-y-auto">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-xs font-bold uppercase tracking-widest text-amber-400 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5" /> แจ้งเตือนระดับเฝ้าระวัง
+                    </h2>
+                    {warningStudents.length > 0 && (
+                      <span className="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 font-mono px-1.5 py-0.5 rounded-full font-bold">
+                        {warningStudents.length}
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {warningStudents.length === 0 ? (
+                      <div className="text-xs text-slate-500 py-1">ไม่มีนักเรียนในกลุ่มเฝ้าระวัง</div>
+                    ) : warningStudents.map(a => {
+                      const student = students.find(s => s.studentId === a.studentId);
+                      return (
+                        <div key={student?.id || a.studentId} className="p-3 bg-amber-950/30 border border-amber-500/40 rounded-lg">
+                          <div className="flex justify-between items-start mb-1">
+                            <span className="text-sm text-slate-200">{student?.name || `รหัส ${a.studentId}`}</span>
+                            <span className="text-xs font-mono text-amber-400">{a.subjectAttendanceRate}%</span>
+                          </div>
+                          <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
+                            <div className="bg-amber-500 h-full" style={{ width: `${a.subjectAttendanceRate}%` }}></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 3. สถิติรวมห้องเรียน */}
+                <div className="p-4 bg-slate-900/50 border-t border-white/10 mt-auto">
+                  <div className="text-xs text-slate-500 mb-2">สถิติรวมห้องเรียน {activeCourse?.room}</div>
+                  <div className="flex items-end gap-2">
+                    <span className="text-2xl font-bold text-green-400">{avgAttendance}%</span>
+                    <span className="text-xs text-slate-400 pb-1">ค่าเฉลี่ยการเข้าเรียน</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* COLLAPSED STATE (Default) - Vertical Bar with Label & Icon */
+              <div 
+                onClick={() => setIsEarlyWarningDrawerOpen(true)}
+                className="h-full flex flex-col items-center justify-between py-4 cursor-pointer hover:bg-slate-800/40 transition-colors group"
+                title="คลิกเพื่อเปิด Alerts & Warnings (แจ้งเตือนเฝ้าระวัง)"
               >
-                <ArrowLeft className="w-3.5 h-3.5" /> กลับหน้าหลัก
-              </button>
-            </div>
+                {/* Top Icon & Indicator */}
+                <div className="flex flex-col items-center gap-2">
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsEarlyWarningDrawerOpen(true);
+                    }}
+                    className="w-8 h-8 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 flex items-center justify-center transition-all group-hover:scale-105 relative"
+                  >
+                    <AlertTriangle className="w-4 h-4" />
+                    {(criticalStudents.length > 0 || warningStudents.length > 0) && (
+                      <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse" />
+                    )}
+                  </button>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-white transition-colors" />
+                </div>
 
-            <div className="p-4 border-b border-white/10 bg-red-500/10">
-              <h2 className="text-xs font-bold uppercase tracking-widest text-red-400 mb-3">Early Warning Hub (วิกฤต)</h2>
-              <div className="space-y-2">
-                {criticalStudents.length === 0 ? (
-                  <div className="text-xs text-slate-500">ไม่มีนักเรียนในกลุ่มวิกฤต</div>
-                ) : criticalStudents.map(a => {
-                  const student = students.find(s => s.studentId === a.studentId);
-                  return (
-                    <div key={student?.id} className="p-3 bg-red-950/40 border border-red-500/50 rounded-lg shadow-[0_0_15px_rgba(239,68,68,0.2)]">
-                      <div className="flex justify-between items-start mb-1">
-                        <span className="text-sm font-bold">{student?.name}</span>
-                        <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded font-mono">{a.subjectAttendanceRate}%</span>
-                      </div>
-                      <p className="text-[11px] text-red-300">ความเสี่ยงสูงเวลาเรียนไม่พอ</p>
-                    </div>
-                  );
-                })}
+                {/* Middle Vertical Label */}
+                <div className="flex-1 flex items-center justify-center py-6">
+                  <div className="[writing-mode:vertical-rl] rotate-180 flex items-center gap-2 text-xs font-semibold tracking-wider text-slate-400 group-hover:text-amber-300 transition-colors whitespace-nowrap">
+                    <span className="uppercase text-[11px] font-bold text-slate-300 group-hover:text-white">Alerts & Warnings</span>
+                    <span className="text-[10px] text-slate-500 font-normal">แจ้งเตือนเฝ้าระวัง</span>
+                    {(criticalStudents.length > 0 || warningStudents.length > 0) && (
+                      <span className="bg-red-500/20 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold">
+                        {criticalStudents.length + warningStudents.length}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bottom Stats Mini Badge */}
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-[10px] font-mono font-bold text-green-400 group-hover:scale-110 transition-transform">
+                    {avgAttendance}%
+                  </span>
+                  <span className="text-[8px] text-slate-500">เฉลี่ย</span>
+                </div>
               </div>
-            </div>
-
-            <div className="p-4 flex-1 overflow-hidden">
-              <h2 className="text-xs font-bold uppercase tracking-widest text-amber-400 mb-3">แจ้งเตือนระดับเฝ้าระวัง</h2>
-              <div className="space-y-2">
-                {warningStudents.length === 0 ? (
-                  <div className="text-xs text-slate-500">ไม่มีนักเรียนในกลุ่มเฝ้าระวัง</div>
-                ) : warningStudents.map(a => {
-                  const student = students.find(s => s.studentId === a.studentId);
-                  return (
-                    <div key={student?.id} className="p-3 bg-amber-950/30 border border-amber-500/40 rounded-lg">
-                      <div className="flex justify-between items-start mb-1">
-                        <span className="text-sm">{student?.name}</span>
-                        <span className="text-xs font-mono text-amber-400">{a.subjectAttendanceRate}%</span>
-                      </div>
-                      <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                        <div className="bg-amber-500 h-full" style={{ width: `${a.subjectAttendanceRate}%` }}></div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-900/50 border-t border-white/10">
-              <div className="text-xs text-slate-500 mb-2">สถิติรวมห้องเรียน {activeCourse?.room}</div>
-              <div className="flex items-end gap-2">
-                <span className="text-2xl font-bold text-green-400">{avgAttendance}%</span>
-                <span className="text-xs text-slate-400 pb-1">ค่าเฉลี่ยการเข้าเรียน</span>
-              </div>
-            </div>
-
+            )}
           </aside>
 
-          {/* Main Content */}
-          <main className="flex-1 flex flex-col bg-[#0b0d14]">
-            
-            {/* Top Bar / Period Selector */}
-            <section className="p-4 bg-[#151921] border-b border-white/10 flex items-center justify-between shadow-sm shrink-0">
-              <div className="flex items-center gap-4">
-                <div className="flex flex-col">
-                  <span className="text-sm font-bold text-white">{activeCourse?.name} ({activeCourse?.room})</span>
-                  <span className="text-xs text-slate-400 font-mono">{activeCourse?.code} - {currentPeriod}</span>
-                </div>
-              </div>
-              <div className="flex gap-2 shrink-0">
-                <button 
-                  onClick={handleRandomSelect}
-                  disabled={isShuffling || courseStudents.length === 0}
-                  className="px-4 py-1.5 bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors shadow-lg shadow-yellow-600/20 flex items-center gap-1.5"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  สุ่มรายชื่อ (Random Student)
-                </button>
-                <button 
-                  onClick={() => activeCourse && handleAttendanceDone(activeCourse.id)}
-                  disabled={isSavingAttendance}
-                  className="px-4 py-1.5 bg-green-600 text-white text-xs font-bold rounded-lg hover:bg-green-500 disabled:opacity-50 transition-colors shadow-lg shadow-green-600/20 flex items-center gap-1.5"
-                >
-                  {isSavingAttendance ? (
-                    <>
-                      <Clock className="w-3.5 h-3.5 animate-spin" />
-                      กำลังบันทึกข้อมูล...
-                    </>
-                  ) : (
-                    'บันทึกการเช็คชื่อทั้งหมด'
-                  )}
-                </button>
-              </div>
-            </section>
-
-            {/* Flexible Drag-and-Drop Seating Area */}
-            <div className="flex-1 flex overflow-hidden flex-col">
-              {/* Homeroom Co-advisor Locking Banner inside Teacher Portal */}
-              {isHrActive && hrRecord && hrRecord.isLocked && (
-                <div className="mx-6 mt-6 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 animate-in fade-in duration-200 shrink-0">
-                  <div className="flex items-center gap-3">
-                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+          {/* Mobile Overlay Drawer for Alerts & Warnings */}
+          {isEarlyWarningDrawerOpen && (
+            <div className="lg:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex">
+              <div className="w-4/5 max-w-sm bg-[#0d0f17] h-full flex flex-col shadow-2xl border-r border-white/10 animate-in slide-in-from-left duration-200">
+                <div className="p-4 border-b border-white/10 flex items-center justify-between bg-[#0d0f17]">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-5 h-5 text-amber-400" />
                     <div>
-                      <p className="font-bold text-sm text-white">เช็กชื่อโฮมรูมแล้ว โดย {hrRecord.checkedByName} เวลา {hrRecord.checkedAt} น.</p>
-                      <p className="text-xs text-slate-400 font-medium">ข้อมูลการเช็กชื่อถูกล็อคตามเงื่อนไขของระบบครูสอนร่วมประจำชั้นเพื่อความสอดคล้อง</p>
+                      <h2 className="text-sm font-bold text-slate-200">Alerts & Warnings</h2>
+                      <p className="text-[10px] text-slate-400">ระบบแจ้งเตือน & เฝ้าระวัง</p>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => hrRequestUnlock()}
-                    className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold text-xs rounded-lg transition-colors shrink-0"
+                  <button
+                    onClick={() => setIsEarlyWarningDrawerOpen(false)}
+                    className="p-1 text-slate-400 hover:text-white rounded-lg"
                   >
-                    ขอแก้ไขข้อมูล
+                    <ChevronLeft className="w-6 h-6" />
                   </button>
                 </div>
-              )}
-              {isHrActive && hrRecord && !hrRecord.isLocked && (
-                <div className="mx-6 mt-6 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 animate-in fade-in duration-200 shrink-0">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
-                    <div>
-                      <p className="font-bold text-sm text-white">ปลดล็อคโดย {hrRecord.requestedEditBy?.split('@')[0]} (แก้ไขได้แล้ว)</p>
-                      <p className="text-xs text-slate-400 font-medium">คุณครูสามารถคลิกสัญลักษณ์สถานะด้านล่างบนบัตรนักเรียนแต่ละคนเพื่อเช็กชื่อใหม่ และกดบันทึก</p>
-                    </div>
+                
+                {/* Warnings List on Mobile */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  <div className="text-xs font-bold text-red-400 flex items-center gap-1.5">
+                    <AlertOctagon className="w-4 h-4" /> วิกฤตเวลาเรียนไม่พอ ({criticalStudents.length})
                   </div>
-                </div>
-              )}
-
-              {/* Seating Grid Container */}
-              <div className="flex-1 p-6 overflow-auto bg-[#0b0d14]">
-                <div className="flex flex-col gap-5 min-w-[1400px]">
-                  {Array.from({ length: layout.totalRows }).map((_, rIndex) => {
-                    const r = rIndex + 1;
+                  {criticalStudents.length === 0 ? (
+                    <div className="text-xs text-slate-500">ไม่มีนักเรียนในกลุ่มวิกฤต</div>
+                  ) : criticalStudents.map(a => {
+                    const student = students.find(s => s.studentId === a.studentId);
                     return (
-                      <div key={r} className="flex gap-4 justify-center items-stretch">
-                        {Array.from({ length: layout.totalCols }).map((_, cIndex) => {
-                          const c = cIndex + 1;
-                          const seatIndex = (r - 1) * layout.totalCols + (c - 1);
-                          const student = courseStudents.find(s => s.seatIndex === seatIndex);
-                          
-                          return (
-                            <React.Fragment key={c}>
-                              <div 
-                                className={cn(
-                                  "w-[180px] rounded-xl transition-all duration-200 border-2",
-                                  student ? "border-transparent" : "border-dashed border-white/10 bg-white/5 min-h-[160px] flex items-center justify-center"
-                                )}
-                                onDragOver={(e) => e.preventDefault()}
-                                onDrop={(e) => {
-                                  e.preventDefault();
-                                  const studentId = e.dataTransfer.getData('studentId');
-                                  if (studentId) moveStudentSeat(studentId, seatIndex);
-                                }}
-                              >
-                                {student ? (
-                                  <div
-                                    draggable
-                                    onDragStart={(e) => e.dataTransfer.setData('studentId', student.studentId)}
-                                    className="cursor-move h-full w-full text-left"
-                                  >
-                                    {(() => {
-                                      const status = attendanceRecords[activeCourse.id]?.[student.studentId] || 'UNMARKED';
-                                      const studentAnalytics = analytics.find(a => a.studentId === student.studentId);
-                                      const bScore = studentAnalytics?.behaviorScore ?? 100;
-                                      
-                                      let borderClass = "border-white/10 border-l-slate-500";
-                                      let shadowClass = "";
-                                      if (status === 'PRESENT') { borderClass = "border-white/10 border-l-green-500"; shadowClass = ""; }
-                                      else if (status === 'LATE') { borderClass = "border-white/10 border-l-amber-500"; shadowClass = "shadow-[0_0_15px_rgba(245,158,11,0.05)]"; }
-                                      else if (status === 'LEAVE') { borderClass = "border-white/10 border-l-blue-500"; shadowClass = ""; }
-                                      else if (status === 'ABSENT') { borderClass = "border-white/10 border-l-red-500"; shadowClass = "shadow-[0_0_15px_rgba(239,68,68,0.1)]"; }
+                      <div key={student?.id || a.studentId} className="p-3 bg-red-950/40 border border-red-500/50 rounded-xl">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="text-sm font-bold text-white">{student?.name || `รหัส ${a.studentId}`}</span>
+                          <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded font-mono">{a.subjectAttendanceRate}%</span>
+                        </div>
+                        <p className="text-[11px] text-red-300">ความเสี่ยงสูงเวลาเรียนไม่พอ</p>
+                      </div>
+                    );
+                  })}
 
-                                      const isGlow = shufflingStudentIds.includes(student.studentId);
-                                      return (
-                                        <div 
-                                          onClick={() => {
-                                            setSelectedStudentForScore(student);
-                                          }}
-                                          className={cn(
-                                            "bg-[#1c1f2b] rounded-xl p-3 flex flex-col gap-2 relative overflow-hidden group border-l-4 border-y border-r transition-all duration-200 h-full w-full hover:border-r-green-500/30 hover:border-y-green-500/30 cursor-pointer",
-                                            borderClass, shadowClass,
-                                            isGlow ? "ring-4 ring-yellow-400 animate-pulse scale-105 border-yellow-500 shadow-[0_0_20px_rgba(234,179,8,0.5)] z-10" : ""
-                                          )}
-                                        >
-                                          <div className="flex justify-between items-start">
-                                            <img 
-                                              src={student.avatar} 
-                                              alt={student.name}
-                                              draggable={false}
-                                              className={cn(
-                                                "w-10 h-10 rounded-full border-2 bg-slate-700 transition-colors",
-                                                status === 'PRESENT' ? 'border-green-500' :
-                                                status === 'LATE' ? 'border-amber-500' :
-                                                status === 'LEAVE' ? 'border-blue-500' :
-                                                status === 'ABSENT' ? 'border-red-500' :
-                                                'border-slate-500'
-                                              )}
-                                            />
-                                            <div className="text-right">
-                                              <div className="text-[10px] text-slate-400 font-mono">#{student.studentId}</div>
-                                            </div>
-                                          </div>
-                                          
-                                          <div>
-                                            <h3 className={cn("font-bold text-xs transition-colors line-clamp-1", 
-                                              status === 'ABSENT' ? 'text-red-400' : 'text-slate-200'
-                                            )} title={student.name}>{student.name}</h3>
-                                            
-                                            <div className="flex items-center justify-between mt-1">
-                                              <p className="text-[10px] text-slate-400 flex items-center gap-0.5">
-                                                คะแนน: 
-                                                <span className={cn(
-                                                  "font-medium",
-                                                  bScore > 100 ? "text-green-400" :
-                                                  bScore < 80 ? "text-red-400" : "text-slate-200"
-                                                )}>
-                                                  {bScore >= 100 ? `+${bScore - 100}` : bScore - 100}
-                                                </span>
-                                              </p>
-                                              
-                                              <div className="flex items-center">
-                                                <button 
-                                                  onClick={(e) => { e.stopPropagation(); adjustBehaviorScore(student.studentId, -5); }}
-                                                  className="w-4 h-4 flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
-                                                  title="หักคะแนนพฤติกรรม"
-                                                >
-                                                  <Minus className="w-3 h-3" />
-                                                </button>
-                                                <button 
-                                                  onClick={(e) => { e.stopPropagation(); adjustBehaviorScore(student.studentId, 5); }}
-                                                  className="w-4 h-4 flex items-center justify-center text-slate-500 hover:text-green-400 hover:bg-green-500/10 rounded transition-colors"
-                                                  title="เพิ่มคะแนนพฤติกรรม"
-                                                >
-                                                  <Plus className="w-3 h-3" />
-                                                </button>
-                                              </div>
-                                            </div>
-                                          </div>
-                                          
-                                          <div className="grid grid-cols-2 gap-1 mt-auto">
-                                            <button 
-                                              onClick={(e) => { 
-                                                if (isHrActive && hrRecord?.isLocked) return;
-                                                e.stopPropagation(); 
-                                                setAttendanceStatus(activeCourse.id, student.studentId, 'PRESENT'); 
-                                              }}
-                                              disabled={isHrActive && hrRecord?.isLocked}
-                                              className={cn("py-1 text-[10px] rounded font-bold transition-colors", 
-                                                status === 'PRESENT' ? 'bg-green-500 text-white' : 'bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10',
-                                                (isHrActive && hrRecord?.isLocked) ? "opacity-50 cursor-not-allowed" : ""
-                                              )}>มา</button>
-                                            <button 
-                                              onClick={(e) => { 
-                                                if (isHrActive && hrRecord?.isLocked) return;
-                                                e.stopPropagation(); 
-                                                setAttendanceStatus(activeCourse.id, student.studentId, 'LATE'); 
-                                              }}
-                                              disabled={isHrActive && hrRecord?.isLocked}
-                                              className={cn("py-1 text-[10px] rounded font-bold transition-colors", 
-                                                status === 'LATE' ? 'bg-amber-500 text-white' : 'bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10',
-                                                (isHrActive && hrRecord?.isLocked) ? "opacity-50 cursor-not-allowed" : ""
-                                              )}>สาย</button>
-                                            <button 
-                                              onClick={(e) => { 
-                                                if (isHrActive && hrRecord?.isLocked) return;
-                                                e.stopPropagation(); 
-                                                setAttendanceStatus(activeCourse.id, student.studentId, 'LEAVE'); 
-                                              }}
-                                              disabled={isHrActive && hrRecord?.isLocked}
-                                              className={cn("py-1 text-[10px] rounded font-bold transition-colors", 
-                                                status === 'LEAVE' ? 'bg-blue-500 text-white' : 'bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10',
-                                                (isHrActive && hrRecord?.isLocked) ? "opacity-50 cursor-not-allowed" : ""
-                                              )}>ลา</button>
-                                            <button 
-                                              onClick={(e) => { 
-                                                if (isHrActive && hrRecord?.isLocked) return;
-                                                e.stopPropagation(); 
-                                                setAttendanceStatus(activeCourse.id, student.studentId, 'ABSENT'); 
-                                              }}
-                                              disabled={isHrActive && hrRecord?.isLocked}
-                                              className={cn("py-1 text-[10px] rounded font-bold transition-colors", 
-                                                status === 'ABSENT' ? 'bg-red-500 text-white' : 'bg-white/5 border border-white/10 text-slate-400 hover:bg-white/10',
-                                                (isHrActive && hrRecord?.isLocked) ? "opacity-50 cursor-not-allowed" : ""
-                                              )}>ขาด</button>
-                                          </div>
-                                        </div>
-                                      );
-                                    })()}
-                                  </div>
-                                ) : (
-                                  <div className="text-white/20 text-[10px] font-bold uppercase tracking-widest text-center select-none">
-                                    โต๊ะว่าง
-                                  </div>
-                                )}
-                              </div>
-                              {layout.aisleAfterCols.includes(c) && (
-                                <div className="w-8 shrink-0 flex items-center justify-center border-l border-r border-dashed border-white/5 bg-slate-900/10 rounded-md">
-                                  <span className="text-[9px] text-slate-600 font-bold uppercase tracking-widest select-none text-center" style={{ writingMode: 'vertical-lr' }}>ทางเดิน</span>
-                                </div>
-                              )}
-                            </React.Fragment>
-                          );
-                        })}
+                  <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5 pt-3 border-t border-white/10">
+                    <AlertTriangle className="w-4 h-4" /> ระดับเฝ้าระวัง ({warningStudents.length})
+                  </div>
+                  {warningStudents.length === 0 ? (
+                    <div className="text-xs text-slate-500">ไม่มีนักเรียนในกลุ่มเฝ้าระวัง</div>
+                  ) : warningStudents.map(a => {
+                    const student = students.find(s => s.studentId === a.studentId);
+                    return (
+                      <div key={student?.id || a.studentId} className="p-3 bg-amber-950/30 border border-amber-500/40 rounded-xl">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="text-sm text-slate-200">{student?.name || `รหัส ${a.studentId}`}</span>
+                          <span className="text-xs font-mono text-amber-400">{a.subjectAttendanceRate}%</span>
+                        </div>
+                        <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-1">
+                          <div className="bg-amber-500 h-full" style={{ width: `${a.subjectAttendanceRate}%` }}></div>
+                        </div>
                       </div>
                     );
                   })}
                 </div>
+
+                <div className="p-4 bg-slate-900 border-t border-white/10 flex justify-between items-center">
+                  <span className="text-xs text-slate-400">ค่าเฉลี่ยเข้าเรียน</span>
+                  <span className="text-xl font-bold text-green-400">{avgAttendance}%</span>
+                </div>
               </div>
-
-              {/* Unassigned Students Sidebar */}
-              <aside 
-                className="w-64 border-l border-white/10 bg-[#0d0f17] flex flex-col shrink-0"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const studentId = e.dataTransfer.getData('studentId');
-                  if (studentId) moveStudentSeat(studentId, null);
-                }}
-              >
-                <div className="p-4 border-b border-white/10 bg-slate-900/50">
-                  <h2 className="text-sm font-bold text-slate-300">นักเรียนที่ยังไม่มีที่นั่ง</h2>
-                  <div className="text-[10px] text-slate-500 mt-1">ลากและวางการ์ดเพื่อจัดที่นั่ง</div>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 text-left">
-                  {unassignedStudents.map(student => (
-                    <div
-                      key={student.id}
-                      draggable
-                      onDragStart={(e) => e.dataTransfer.setData('studentId', student.studentId)}
-                      className="bg-[#1c1f2b] p-3 rounded-lg border border-white/10 cursor-move shadow-md hover:border-green-500/50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <img src={student.avatar} draggable={false} className="w-10 h-10 rounded-full border border-slate-700 bg-slate-800" alt={student.name} />
-                        <div>
-                          <div className="font-bold text-xs text-slate-200 line-clamp-1">{student.name}</div>
-                          <div className="text-[10px] text-slate-400 font-mono">#{student.studentId}</div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {unassignedStudents.length === 0 && (
-                    <div className="text-center py-10 text-xs text-slate-500">
-                      นักเรียนมีที่นั่งครบทุกคนแล้ว
-                    </div>
-                  )}
-                </div>
-              </aside>
+              <div className="flex-1" onClick={() => setIsEarlyWarningDrawerOpen(false)} />
             </div>
+          )}
 
+          {/* Main Seating Manager with Categories, Layout Templates, Locking & Random Picker */}
+          <main className="flex-1 flex flex-col overflow-hidden">
+            <ClassroomSeatingManager
+              course={activeCourse}
+              students={students}
+              onBackToDashboard={() => setActiveCourse(null)}
+              onSelectStudentDetail={(s) => setAssessmentModalStudent(s)}
+            />
           </main>
         </div>
+      )}
+
+      {view === 'active_learning' && activeCourse && (
+        <ActiveLearningClassroom 
+          course={activeCourse} 
+          students={courseStudents} 
+          onBack={() => setView('dashboard')} 
+        />
       )}
         </motion.div>
       </AnimatePresence>
@@ -1844,6 +1920,15 @@ export function TeacherPortal() {
                   className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-bold rounded-xl border border-white/10 transition-colors"
                 >
                   ปิดหน้าต่าง
+                </button>
+                <button
+                  onClick={() => {
+                    setAssessmentModalStudent(selectedStudentForScore);
+                    setSelectedStudentForScore(null);
+                  }}
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-colors shadow-lg flex items-center justify-center gap-1.5"
+                >
+                  <Eye className="w-3.5 h-3.5" /> ดูข้อมูลวิเคราะห์ตนเอง
                 </button>
               </div>
             </div>
@@ -2256,6 +2341,16 @@ export function TeacherPortal() {
           <span>Zustand Context: {activeCourse ? activeCourse.code + '_' + activeCourse.room : 'dashboard'}</span>
         </div>
       </footer>
+
+      {/* Student Self-Assessment Detail Modal */}
+      {assessmentModalStudent && (
+        <StudentAssessmentDetailModal
+          student={assessmentModalStudent}
+          assessment={useStore.getState().selfAssessments[assessmentModalStudent.studentId]}
+          viewerRole="TEACHER"
+          onClose={() => setAssessmentModalStudent(null)}
+        />
+      )}
 
     </div>
   );

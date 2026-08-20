@@ -1,29 +1,38 @@
 import { create } from 'zustand';
-import { StoreState, AttendanceStatus, Course } from './types';
-import { MOCK_COURSES, MOCK_STUDENTS, MOCK_ANALYTICS, MOCK_LEAVE_REQUESTS, STATUS_CYCLE, GLOBAL_COURSES } from './data/mockData';
+import { StoreState, AttendanceStatus, Course, StudentSelfAssessment, MOCK_MULTI_ROLE_USERS, ActiveLearningCategory, ActiveLearningRecord } from './types';
+import { MOCK_COURSES, MOCK_ANALYTICS, MOCK_LEAVE_REQUESTS, STATUS_CYCLE, GLOBAL_COURSES } from './data/mockData';
 import { mockStudentsData } from './data/mockStudentsData';
+import { mockSelfAssessments } from './data/mockSelfAssessments';
+import { saveSelfAssessmentRecord } from './services/firestoreService';
 
-export const useStore = create<StoreState>((set) => ({
-  user: null,
+const defaultKiattisakProfile = MOCK_MULTI_ROLE_USERS[0];
+
+export const useStore = create<StoreState>((set, get) => ({
+  user: {
+    uid: defaultKiattisakProfile.id,
+    email: defaultKiattisakProfile.email,
+    displayName: 'Mr. Kiattisak (ครูผู้สอน)',
+    role: 'teacher',
+    activeRole: 'SUBJECT_TEACHER',
+    profile: defaultKiattisakProfile
+  },
   currentDate: new Date(),
   currentPeriod: 'คาบ 1',
-  students: [...MOCK_STUDENTS, ...mockStudentsData],
+  students: mockStudentsData,
   courses: MOCK_COURSES,
   globalCourses: GLOBAL_COURSES,
   homeroomAssignments: {
-    'kiattisak@utd.ac.th': 'ม.5/8',
-    'teacher@utd.ac.th': 'ม.5/8',
-    'somjai@utd.ac.th': 'ม.4/1'
+    'kiattisak@utd.ac.th': 'M.5/8',
+    'teacher@utd.ac.th': 'M.5/8',
+    'koy@utd.ac.th': 'M.5/8',
+    'smith@utd.ac.th': 'M.2/10',
+    'jones@utd.ac.th': 'M.1/3',
+    'ball@utd.ac.th': 'M.5/7',
+    'noi@utd.ac.th': 'M.4/4',
+    'somjai@utd.ac.th': 'M.4/1'
   },
   scheduleChangeRequests: [],
-  analytics: [
-    ...MOCK_ANALYTICS,
-    ...mockStudentsData.map((s, idx) => ({
-      studentId: s.studentId,
-      subjectAttendanceRate: 80 + ((idx * 7) % 21), // 80 - 100%
-      behaviorScore: 85 + ((idx * 3) % 16) // 85 - 100
-    }))
-  ],
+  analytics: MOCK_ANALYTICS,
   leaveRequests: MOCK_LEAVE_REQUESTS,
   lateAttendanceRequests: [],
   scheduleConfig: {
@@ -34,6 +43,73 @@ export const useStore = create<StoreState>((set) => ({
   attendanceRecords: {},
   parentConferences: [],
   parentNotifications: [],
+  selfAssessments: mockSelfAssessments,
+
+  activeLearningPoints: {
+    '6950801': 38,
+    '6950802': 32,
+    '6950803': 29,
+    '6950804': 25,
+    '6950805': 22,
+    '6950806': 18,
+    '6950807': 16,
+    '6950808': 14,
+    '6950809': 11,
+    '6950810': 9,
+    '6950901': 35,
+    '6950902': 28,
+    '6950903': 24,
+    '6950904': 21,
+    '6950905': 19,
+    '6951101': 30,
+    '6951102': 27,
+    '6951103': 23,
+    '38501': 26,
+    '38502': 34,
+    '38511': 20
+  },
+  activeLearningLogs: [
+    {
+      id: 'al-log-1',
+      studentId: '6950801',
+      points: 5,
+      category: 'PRESENTATION',
+      note: 'นำเสนอโครงงาน Active Learning หน้าชั้นเรียนอย่างชัดเจน',
+      awardedAt: '2026-08-18T09:30:00Z'
+    },
+    {
+      id: 'al-log-2',
+      studentId: '6950802',
+      points: 3,
+      category: 'ANSWER',
+      note: 'ตอบคำถามวิเคราะห์โจทย์ประยุกต์ได้ถูกต้อง',
+      awardedAt: '2026-08-18T10:15:00Z'
+    },
+    {
+      id: 'al-log-3',
+      studentId: '6950803',
+      points: 4,
+      category: 'COLLABORATION',
+      note: 'เป็นผู้นำกลุ่มและช่วยเพื่อนร่วมทีมทำแบบฝึกหัดจนเสร็จ',
+      awardedAt: '2026-08-17T14:20:00Z'
+    },
+    {
+      id: 'al-log-4',
+      studentId: '6950801',
+      points: 2,
+      category: 'HELPING_PEERS',
+      note: 'ช่วยเพื่อนจัดเตรียมอุปกรณ์ทดลองวิทยาศาสตร์',
+      awardedAt: '2026-08-17T11:00:00Z'
+    },
+    {
+      id: 'al-log-5',
+      studentId: '6950901',
+      points: 5,
+      category: 'CREATIVITY',
+      note: 'เสนอไอเดียและแนวคิดสร้างสรรค์ในการแก้ปัญหาโจทย์',
+      awardedAt: '2026-08-16T13:45:00Z'
+    }
+  ],
   
   postTeachingRecords: [
     {
@@ -185,7 +261,7 @@ export const useStore = create<StoreState>((set) => ({
   cycleAttendanceStatus: (courseId: string, studentId: string) => set((state) => {
     const courseRecords = state.attendanceRecords[courseId] || {};
     const currentStatus = courseRecords[studentId] || 'UNMARKED';
-    const currentIndex = STATUS_CYCLE.indexOf(currentStatus);
+    const currentIndex = currentStatus === 'UNMARKED' ? -1 : STATUS_CYCLE.indexOf(currentStatus as AttendanceStatus);
     const nextStatus = STATUS_CYCLE[(currentIndex + 1) % STATUS_CYCLE.length];
     
     return {
@@ -350,6 +426,61 @@ export const useStore = create<StoreState>((set) => ({
     students[sourceIndex] = { ...sourceStudent, seatIndex: newSeatIndex };
     return { students };
   }),
+
+  resetClassroomSeats: (room?: string) => set((state) => {
+    const isSameRoom = (r1?: string, r2?: string) => {
+      if (!r1 || !r2) return true;
+      const n1 = r1.replace(/^M\./i, 'ม.').trim();
+      const n2 = r2.replace(/^M\./i, 'ม.').trim();
+      return n1 === n2;
+    };
+
+    const students = state.students.map(s => {
+      if (!room || isSameRoom(s.room, room)) {
+        return { ...s, seatIndex: null };
+      }
+      return s;
+    });
+
+    return { students };
+  }),
+
+  autoAssignClassroomSeats: (room?: string, capacity = 40) => set((state) => {
+    const isSameRoom = (r1?: string, r2?: string) => {
+      if (!r1 || !r2) return true;
+      const n1 = r1.replace(/^M\./i, 'ม.').trim();
+      const n2 = r2.replace(/^M\./i, 'ม.').trim();
+      return n1 === n2;
+    };
+
+    const roomStudents = state.students.filter(s => !room || isSameRoom(s.room, room));
+    const occupiedSeats = new Set<number>();
+    roomStudents.forEach(s => {
+      if (s.seatIndex !== null && s.seatIndex !== undefined && s.seatIndex < capacity) {
+        occupiedSeats.add(s.seatIndex);
+      }
+    });
+
+    let nextSeat = 0;
+    const students = state.students.map(s => {
+      if (!room || isSameRoom(s.room, room)) {
+        if (s.seatIndex === null || s.seatIndex === undefined || s.seatIndex >= capacity) {
+          while (occupiedSeats.has(nextSeat) && nextSeat < capacity) {
+            nextSeat++;
+          }
+          if (nextSeat < capacity) {
+            occupiedSeats.add(nextSeat);
+            const assigned = nextSeat;
+            nextSeat++;
+            return { ...s, seatIndex: assigned };
+          }
+        }
+      }
+      return s;
+    });
+
+    return { students };
+  }),
   setCourses: (courses: Course[]) => set({ courses }),
   updateCourseSchedule: (courseId: string, newSchedule: string) => set((state) => ({
     courses: state.courses.map(c => c.id === courseId ? { ...c, schedule: newSchedule } : c),
@@ -364,9 +495,56 @@ export const useStore = create<StoreState>((set) => ({
   updateScheduleChangeRequestStatus: (id, status) => set((state) => ({
     scheduleChangeRequests: state.scheduleChangeRequests.map(req => req.id === id ? { ...req, status } : req)
   })),
-  markAttendanceDone: (courseId: string) => set((state) => ({
-    courses: state.courses.map(c => c.id === courseId ? { ...c, attendanceTaken: true } : c)
-  })),
+  markAttendanceDone: (courseId: string) => set((state) => {
+    // 1. Update matching courses in state.courses
+    let matchedAny = false;
+    let updatedCourses = state.courses.map(c => {
+      if (
+        c.id === courseId ||
+        c.code === courseId ||
+        courseId.includes(c.id) ||
+        (courseId.includes(c.code) && (courseId.includes('5/8') ? c.room.includes('5/8') : courseId.includes('5/9') ? c.room.includes('5/9') : true))
+      ) {
+        matchedAny = true;
+        return { ...c, attendanceTaken: true };
+      }
+      return c;
+    });
+
+    // If not found in updatedCourses, add or update an entry for this courseId
+    const exists = updatedCourses.some(c => c.id === courseId);
+    if (!exists) {
+      const gc = state.globalCourses.find(g => g.courseId === courseId || courseId.includes(g.code));
+      updatedCourses.push({
+        id: courseId,
+        code: gc ? gc.code : courseId.split('-')[0],
+        name: gc ? gc.courseName : 'รายวิชา',
+        room: gc ? gc.roomName : 'ม.5/8',
+        term: '1/2569',
+        studentsCount: 40,
+        attendanceTaken: true,
+        periodIndex: 1,
+        schedule: gc ? gc.scheduleString : 'พ0'
+      });
+    }
+
+    // 2. Also populate attendanceRecords with default PRESENT for all students
+    const existingRecords = state.attendanceRecords[courseId] || {};
+    const newRecords = { ...existingRecords };
+    state.students.forEach(s => {
+      if (!newRecords[s.studentId]) {
+        newRecords[s.studentId] = 'PRESENT';
+      }
+    });
+
+    return {
+      courses: updatedCourses,
+      attendanceRecords: {
+        ...state.attendanceRecords,
+        [courseId]: newRecords
+      }
+    };
+  }),
   updateStudentProfile: (studentId, profile) => set((state) => ({
     students: state.students.map(s => {
       if (s.studentId === studentId) {
@@ -528,6 +706,50 @@ export const useStore = create<StoreState>((set) => ({
       },
       ...state.parentNotifications
     ]
-  }))
+  })),
+
+  addActiveLearningPoints: (studentId: string, points: number, category: ActiveLearningCategory = 'GENERAL', note?: string, courseId?: string) => set((state) => {
+    const currentPoints = state.activeLearningPoints[studentId] || 0;
+    const newPoints = Math.max(0, currentPoints + points);
+    const newLog: ActiveLearningRecord = {
+      id: `al-log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      studentId,
+      courseId,
+      points,
+      category,
+      note,
+      awardedAt: new Date().toISOString()
+    };
+
+    return {
+      activeLearningPoints: {
+        ...state.activeLearningPoints,
+        [studentId]: newPoints
+      },
+      activeLearningLogs: [newLog, ...state.activeLearningLogs]
+    };
+  }),
+
+  saveSelfAssessment: async (assessment: StudentSelfAssessment) => {
+    const updated: StudentSelfAssessment = {
+      ...assessment,
+      updatedAt: new Date().toISOString(),
+      submittedAt: assessment.submittedAt || new Date().toISOString(),
+      isCompleted: true
+    };
+
+    set((state) => ({
+      selfAssessments: {
+        ...state.selfAssessments,
+        [assessment.studentId]: updated
+      }
+    }));
+
+    try {
+      await saveSelfAssessmentRecord(updated);
+    } catch (err) {
+      console.warn("Notice: Firestore persistence for self-assessment handled locally/optimistically", err);
+    }
+  }
 }));
 

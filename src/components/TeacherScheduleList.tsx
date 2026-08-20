@@ -30,6 +30,7 @@ interface TeacherScheduleListProps {
   onRecordPostTeaching: (courseId: string) => void;
   onViewPostTeachingRecord: (courseId: string) => void;
   onTogglePartnerAttendance?: (courseId: string, currentStatus: boolean) => void;
+  onEnterClassroom?: (courseId: string) => void;
 }
 
 export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
@@ -41,7 +42,8 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
   onRequestLateAttendance,
   onRecordPostTeaching,
   onViewPostTeachingRecord,
-  onTogglePartnerAttendance
+  onTogglePartnerAttendance,
+  onEnterClassroom
 }) => {
   const [selectedClass, setSelectedClass] = useState<string>('ALL');
 
@@ -251,16 +253,28 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                           </button>
                         </div>
                       ) : (
-                        <span className="px-3 py-1.5 text-xs font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 rounded-lg flex items-center gap-1">
-                          <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> เช็คชื่อเรียบร้อย
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-3 py-1.5 text-xs font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 rounded-lg flex items-center gap-1">
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> เช็คชื่อเรียบร้อยแล้ว
+                          </span>
+                          {onEnterClassroom && (
+                            <button 
+                              id={`btn-past-enter-class-${period.id}`}
+                              onClick={() => onEnterClassroom(period.courseId)}
+                              className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 rounded-lg flex items-center gap-1.5 transition active:scale-95 shadow-md shadow-indigo-600/25"
+                            >
+                              <Sparkles className="w-3.5 h-3.5 text-indigo-200" />
+                              เข้าสู่ชั้นเรียน
+                            </button>
+                          )}
+                        </div>
                       )}
 
                       {period.hasPostTeachingRecord ? (
                         <button 
                           id={`btn-view-log-${period.id}`}
                           onClick={() => onViewPostTeachingRecord(period.courseId)}
-                          className="px-4 py-2 text-xs font-bold text-blue-400 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 rounded-full flex items-center gap-1.5 transition active:scale-95"
+                          className="px-4 py-2 text-xs font-bold text-blue-400 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 rounded-lg flex items-center gap-1.5 transition active:scale-95"
                         >
                           <FileText className="w-3.5 h-3.5" />
                           ดูบันทึกหลังสอน
@@ -269,7 +283,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                         <button 
                           id={`btn-log-${period.id}`}
                           onClick={() => onRecordPostTeaching(period.courseId)}
-                          className="px-4 py-2 text-xs font-bold text-blue-400 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 rounded-full flex items-center gap-1.5 transition active:scale-95"
+                          className="px-4 py-2 text-xs font-bold text-blue-400 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 rounded-lg flex items-center gap-1.5 transition active:scale-95"
                         >
                           <BookOpen className="w-3.5 h-3.5" />
                           บันทึกการสอน (Lesson Log)
@@ -327,9 +341,21 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                     {/* CURRENT PERIOD BUTTONS */}
                     <div className="flex flex-wrap items-center gap-3 md:self-center z-10">
                       {period.attendanceTaken ? (
-                        <span className="px-4 py-2 text-xs font-extrabold text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 rounded-lg flex items-center gap-1.5">
-                          <CheckCircle className="w-4 h-4 text-emerald-400" /> เช็คชื่อเรียนเรียบร้อย
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-4 py-2 text-xs font-extrabold text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 rounded-lg flex items-center gap-1.5">
+                            <CheckCircle className="w-4 h-4 text-emerald-400" /> เช็คชื่อเรียบร้อยแล้ว
+                          </span>
+                          {onEnterClassroom && (
+                            <button
+                              id={`btn-live-enter-class-${period.id}`}
+                              onClick={() => onEnterClassroom(period.courseId)}
+                              className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 rounded-lg flex items-center gap-1.5 transition active:scale-95 shadow-md shadow-indigo-600/25"
+                            >
+                              <Sparkles className="w-4 h-4 text-indigo-200" />
+                              เข้าสู่ชั้นเรียน
+                            </button>
+                          )}
+                        </div>
                       ) : (
                         <div className="flex items-center gap-2">
                           <span className="text-red-500 font-medium text-xs flex items-center gap-1">
@@ -350,7 +376,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                         <button 
                           id={`btn-live-view-log-${period.id}`}
                           onClick={() => onViewPostTeachingRecord(period.courseId)}
-                          className="px-4 py-2.5 text-xs font-bold text-blue-400 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 rounded-full flex items-center gap-1.5 transition active:scale-95"
+                          className="px-4 py-2 text-xs font-bold text-blue-400 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 rounded-lg flex items-center gap-1.5 transition active:scale-95"
                         >
                           <FileText className="w-3.5 h-3.5 text-blue-400" /> ดูบันทึกหลังสอน
                         </button>
@@ -358,7 +384,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                         <button 
                           id={`btn-live-log-${period.id}`}
                           onClick={() => onRecordPostTeaching(period.courseId)}
-                          className="px-4 py-2.5 text-xs font-bold text-blue-400 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 rounded-full flex items-center gap-1.5 transition active:scale-95"
+                          className="px-4 py-2 text-xs font-bold text-blue-400 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 rounded-lg flex items-center gap-1.5 transition active:scale-95"
                         >
                           <BookOpen className="w-3.5 h-3.5 text-blue-400" />
                           บันทึกการสอน (Lesson Log)
@@ -407,16 +433,54 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 md:self-center">
-                    {!period.attendanceTaken && (
-                      <span className="text-red-500 font-medium text-xs flex items-center gap-1">
-                        ● ยังไม่บันทึก
-                      </span>
+                  <div className="flex flex-wrap items-center gap-2 md:self-center">
+                    {period.attendanceTaken ? (
+                      <>
+                        <span className="px-3 py-1.5 text-xs font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 rounded-lg flex items-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> เช็คชื่อเรียบร้อยแล้ว
+                        </span>
+                        {onEnterClassroom && (
+                          <button
+                            id={`btn-upcoming-enter-class-${period.id}`}
+                            onClick={() => onEnterClassroom(period.courseId)}
+                            className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 rounded-lg flex items-center gap-1.5 transition active:scale-95 shadow-md shadow-indigo-600/25"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-200" />
+                            เข้าสู่ชั้นเรียน
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-red-500 font-medium text-xs flex items-center gap-1">
+                          ● ยังไม่บันทึก
+                        </span>
+                        <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-3.5 py-2 rounded-lg flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                          รอสอน
+                        </span>
+                      </>
                     )}
-                    <span className="text-xs font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/50 px-3.5 py-2 rounded-lg flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                      รอสอน
-                    </span>
+
+                    {period.hasPostTeachingRecord ? (
+                      <button 
+                        id={`btn-upcoming-view-log-${period.id}`}
+                        onClick={() => onViewPostTeachingRecord(period.courseId)}
+                        className="px-4 py-2 text-xs font-bold text-blue-400 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 rounded-lg flex items-center gap-1.5 transition active:scale-95"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        ดูบันทึกหลังสอน
+                      </button>
+                    ) : (
+                      <button 
+                        id={`btn-upcoming-log-${period.id}`}
+                        onClick={() => onRecordPostTeaching(period.courseId)}
+                        className="px-4 py-2 text-xs font-bold text-blue-400 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 rounded-lg flex items-center gap-1.5 transition active:scale-95"
+                      >
+                        <BookOpen className="w-3.5 h-3.5" />
+                        บันทึกการสอน (Lesson Log)
+                      </button>
+                    )}
                   </div>
                 </div>
                 {renderActivityDetails(period)}

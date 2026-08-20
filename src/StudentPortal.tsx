@@ -24,11 +24,15 @@ import {
   Map as MapIcon,
   Image as ImageIcon,
   BookOpen,
-  Activity
+  Activity,
+  Brain,
+  Edit3
 } from 'lucide-react';
 import { LineChart, Line, XAxis, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { twMerge } from 'tailwind-merge';
 import clsx from 'clsx';
+import { StudentSelfAssessmentForm } from './components/StudentSelfAssessmentForm';
+import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 
 function deg2rad(deg: number) {
   return deg * (Math.PI/180);
@@ -49,9 +53,23 @@ function getDistanceFromLatLonInM(lat1: number, lon1: number, lat2: number, lon2
 
 
 export function StudentPortal() {
-  const { students, analytics, attendanceRecords, currentPeriod, schoolCheckInRecords, markSchoolCheckIn, studentScores, globalCourses, courseScoreSettings } = useStore();
+  const { 
+    students, 
+    analytics, 
+    attendanceRecords, 
+    currentPeriod, 
+    schoolCheckInRecords, 
+    markSchoolCheckIn, 
+    studentScores, 
+    globalCourses, 
+    courseScoreSettings,
+    selfAssessments,
+    saveSelfAssessment
+  } = useStore();
   
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'homevisit' | 'health' | 'gradebook'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'homevisit' | 'health' | 'gradebook' | 'assessment'>('dashboard');
+  const [isEditingAssessment, setIsEditingAssessment] = useState(false);
+  const [viewDetailModal, setViewDetailModal] = useState(false);
   const [eqModalOpen, setEqModalOpen] = useState(false);
   const [selectedClassmate, setSelectedClassmate] = useState<any>(null);
   const [completedEqs, setCompletedEqs] = useState<string[]>([]);
@@ -79,11 +97,12 @@ export function StudentPortal() {
     { term: '1/67', bmi: 19.1 },
   ];
 
-  // Get data for a specific student (54001 - สมชาย)
-  const student = students.find(s => s.studentId === '38502');
+  // Get data for a specific student (54001/38502 - สมชาย)
+  const student = students.find(s => s.studentId === '38502') || students[0];
   const studentAnalytics = analytics.find(a => a.studentId === '38502');
   const bScore = studentAnalytics?.behaviorScore ?? 100;
   const currentMathStatus = attendanceRecords['1']?.['38502'] || 'UNMARKED';
+  const myAssessment = selfAssessments['38502'] || (student ? selfAssessments[student.studentId] : undefined);
 
   if (!student) return null;
 
@@ -300,6 +319,64 @@ export function StudentPortal() {
                     </button>
                   )
                 })}
+              </div>
+            </section>
+
+            {/* Student Self-Assessment Card on Dashboard */}
+            <section className="mb-6">
+              <div className="bg-gradient-to-r from-indigo-900/60 via-purple-900/60 to-blue-900/60 border border-indigo-500/30 rounded-2xl p-5 shadow-xl relative overflow-hidden">
+                <div className="flex items-start justify-between relative z-10">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-300 flex items-center justify-center border border-indigo-400/30">
+                      <Brain className="w-5 h-5 text-sky-300" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-sky-300 bg-sky-500/20 px-2 py-0.5 rounded">
+                          ภารกิจสำคัญ 30 ข้อ
+                        </span>
+                        {myAssessment?.isCompleted ? (
+                          <span className="text-[10px] font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> ประเมินแล้ว
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded flex items-center gap-1">
+                            <Clock className="w-3 h-3" /> รอการประเมิน
+                          </span>
+                        )}
+                      </div>
+                      <h4 className="text-base font-bold text-white mt-1">แบบวิเคราะห์ตนเองและรู้จักผู้เรียน</h4>
+                      <p className="text-xs text-slate-300 mt-0.5">
+                        {myAssessment?.isCompleted
+                          ? `สไตล์หลัก: ${myAssessment.learningStyle?.preferredStyles?.join(', ') || 'ลงมือปฏิบัติ'} | บทบาท: ${myAssessment.identity?.groupRole || 'ค้นหาข้อมูล'}`
+                          : 'ช่วยให้คุณครูและผู้ปกครองเข้าใจสไตล์การเรียนรู้และเป้าหมายของคุณ'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between relative z-10">
+                  <button
+                    onClick={() => {
+                      setViewDetailModal(true);
+                    }}
+                    className="text-xs text-sky-300 hover:text-sky-200 font-semibold flex items-center gap-1 transition-colors"
+                  >
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>ดูสรุป DNA ผู้เรียน</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setIsEditingAssessment(true);
+                      setActiveTab('assessment');
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-all shadow-md"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>{myAssessment?.isCompleted ? 'แก้ไข/อัปเดตแบบประเมิน' : 'เริ่มทำแบบประเมิน (30 ข้อ)'}</span>
+                  </button>
+                </div>
               </div>
             </section>
 
@@ -626,51 +703,88 @@ export function StudentPortal() {
           </div>
         )}
 
+        {/* Assessment Tab */}
+        {activeTab === 'assessment' && (
+          <div className="space-y-6 animate-in fade-in duration-300">
+            <StudentSelfAssessmentForm
+              student={student}
+              existingAssessment={myAssessment}
+              onSave={async (assessment) => {
+                await saveSelfAssessment(assessment);
+              }}
+              onClose={() => setActiveTab('dashboard')}
+            />
+          </div>
+        )}
+
       </main>
 
       {/* Modern Bottom Nav */}
-      <nav className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[90%] h-16 bg-[#1a1e2e]/90 backdrop-blur-xl border border-white/10 rounded-2xl flex items-center justify-around shadow-2xl z-20 px-2">
+      <nav className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[94%] max-w-lg h-16 bg-[#1a1e2e]/95 backdrop-blur-xl border border-white/10 rounded-2xl flex items-center justify-around shadow-2xl z-20 px-1">
         <button 
           onClick={() => setActiveTab('dashboard')}
           className={cn(
-            "flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all duration-300",
+            "flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all duration-300",
             activeTab === 'dashboard' ? "text-blue-400 bg-blue-500/10" : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
           )}
         >
-          <User className={cn("w-5 h-5", activeTab === 'dashboard' && "drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]")} />
-          <span className="text-[9px] font-medium mt-1">Dashboard</span>
+          <User className={cn("w-4 h-4 sm:w-5 sm:h-5", activeTab === 'dashboard' && "drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]")} />
+          <span className="text-[8px] sm:text-[9px] font-medium mt-0.5">Dashboard</span>
+        </button>
+        <button 
+          onClick={() => setActiveTab('assessment')}
+          className={cn(
+            "flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all duration-300 relative",
+            activeTab === 'assessment' ? "text-indigo-400 bg-indigo-500/10" : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
+          )}
+        >
+          <Brain className={cn("w-4 h-4 sm:w-5 sm:h-5", activeTab === 'assessment' && "drop-shadow-[0_0_8px_rgba(99,102,241,0.5)]")} />
+          <span className="text-[8px] sm:text-[9px] font-medium mt-0.5">ประเมินตนเอง</span>
+          {!myAssessment?.isCompleted && (
+            <span className="absolute top-1.5 right-2 w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+          )}
         </button>
         <button 
           onClick={() => setActiveTab('homevisit')}
           className={cn(
-            "flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all duration-300",
+            "flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all duration-300",
             activeTab === 'homevisit' ? "text-emerald-400 bg-emerald-500/10" : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
           )}
         >
-          <MapPin className={cn("w-5 h-5", activeTab === 'homevisit' && "drop-shadow-[0_0_8px_rgba(16,185,129,0.5)]")} />
-          <span className="text-[9px] font-medium mt-1">Home Visit</span>
+          <MapPin className={cn("w-4 h-4 sm:w-5 sm:h-5", activeTab === 'homevisit' && "drop-shadow-[0_0_8px_rgba(16,185,129,0.5)]")} />
+          <span className="text-[8px] sm:text-[9px] font-medium mt-0.5">Home Visit</span>
         </button>
         <button 
           onClick={() => setActiveTab('health')}
           className={cn(
-            "flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all duration-300",
+            "flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all duration-300",
             activeTab === 'health' ? "text-pink-400 bg-pink-500/10" : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
           )}
         >
-          <Activity className={cn("w-5 h-5", activeTab === 'health' && "drop-shadow-[0_0_8px_rgba(236,72,153,0.5)]")} />
-          <span className="text-[9px] font-medium mt-1">Health</span>
+          <Activity className={cn("w-4 h-4 sm:w-5 sm:h-5", activeTab === 'health' && "drop-shadow-[0_0_8px_rgba(236,72,153,0.5)]")} />
+          <span className="text-[8px] sm:text-[9px] font-medium mt-0.5">Health</span>
         </button>
         <button 
           onClick={() => setActiveTab('gradebook')}
           className={cn(
-            "flex flex-col items-center justify-center w-16 h-12 rounded-xl transition-all duration-300",
+            "flex flex-col items-center justify-center w-14 h-12 rounded-xl transition-all duration-300",
             activeTab === 'gradebook' ? "text-amber-400 bg-amber-500/10" : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
           )}
         >
-          <BookOpen className={cn("w-5 h-5", activeTab === 'gradebook' && "drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]")} />
-          <span className="text-[9px] font-medium mt-1">Grade</span>
+          <BookOpen className={cn("w-4 h-4 sm:w-5 sm:h-5", activeTab === 'gradebook' && "drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]")} />
+          <span className="text-[8px] sm:text-[9px] font-medium mt-0.5">Grade</span>
         </button>
       </nav>
+
+      {/* Student Self-Assessment Detail Modal */}
+      {viewDetailModal && student && (
+        <StudentAssessmentDetailModal
+          student={student}
+          assessment={myAssessment}
+          viewerRole="STUDENT"
+          onClose={() => setViewDetailModal(false)}
+        />
+      )}
 
       {/* EQ Assessment Modal */}
       {eqModalOpen && selectedClassmate && (

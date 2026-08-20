@@ -125,6 +125,25 @@
         "notes": { "type": "string", "description": "Admin or parent annotations" }
       },
       "required": ["studentId", "studentName", "parentId", "status", "title", "message", "createdAt", "remainingScore", "availableSlots"]
+    },
+    "StudentSelfAssessment": {
+      "title": "StudentSelfAssessment",
+      "description": "Student 6-section individual learner analysis and self-assessment for secondary school care",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string", "description": "Student unique ID" },
+        "studentName": { "type": "string", "description": "Full name of the student" },
+        "isCompleted": { "type": "boolean", "description": "Whether the assessment is submitted" },
+        "submittedAt": { "type": "string", "description": "Submission ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "Last update timestamp" },
+        "basicInfo": { "type": "object", "description": "Section 1: Basic info and contacts" },
+        "familyBackground": { "type": "object", "description": "Section 2: Background, family context, and commute" },
+        "identity": { "type": "object", "description": "Section 3: Identity, interests, and strengths" },
+        "learningStyle": { "type": "object", "description": "Section 4: Learning style, AI adoption, and obstacles" },
+        "socialAndSafety": { "type": "object", "description": "Section 5: Social media, bullying, and school safety" },
+        "futureGoals": { "type": "object", "description": "Section 6: Future goals, self-improvement, and notes to teacher" }
+      },
+      "required": ["studentId", "isCompleted"]
     }
   },
   "firestore": {
@@ -159,6 +178,10 @@
     "/parent_conferences/{conferenceId}": {
       "schema": "ParentConference",
       "description": "Conference appointments triggered by critical behavioral thresholds"
+    },
+    "/student_self_assessments/{studentId}": {
+      "schema": "StudentSelfAssessment",
+      "description": "Individual student self-assessments"
     }
   }
 }

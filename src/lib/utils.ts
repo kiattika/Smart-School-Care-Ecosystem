@@ -5,46 +5,68 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function parseThaiSchedule(scheduleStr: string) {
+export interface ParsedScheduleSegment {
+  day: number; // 1 = จ, 2 = อ, 3 = พ, 4 = ฤ / พฤ, 5 = ศ, 6 = ส, 0 = อา
+  periodIndex: number;
+}
+
+export function parseThaiSchedule(scheduleStr?: string): ParsedScheduleSegment[] {
   if (!scheduleStr) return [];
 
-  // e.g., "จ1-2, พ7"
-  const segments = scheduleStr.split(',').map(s => s.trim());
-  const result: { day: number; periodIndex: number }[] = [];
+  // Split by comma, semicolon, or whitespace delimiter (e.g., "อ2, พ4, ฤ1, ศ3" or "จ1, พ8, ฤ2, ศ2")
+  const segments = scheduleStr.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
+  const result: ParsedScheduleSegment[] = [];
 
   const dayMap: Record<string, number> = {
     'จ': 1,
+    'จันทร์': 1,
     'อ': 2,
+    'อัง': 2,
+    'อังคาร': 2,
     'พ': 3,
+    'พุ': 3,
+    'พุธ': 3,
     'พฤ': 4,
     'ฤ': 4,
-    'ศ': 5
+    'พฤหัส': 4,
+    'พฤหัสบดี': 4,
+    'ศ': 5,
+    'ศุกร์': 5,
+    'ส': 6,
+    'เสาร์': 6,
+    'อา': 0,
+    'อาทิตย์': 0
   };
 
   segments.forEach(segment => {
-    // Matches patterns like "จ1", "จ1-2", "พฤ3-4", "ศ5"
-    const match = segment.match(/^([จอพศฤ]+)([\d\-]+)$/);
+    // Matches Thai day prefix and period range (e.g., "พ4", "พ8", "พ0", "จ6-7", "อ3-4", "ฤ1", "ศ3")
+    const match = segment.match(/^([^\d]+)([\d\-]+)$/);
     if (!match) return;
 
-    let dayStr = match[1];
-    // Special handling if 'พฤ' is parsed correctly, otherwise might need adjustment.
-    // In our regex `([จอพศฤ]+)` captures it. Note 'พฤ' will map properly.
-    if (dayStr === 'พุ') dayStr = 'พ'; // just in case
-
-    const periodsStr = match[2];
-    const targetDay = dayMap[dayStr] || 1;
+    const dayStr = match[1].trim();
+    const periodsStr = match[2].trim();
+    const targetDay = dayMap[dayStr] !== undefined ? dayMap[dayStr] : 1;
 
     const periods: number[] = [];
     if (periodsStr.includes('-')) {
       const [start, end] = periodsStr.split('-').map(Number);
-      for (let i = start; i <= end; i++) {
-        periods.push(i);
+      if (!isNaN(start) && !isNaN(end)) {
+        for (let i = start; i <= end; i++) {
+          periods.push(i);
+        }
       }
     } else {
-      periods.push(Number(periodsStr));
+      const p = Number(periodsStr);
+      if (!isNaN(p)) {
+        periods.push(p);
+      }
     }
 
-    periods.forEach(p => result.push({ day: targetDay, periodIndex: p }));
+    periods.forEach(p => {
+      if (!result.some(r => r.day === targetDay && r.periodIndex === p)) {
+        result.push({ day: targetDay, periodIndex: p });
+      }
+    });
   });
 
   return result;
@@ -52,7 +74,40 @@ export function parseThaiSchedule(scheduleStr: string) {
 
 export function isSameRoom(r1?: string, r2?: string): boolean {
   if (!r1 || !r2) return false;
-  const norm = (r: string) => r.replace(/^ม\./i, '').replace(/^M\./i, '').trim();
-  return norm(r1) === norm(r2);
+  
+  const normalize = (r: string) => {
+    let str = r.trim().toLowerCase();
+    // Remove common prefixes like 'hr_', 'hr', 'homeroom', 'ห้อง', 'ชั้น', bracket notes like '[943]'
+    str = str.replace(/\[.*?\]/g, '').trim();
+    str = str.replace(/^(hr_|hr\s*|homeroom\s*|ห้อง\s*|ชั้น\s*)/i, '').trim();
+    
+    // Extract Grade/Room pattern e.g. "5/8", "5 / 8", "ม.5/8", "M.5/8"
+    const match = str.match(/(\d+)\s*\/\s*(\d+)/);
+    if (match) {
+      return `${match[1]}/${match[2]}`;
+    }
+    
+    // Fallback normalization
+    return str.replace(/^[mม]\.?\s*/i, '').replace(/[^a-z0-9]/g, '');
+  };
+
+  const n1 = normalize(r1);
+  const n2 = normalize(r2);
+  
+  if (n1 && n2 && n1 === n2) return true;
+  return false;
 }
+
+export function formatRoomName(room?: string): string {
+  if (!room) return 'ม.5/8';
+  const match = room.match(/(\d+)\s*\/\s*(\d+)/);
+  if (match) {
+    return `ม.${match[1]}/${match[2]}`;
+  }
+  if (room.startsWith('ม.') || room.startsWith('M.')) {
+    return room.replace(/^M\./i, 'ม.');
+  }
+  return room;
+}
+
 
