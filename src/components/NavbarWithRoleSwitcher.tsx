@@ -11,11 +11,16 @@ import {
   Award,
   Lock,
   Building,
-  Activity
+  Activity,
+  Satellite,
+  Radio,
+  Menu,
+  X
 } from 'lucide-react';
 import { UserRole, Permission, UserProfile, ROLE_PERMISSIONS } from '../types/auth';
 import { useStore } from '../store';
 import { HeaderRealTimeClock } from './HeaderRealTimeClock';
+import { GPSGeofenceCheckinModal } from './GPSGeofenceCheckinModal';
 
 // สีของ Badge และธีมประจำแต่ละบทบาท
 interface RoleVisualConfig {
@@ -82,6 +87,42 @@ export const ROLE_VISUALS: Record<UserRole, RoleVisualConfig> = {
     iconBg: 'bg-teal-500/20',
     iconColor: 'text-teal-400',
     description: 'ประเมินแผนการสอน นิเทศสังเกตการณ์ชั้นเรียน'
+  },
+  INFIRMARY_STAFF: {
+    label: 'พยาบาลโรงเรียน',
+    badgeBg: 'bg-rose-500/10',
+    badgeText: 'text-rose-400',
+    badgeBorder: 'border-rose-500/20',
+    iconBg: 'bg-rose-500/20',
+    iconColor: 'text-rose-400',
+    description: 'บันทึกห้องพยาบาล จ่ายยา และตรวจสุขภาพนักเรียน'
+  },
+  GUIDANCE_COUNSELOR: {
+    label: 'ครูแนะแนว',
+    badgeBg: 'bg-purple-500/10',
+    badgeText: 'text-purple-400',
+    badgeBorder: 'border-purple-500/20',
+    iconBg: 'bg-purple-500/20',
+    iconColor: 'text-purple-400',
+    description: 'ให้คำปรึกษา เคส SDQ/EQ และระบบ TCAS พอร์ตโฟลิโอ'
+  },
+  FINANCE_STAFF: {
+    label: 'เจ้าหน้าที่การเงิน',
+    badgeBg: 'bg-emerald-500/10',
+    badgeText: 'text-emerald-400',
+    badgeBorder: 'border-emerald-500/20',
+    iconBg: 'bg-emerald-500/20',
+    iconColor: 'text-emerald-400',
+    description: 'จัดเก็บค่าธรรมเนียม ใบเสร็จดิจิทัล และอนุมัติเบิกงบครู'
+  },
+  INSTRUCTIONAL_SUPERVISOR: {
+    label: 'ครูผู้นิเทศ/วิชาการ',
+    badgeBg: 'bg-cyan-500/10',
+    badgeText: 'text-cyan-400',
+    badgeBorder: 'border-cyan-500/20',
+    iconBg: 'bg-cyan-500/20',
+    iconColor: 'text-cyan-400',
+    description: 'ตรวจแผนการสอน นิเทศชั้นเรียน และประเมินสมรรถนะ'
   }
 };
 
@@ -93,7 +134,11 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   VIEW_ALL_REPORTS: 'ดูรายงานภาพรวมโรงเรียน',
   VIEW_DEPT_REPORTS: 'ดูรายงานสถิติสาระการเรียนรู้',
   MANAGE_HOMEROOM: 'บันทึกเช็กชื่อ/พฤติกรรมประจำชั้น',
-  EVALUATE_TEACHERS: 'ประเมินแผนและการจัดการสอน'
+  EVALUATE_TEACHERS: 'ประเมินแผนและการจัดการสอน',
+  MANAGE_INFIRMARY: 'จัดการห้องพยาบาลและสถิติสุขภาพ',
+  MANAGE_COUNSELING: 'จัดการระบบแนะแนวและให้คำปรึกษา',
+  MANAGE_FINANCE: 'จัดการงานการเงินและบัญชีโรงเรียน',
+  MANAGE_SUPERVISION: 'จัดการงานนิเทศการสอนและตรวจแผน'
 };
 
 export interface NavbarWithRoleSwitcherProps {
@@ -111,6 +156,7 @@ export function NavbarWithRoleSwitcher({
 }: NavbarWithRoleSwitcherProps) {
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
+  const [isGPSModalOpen, setIsGPSModalOpen] = useState(false);
   const roleDropdownRef = useRef<HTMLDivElement>(null);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -146,13 +192,18 @@ export function NavbarWithRoleSwitcher({
       case 'SUPERVISORY_TEACHER':
         const menteesCount = user.assignments.supervisoryMentees?.length || 0;
         return menteesCount > 0 ? `นิเทศครู ${menteesCount} ท่าน` : '';
+      case 'INFIRMARY_STAFF':
+        return 'งานพยาบาลและอนามัย';
+      case 'GUIDANCE_COUNSELOR':
+        return 'งานแนะแนวและจิตวิทยา';
       default:
         return '';
     }
   };
 
   return (
-    <nav className="w-full bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800 text-slate-100 px-3 sm:px-6 py-2.5 sm:py-3.5 flex items-center justify-between sticky top-0 z-50 shadow-lg">
+    <>
+      <nav className="w-full bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800 text-slate-100 px-3 sm:px-6 py-2.5 sm:py-3.5 flex items-center justify-between sticky top-0 z-50 shadow-lg">
       
       {/* ฝั่งซ้าย: โลโก้และชื่อระบบ */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -176,12 +227,26 @@ export function NavbarWithRoleSwitcher({
       </div>
 
       {/* ฝั่งขวา: โปรไฟล์ผู้ใช้, นาฬิกา Real-time และ Role Switcher */}
-      <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
         
-        {/* Real-time live digital clock and active class period (hidden on small mobile to conserve space) */}
-        <div className="hidden lg:flex">
+        {/* Real-time live digital clock and active class period */}
+        <div className="hidden xl:flex">
           <HeaderRealTimeClock />
         </div>
+
+        {/* GPS Geofence Check-in Button */}
+        <button
+          onClick={() => setIsGPSModalOpen(true)}
+          className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-gradient-to-r from-indigo-900/60 to-emerald-950/60 hover:from-indigo-800/80 hover:to-emerald-900/80 border border-emerald-500/30 hover:border-emerald-500/50 text-slate-100 text-xs font-semibold shadow-md transition-all cursor-pointer group"
+          title="เช็คอินลงชื่อด้วยพิกัดดาวเทียมโรงเรียน (GPS Geofence)"
+        >
+          <div className="relative">
+            <Satellite className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
+            <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+          </div>
+          <span className="hidden sm:inline text-slate-200 group-hover:text-white">เช็คอิน GPS</span>
+          <span className="sm:hidden text-[10.5px] text-emerald-300">GPS</span>
+        </button>
         
         {/* Role Switcher Selector */}
         <div className="relative" ref={roleDropdownRef}>
@@ -382,5 +447,12 @@ export function NavbarWithRoleSwitcher({
 
       </div>
     </nav>
+
+    {/* GPS Geofence Check-in Modal */}
+    <GPSGeofenceCheckinModal
+      isOpen={isGPSModalOpen}
+      onClose={() => setIsGPSModalOpen(false)}
+    />
+  </>
   );
 }

@@ -23,7 +23,11 @@ import {
   UserCheck,
   ZoomIn,
   ZoomOut,
-  Maximize2
+  Maximize2,
+  ArrowRightLeft,
+  X,
+  GripVertical,
+  Hand
 } from 'lucide-react';
 import { Student, Course, AttendanceStatus } from '../types';
 import { cn, isSameRoom, formatRoomName } from '../lib/utils';
@@ -285,6 +289,132 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   // 4. Random Student Picker Modal State
   const [showRandomPicker, setShowRandomPicker] = useState<boolean>(false);
   const [highlightedStudentIds, setHighlightedStudentIds] = useState<string[]>([]);
+
+  // 5. Touch Gestures & Mobile Drag-and-Drop State
+  const [touchDragState, setTouchDragState] = useState<{
+    student: Student;
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    fromSeatIndex: number | null;
+    isDragging: boolean;
+    hoveredSeatIndex: number | null;
+    isHoveringUnassigned: boolean;
+  } | null>(null);
+
+  const touchDragRef = useRef<{
+    student: Student;
+    startX: number;
+    startY: number;
+    fromSeatIndex: number | null;
+    isDragging: boolean;
+    hoveredSeatIndex: number | null;
+    isHoveringUnassigned: boolean;
+  } | null>(null);
+
+  // 6. Mobile Tap-to-Move / Tap-to-Swap Mode & Mobile Pool Drawer
+  const [selectedStudentForMove, setSelectedStudentForMove] = useState<Student | null>(null);
+  const [isMobilePoolOpen, setIsMobilePoolOpen] = useState<boolean>(false);
+
+  // Touch Event Handlers
+  const handleTouchStart = (e: React.TouchEvent, student: Student, fromSeatIndex: number | null) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    touchDragRef.current = {
+      student,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      fromSeatIndex,
+      isDragging: false,
+      hoveredSeatIndex: null,
+      isHoveringUnassigned: false
+    };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchDragRef.current) return;
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - touchDragRef.current.startX;
+    const deltaY = touch.clientY - touchDragRef.current.startY;
+    const dist = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+    if (dist > 8 || touchDragRef.current.isDragging) {
+      if (!touchDragRef.current.isDragging) {
+        touchDragRef.current.isDragging = true;
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          try { navigator.vibrate(30); } catch (_) {}
+        }
+      }
+
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+
+      // Check drop target element under finger
+      const targetEl = document.elementFromPoint(touch.clientX, touch.clientY);
+      let hoveredSeat: number | null = null;
+      let isHoveringUnassigned = false;
+
+      if (targetEl) {
+        const seatContainer = targetEl.closest('[data-seat-index]');
+        if (seatContainer) {
+          const rawIdx = seatContainer.getAttribute('data-seat-index');
+          if (rawIdx !== null) {
+            const parsed = parseInt(rawIdx, 10);
+            if (!isNaN(parsed) && parsed >= 0) {
+              hoveredSeat = parsed;
+            }
+          }
+        } else {
+          const unassignedZone = targetEl.closest('[data-drop-zone="unassigned"]');
+          if (unassignedZone) {
+            isHoveringUnassigned = true;
+          }
+        }
+      }
+
+      touchDragRef.current.hoveredSeatIndex = hoveredSeat;
+      touchDragRef.current.isHoveringUnassigned = isHoveringUnassigned;
+
+      setTouchDragState({
+        student: touchDragRef.current.student,
+        startX: touchDragRef.current.startX,
+        startY: touchDragRef.current.startY,
+        currentX: touch.clientX,
+        currentY: touch.clientY,
+        fromSeatIndex: touchDragRef.current.fromSeatIndex,
+        isDragging: true,
+        hoveredSeatIndex: hoveredSeat,
+        isHoveringUnassigned
+      });
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (touchDragRef.current?.isDragging) {
+      const { student, hoveredSeatIndex, isHoveringUnassigned, fromSeatIndex } = touchDragRef.current;
+      
+      if (hoveredSeatIndex !== null && hoveredSeatIndex !== fromSeatIndex) {
+        moveStudentSeat(student.studentId, hoveredSeatIndex);
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          try { navigator.vibrate([40, 25, 60]); } catch (_) {}
+        }
+        setLayoutNotice(`ย้าย ${student.fullName || student.name} ไปยังโต๊ะที่ ${hoveredSeatIndex + 1} แล้ว`);
+        setTimeout(() => setLayoutNotice(null), 2500);
+      } else if (isHoveringUnassigned && fromSeatIndex !== null) {
+        moveStudentSeat(student.studentId, null);
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          try { navigator.vibrate(30); } catch (_) {}
+        }
+        setLayoutNotice(`นำ ${student.fullName || student.name} ออกจากที่นั่งแล้ว`);
+        setTimeout(() => setLayoutNotice(null), 2500);
+      }
+    }
+
+    touchDragRef.current = null;
+    setTouchDragState(null);
+  };
 
   const unassignedStudents = courseStudents.filter(s => s.seatIndex === null || s.seatIndex === undefined);
 
@@ -557,6 +687,19 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
         {/* Right: Action Buttons */}
         <div className="flex items-center gap-2 shrink-0 ml-auto sm:ml-0">
           
+          {/* Mobile Unassigned Students Pool Button */}
+          {unassignedStudents.length > 0 && (
+            <button
+              id="btn-mobile-unassigned-pool-trigger"
+              onClick={() => setIsMobilePoolOpen(true)}
+              className="md:hidden px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center gap-1.5 active:scale-95 cursor-pointer border border-indigo-400/40"
+              title="เปิดรายชื่อนักเรียนที่ยังไม่มีที่นั่ง"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>รอนั่ง ({unassignedStudents.length})</span>
+            </button>
+          )}
+
           {/* Random Student Picker Button */}
           <button
             onClick={() => setShowRandomPicker(true)}
@@ -915,303 +1058,425 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
       )}
 
       {/* Main Seating Workspace Canvas */}
-      <div className="flex-1 flex overflow-hidden relative w-full">
+      <div className="flex-1 flex overflow-hidden relative w-full h-full">
         
-        {/* Seating Layout Canvas (Scrollable without scaling outer classroom boundaries) */}
-        <div className="flex-1 p-3 sm:p-5 md:p-6 overflow-auto bg-[#080b13] flex flex-col items-center w-full min-w-0">
+        {/* Seating Layout Canvas (Scrollable without clipping boundaries) */}
+        <div className="flex-1 p-4 sm:p-6 md:p-8 overflow-auto bg-[#080b13] w-full h-full scroll-smooth">
           
-          {/* Outer Classroom Envelope: Teacher Desk / Whiteboard Stage Bar */}
-          <div className="w-full max-w-5xl bg-gradient-to-r from-slate-800/80 via-slate-700/80 to-slate-800/80 border border-slate-600/40 rounded-2xl py-2 sm:py-2.5 px-3 sm:px-6 mb-6 text-center shadow-lg flex items-center justify-between gap-2 shrink-0">
-            <span className="text-[10px] sm:text-[11px] font-mono text-slate-400 hidden sm:inline">ประตูห้องเรียน (Entrance)</span>
-            <span className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2 mx-auto sm:mx-0">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              กระดานหน้าห้อง / โต๊ะครูผู้สอน (Whiteboard & Teacher Desk)
-            </span>
-            <span className="text-[10px] sm:text-[11px] font-mono text-slate-400 hidden sm:inline">จอโปรเจกเตอร์</span>
-          </div>
+          {/* Inner Layout Wrapper: Ensures safe alignment & infinite scroll without data loss on left/top */}
+          <div className="w-max min-w-full mx-auto flex flex-col items-center pb-24 pt-3 sm:pt-4">
 
-          {/* 1. CLASSROOM MODE GRID (Scales individual seat blocks directly) */}
-          {seatingCategory === 'CLASSROOM' && (
-            <div className="flex flex-col gap-2.5 sm:gap-3.5 md:gap-4 w-full max-w-full justify-center items-center pb-12 overflow-x-auto px-2">
-              {Array.from({ length: layout.totalRows || 5 }).map((_, rIndex) => {
-                const r = rIndex + 1;
-                return (
-                  <div key={r} className="flex gap-2 sm:gap-3 md:gap-3.5 justify-center items-stretch w-full max-w-full">
-                    {Array.from({ length: layout.totalCols || 8 }).map((_, cIndex) => {
-                      const c = cIndex + 1;
-                      const seatIndex = (r - 1) * (layout.totalCols || 8) + (c - 1);
-                      
-                      // Skip if beyond capacity
-                      if (seatIndex >= capacity) {
-                        return null;
-                      }
+            {/* Outer Classroom Envelope: Teacher Desk / Whiteboard Stage Bar */}
+            <div className="w-full max-w-5xl bg-gradient-to-r from-slate-800/80 via-slate-700/80 to-slate-800/80 border border-slate-600/40 rounded-2xl py-2.5 sm:py-3 px-4 sm:px-6 mb-8 sm:mb-10 text-center shadow-lg flex items-center justify-between gap-3 shrink-0">
+              <span className="text-[10px] sm:text-[11px] font-mono text-slate-400 hidden sm:inline">ประตูห้องเรียน (Entrance)</span>
+              <span className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2 mx-auto sm:mx-0">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                กระดานหน้าห้อง / โต๊ะครูผู้สอน (Whiteboard & Teacher Desk)
+              </span>
+              <span className="text-[10px] sm:text-[11px] font-mono text-slate-400 hidden sm:inline">จอโปรเจกเตอร์</span>
+            </div>
 
-                      const student = courseStudents.find(s => s.seatIndex === seatIndex);
-                      const isHighlighted = student && highlightedStudentIds.includes(student.studentId);
+            {/* 1. CLASSROOM MODE GRID (Scales individual seat blocks directly) */}
+            {seatingCategory === 'CLASSROOM' && (
+              <div className="flex flex-col gap-3 sm:gap-4 md:gap-5 pb-8 items-center w-full">
+                {Array.from({ length: layout.totalRows || 5 }).map((_, rIndex) => {
+                  const r = rIndex + 1;
+                  return (
+                    <div key={r} className="flex gap-2 sm:gap-3 md:gap-3.5 items-stretch shrink-0">
+                      {Array.from({ length: layout.totalCols || 8 }).map((_, cIndex) => {
+                        const c = cIndex + 1;
+                        const seatIndex = (r - 1) * (layout.totalCols || 8) + (c - 1);
+                        
+                        // Skip if beyond capacity
+                        if (seatIndex >= capacity) {
+                          return null;
+                        }
 
-                      return (
-                        <React.Fragment key={c}>
-                          <div 
-                            style={{
-                              width: `${seatBlockWidth}px`,
-                              minHeight: `${seatBlockMinHeight}px`
-                            }}
-                            className={cn(
-                              "rounded-2xl transition-all duration-200 border-2 relative flex flex-col shrink-0",
-                              student 
-                                ? "border-transparent" 
-                                : "border-dashed border-white/10 bg-white/[0.02] hover:border-indigo-500/40 items-center justify-center text-center p-2 sm:p-3"
-                            )}
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              const studentId = e.dataTransfer.getData('studentId');
-                              if (studentId) moveStudentSeat(studentId, seatIndex);
-                            }}
-                          >
-                            {student ? (
-                              <StudentSeatCard
-                                student={student}
-                                seatNumber={seatIndex + 1}
-                                status={currentCourseRecords[student.studentId] || 'UNMARKED'}
-                                isLocked={isAttendanceLocked}
-                                isHighlighted={!!isHighlighted}
-                                alPoints={activeLearningPoints[student.studentId] || 0}
-                                behaviorScore={analytics.find(a => a.studentId === student.studentId)?.behaviorScore ?? 100}
-                                onStatusChange={(st) => setAttendanceStatus(course.id, student.studentId, st)}
-                                onAwardPoint={(pts) => {
-                                  addActiveLearningPoints(student.studentId, pts, 'ANSWER', `กิจกรรมในชั้นเรียน (+${pts} แต้ม)`, course.id);
-                                  adjustBehaviorScore(student.studentId, pts);
-                                }}
-                                onCardClick={() => onSelectStudentDetail && onSelectStudentDetail(student)}
-                              />
-                            ) : (
-                              <div className="space-y-1 select-none pointer-events-none">
-                                <div className="text-white/20 text-xs font-mono font-bold">
-                                  โต๊ะที่ {seatIndex + 1}
+                        const student = courseStudents.find(s => s.seatIndex === seatIndex);
+                        const isHighlighted = student && highlightedStudentIds.includes(student.studentId);
+                        const isTouchHovered = touchDragState?.hoveredSeatIndex === seatIndex;
+                        const isSelectedMoveTarget = selectedStudentForMove !== null && (!student || student.studentId !== selectedStudentForMove.studentId);
+
+                        return (
+                          <React.Fragment key={c}>
+                            <div 
+                              data-seat-index={seatIndex}
+                              data-drop-zone="seat"
+                              style={{
+                                width: `${seatBlockWidth}px`,
+                                minHeight: `${seatBlockMinHeight}px`
+                              }}
+                              onClick={() => {
+                                if (selectedStudentForMove) {
+                                  moveStudentSeat(selectedStudentForMove.studentId, seatIndex);
+                                  setSelectedStudentForMove(null);
+                                  setLayoutNotice(`ย้าย ${selectedStudentForMove.fullName || selectedStudentForMove.name} ไปยังโต๊ะที่ ${seatIndex + 1} แล้ว`);
+                                  setTimeout(() => setLayoutNotice(null), 2500);
+                                }
+                              }}
+                              className={cn(
+                                "rounded-2xl transition-all duration-200 border-2 relative flex flex-col shrink-0 select-none",
+                                isTouchHovered ? "border-amber-400 bg-amber-500/20 ring-4 ring-amber-400/60 scale-[1.03] z-20 shadow-xl" :
+                                isSelectedMoveTarget ? "border-indigo-400/80 bg-indigo-500/10 cursor-pointer animate-pulse ring-2 ring-indigo-400/40" :
+                                student 
+                                  ? "border-transparent" 
+                                  : "border-dashed border-white/10 bg-white/[0.02] hover:border-indigo-500/40 items-center justify-center text-center p-2 sm:p-3"
+                              )}
+                              onDragOver={(e) => e.preventDefault()}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                const studentId = e.dataTransfer.getData('studentId');
+                                if (studentId) moveStudentSeat(studentId, seatIndex);
+                              }}
+                            >
+                              {isTouchHovered && (
+                                <div className="absolute inset-0 bg-amber-500/30 backdrop-blur-[1px] rounded-2xl flex flex-col items-center justify-center z-30 pointer-events-none p-2 border-2 border-amber-300 text-center animate-pulse">
+                                  <ArrowRightLeft className="w-5 h-5 text-amber-200 mb-1" />
+                                  <span className="text-[11px] font-bold text-white leading-tight">
+                                    {student ? `สลับกับ ${student.fullName || student.name}` : `วางที่โต๊ะ ${seatIndex + 1}`}
+                                  </span>
                                 </div>
-                                <div className="text-[10px] text-slate-500">
-                                  ว่าง (ลากวางนักเรียน)
-                                </div>
-                              </div>
-                            )}
-                          </div>
+                              )}
 
-                          {/* Aisle Spacer */}
-                          {layout.aisleAfterCols?.includes(c) && (
-                            <div className="w-2.5 sm:w-4 md:w-5 shrink-0 flex items-center justify-center border-l border-r border-dashed border-white/5 bg-slate-900/10 rounded-md">
-                              <span className="text-[8px] sm:text-[9px] text-slate-600 font-bold uppercase tracking-widest select-none text-center" style={{ writingMode: 'vertical-lr' }}>
-                                ทางเดิน
-                              </span>
+                              {student ? (
+                                <StudentSeatCard
+                                  student={student}
+                                  seatNumber={seatIndex + 1}
+                                  status={currentCourseRecords[student.studentId] || 'UNMARKED'}
+                                  isLocked={isAttendanceLocked}
+                                  isHighlighted={!!isHighlighted}
+                                  isSelectedForMove={selectedStudentForMove?.studentId === student.studentId}
+                                  isHoveredDropTarget={isTouchHovered}
+                                  alPoints={activeLearningPoints[student.studentId] || 0}
+                                  behaviorScore={analytics.find(a => a.studentId === student.studentId)?.behaviorScore ?? 100}
+                                  onStatusChange={(st) => setAttendanceStatus(course.id, student.studentId, st)}
+                                  onAwardPoint={(pts) => {
+                                    addActiveLearningPoints(student.studentId, pts, 'ANSWER', `กิจกรรมในชั้นเรียน (+${pts} แต้ม)`, course.id);
+                                    adjustBehaviorScore(student.studentId, pts);
+                                  }}
+                                  onCardClick={() => {
+                                    if (selectedStudentForMove) {
+                                      moveStudentSeat(selectedStudentForMove.studentId, seatIndex);
+                                      setSelectedStudentForMove(null);
+                                    } else if (onSelectStudentDetail) {
+                                      onSelectStudentDetail(student);
+                                    }
+                                  }}
+                                  onSelectForMove={() => {
+                                    setSelectedStudentForMove(selectedStudentForMove?.studentId === student.studentId ? null : student);
+                                  }}
+                                  onTouchStart={(e) => handleTouchStart(e, student, seatIndex)}
+                                  onTouchMove={handleTouchMove}
+                                  onTouchEnd={handleTouchEnd}
+                                  onTouchCancel={handleTouchEnd}
+                                />
+                              ) : (
+                                <div className="space-y-1 select-none pointer-events-none">
+                                  <div className="text-white/20 text-xs font-mono font-bold">
+                                    โต๊ะที่ {seatIndex + 1}
+                                  </div>
+                                  <div className="text-[10px] text-slate-500">
+                                    {isSelectedMoveTarget ? '+ แตะวางที่นี่' : 'ว่าง (ลาก/แตะวาง)'}
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </div>
-          )}
 
-          {/* 2. LABORATORY MODE (Dynamic Island Tables with individual seat scaling) */}
-          {seatingCategory === 'LABORATORY' && (
-            <div className={cn(
-              "grid gap-4 sm:gap-6 max-w-7xl w-full pb-12",
-              groupCount <= 2 ? "grid-cols-1 md:grid-cols-2" :
-              groupCount <= 4 ? "grid-cols-1 md:grid-cols-2" :
-              "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-            )}>
-              {Array.from({ length: groupCount }).map((_, tableIdx) => {
-                const tableNumber = tableIdx + 1;
-                const baseSeats = Math.floor(capacity / groupCount);
-                const extraSeats = capacity % groupCount;
-                const seatsAtThisTable = baseSeats + (tableIdx < extraSeats ? 1 : 0);
-                
-                // Calculate starting index for this table
-                let startIndex = 0;
-                for (let t = 0; t < tableIdx; t++) {
-                  startIndex += baseSeats + (t < extraSeats ? 1 : 0);
-                }
-
-                return (
-                  <div key={tableIdx} className="bg-[#121829] border border-white/10 rounded-3xl p-4 sm:p-5 shadow-xl flex flex-col space-y-4">
-                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold text-xs">
-                          T{tableNumber}
-                        </div>
-                        <div>
-                          <h3 className="text-sm font-bold text-white">โต๊ะทดลองที่ {tableNumber}</h3>
-                          <p className="text-[10px] text-slate-400">Lab Station #{tableNumber}</p>
-                        </div>
-                      </div>
-                      <span className="text-[11px] font-mono px-2 py-0.5 bg-slate-800 rounded-lg text-slate-300">
-                        {seatsAtThisTable} ที่นั่ง
-                      </span>
-                    </div>
-
-                    {/* Circular / Island Table Stools */}
-                    <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
-                      {Array.from({ length: seatsAtThisTable }).map((_, seatSlot) => {
-                        const seatIndex = startIndex + seatSlot;
-                        const student = courseStudents.find(s => s.seatIndex === seatIndex);
-                        const isHighlighted = student && highlightedStudentIds.includes(student.studentId);
-
-                        return (
-                          <div 
-                            key={seatSlot}
-                            style={{
-                              minHeight: `${seatBlockMinHeight}px`
-                            }}
-                            className={cn(
-                              "rounded-2xl transition-all border-2 relative flex flex-col",
-                              student ? "border-transparent" : "border-dashed border-white/10 bg-white/[0.02] items-center justify-center text-center p-2"
-                            )}
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              const studentId = e.dataTransfer.getData('studentId');
-                              if (studentId) moveStudentSeat(studentId, seatIndex);
-                            }}
-                          >
-                            {student ? (
-                              <StudentSeatCard
-                                student={student}
-                                seatNumber={seatIndex + 1}
-                                status={currentCourseRecords[student.studentId] || 'UNMARKED'}
-                                isLocked={isAttendanceLocked}
-                                isHighlighted={!!isHighlighted}
-                                alPoints={activeLearningPoints[student.studentId] || 0}
-                                behaviorScore={analytics.find(a => a.studentId === student.studentId)?.behaviorScore ?? 100}
-                                onStatusChange={(st) => setAttendanceStatus(course.id, student.studentId, st)}
-                                onAwardPoint={(pts) => {
-                                  addActiveLearningPoints(student.studentId, pts, 'COLLABORATION', `กิจกรรมกลุ่มแล็บ (+${pts} แต้ม)`, course.id);
-                                  adjustBehaviorScore(student.studentId, pts);
-                                }}
-                                onCardClick={() => onSelectStudentDetail && onSelectStudentDetail(student)}
-                              />
-                            ) : (
-                              <div className="text-[10px] text-slate-500 font-mono">
-                                สตูล {seatSlot + 1} (ว่าง)
+                            {/* Aisle Spacer */}
+                            {layout.aisleAfterCols?.includes(c) && (
+                              <div className="w-2.5 sm:w-4 md:w-5 shrink-0 flex items-center justify-center border-l border-r border-dashed border-white/5 bg-slate-900/10 rounded-md">
+                                <span className="text-[8px] sm:text-[9px] text-slate-600 font-bold uppercase tracking-widest select-none text-center" style={{ writingMode: 'vertical-lr' }}>
+                                  ทางเดิน
+                                </span>
                               </div>
                             )}
-                          </div>
+                          </React.Fragment>
                         );
                       })}
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            )}
 
-          {/* 3. OUTDOOR / FIELD MODE (Dynamic Activity Bases with individual seat scaling) */}
-          {seatingCategory === 'OUTDOOR' && (
-            <div className={cn(
-              "grid gap-4 sm:gap-6 max-w-7xl w-full pb-12",
-              groupCount <= 2 ? "grid-cols-1 md:grid-cols-2" :
-              groupCount <= 4 ? "grid-cols-1 md:grid-cols-2" :
-              "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-            )}>
-              {Array.from({ length: groupCount }).map((_, groupIdx) => {
-                const groupNumber = groupIdx + 1;
-                const baseColors = [
-                  'ทีมสีแดง (Base A)',
-                  'ทีมสีน้ำเงิน (Base B)',
-                  'ทีมสีเขียว (Base C)',
-                  'ทีมสีเหลือง (Base D)',
-                  'ทีมสีส้ม (Base E)',
-                  'ทีมสีม่วง (Base F)',
-                  'ทีมสีชมพู (Base G)',
-                  'ทีมสีฟ้า (Base H)',
-                  'ทีมสีขาว (Base I)',
-                  'ทีมสีทอง (Base J)',
-                  'ทีมสีเงิน (Base K)',
-                  'ทีมสีมรกต (Base L)'
-                ];
-                const baseSeats = Math.floor(capacity / groupCount);
-                const extraSeats = capacity % groupCount;
-                const seatsPerGrp = baseSeats + (groupIdx < extraSeats ? 1 : 0);
-                
-                // Calculate starting index for this group
-                let startIndex = 0;
-                for (let g = 0; g < groupIdx; g++) {
-                  startIndex += baseSeats + (g < extraSeats ? 1 : 0);
-                }
+            {/* 2. LABORATORY MODE (Dynamic Island Tables with individual seat scaling) */}
+            {seatingCategory === 'LABORATORY' && (
+              <div className={cn(
+                "grid gap-4 sm:gap-6 max-w-7xl w-full pb-8",
+                groupCount <= 2 ? "grid-cols-1 md:grid-cols-2" :
+                groupCount <= 4 ? "grid-cols-1 md:grid-cols-2" :
+                "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              )}>
+                {Array.from({ length: groupCount }).map((_, tableIdx) => {
+                  const tableNumber = tableIdx + 1;
+                  const baseSeats = Math.floor(capacity / groupCount);
+                  const extraSeats = capacity % groupCount;
+                  const seatsAtThisTable = baseSeats + (tableIdx < extraSeats ? 1 : 0);
+                  
+                  // Calculate starting index for this table
+                  let startIndex = 0;
+                  for (let t = 0; t < tableIdx; t++) {
+                    startIndex += baseSeats + (t < extraSeats ? 1 : 0);
+                  }
 
-                return (
-                  <div key={groupIdx} className="bg-[#121829] border border-amber-500/20 rounded-3xl p-4 sm:p-6 shadow-xl space-y-4">
-                    <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center font-bold text-xs">
-                          G{groupNumber}
-                        </div>
-                        <div>
-                          <h3 className="text-sm font-bold text-white">
-                            {baseColors[groupIdx] || `กลุ่มกิจกรรมสนามที่ ${groupNumber}`}
-                          </h3>
-                          <p className="text-[10px] text-amber-400/80">Outdoor Activity Base #{groupNumber}</p>
-                        </div>
-                      </div>
-                      <span className="text-[11px] font-mono px-2 py-0.5 bg-slate-800 rounded-lg text-slate-300">
-                        {seatsPerGrp} คน
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3">
-                      {Array.from({ length: seatsPerGrp }).map((_, seatSlot) => {
-                        const seatIndex = startIndex + seatSlot;
-                        const student = courseStudents.find(s => s.seatIndex === seatIndex);
-                        const isHighlighted = student && highlightedStudentIds.includes(student.studentId);
-
-                        return (
-                          <div 
-                            key={seatSlot}
-                            style={{
-                              minHeight: `${seatBlockMinHeight}px`
-                            }}
-                            className={cn(
-                              "rounded-2xl transition-all border-2 relative flex flex-col",
-                              student ? "border-transparent" : "border-dashed border-white/10 bg-white/[0.02] items-center justify-center text-center p-2"
-                            )}
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              const studentId = e.dataTransfer.getData('studentId');
-                              if (studentId) moveStudentSeat(studentId, seatIndex);
-                            }}
-                          >
-                            {student ? (
-                              <StudentSeatCard
-                                student={student}
-                                seatNumber={seatIndex + 1}
-                                status={currentCourseRecords[student.studentId] || 'UNMARKED'}
-                                isLocked={isAttendanceLocked}
-                                isHighlighted={!!isHighlighted}
-                                alPoints={activeLearningPoints[student.studentId] || 0}
-                                behaviorScore={analytics.find(a => a.studentId === student.studentId)?.behaviorScore ?? 100}
-                                onStatusChange={(st) => setAttendanceStatus(course.id, student.studentId, st)}
-                                onAwardPoint={(pts) => {
-                                  addActiveLearningPoints(student.studentId, pts, 'LEADERSHIP', `กิจกรรมฐานกลางแจ้ง (+${pts} แต้ม)`, course.id);
-                                  adjustBehaviorScore(student.studentId, pts);
-                                }}
-                                onCardClick={() => onSelectStudentDetail && onSelectStudentDetail(student)}
-                              />
-                            ) : (
-                              <div className="text-[10px] text-slate-500 font-mono">
-                                ที่ว่าง {seatSlot + 1}
-                              </div>
-                            )}
+                  return (
+                    <div key={tableIdx} className="bg-[#121829] border border-white/10 rounded-3xl p-4 sm:p-5 shadow-xl flex flex-col space-y-4">
+                      <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold text-xs">
+                            T{tableNumber}
                           </div>
-                        );
-                      })}
+                          <div>
+                            <h3 className="text-sm font-bold text-white">โต๊ะทดลองที่ {tableNumber}</h3>
+                            <p className="text-[10px] text-slate-400">Lab Station #{tableNumber}</p>
+                          </div>
+                        </div>
+                        <span className="text-[11px] font-mono px-2 py-0.5 bg-slate-800 rounded-lg text-slate-300">
+                          {seatsAtThisTable} ที่นั่ง
+                        </span>
+                      </div>
+
+                      {/* Circular / Island Table Stools */}
+                      <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                        {Array.from({ length: seatsAtThisTable }).map((_, seatSlot) => {
+                          const seatIndex = startIndex + seatSlot;
+                          const student = courseStudents.find(s => s.seatIndex === seatIndex);
+                          const isHighlighted = student && highlightedStudentIds.includes(student.studentId);
+                          const isTouchHovered = touchDragState?.hoveredSeatIndex === seatIndex;
+                          const isSelectedMoveTarget = selectedStudentForMove !== null && (!student || student.studentId !== selectedStudentForMove.studentId);
+
+                          return (
+                            <div 
+                              key={seatSlot}
+                              data-seat-index={seatIndex}
+                              data-drop-zone="seat"
+                              style={{
+                                minHeight: `${seatBlockMinHeight}px`
+                              }}
+                              onClick={() => {
+                                if (selectedStudentForMove) {
+                                  moveStudentSeat(selectedStudentForMove.studentId, seatIndex);
+                                  setSelectedStudentForMove(null);
+                                  setLayoutNotice(`ย้าย ${selectedStudentForMove.fullName || selectedStudentForMove.name} ไปยังโต๊ะที่ ${seatIndex + 1} แล้ว`);
+                                  setTimeout(() => setLayoutNotice(null), 2500);
+                                }
+                              }}
+                              className={cn(
+                                "rounded-2xl transition-all border-2 relative flex flex-col select-none",
+                                isTouchHovered ? "border-amber-400 bg-amber-500/20 ring-4 ring-amber-400/60 scale-[1.03] z-20 shadow-xl" :
+                                isSelectedMoveTarget ? "border-indigo-400/80 bg-indigo-500/10 cursor-pointer animate-pulse ring-2 ring-indigo-400/40" :
+                                student ? "border-transparent" : "border-dashed border-white/10 bg-white/[0.02] items-center justify-center text-center p-2"
+                              )}
+                              onDragOver={(e) => e.preventDefault()}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                const studentId = e.dataTransfer.getData('studentId');
+                                if (studentId) moveStudentSeat(studentId, seatIndex);
+                              }}
+                            >
+                              {isTouchHovered && (
+                                <div className="absolute inset-0 bg-amber-500/30 backdrop-blur-[1px] rounded-2xl flex flex-col items-center justify-center z-30 pointer-events-none p-2 border-2 border-amber-300 text-center animate-pulse">
+                                  <ArrowRightLeft className="w-5 h-5 text-amber-200 mb-1" />
+                                  <span className="text-[11px] font-bold text-white leading-tight">
+                                    {student ? `สลับกับ ${student.fullName || student.name}` : `วางที่สตูล ${seatSlot + 1}`}
+                                  </span>
+                                </div>
+                              )}
+
+                              {student ? (
+                                <StudentSeatCard
+                                  student={student}
+                                  seatNumber={seatIndex + 1}
+                                  status={currentCourseRecords[student.studentId] || 'UNMARKED'}
+                                  isLocked={isAttendanceLocked}
+                                  isHighlighted={!!isHighlighted}
+                                  isSelectedForMove={selectedStudentForMove?.studentId === student.studentId}
+                                  isHoveredDropTarget={isTouchHovered}
+                                  alPoints={activeLearningPoints[student.studentId] || 0}
+                                  behaviorScore={analytics.find(a => a.studentId === student.studentId)?.behaviorScore ?? 100}
+                                  onStatusChange={(st) => setAttendanceStatus(course.id, student.studentId, st)}
+                                  onAwardPoint={(pts) => {
+                                    addActiveLearningPoints(student.studentId, pts, 'COLLABORATION', `กิจกรรมกลุ่มแล็บ (+${pts} แต้ม)`, course.id);
+                                    adjustBehaviorScore(student.studentId, pts);
+                                  }}
+                                  onCardClick={() => {
+                                    if (selectedStudentForMove) {
+                                      moveStudentSeat(selectedStudentForMove.studentId, seatIndex);
+                                      setSelectedStudentForMove(null);
+                                    } else if (onSelectStudentDetail) {
+                                      onSelectStudentDetail(student);
+                                    }
+                                  }}
+                                  onSelectForMove={() => {
+                                    setSelectedStudentForMove(selectedStudentForMove?.studentId === student.studentId ? null : student);
+                                  }}
+                                  onTouchStart={(e) => handleTouchStart(e, student, seatIndex)}
+                                  onTouchMove={handleTouchMove}
+                                  onTouchEnd={handleTouchEnd}
+                                  onTouchCancel={handleTouchEnd}
+                                />
+                              ) : (
+                                <div className="text-[10px] text-slate-500 font-mono">
+                                  {isSelectedMoveTarget ? '+ แตะวางที่นี่' : `สตูล ${seatSlot + 1} (ว่าง)`}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 3. OUTDOOR / FIELD MODE (Dynamic Activity Bases with individual seat scaling) */}
+            {seatingCategory === 'OUTDOOR' && (
+              <div className={cn(
+                "grid gap-4 sm:gap-6 max-w-7xl w-full pb-8",
+                groupCount <= 2 ? "grid-cols-1 md:grid-cols-2" :
+                groupCount <= 4 ? "grid-cols-1 md:grid-cols-2" :
+                "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              )}>
+                {Array.from({ length: groupCount }).map((_, groupIdx) => {
+                  const groupNumber = groupIdx + 1;
+                  const baseColors = [
+                    'ทีมสีแดง (Base A)',
+                    'ทีมสีน้ำเงิน (Base B)',
+                    'ทีมสีเขียว (Base C)',
+                    'ทีมสีเหลือง (Base D)',
+                    'ทีมสีส้ม (Base E)',
+                    'ทีมสีม่วง (Base F)',
+                    'ทีมสีชมพู (Base G)',
+                    'ทีมสีฟ้า (Base H)',
+                    'ทีมสีขาว (Base I)',
+                    'ทีมสีทอง (Base J)',
+                    'ทีมสีเงิน (Base K)',
+                    'ทีมสีมรกต (Base L)'
+                  ];
+                  const baseSeats = Math.floor(capacity / groupCount);
+                  const extraSeats = capacity % groupCount;
+                  const seatsPerGrp = baseSeats + (groupIdx < extraSeats ? 1 : 0);
+                  
+                  // Calculate starting index for this group
+                  let startIndex = 0;
+                  for (let g = 0; g < groupIdx; g++) {
+                    startIndex += baseSeats + (g < extraSeats ? 1 : 0);
+                  }
+
+                  return (
+                    <div key={groupIdx} className="bg-[#121829] border border-amber-500/20 rounded-3xl p-4 sm:p-6 shadow-xl space-y-4">
+                      <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center font-bold text-xs">
+                            G{groupNumber}
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-bold text-white">
+                              {baseColors[groupIdx] || `กลุ่มกิจกรรมสนามที่ ${groupNumber}`}
+                            </h3>
+                            <p className="text-[10px] text-amber-400/80">Outdoor Activity Base #{groupNumber}</p>
+                          </div>
+                        </div>
+                        <span className="text-[11px] font-mono px-2 py-0.5 bg-slate-800 rounded-lg text-slate-300">
+                          {seatsPerGrp} คน
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3">
+                        {Array.from({ length: seatsPerGrp }).map((_, seatSlot) => {
+                          const seatIndex = startIndex + seatSlot;
+                          const student = courseStudents.find(s => s.seatIndex === seatIndex);
+                          const isHighlighted = student && highlightedStudentIds.includes(student.studentId);
+                          const isTouchHovered = touchDragState?.hoveredSeatIndex === seatIndex;
+                          const isSelectedMoveTarget = selectedStudentForMove !== null && (!student || student.studentId !== selectedStudentForMove.studentId);
+
+                          return (
+                            <div 
+                              key={seatSlot}
+                              data-seat-index={seatIndex}
+                              data-drop-zone="seat"
+                              style={{
+                                minHeight: `${seatBlockMinHeight}px`
+                              }}
+                              onClick={() => {
+                                if (selectedStudentForMove) {
+                                  moveStudentSeat(selectedStudentForMove.studentId, seatIndex);
+                                  setSelectedStudentForMove(null);
+                                  setLayoutNotice(`ย้าย ${selectedStudentForMove.fullName || selectedStudentForMove.name} ไปยังฐานที่ ${groupNumber} แล้ว`);
+                                  setTimeout(() => setLayoutNotice(null), 2500);
+                                }
+                              }}
+                              className={cn(
+                                "rounded-2xl transition-all border-2 relative flex flex-col select-none",
+                                isTouchHovered ? "border-amber-400 bg-amber-500/20 ring-4 ring-amber-400/60 scale-[1.03] z-20 shadow-xl" :
+                                isSelectedMoveTarget ? "border-indigo-400/80 bg-indigo-500/10 cursor-pointer animate-pulse ring-2 ring-indigo-400/40" :
+                                student ? "border-transparent" : "border-dashed border-white/10 bg-white/[0.02] items-center justify-center text-center p-2"
+                              )}
+                              onDragOver={(e) => e.preventDefault()}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                const studentId = e.dataTransfer.getData('studentId');
+                                if (studentId) moveStudentSeat(studentId, seatIndex);
+                              }}
+                            >
+                              {isTouchHovered && (
+                                <div className="absolute inset-0 bg-amber-500/30 backdrop-blur-[1px] rounded-2xl flex flex-col items-center justify-center z-30 pointer-events-none p-2 border-2 border-amber-300 text-center animate-pulse">
+                                  <ArrowRightLeft className="w-5 h-5 text-amber-200 mb-1" />
+                                  <span className="text-[11px] font-bold text-white leading-tight">
+                                    {student ? `สลับกับ ${student.fullName || student.name}` : `วางที่ช่อง ${seatSlot + 1}`}
+                                  </span>
+                                </div>
+                              )}
+
+                              {student ? (
+                                <StudentSeatCard
+                                  student={student}
+                                  seatNumber={seatIndex + 1}
+                                  status={currentCourseRecords[student.studentId] || 'UNMARKED'}
+                                  isLocked={isAttendanceLocked}
+                                  isHighlighted={!!isHighlighted}
+                                  isSelectedForMove={selectedStudentForMove?.studentId === student.studentId}
+                                  isHoveredDropTarget={isTouchHovered}
+                                  alPoints={activeLearningPoints[student.studentId] || 0}
+                                  behaviorScore={analytics.find(a => a.studentId === student.studentId)?.behaviorScore ?? 100}
+                                  onStatusChange={(st) => setAttendanceStatus(course.id, student.studentId, st)}
+                                  onAwardPoint={(pts) => {
+                                    addActiveLearningPoints(student.studentId, pts, 'LEADERSHIP', `กิจกรรมฐานกลางแจ้ง (+${pts} แต้ม)`, course.id);
+                                    adjustBehaviorScore(student.studentId, pts);
+                                  }}
+                                  onCardClick={() => {
+                                    if (selectedStudentForMove) {
+                                      moveStudentSeat(selectedStudentForMove.studentId, seatIndex);
+                                      setSelectedStudentForMove(null);
+                                    } else if (onSelectStudentDetail) {
+                                      onSelectStudentDetail(student);
+                                    }
+                                  }}
+                                  onSelectForMove={() => {
+                                    setSelectedStudentForMove(selectedStudentForMove?.studentId === student.studentId ? null : student);
+                                  }}
+                                  onTouchStart={(e) => handleTouchStart(e, student, seatIndex)}
+                                  onTouchMove={handleTouchMove}
+                                  onTouchEnd={handleTouchEnd}
+                                  onTouchCancel={handleTouchEnd}
+                                />
+                              ) : (
+                                <div className="text-[10px] text-slate-500 font-mono">
+                                  {isSelectedMoveTarget ? '+ แตะวางที่นี่' : `ที่ว่าง ${seatSlot + 1}`}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+          </div>
 
         </div>
 
@@ -1219,7 +1484,11 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
         {unassignedStudents.length > 0 && (
           <aside 
             id="unassigned-students-sidebar"
-            className="w-72 border-l border-white/10 bg-[#0d121f] flex flex-col shrink-0 animate-in fade-in slide-in-from-right-4 duration-300 hidden md:flex"
+            data-drop-zone="unassigned"
+            className={cn(
+              "w-72 border-l border-white/10 bg-[#0d121f] flex flex-col shrink-0 animate-in fade-in slide-in-from-right-4 duration-300 hidden md:flex transition-all",
+              touchDragState?.isHoveringUnassigned ? "ring-2 ring-rose-500 bg-rose-950/20" : ""
+            )}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
@@ -1238,7 +1507,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
                 </span>
               </div>
               <p className="text-[10px] text-slate-400">
-                ลากการ์ดนักเรียนไปวางบนโต๊ะ หรือใช้ปุ่มจัดอัตโนมัติ
+                ลากหรือแตะการ์ดเพื่อวางในผังที่นั่ง
               </p>
 
               {/* Quick Actions */}
@@ -1266,50 +1535,286 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
             </div>
 
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {unassignedStudents.map((student, idx) => (
-                <div
-                  key={student.studentId}
-                  draggable
-                  onDragStart={(e) => e.dataTransfer.setData('studentId', student.studentId)}
-                  onClick={() => {
-                    // If clicked, find first available seat
-                    const occupiedSeats = new Set(courseStudents.map(s => s.seatIndex).filter(i => i !== null && i !== undefined));
-                    for (let i = 0; i < capacity; i++) {
-                      if (!occupiedSeats.has(i)) {
-                        moveStudentSeat(student.studentId, i);
-                        break;
+              {unassignedStudents.map((student, idx) => {
+                const isSelectedForMove = selectedStudentForMove?.studentId === student.studentId;
+                return (
+                  <div
+                    key={student.studentId}
+                    draggable
+                    onDragStart={(e) => e.dataTransfer.setData('studentId', student.studentId)}
+                    onTouchStart={(e) => handleTouchStart(e, student, null)}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
+                    onTouchCancel={handleTouchEnd}
+                    onClick={() => {
+                      if (isSelectedForMove) {
+                        setSelectedStudentForMove(null);
+                      } else {
+                        setSelectedStudentForMove(student);
                       }
-                    }
-                  }}
-                  className="bg-[#172033] hover:bg-[#1e2a44] p-2.5 rounded-2xl border border-white/10 hover:border-indigo-500/50 transition-all cursor-grab active:cursor-grabbing shadow-md flex items-center gap-2.5 group"
-                  title="คลิกหรือลากไปวางในผังที่นั่ง"
-                >
-                  <img 
-                    src={student.avatar || student.photoUrl} 
-                    alt="" 
-                    className="w-10 h-10 rounded-full object-cover border border-slate-700 bg-slate-800 shrink-0"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="font-bold text-xs text-slate-200 group-hover:text-white truncate">
-                      {student.fullName || student.name}
-                    </div>
-                    <div className="text-[10px] text-slate-400 flex items-center justify-between font-mono mt-0.5">
-                      <span>เลขที่ {student.studentNo || student.number || idx + 1}</span>
-                      <span className="text-slate-500">#{student.studentCode || student.studentId}</span>
-                    </div>
-                    {student.nickname && (
-                      <div className="text-[9.5px] text-amber-400 font-medium">
-                        ({student.nickname})
-                      </div>
+                    }}
+                    className={cn(
+                      "p-2.5 rounded-2xl border transition-all cursor-grab active:cursor-grabbing shadow-md flex items-center gap-2.5 group select-none touch-none",
+                      isSelectedForMove 
+                        ? "bg-indigo-900/60 border-indigo-400 ring-2 ring-indigo-400/50" 
+                        : "bg-[#172033] hover:bg-[#1e2a44] border-white/10 hover:border-indigo-500/50"
                     )}
+                    title="แตะเพื่อเลือกวาง หรือลากไปวางในผังที่นั่ง"
+                  >
+                    <GripVertical className="w-4 h-4 text-slate-500 shrink-0" />
+                    <img 
+                      src={student.avatar || student.photoUrl} 
+                      alt="" 
+                      className="w-10 h-10 rounded-full object-cover border border-slate-700 bg-slate-800 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-xs text-slate-200 group-hover:text-white truncate">
+                        {student.fullName || student.name}
+                      </div>
+                      <div className="text-[10px] text-slate-400 flex items-center justify-between font-mono mt-0.5">
+                        <span>เลขที่ {student.studentNo || student.number || idx + 1}</span>
+                        <span className="text-slate-500">#{student.studentCode || student.studentId}</span>
+                      </div>
+                      {student.nickname && (
+                        <div className="text-[9.5px] text-amber-400 font-medium">
+                          ({student.nickname})
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </aside>
         )}
 
       </div>
+
+      {/* Mobile Drawer: Unassigned Students Bottom Sheet Modal */}
+      <AnimatePresence>
+        {isMobilePoolOpen && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 md:hidden">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobilePoolOpen(false)}
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="relative w-full max-w-lg bg-[#0f172a] border-t sm:border border-white/10 rounded-t-3xl sm:rounded-3xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden z-10"
+            >
+              {/* Drawer Header */}
+              <div className="p-4 border-b border-white/10 flex items-center justify-between bg-slate-900/90">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">นักเรียนที่ยังไม่มีที่นั่ง</h3>
+                    <p className="text-[10px] text-slate-400">แตะนักเรียนเพื่อเลือก แล้วแตะโต๊ะว่างในผัง</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full font-mono text-xs font-bold">
+                    {unassignedStudents.length} คน
+                  </span>
+                  <button 
+                    onClick={() => setIsMobilePoolOpen(false)}
+                    className="p-1.5 rounded-full hover:bg-white/10 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="p-3 border-b border-white/10 bg-slate-900/50 flex gap-2">
+                <button
+                  onClick={() => {
+                    autoAssignClassroomSeats(course.room, capacity);
+                    setIsMobilePoolOpen(false);
+                  }}
+                  disabled={unassignedStudents.length === 0}
+                  className="flex-1 py-2 px-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all shadow flex items-center justify-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  จัดที่นั่งอัตโนมัติทั้งหมด
+                </button>
+                <button
+                  onClick={() => {
+                    resetClassroomSeats(course.room);
+                    setIsMobilePoolOpen(false);
+                  }}
+                  className="py-2 px-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  ล้างผัง
+                </button>
+              </div>
+
+              {/* Student List */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-2.5 max-h-[50vh]">
+                {unassignedStudents.length === 0 ? (
+                  <div className="text-center py-8 text-slate-400 text-xs">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
+                    นักเรียนทุกคนมีที่นั่งเรียบร้อยแล้ว
+                  </div>
+                ) : (
+                  unassignedStudents.map((student, idx) => {
+                    const isSelected = selectedStudentForMove?.studentId === student.studentId;
+                    return (
+                      <div
+                        key={student.studentId}
+                        onTouchStart={(e) => {
+                          handleTouchStart(e, student, null);
+                        }}
+                        onTouchMove={handleTouchMove}
+                        onTouchEnd={() => {
+                          handleTouchEnd();
+                          setIsMobilePoolOpen(false);
+                        }}
+                        onTouchCancel={handleTouchEnd}
+                        onClick={() => {
+                          setSelectedStudentForMove(isSelected ? null : student);
+                          setIsMobilePoolOpen(false);
+                        }}
+                        className={cn(
+                          "p-3 rounded-2xl border transition-all flex items-center gap-3 active:scale-[0.98] select-none touch-none",
+                          isSelected 
+                            ? "bg-indigo-900/70 border-indigo-400 ring-2 ring-indigo-400" 
+                            : "bg-[#172033] hover:bg-[#1e2a44] border-white/10"
+                        )}
+                      >
+                        <GripVertical className="w-4 h-4 text-slate-500 shrink-0" />
+                        <img 
+                          src={student.avatar || student.photoUrl} 
+                          alt="" 
+                          className="w-11 h-11 rounded-full object-cover border border-slate-700 bg-slate-800 shrink-0"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-sm text-white truncate">
+                            {student.fullName || student.name}
+                          </div>
+                          <div className="text-xs text-slate-400 flex items-center justify-between font-mono mt-0.5">
+                            <span>เลขที่ {student.studentNo || student.number || idx + 1}</span>
+                            <span className="text-slate-500">#{student.studentCode || student.studentId}</span>
+                          </div>
+                          {student.nickname && (
+                            <span className="text-xs text-amber-400 font-medium">({student.nickname})</span>
+                          )}
+                        </div>
+                        <div className="shrink-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              // Assign to first free desk
+                              const occupiedSeats = new Set(courseStudents.map(s => s.seatIndex).filter(i => i !== null && i !== undefined));
+                              for (let i = 0; i < capacity; i++) {
+                                if (!occupiedSeats.has(i)) {
+                                  moveStudentSeat(student.studentId, i);
+                                  break;
+                                }
+                              }
+                              if (unassignedStudents.length <= 1) {
+                                setIsMobilePoolOpen(false);
+                              }
+                            }}
+                            className="px-2.5 py-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-bold"
+                          >
+                            วางช่องว่างแรก
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Tap-to-Move / Tap-to-Swap Floating Action Bar */}
+      <AnimatePresence>
+        {selectedStudentForMove && (
+          <motion.div
+            initial={{ y: 80, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 80, opacity: 0 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-indigo-950/95 border-2 border-indigo-400/80 rounded-2xl py-3 px-4 sm:px-6 shadow-2xl backdrop-blur-md flex items-center gap-3 sm:gap-4 max-w-[90vw]"
+          >
+            <img 
+              src={selectedStudentForMove.avatar || selectedStudentForMove.photoUrl} 
+              alt=""
+              className="w-10 h-10 rounded-full object-cover border-2 border-indigo-400 shrink-0" 
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs sm:text-sm font-bold text-white truncate flex items-center gap-1.5">
+                <span>แตะเลือกโต๊ะเพื่อจัดที่นั่ง</span>
+              </div>
+              <p className="text-[11px] text-indigo-300 truncate">
+                {selectedStudentForMove.fullName || selectedStudentForMove.name} {selectedStudentForMove.seatIndex !== null && selectedStudentForMove.seatIndex !== undefined ? `(โต๊ะ ${selectedStudentForMove.seatIndex + 1})` : '(รอนั่ง)'}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {selectedStudentForMove.seatIndex !== null && selectedStudentForMove.seatIndex !== undefined && (
+                <button
+                  onClick={() => {
+                    moveStudentSeat(selectedStudentForMove.studentId, null);
+                    setSelectedStudentForMove(null);
+                  }}
+                  className="px-2.5 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold transition-all"
+                >
+                  นำออก
+                </button>
+              )}
+              <button
+                onClick={() => setSelectedStudentForMove(null)}
+                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-all"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Ghost Overlay during Touch Drag */}
+      {touchDragState && touchDragState.isDragging && (
+        <div 
+          style={{
+            position: 'fixed',
+            left: `${touchDragState.currentX - 55}px`,
+            top: `${touchDragState.currentY - 60}px`,
+            pointerEvents: 'none',
+            zIndex: 9999
+          }}
+          className="bg-indigo-900/95 border-2 border-amber-400 text-white rounded-2xl p-2.5 shadow-2xl backdrop-blur-sm flex items-center gap-2.5 w-44 scale-105 animate-pulse"
+        >
+          <img 
+            src={touchDragState.student.avatar || touchDragState.student.photoUrl} 
+            alt="" 
+            className="w-9 h-9 rounded-full object-cover border border-amber-400 shrink-0"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold text-xs text-white truncate">
+              {touchDragState.student.fullName || touchDragState.student.name}
+            </div>
+            <div className="text-[10px] text-amber-300 font-mono">
+              {touchDragState.hoveredSeatIndex !== null 
+                ? `👉 โต๊ะที่ ${touchDragState.hoveredSeatIndex + 1}`
+                : touchDragState.isHoveringUnassigned
+                ? '🗑️ นำออกจากที่นั่ง'
+                : 'ลากไปวางบนโต๊ะ'}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Random Student Picker Modal */}
       <RandomStudentPickerModal
@@ -1333,11 +1838,18 @@ interface StudentSeatCardProps {
   status: AttendanceStatus;
   isLocked: boolean;
   isHighlighted: boolean;
+  isSelectedForMove?: boolean;
+  isHoveredDropTarget?: boolean;
   alPoints: number;
   behaviorScore: number;
   onStatusChange: (status: AttendanceStatus) => void;
   onAwardPoint: (points: number) => void;
   onCardClick?: () => void;
+  onSelectForMove?: () => void;
+  onTouchStart?: (e: React.TouchEvent) => void;
+  onTouchMove?: (e: React.TouchEvent) => void;
+  onTouchEnd?: (e: React.TouchEvent) => void;
+  onTouchCancel?: (e: React.TouchEvent) => void;
 }
 
 const StudentSeatCard: React.FC<StudentSeatCardProps> = ({
@@ -1346,11 +1858,18 @@ const StudentSeatCard: React.FC<StudentSeatCardProps> = ({
   status,
   isLocked,
   isHighlighted,
+  isSelectedForMove,
+  isHoveredDropTarget,
   alPoints,
   behaviorScore,
   onStatusChange,
   onAwardPoint,
-  onCardClick
+  onCardClick,
+  onSelectForMove,
+  onTouchStart,
+  onTouchMove,
+  onTouchEnd,
+  onTouchCancel
 }) => {
   const studentNo = student.studentNo || student.number || seatNumber;
   const nickname = student.nickname || '';
@@ -1383,10 +1902,16 @@ const StudentSeatCard: React.FC<StudentSeatCardProps> = ({
     <div
       draggable
       onDragStart={(e) => e.dataTransfer.setData('studentId', student.studentId)}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchCancel}
       onClick={onCardClick}
       className={cn(
-        "bg-[#151c2e] hover:bg-[#1a233a] rounded-2xl p-2.5 flex flex-col justify-between h-full w-full text-left relative overflow-hidden transition-all duration-200 border-l-4 border-y border-r border-white/10 group cursor-move shadow-md",
+        "bg-[#151c2e] hover:bg-[#1a233a] rounded-2xl p-2.5 flex flex-col justify-between h-full w-full text-left relative overflow-hidden transition-all duration-200 border-l-4 border-y border-r border-white/10 group cursor-grab active:cursor-grabbing shadow-md touch-none select-none",
         borderStatusClass,
+        isSelectedForMove ? "ring-4 ring-indigo-400 bg-indigo-950/60 scale-105 z-20 shadow-2xl" : "",
+        isHoveredDropTarget ? "ring-4 ring-amber-400 scale-105 z-30 shadow-2xl" : "",
         isHighlighted ? "ring-4 ring-amber-400 scale-105 border-amber-400 shadow-[0_0_25px_rgba(251,191,36,0.6)] z-10 animate-pulse" : ""
       )}
     >
@@ -1412,7 +1937,24 @@ const StudentSeatCard: React.FC<StudentSeatCardProps> = ({
         </div>
 
         <div className="flex flex-col items-end">
-          <span className="text-[10px] font-mono text-slate-400">#{studentCode}</span>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] font-mono text-slate-400">#{studentCode}</span>
+            {onSelectForMove && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectForMove();
+                }}
+                className={cn(
+                  "p-0.5 rounded-md transition-colors",
+                  isSelectedForMove ? "bg-indigo-500 text-white" : "text-slate-400 hover:text-white hover:bg-white/10"
+                )}
+                title="ย้ายหรือสลับที่นั่ง"
+              >
+                <ArrowRightLeft className="w-3 h-3" />
+              </button>
+            )}
+          </div>
           <span className="text-[9.5px] font-mono font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20 mt-0.5">
             🌟 {alPoints} แต้ม
           </span>

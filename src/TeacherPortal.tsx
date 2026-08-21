@@ -10,7 +10,7 @@ import { th } from 'date-fns/locale';
 import { useStore } from './store';
 import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, PeriodSwap, SubstituteAssignment, Student } from './types';
 import { REAL_STUDENTS } from './data/realStudents';
-import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Edit3, Sparkles, Shuffle, Calendar, ArrowUpRight, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye } from 'lucide-react';
+import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Edit3, Sparkles, Shuffle, Calendar, ArrowUpRight, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { motion, AnimatePresence } from 'motion/react';
@@ -19,6 +19,7 @@ import { ActiveLearningClassroom } from './components/ActiveLearningClassroom';
 import { TeachingLoadTable } from './components/TeachingLoadTable';
 import { ClassroomSeatingManager } from './components/ClassroomSeatingManager';
 import { ClassroomLeaderboard } from './components/ClassroomLeaderboard';
+import { GPSGeofenceCheckinModal } from './components/GPSGeofenceCheckinModal';
 
 // Helper for tailwind classes
 
@@ -190,17 +191,19 @@ export function TeacherPortal() {
   const [viewingRecord, setViewingRecord] = useState<PostTeachingRecord | null>(null);
 
   // New States for Dashboard Navigation
-  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook'>('courses');
+  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence'>('courses');
+  const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
   
   // Dynamic Role-Based Access Control (RBAC) Tab Filtering
   const availableDashboardTabs = useMemo(() => {
     const rawTabs: Array<{ 
-      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook'; 
+      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence'; 
       label: string; 
       count: number; 
       hideForRoles?: string[] 
     }> = [
       { id: 'courses', label: 'ตารางสอนและการเข้าเรียน', count: myCourses.length },
+      { id: 'gps-geofence', label: '📍 พิกัดดาวเทียม & เช็คอิน (GPS Geofence)', count: 0 },
       { id: 'teaching-load', label: 'ตารางภาระงานสอน (Teaching Load)', count: 6, hideForRoles: ['SUBJECT_TEACHER'] },
       { id: 'leaderboard', label: '🏆 กระดานคะแนน Active Learning (Leaderboard)', count: Object.values(activeLearningPoints).filter(p => p > 0).length },
       { id: 'substitutions', label: 'จัดการภาระลา & สอนแทน', count: substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.date === todayStr).length + periodSwaps.filter(ps => ps.targetEmail === user?.email && ps.status === 'PENDING_TEACHER').length },
@@ -1391,6 +1394,105 @@ export function TeacherPortal() {
               <ClassroomLeaderboard />
             )}
 
+            {dashboardTab === 'gps-geofence' && (
+              <div className="space-y-6 animate-in fade-in duration-300">
+                {/* Hero Header Card */}
+                <div className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+                  <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                    <div className="space-y-2">
+                      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        ระบบระบุพิกัดดาวเทียมโรงเรียน (GPS Satellite Geofence Active)
+                      </div>
+                      <h3 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+                        เช็คอินลงเวลาปฏิบัติราชการและเข้าเรียนด้วยพิกัดดาวเทียม
+                      </h3>
+                      <p className="text-sm text-slate-300 max-w-2xl leading-relaxed">
+                        ระบบตรวจสอบพิกัด Geofence อัตโนมัติ (รัศมี 350 เมตร รอบสถานศึกษา) ป้องกันการปลอมแปลงพิกัด พร้อมบันทึกเวลาจริงและส่งผลการเช็คชื่อเข้าสู่ระบบบริหารสถานศึกษาทันที
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto shrink-0">
+                      <button
+                        onClick={() => setIsTeacherGPSModalOpen(true)}
+                        className="py-3 px-5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2.5 transition-all cursor-pointer"
+                      >
+                        <Satellite className="w-4 h-4 animate-spin [animation-duration:8s]" />
+                        <span>เปิดหน้าจอเช็คอินสด (Live GPS Clock-in)</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Campus Gate Coordinates & Status Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-[#161f30] border border-slate-800 rounded-2xl p-5 shadow-lg">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                        <MapPin className="w-5 h-5" />
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[11px] font-bold border border-emerald-500/20">
+                        เปิดบริการ 24 ชม.
+                      </span>
+                    </div>
+                    <h4 className="text-sm font-bold text-white mb-1">ประตู 1 (หน้าโรงเรียน)</h4>
+                    <p className="text-xs text-slate-400 mb-3">ถนนประชานิมิตร • ซุ้มประตูหลักและจุดคัดกรอง</p>
+                    <div className="text-[11px] font-mono text-slate-400 pt-2 border-t border-slate-800 flex justify-between">
+                      <span>Lat: 17.625620</span>
+                      <span>Lng: 100.093200</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#161f30] border border-slate-800 rounded-2xl p-5 shadow-lg">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                        <MapPin className="w-5 h-5" />
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[11px] font-bold border border-emerald-500/20">
+                        เปิดบริการ 24 ชม.
+                      </span>
+                    </div>
+                    <h4 className="text-sm font-bold text-white mb-1">ประตู 2 (ด้านหลังโรงเรียน)</h4>
+                    <p className="text-xs text-slate-400 mb-3">ซอยแปดวา • จุดจอดรถครูและบุคลากร</p>
+                    <div className="text-[11px] font-mono text-slate-400 pt-2 border-t border-slate-800 flex justify-between">
+                      <span>Lat: 17.624890</span>
+                      <span>Lng: 100.092800</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#161f30] border border-slate-800 rounded-2xl p-5 shadow-lg">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
+                        <MapPin className="w-5 h-5" />
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[11px] font-bold border border-emerald-500/20">
+                        เปิดบริการ 24 ชม.
+                      </span>
+                    </div>
+                    <h4 className="text-sm font-bold text-white mb-1">ประตู 3 (ศูนย์กีฬา/อาคารอเนกประสงค์)</h4>
+                    <p className="text-xs text-slate-400 mb-3">ฝั่งสนามกีฬาเฉลิมพระเกียรติ</p>
+                    <div className="text-[11px] font-mono text-slate-400 pt-2 border-t border-slate-800 flex justify-between">
+                      <span>Lat: 17.625800</span>
+                      <span>Lng: 100.094100</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Features Banner */}
+                <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <span>ระบบป้องกันการจำลองพิกัดเสมือน (Anti-Mock Location) และบันทึกประวัติเวลา Real-time</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Radio className="w-4 h-4 text-indigo-400" />
+                    <span>เชื่อมต่อกับระบบเช็คชื่อรายวิชาและแจ้งเตือนผู้ปกครองผ่าน LINE ทันที</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {myCourses.length === 0 && dashboardTab === 'courses' && (
               <div className="text-center py-20 border border-dashed border-white/10 rounded-2xl bg-[#151921]">
                 <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-4" />
@@ -2316,7 +2418,7 @@ export function TeacherPortal() {
               </div>
 
               <div className="flex items-center justify-between text-[10px] text-slate-500 pt-3 border-t border-slate-800/80 font-mono">
-                <span>วันเวลาที่บันทึก: {new Date(viewingRecord.submittedAt).toLocaleString('th-TH')}</span>
+                <span>วันเวลาที่บันทึก: {viewingRecord?.submittedAt ? new Date(viewingRecord.submittedAt).toLocaleString('th-TH') : '-'}</span>
                 {viewingRecord.isLate && <span className="text-amber-500 font-bold">⚠️ ส่งล่าช้า</span>}
               </div>
 
@@ -2351,6 +2453,12 @@ export function TeacherPortal() {
           onClose={() => setAssessmentModalStudent(null)}
         />
       )}
+
+      {/* Teacher GPS Satellite Geofence Modal */}
+      <GPSGeofenceCheckinModal
+        isOpen={isTeacherGPSModalOpen}
+        onClose={() => setIsTeacherGPSModalOpen(false)}
+      />
 
     </div>
   );

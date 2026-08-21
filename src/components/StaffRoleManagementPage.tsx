@@ -35,6 +35,10 @@ export const ROLE_NAMES_TH: Record<UserRole, string> = {
   HOMEROOM_TEACHER: 'ครูประจำชั้น',
   SUBJECT_TEACHER: 'ครูผู้สอน / ครูประจำวิชา',
   SUPERVISORY_TEACHER: 'ครูนิเทศ (Supervisory)',
+  INFIRMARY_STAFF: 'ครูพยาบาล / ห้องพยาบาล',
+  GUIDANCE_COUNSELOR: 'ครูแนะแนว / ให้คำปรึกษา',
+  FINANCE_STAFF: 'เจ้าหน้าที่การเงินและบัญชี',
+  INSTRUCTIONAL_SUPERVISOR: 'ครูผู้นิเทศ / ฝ่ายวิชาการ',
 };
 
 // สีกำกับแต่ละบทบาทสำหรับ Badge
@@ -45,6 +49,10 @@ export const ROLE_COLORS: Record<UserRole, { bg: string; text: string; border: s
   HOMEROOM_TEACHER: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', border: 'border-emerald-500/20' },
   SUBJECT_TEACHER: { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
   SUPERVISORY_TEACHER: { bg: 'bg-pink-500/10', text: 'text-pink-400', border: 'border-pink-500/20' },
+  INFIRMARY_STAFF: { bg: 'bg-rose-500/10', text: 'text-rose-400', border: 'border-rose-500/20' },
+  GUIDANCE_COUNSELOR: { bg: 'bg-fuchsia-500/10', text: 'text-fuchsia-400', border: 'border-fuchsia-500/20' },
+  FINANCE_STAFF: { bg: 'bg-emerald-500/10', text: 'text-emerald-300', border: 'border-emerald-500/20' },
+  INSTRUCTIONAL_SUPERVISOR: { bg: 'bg-cyan-500/10', text: 'text-cyan-400', border: 'border-cyan-500/20' },
 };
 
 // กลุ่มสาระการเรียนรู้

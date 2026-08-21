@@ -5,7 +5,11 @@ export type UserRole =
   | 'HEAD_OF_DEPARTMENT'   // หัวหน้ากลุ่มสาระการเรียนรู้
   | 'HOMEROOM_TEACHER'     // ครูประจำชั้น
   | 'SUBJECT_TEACHER'      // ครูผู้สอน / ครูประจำวิชา
-  | 'SUPERVISORY_TEACHER'; // ครูนิเทศ
+  | 'SUPERVISORY_TEACHER'  // ครูนิเทศ
+  | 'INFIRMARY_STAFF'      // ครูพยาบาล / เจ้าหน้าที่ห้องพยาบาล
+  | 'GUIDANCE_COUNSELOR'   // ครูแนะแนว / ให้คำปรึกษา
+  | 'FINANCE_STAFF'        // เจ้าหน้าที่งานการเงิน / บัญชี
+  | 'INSTRUCTIONAL_SUPERVISOR'; // ครูผู้นิเทศ / หัวหน้าฝ่ายวิชาการ
 
 // 2. นิยามสิทธิ์การเข้าถึง (Permissions)
 export type Permission = 
@@ -15,7 +19,11 @@ export type Permission =
   | 'VIEW_ALL_REPORTS'     // ดูรายงานภาพรวมทั้งโรงเรียน
   | 'VIEW_DEPT_REPORTS'    // ดูรายงานเฉพาะกลุ่มสาระฯ
   | 'MANAGE_HOMEROOM'      // ดูแลเช็กชื่อ/พฤติกรรมห้องตนเอง
-  | 'EVALUATE_TEACHERS';   // ประเมิน/นิเทศครู
+  | 'EVALUATE_TEACHERS'    // ประเมิน/นิเทศครู
+  | 'MANAGE_INFIRMARY'     // บันทึกและจัดการห้องพยาบาล ยา และตรวจสุขภาพ
+  | 'MANAGE_COUNSELING'    // จัดการระบบแนะแนว เคสให้คำปรึกษา และ SDQ/EQ
+  | 'MANAGE_FINANCE'       // จัดการงานการเงิน บัญชี และเบิกจ่ายงบประมาณ
+  | 'MANAGE_SUPERVISION';  // จัดการงานนิเทศการสอน และตรวจสอบแผนการจัดการเรียนรู้
 
 // 3. โครงสร้างบัญชีผู้ใช้ (User Profile)
 export interface UserProfile {
@@ -70,6 +78,21 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   SUPERVISORY_TEACHER: [
     'EVALUATE_TEACHERS'
+  ],
+  INFIRMARY_STAFF: [
+    'MANAGE_INFIRMARY'
+  ],
+  GUIDANCE_COUNSELOR: [
+    'MANAGE_COUNSELING'
+  ],
+  FINANCE_STAFF: [
+    'MANAGE_FINANCE',
+    'VIEW_ALL_REPORTS'
+  ],
+  INSTRUCTIONAL_SUPERVISOR: [
+    'MANAGE_SUPERVISION',
+    'EVALUATE_TEACHERS',
+    'VIEW_ALL_REPORTS'
   ]
 };
 
@@ -114,6 +137,30 @@ export const MOCK_MULTI_ROLE_USERS: UserProfile[] = [
     }
   },
   {
+    id: 'nurse-kanokwan',
+    email: 'kanokwan.n@utd.ac.th',
+    prefix: 'นางสาว',
+    firstName: 'กนกวรรณ',
+    lastName: 'พยาบาลวิชาชีพ',
+    position: 'พยาบาลโรงเรียน (Nurse Practitioner)',
+    roles: ['INFIRMARY_STAFF'],
+    assignments: {
+      departmentId: 'health-dept'
+    }
+  },
+  {
+    id: 'counselor-suda',
+    email: 'suda.c@utd.ac.th',
+    prefix: 'ดร.',
+    firstName: 'สุดา',
+    lastName: 'จิตวิทยา',
+    position: 'ครูแนะแนวและจิตวิทยาการปรึกษา (Guidance Counselor)',
+    roles: ['GUIDANCE_COUNSELOR', 'SUBJECT_TEACHER'],
+    assignments: {
+      departmentId: 'guidance-dept'
+    }
+  },
+  {
     id: 'teacher-somchai',
     email: 'somchai.j@school.ac.th',
     prefix: 'นาย',
@@ -155,6 +202,31 @@ export const MOCK_MULTI_ROLE_USERS: UserProfile[] = [
     roles: ['EXECUTIVE', 'SUPER_ADMIN'],
     assignments: {
       departmentId: 'administration'
+    }
+  },
+  {
+    id: 'finance-somying',
+    email: 'somying.f@utd.ac.th',
+    prefix: 'นางสาว',
+    firstName: 'สมหญิง',
+    lastName: 'การเงิน',
+    position: 'เจ้าหน้าที่บริหารงานการเงินและบัญชี',
+    roles: ['FINANCE_STAFF'],
+    assignments: {
+      departmentId: 'finance-dept'
+    }
+  },
+  {
+    id: 'supervisor-narong',
+    email: 'narong.s@utd.ac.th',
+    prefix: 'ดร.',
+    firstName: 'ณรงค์',
+    lastName: 'วิชาการ',
+    position: 'หัวหน้าฝ่ายวิชาการและศึกษานิเทศก์',
+    roles: ['INSTRUCTIONAL_SUPERVISOR', 'SUPERVISORY_TEACHER', 'HEAD_OF_DEPARTMENT'],
+    assignments: {
+      departmentId: 'academic-dept',
+      supervisoryMentees: ['teacher-somchai', 'teacher-wipada']
     }
   }
 ];

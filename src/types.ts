@@ -309,6 +309,382 @@ export interface StudentSelfAssessment {
   };
 }
 
+// Student & Parent Portal Enhanced Module Types
+export interface GateAttendanceRecord {
+  id: string;
+  studentId: string;
+  studentName: string;
+  type: 'ENTRY' | 'EXIT';
+  timestamp: string; // e.g. "07:28 น."
+  date: string; // e.g. "2026-08-20"
+  gateName: string; // e.g. "ประตู 1 (หน้าโรงเรียน)"
+  method: 'NFC_CARD' | 'BIOMETRIC_FACE' | 'BIOMETRIC_FINGER' | 'MANUAL' | 'GPS_GEOFENCE' | 'BEACON_BLE';
+  status: 'ON_TIME' | 'LATE' | 'NORMAL';
+  temperature?: number;
+  parentNotified: boolean;
+  distanceMeters?: number;
+  coordinates?: { latitude: number; longitude: number };
+  selfieUrl?: string;
+}
+
+export interface GPSCheckInLog {
+  id: string;
+  userId: string;
+  userName: string;
+  userRole: string;
+  type: 'ENTRY' | 'EXIT';
+  timestamp: string;
+  date: string;
+  latitude: number;
+  longitude: number;
+  distanceMeters: number;
+  isInsideGeofence: boolean;
+  status: 'ON_TIME' | 'LATE' | 'EARLY_DEPARTURE' | 'NORMAL_DEPARTURE';
+  accuracyMeters?: number;
+  nearestGate?: string;
+  selfieUrl?: string;
+  notes?: string;
+}
+
+export interface DetailedLeaveRequest {
+  id: string;
+  studentId: string;
+  leaveType: 'SICK' | 'PERSONAL' | 'ACTIVITY' | 'OTHER';
+  startDate: string;
+  endDate: string;
+  totalDays: number;
+  reason: string;
+  attachmentUrl?: string;
+  attachmentName?: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  submittedBy: string;
+  submittedAt: string;
+  teacherRemarks?: string;
+  approvedBy?: string;
+}
+
+export interface SemesterHealthRecord {
+  semester: string; // e.g. "1/2569"
+  height: number; // cm
+  weight: number; // kg
+  bmi: number;
+  bmiCategory: 'UNDERWEIGHT' | 'NORMAL' | 'OVERWEIGHT' | 'OBESE';
+  bloodType: string;
+  systolicBp?: number;
+  diastolicBp?: number;
+  recordedAt: string;
+}
+
+export interface ChronicIllness {
+  id: string;
+  name: string;
+  severity: 'MILD' | 'MODERATE' | 'SEVERE';
+  treatmentCare: string;
+}
+
+export interface AllergyRecord {
+  id: string;
+  allergen: string;
+  type: 'FOOD' | 'DRUG' | 'ENVIRONMENTAL';
+  reaction: string;
+}
+
+export interface SpecialCareNeed {
+  id: string;
+  category: string;
+  description: string;
+  actionPlan: string;
+}
+
+export interface InfirmaryVisit {
+  id: string;
+  studentId: string;
+  visitTime: string;
+  symptoms: string;
+  temperature: number;
+  treatment: string;
+  medicationGiven: string;
+  restDurationMinutes: number;
+  nurseName: string;
+  isUrgentAlert: boolean;
+  parentAcknowledged: boolean;
+  acknowledgedAt?: string;
+}
+
+export interface TwoQuestionScreening {
+  id: string;
+  studentId: string;
+  q1Depressed: boolean; // ใน 2 สัปดาห์ที่ผ่านมารู้สึกหดหู่ เศร้า หรือท้อแท้
+  q2Hopeless: boolean;  // ใน 2 สัปดาห์ที่ผ่านมารู้สึกเบื่อ ไม่มีความสุขในการทำสิ่งต่างๆ
+  isPositive: boolean;
+  conductedAt: string;
+}
+
+export interface PHQ9Screening {
+  id: string;
+  studentId: string;
+  answers: number[]; // 9 questions (0 - 3)
+  totalScore: number; // 0 - 27
+  riskLevel: 'NORMAL' | 'MILD' | 'MODERATE' | 'SEVERE' | 'VERY_SEVERE';
+  recommendation: string;
+  conductedAt: string;
+}
+
+export interface SDQAssessment {
+  id: string;
+  studentId: string;
+  evaluatorType: 'STUDENT' | 'TEACHER' | 'PARENT';
+  evaluatorName: string;
+  subscaleScores: {
+    emotional: number; // อารมณ์ (0-10)
+    conduct: number;   // ความประพฤติ (0-10)
+    hyperactivity: number; // สมาธิสั้น (0-10)
+    peerProblems: number;  // ปัญหาเพื่อน (0-10)
+    prosocial: number;     // สัมพันธภาพทางสังคม (0-10)
+  };
+  totalDifficultiesScore: number; // รวม 4 ด้านแรก (0-40)
+  triagingStatus: 'NORMAL' | 'AT_RISK' | 'VULNERABLE';
+  assessmentDate: string;
+  recommendations: string[];
+}
+
+export interface GuardianBackground {
+  relation: string;
+  fullName: string;
+  phone: string;
+  lineId: string;
+  occupation: string;
+  monthlyIncome: number;
+  maritalStatus: 'MARRIED_TOGETHER' | 'DIVORCED' | 'SEPARATED' | 'DECEASED' | 'SINGLE_PARENT';
+  householdMembersCount: number;
+  dependentsCount: number;
+  emergencyContact: {
+    name: string;
+    phone: string;
+    relationship: string;
+  };
+}
+
+export interface HomeVisitLogRecord {
+  id: string;
+  studentId: string;
+  visitedDate: string;
+  teacherName: string;
+  counselorName: string;
+  coordinates: [number, number];
+  addressText: string;
+  livingConditions: string;
+  photos: { url: string; caption: string }[];
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  counselorNotes: string;
+  studentEnvironmentRating: number; // 1-5
+}
+
+export interface EQFHardshipScreening {
+  id: string;
+  studentId: string;
+  householdIncomePerCapita: number; // บาท/คน/เดือน
+  electricityBillMonthly: number;
+  housingConditionRating: number; // 1-5
+  travelBarrierScore: number; // 1-5
+  familyBurdenScore: number; // 1-5
+  overallHardshipIndex: number; // 0-100
+  isEligibleForGrant: boolean;
+  grantType: string; // e.g. "ทุนเสมอภาค (กสศ.) กลุ่มยากจนพิเศษ"
+  status: 'APPROVED' | 'UNDER_REVIEW' | 'REJECTED';
+  assessedDate: string;
+}
+
+export interface MeritDemeritRecord {
+  id: string;
+  studentId: string;
+  type: 'MERIT' | 'DEMERIT';
+  points: number;
+  category: string;
+  description: string;
+  teacherName: string;
+  date: string;
+  academicYear: string;
+}
+
+export interface BehaviorCertificate {
+  certificateNo: string;
+  studentId: string;
+  studentFullName: string;
+  studentNo: number;
+  room: string;
+  academicYear: string;
+  currentScore: number;
+  behaviorRating: 'EXCELLENT' | 'VERY_GOOD' | 'GOOD' | 'FAIR';
+  issuedDate: string;
+  directorName: string;
+  verificationHash: string;
+}
+
+export interface PortfolioItem {
+  id: string;
+  studentId: string;
+  title: string;
+  category: 'ACADEMIC' | 'STEM' | 'ARTS_MUSIC' | 'SPORTS' | 'LEADERSHIP' | 'VOLUNTEER';
+  awardLevel?: string;
+  date: string;
+  photos: string[];
+  description: string;
+  skills: string[];
+  isVerifiedByTeacher: boolean;
+  teacherVerifier?: string;
+}
+
+export interface DigitalCertificate {
+  id: string;
+  studentId: string;
+  title: string;
+  issuer: string;
+  issueDate: string;
+  category: 'ACADEMIC' | 'ACTIVITY' | 'VOLUNTEER' | 'EXTERNAL';
+  certificateUrl: string;
+  verificationStatus: 'VERIFIED_OFFICIAL' | 'VERIFIED_EXTERNAL' | 'PENDING';
+  credentialId: string;
+}
+
+export interface VolunteerHourRecord {
+  id: string;
+  studentId: string;
+  activityName: string;
+  hours: number;
+  organization: string;
+  date: string;
+  status: 'APPROVED' | 'PENDING' | 'REJECTED';
+  verifierTeacher: string;
+  description?: string;
+}
+
+export interface TCASPortfolioConfig {
+  studentId: string;
+  targetFaculty: string;
+  targetUniversity: string;
+  themeColor: string;
+  statementOfPurpose: string;
+  selectedPortfolioItemIds: string[];
+  selectedCertificateIds: string[];
+}
+
+export interface ReportCardSubject {
+  code?: string;
+  courseCode?: string;
+  name?: string;
+  courseName?: string;
+  credit?: number;
+  credits?: number;
+  preMidterm?: number;
+  midterm?: number;
+  midtermScore?: number;
+  postMidterm?: number;
+  final?: number;
+  finalScore?: number;
+  totalScore?: number;
+  grade: string | number;
+  evaluation?: 'ผ่านเกณฑ์ดีเยี่ยม' | 'ผ่านเกณฑ์' | 'ปรับปรุง' | string;
+}
+
+export interface ReportCardTerm {
+  term?: string; // e.g. "1/2569"
+  semester?: string;
+  year?: string;
+  gpa: number;
+  gpax: number;
+  creditsEarned?: number;
+  totalCredits?: number;
+  classRank?: number;
+  homeroomRemarks?: string;
+  studentId?: string;
+  subjects: ReportCardSubject[];
+}
+
+export type ReportCardSemester = ReportCardTerm;
+
+export interface HomeworkAssignment {
+  id: string;
+  studentId?: string;
+  courseCode: string;
+  courseName: string;
+  title: string;
+  description: string;
+  dueDate: string;
+  assignedDate: string;
+  maxScore: number;
+  status: 'ASSIGNED' | 'SUBMITTED' | 'GRADED' | 'OVERDUE';
+  submittedFile?: string;
+  submittedAt?: string;
+  scoreReceived?: number;
+  score?: number;
+  teacherFeedback?: string;
+  feedback?: string;
+}
+
+export interface ExamScheduleItem {
+  id: string;
+  subjectCode: string;
+  subjectName: string;
+  courseCode?: string;
+  courseName?: string;
+  examType: 'MIDTERM' | 'FINAL';
+  date: string;
+  time: string;
+  timeSlot?: string;
+  room: string;
+  seatNumber: string;
+  seatNo?: string;
+  toolsAllowed?: string;
+}
+
+export interface BillingInvoiceItem {
+  description: string;
+  amount: number;
+}
+
+export interface BillingInvoice {
+  id: string;
+  studentId: string;
+  invoiceNo: string;
+  title: string;
+  items: BillingInvoiceItem[];
+  totalAmount: number;
+  dueDate: string;
+  status: 'UNPAID' | 'PAID' | 'OVERDUE';
+  promptPayQr: string;
+  paidAt?: string;
+  receiptNo?: string;
+}
+
+export interface ParentTeacherMessage {
+  id: string;
+  studentId: string;
+  senderRole: 'PARENT' | 'TEACHER' | 'COUNSELOR';
+  senderName: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+}
+
+export interface ParentAppointment {
+  id: string;
+  studentId: string;
+  parentId?: string;
+  parentName?: string;
+  teacherName: string;
+  teacherRole?: string;
+  topic: string;
+  preferredDate?: string;
+  date?: string;
+  timeSlot: string;
+  meetingType: 'ONSITE' | 'ONLINE_MEET';
+  status: 'REQUESTED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED';
+  counselorNotes?: string;
+  meetLink?: string;
+  locationOrLink?: string;
+}
+
 export interface StoreState {
   user: User | null;
   currentDate: Date;
@@ -342,6 +718,44 @@ export interface StoreState {
   // Active Learning Points & Leaderboard
   activeLearningPoints: Record<string, number>; // studentId -> cumulative points
   activeLearningLogs: ActiveLearningRecord[];
+
+  // Student & Parent Module Extended State
+  gateAttendanceLogs: GateAttendanceRecord[];
+  detailedLeaveRequests: DetailedLeaveRequest[];
+  semesterHealthLogs: Record<string, SemesterHealthRecord[]>;
+  chronicIllnesses: Record<string, ChronicIllness[]>;
+  allergies: Record<string, AllergyRecord[]>;
+  specialCareNeeds: Record<string, SpecialCareNeed[]>;
+  infirmaryVisits: InfirmaryVisit[];
+  twoQuestionScreenings: Record<string, TwoQuestionScreening>;
+  phq9Screenings: Record<string, PHQ9Screening>;
+  sdqAssessments: SDQAssessment[];
+  guardianProfiles: Record<string, GuardianBackground>;
+  homeVisitLogs: HomeVisitLogRecord[];
+  eqfHardshipScreenings: Record<string, EQFHardshipScreening>;
+  meritDemeritLogs: MeritDemeritRecord[];
+  portfolioItems: PortfolioItem[];
+  digitalCertificates: DigitalCertificate[];
+  volunteerRecords: VolunteerHourRecord[];
+  reportCards: Record<string, ReportCardTerm[]>;
+  homeworkAssignments: HomeworkAssignment[];
+  examSchedules: ExamScheduleItem[];
+  billingInvoices: BillingInvoice[];
+  parentTeacherMessages: ParentTeacherMessage[];
+  parentAppointments: ParentAppointment[];
+
+  schoolGeofenceConfig: {
+    schoolId: string;
+    schoolName: string;
+    schoolAddress: string;
+    centerCoordinates: { latitude: number; longitude: number };
+    radiusMeters: number;
+    entryStartTime: string;
+    entryLateTime: string;
+    exitStartTime: string;
+    gates: { id: string; name: string; coordinates: { latitude: number; longitude: number }; radiusMeters: number }[];
+  };
+  gpsCheckInLogs: GPSCheckInLog[];
 
   // Actions
   addActiveLearningPoints: (studentId: string, points: number, category?: ActiveLearningCategory, note?: string, courseId?: string) => void;
@@ -387,4 +801,25 @@ export interface StoreState {
   scheduleConference: (conferenceId: string, date: string, time: string) => void;
   addMockParentNotification: (notif: Omit<ParentNotification, 'id' | 'createdAt' | 'status'>) => void;
   saveSelfAssessment: (assessment: StudentSelfAssessment) => Promise<void>;
+
+  // Extended Student & Parent Module Actions
+  recordGateAttendance: (studentId: string, type: 'ENTRY' | 'EXIT', method: GateAttendanceRecord['method']) => void;
+  submitDetailedLeave: (request: Omit<DetailedLeaveRequest, 'id' | 'submittedAt' | 'status'>) => void;
+  approveDetailedLeave: (id: string, teacherRemarks?: string) => void;
+  acknowledgeInfirmaryAlert: (visitId: string) => void;
+  savePHQ9Screening: (studentId: string, answers: number[]) => void;
+  save2QScreening: (studentId: string, q1: boolean, q2: boolean) => void;
+  submitSDQAssessment: (sdq: Omit<SDQAssessment, 'id' | 'assessmentDate'>) => void;
+  addMeritDemeritRecord: (studentId: string, type: 'MERIT' | 'DEMERIT', points: number, category: string, description: string, teacherName: string) => void;
+  addPortfolioItem: (item: Omit<PortfolioItem, 'id' | 'isVerifiedByTeacher'>) => void;
+  addDigitalCertificate: (cert: Omit<DigitalCertificate, 'id'>) => void;
+  submitVolunteerHours: (record: Omit<VolunteerHourRecord, 'id' | 'status'>) => void;
+  submitHomework: (assignmentId: string, fileName: string) => void;
+  payBillingInvoice: (invoiceId: string) => void;
+  sendParentTeacherMessage: (studentId: string, senderRole: ParentTeacherMessage['senderRole'], senderName: string, message: string) => void;
+  bookParentAppointment: (appointment: Omit<ParentAppointment, 'id' | 'status'>) => void;
+
+  // GPS Geofence Actions
+  addGPSCheckInLog: (log: Omit<GPSCheckInLog, 'id'>) => void;
+  updateSchoolGeofenceConfig: (config: Partial<StoreState['schoolGeofenceConfig']>) => void;
 }

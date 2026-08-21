@@ -74,45 +74,45 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
-      <div className="bg-[#151921] border border-white/10 rounded-2xl p-8 max-w-lg w-full shadow-2xl flex flex-col items-center text-center space-y-6">
-        <div className="w-16 h-16 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl flex items-center justify-center border border-white/10 shadow-lg">
-          <LogIn className="w-8 h-8 text-white" />
+    <div className="min-h-[100dvh] w-full bg-slate-900 flex flex-col items-center justify-center p-3 sm:p-6 overflow-y-auto touch-scroll">
+      <div className="bg-[#151921] border border-white/10 rounded-2xl sm:rounded-3xl p-5 sm:p-8 w-full max-w-full sm:max-w-lg shadow-2xl flex flex-col items-center text-center space-y-5 sm:space-y-6 my-auto">
+        <div className="w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl flex items-center justify-center border border-white/10 shadow-lg">
+          <LogIn className="w-7 h-7 sm:w-8 sm:h-8 text-white" />
         </div>
         
-        <div className="space-y-2">
-          <h1 className="text-2xl font-bold text-white tracking-tight">Smart School Care</h1>
-          <p className="text-slate-400 text-sm">เข้าสู่ระบบเพื่อเข้าใช้งานระบบบริหารจัดการและช่วยเหลือนักเรียน</p>
+        <div className="space-y-1 sm:space-y-2">
+          <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Smart School Care</h1>
+          <p className="text-slate-400 text-xs sm:text-sm px-2">เข้าสู่ระบบเพื่อเข้าใช้งานระบบบริหารจัดการและช่วยเหลือนักเรียน</p>
         </div>
 
         {/* ระบบเข้าใช้งานหลัก */}
-        <div className="w-full space-y-3 pt-2">
+        <div className="w-full space-y-3 pt-1">
           <button 
             onClick={() => handleLogin('teacher')}
-            className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-100 text-slate-900 font-medium py-3 px-4 rounded-xl transition-all shadow-md active:scale-[0.98]"
+            className="w-full min-h-[48px] flex items-center justify-center gap-3 bg-white hover:bg-slate-100 text-slate-900 font-medium py-3 px-4 rounded-xl text-xs sm:text-sm transition-all shadow-md active:scale-[0.98] cursor-pointer"
           >
-            <img src="https://www.google.com/favicon.ico" alt="Google" className="w-5 h-5" />
-            เข้าสู่ระบบบุคลากรและนักเรียน (@utd.ac.th)
+            <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+            <span className="truncate">เข้าสู่ระบบบุคลากรและนักเรียน (@utd.ac.th)</span>
           </button>
           
           <button 
             onClick={() => handleLogin('parent')}
-            className="w-full flex items-center justify-center gap-3 bg-[#00B900] hover:bg-[#00A000] text-white font-medium py-3 px-4 rounded-xl transition-all shadow-md active:scale-[0.98]"
+            className="w-full min-h-[48px] flex items-center justify-center gap-3 bg-[#00B900] hover:bg-[#00A000] text-white font-medium py-3 px-4 rounded-xl text-xs sm:text-sm transition-all shadow-md active:scale-[0.98] cursor-pointer"
           >
-            <div className="w-5 h-5 bg-white text-[#00B900] rounded-full flex items-center justify-center font-bold text-xs">
+            <div className="w-4 h-4 sm:w-5 sm:h-5 bg-white text-[#00B900] rounded-full flex items-center justify-center font-bold text-[10px] sm:text-xs shrink-0">
               L
             </div>
-            เข้าสู่ระบบสำหรับผู้ปกครอง (LINE)
+            <span className="truncate">เข้าสู่ระบบสำหรับผู้ปกครอง (LINE)</span>
           </button>
         </div>
 
         {/* บัญชีทดสอบระบบใหม่ (Multi-role Switcher Accounts) */}
-        <div className="w-full pt-5 border-t border-white/10 space-y-3">
+        <div className="w-full pt-4 sm:pt-5 border-t border-white/10 space-y-2.5 sm:space-y-3">
           <div className="text-left">
-            <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider block mb-1">
+            <span className="text-[11px] sm:text-xs font-bold text-indigo-400 uppercase tracking-wider block mb-0.5">
               Multi-role Switcher Accounts
             </span>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[10px] sm:text-[11px] text-slate-400">
               ทดสอบบัญชีของบุคลากรที่รับผิดชอบหลายหน้าที่ (สลับสิทธิ์ผ่าน Navbar ได้ทันที)
             </p>
           </div>
@@ -122,25 +122,25 @@ export function LoginPage() {
               <button
                 key={profile.id}
                 onClick={() => handleMultiRoleLogin(profile)}
-                className="w-full p-3 bg-slate-800/40 hover:bg-slate-800/80 border border-slate-800 hover:border-indigo-500/40 rounded-xl transition-all flex items-center justify-between group cursor-pointer"
+                className="w-full p-2.5 sm:p-3 bg-slate-800/40 hover:bg-slate-800/80 border border-slate-800 hover:border-indigo-500/40 rounded-xl transition-all flex items-center justify-between group cursor-pointer active:scale-[0.99]"
               >
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg flex items-center justify-center font-bold text-xs group-hover:bg-indigo-500/20">
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 pr-2">
+                  <div className="w-8 h-8 sm:w-9 sm:h-9 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg flex items-center justify-center font-bold text-xs group-hover:bg-indigo-500/20 shrink-0">
                     {profile.firstName[0]}
                   </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-200 group-hover:text-white">
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-bold text-slate-200 group-hover:text-white truncate">
                       {profile.prefix}{profile.firstName} {profile.lastName}
                     </h4>
-                    <p className="text-[10px] text-slate-400">{profile.position}</p>
+                    <p className="text-[9.5px] sm:text-[10px] text-slate-400 truncate">{profile.position}</p>
                   </div>
                 </div>
                 
-                <div className="flex flex-wrap gap-1 justify-end max-w-[160px]">
+                <div className="flex flex-wrap gap-1 justify-end max-w-[130px] sm:max-w-[160px] shrink-0">
                   {profile.roles.map((role) => (
                     <span 
                       key={role} 
-                      className="text-[9px] px-1.5 py-0.5 bg-slate-900 text-slate-300 rounded border border-slate-700/50"
+                      className="text-[8.5px] sm:text-[9px] px-1.5 py-0.5 bg-slate-900 text-slate-300 rounded border border-slate-700/50"
                     >
                       {role === 'SUPER_ADMIN' ? 'Admin' :
                        role === 'EXECUTIVE' ? 'ผู้บริหาร' :
@@ -156,14 +156,14 @@ export function LoginPage() {
         </div>
         
         {/* Developer Bypass / Quick Login */}
-        <div className="w-full pt-4 border-t border-white/5 space-y-2">
-          <p className="text-xs text-slate-500">Developer Bypass / Quick Login</p>
+        <div className="w-full pt-3 sm:pt-4 border-t border-white/5 space-y-2 pb-safe">
+          <p className="text-[11px] text-slate-500">Developer Bypass / Quick Login</p>
           <div className="flex flex-wrap justify-center gap-1.5">
-            <button onClick={() => handleLogin('teacher')} className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5">Subject Teacher</button>
-            <button onClick={() => handleLogin('advisor')} className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5">Homeroom Advisor</button>
-            <button onClick={() => handleLogin('executive')} className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5">Executive</button>
-            <button onClick={() => handleLogin('student')} className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5">Student</button>
-            <button onClick={() => handleLogin('admin')} className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5">Admin</button>
+            <button onClick={() => handleLogin('teacher')} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5 active:scale-95">Subject Teacher</button>
+            <button onClick={() => handleLogin('advisor')} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5 active:scale-95">Homeroom Advisor</button>
+            <button onClick={() => handleLogin('executive')} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5 active:scale-95">Executive</button>
+            <button onClick={() => handleLogin('student')} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5 active:scale-95">Student</button>
+            <button onClick={() => handleLogin('admin')} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5 active:scale-95">Admin</button>
           </div>
         </div>
       </div>

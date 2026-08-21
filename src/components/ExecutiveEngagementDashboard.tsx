@@ -268,7 +268,7 @@ export const ExecutiveEngagementDashboard: React.FC<Props> = ({
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">คะแนน Active รวมทั้งโรงเรียน</span>
           </div>
           <div className="text-3xl font-black text-white mt-1">
-            {totalSchoolPoints.toLocaleString()} <span className="text-xs font-medium text-emerald-400">Pts</span>
+            {(totalSchoolPoints || 0).toLocaleString()} <span className="text-xs font-medium text-emerald-400">Pts</span>
           </div>
           <div className="flex items-center gap-1.5 mt-3 text-xs text-emerald-400 font-semibold">
             <TrendingUp className="w-3.5 h-3.5" /> +14.8% เทียบกับเดือนก่อน
@@ -289,7 +289,7 @@ export const ExecutiveEngagementDashboard: React.FC<Props> = ({
             {avgSchoolParticipation}%
           </div>
           <div className="flex items-center gap-1.5 mt-3 text-xs text-slate-400">
-            ครอบคลุมนักเรียนทั้งหมด <span className="text-white font-bold">{totalSchoolStudents.toLocaleString()}</span> คน
+            ครอบคลุมนักเรียนทั้งหมด <span className="text-white font-bold">{(totalSchoolStudents || 0).toLocaleString()}</span> คน
           </div>
         </div>
 
@@ -540,7 +540,8 @@ export const ExecutiveEngagementDashboard: React.FC<Props> = ({
                       qna: 'การซักถาม/อภิปราย (Q&A)',
                       problemSolving: 'การแก้โจทย์ปัญหา (Problem Solving)'
                     };
-                    return [`${value.toLocaleString()} pts`, labels[name] || name];
+                    const numericVal = typeof value === 'number' ? value : Number(value) || 0;
+                    return [`${numericVal.toLocaleString()} pts`, labels[name] || name];
                   }}
                 />
                 <Legend 
@@ -669,10 +670,10 @@ export const ExecutiveEngagementDashboard: React.FC<Props> = ({
                     </div>
                   </td>
                   <td className="px-6 py-4 text-center font-mono text-slate-300">
-                    {g.studentsCount.toLocaleString()} คน
+                    {(g.studentsCount || 0).toLocaleString()} คน
                   </td>
                   <td className="px-6 py-4 text-center font-mono font-bold text-emerald-400">
-                    {g.totalPoints.toLocaleString()} Pts
+                    {(g.totalPoints || 0).toLocaleString()} Pts
                   </td>
                   <td className="px-6 py-4 text-center font-mono font-bold text-white">
                     {g.avgPoints} Pts

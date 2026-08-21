@@ -7,10 +7,15 @@ import { AdvisorPortal } from './AdvisorPortal';
 import { ExecutivePortal } from './ExecutivePortal';
 import { StudentPortal } from './StudentPortal';
 import { AdminPortal } from './AdminPortal';
+import { InfirmaryPortal } from './components/infirmary/InfirmaryPortal';
+import { GuidancePortal } from './components/guidance/GuidancePortal';
+import { FinancePortal } from './components/finance/FinancePortal';
+import { SupervisionPortal } from './components/supervision/SupervisionPortal';
 import { LoginPage } from './LoginPage';
 import { LogOut } from 'lucide-react';
 import { useStore } from './store';
 import { NavbarWithRoleSwitcher } from './components/NavbarWithRoleSwitcher';
+import { QuickActionHub } from './components/QuickActionHub';
 import { UserRole, Role } from './types';
 
 export default function App() {
@@ -26,7 +31,6 @@ export default function App() {
 
   const handleRoleChange = (role: UserRole) => {
     if (user && user.profile) {
-      // จับคู่ UserRole ของระบบใหม่ เข้ากับ Legacy Portal Role ของตัวจำลองที่มีอยู่
       let legacyRole: Role = 'teacher';
       if (role === 'SUPER_ADMIN') {
         legacyRole = 'admin';
@@ -72,33 +76,44 @@ export default function App() {
       <div className="flex-1 flex flex-col">
         <AnimatePresence mode="wait">
           <motion.div
-            key={user.role}
+            key={user.activeRole || user.role}
             initial={{ opacity: 0, y: 15, scale: 0.99 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -15, scale: 0.99 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
             className="flex-1 flex flex-col"
           >
-            {user.role === 'teacher' ? (
+            {user.activeRole === 'FINANCE_STAFF' ? (
+              <FinancePortal />
+            ) : user.activeRole === 'INSTRUCTIONAL_SUPERVISOR' ? (
+              <SupervisionPortal />
+            ) : user.activeRole === 'INFIRMARY_STAFF' ? (
+              <InfirmaryPortal />
+            ) : user.activeRole === 'GUIDANCE_COUNSELOR' ? (
+              <GuidancePortal />
+            ) : user.role === 'teacher' ? (
               <TeacherPortal />
             ) : user.role === 'advisor' ? (
               <AdvisorPortal />
             ) : user.role === 'executive' ? (
               <ExecutivePortal />
             ) : user.role === 'student' ? (
-              <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+              <div className="min-h-[100dvh] w-full bg-slate-950 sm:bg-slate-900 flex items-center justify-center p-0 sm:p-4">
                 <StudentPortal />
               </div>
             ) : user.role === 'admin' ? (
               <AdminPortal />
             ) : (
-              <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+              <div className="min-h-[100dvh] w-full bg-slate-950 sm:bg-slate-900 flex items-center justify-center p-0 sm:p-4">
                 <ParentPortal />
               </div>
             )}
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* Floating Quick Action Navigation & GPS Hub */}
+      <QuickActionHub />
     </div>
   );
 }
