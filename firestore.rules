@@ -59,7 +59,9 @@ service cloud.firestore {
 
     // 5. Parent-Teacher Conferences
     match /parent_conferences/{confId} {
-      allow read: if isSignedIn();
+      allow read: if hasRole('SUPER_ADMIN') || 
+                     hasRole('HOMEROOM_TEACHER') || 
+                     (isSignedIn() && resource.data.parentId == request.auth.uid);
       allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
     }
 
