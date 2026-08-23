@@ -96,6 +96,8 @@ export function AdvisorPortal() {
   const [editNickname, setEditNickname] = useState('');
   const [editPhotoUrl, setEditPhotoUrl] = useState('');
   const [editAddress, setEditAddress] = useState('');
+  const [editParentUid, setEditParentUid] = useState('');
+  const [editParentEmail, setEditParentEmail] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   
   const pendingLeaves = leaveRequests.filter(r => r.status === 'PENDING');
@@ -783,9 +785,11 @@ export function AdvisorPortal() {
                                 onClick={() => {
                                   if (isEditingLocked) return;
                                   setEditProfileStudent(student);
-                                  setEditNickname(student.nickname);
-                                  setEditPhotoUrl(student.photoUrl);
-                                  setEditAddress(student.homeLocation.address);
+                                  setEditNickname(student.nickname || '');
+                                  setEditPhotoUrl(student.photoUrl || student.avatar || '');
+                                  setEditAddress(student.homeLocation?.address || '');
+                                  setEditParentUid((student as any).parentUid || (student as any).parentId || '');
+                                  setEditParentEmail((student as any).parentEmail || '');
                                 }}
                                 disabled={isEditingLocked}
                                 className={cn(
@@ -1487,16 +1491,49 @@ export function AdvisorPortal() {
                  />
                </div>
 
+               <div className="pt-2 border-t border-white/10 space-y-3">
+                 <div className="text-xs font-bold text-emerald-400">🔗 เชื่อมโยงบัญชีผู้ปกครอง (Parent Account Linkage)</div>
+                 
+                 <div>
+                   <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                     Firebase Auth UID ของผู้ปกครอง (parentUid)
+                   </label>
+                   <input
+                     type="text"
+                     value={editParentUid}
+                     onChange={(e) => setEditParentUid(e.target.value)}
+                     placeholder="เช่น test_parent_001 หรือ UID จาก Firebase Auth"
+                     className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-emerald-300 focus:border-emerald-500 outline-none font-mono"
+                   />
+                   <p className="text-[10px] text-slate-500 mt-0.5">ใช้สำหรับสิทธิ์ความปลอดภัย Firestore Rules ให้ผู้ปกครองเข้าถึงข้อมูลบุตรหลาน</p>
+                 </div>
+
+                 <div>
+                   <label className="block text-[11px] font-semibold text-slate-400 mb-1">
+                     อีเมลผู้ปกครอง (Parent Email)
+                   </label>
+                   <input
+                     type="email"
+                     value={editParentEmail}
+                     onChange={(e) => setEditParentEmail(e.target.value)}
+                     placeholder="เช่น parent.test@gmail.com"
+                     className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:border-indigo-500 outline-none"
+                   />
+                 </div>
+               </div>
+
                <div className="pt-2 flex gap-2">
                  <button
                    onClick={() => {
                      updateStudentProfile(editProfileStudent.studentId, {
                        nickname: editNickname,
                        photoUrl: editPhotoUrl,
-                       address: editAddress
+                       address: editAddress,
+                       parentUid: editParentUid,
+                       parentEmail: editParentEmail
                      });
                      setEditProfileStudent(null);
-                     setToastMessage(`อัปเดตข้อมูลของ ${editProfileStudent.name} สำเร็จแล้ว`);
+                     setToastMessage(`อัปเดตข้อมูลและเชื่อมโยงผู้ปกครองของ ${editProfileStudent.name} สำเร็จแล้ว`);
                      setTimeout(() => setToastMessage(null), 3000);
                    }}
                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all shadow-md"

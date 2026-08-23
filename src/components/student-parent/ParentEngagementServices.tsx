@@ -93,7 +93,7 @@ export function ParentEngagementServices({ studentId }: { studentId: string }) {
     e.preventDefault();
     bookParentAppointment({
       studentId: student.studentId,
-      parentId: `parent_${student.studentId}`,
+      parentId: (student as any)?.parentUid || (student as any)?.parentId || `parent_${student.studentId}`,
       teacherName,
       date: appointmentDate,
       timeSlot,

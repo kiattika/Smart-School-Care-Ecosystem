@@ -51,7 +51,7 @@ service cloud.firestore {
     match /parent_notifications/{notifId} {
       allow read: if hasRole('SUPER_ADMIN') || 
                      hasRole('HOMEROOM_TEACHER') || 
-                     (isSignedIn() && resource.data.parentId == request.auth.uid);
+                     (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid));
       allow write: if hasRole('SUPER_ADMIN') || 
                       hasRole('HOMEROOM_TEACHER') || 
                       hasRole('SUBJECT_TEACHER');
@@ -61,7 +61,7 @@ service cloud.firestore {
     match /parent_conferences/{confId} {
       allow read: if hasRole('SUPER_ADMIN') || 
                      hasRole('HOMEROOM_TEACHER') || 
-                     (isSignedIn() && resource.data.parentId == request.auth.uid);
+                     (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid));
       allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
     }
 

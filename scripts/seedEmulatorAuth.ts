@@ -272,12 +272,30 @@ export async function seedEmulatorAuth() {
         const notifDocRef = db.collection('parent_notifications').doc(`notif_parent_test_01`);
         await notifDocRef.set({
           id: `notif_parent_test_01`,
+          parentUid: userDef.studentInfo.parentId,
           parentId: userDef.studentInfo.parentId,
           studentId: userDef.studentInfo.studentId,
           studentName: 'นายกิตติคุณ มงคลศิลป์',
           title: 'ยินดีต้อนรับสู่ระบบ Smart School Care',
           message: 'บัญชีผู้ปกครองได้รับการเชื่อมโยงกับนักเรียนเรียบร้อยแล้วค่ะ',
           status: 'unread',
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+
+        // Add a sample parent conference for testing parent conference rules
+        const confDocRef = db.collection('parent_conferences').doc(`conf_test_01`);
+        await confDocRef.set({
+          id: `conf_test_01`,
+          parentUid: userDef.studentInfo.parentId,
+          parentId: userDef.studentInfo.parentId,
+          studentId: userDef.studentInfo.studentId,
+          studentName: 'นายกิตติคุณ มงคลศิลป์',
+          title: 'การนัดพบเพื่อวางแผนการเรียนภาคเรียนที่ 1/2569',
+          message: 'ขอเรียนเชิญผู้ปกครองเข้าร่วมการปรึกษาแนวทางการศึกษาต่อระดับอุดมศึกษา',
+          status: 'SCHEDULED',
+          scheduledDate: '2026-08-28',
+          scheduledTime: '13:00 - 14:00 น.',
+          remainingScore: 100,
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
       }

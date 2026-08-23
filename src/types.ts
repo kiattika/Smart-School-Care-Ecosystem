@@ -45,6 +45,10 @@ export interface Student {
   grade?: string;         // ระดับชั้น (ม.5)
   number?: number;        // เลขที่ (1-10)
   status?: 'ACTIVE' | 'INACTIVE';
+  parentUid?: string;     // Firebase Auth UID ของผู้ปกครอง (เชื่อมโยงตาม Security Rules)
+  parentId?: string;      // Alias/Legacy ID
+  parentEmail?: string;   // อีเมลผู้ปกครอง
+  studentUid?: string;    // Firebase Auth UID ของนักเรียน
 }
 
 export interface StudentAnalytics {
@@ -218,7 +222,8 @@ export interface ParentConference {
   id: string;
   studentId: string;
   studentName: string;
-  parentId: string;
+  parentUid: string;
+  parentId?: string;
   status: 'PENDING' | 'SCHEDULED' | 'COMPLETED';
   title: string;
   message: string;
@@ -232,7 +237,8 @@ export interface ParentConference {
 
 export interface ParentNotification {
   id: string;
-  parentId: string;
+  parentUid: string;
+  parentId?: string;
   studentId: string;
   studentName: string;
   title: string;
@@ -781,7 +787,7 @@ export interface StoreState {
   submitScheduleChangeRequest: (req: Omit<ScheduleChangeRequest, 'id' | 'status' | 'createdAt'>) => void;
   updateScheduleChangeRequestStatus: (id: string, status: 'APPROVED' | 'REJECTED') => void;
   markAttendanceDone: (courseId: string) => void;
-  updateStudentProfile: (studentId: string, profile: { nickname: string; photoUrl: string; address: string }) => void;
+  updateStudentProfile: (studentId: string, profile: { nickname?: string; photoUrl?: string; address?: string; parentUid?: string; parentEmail?: string }) => void;
   updateMorningAttendance: (studentId: string, status: 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE', method: 'SCAN' | 'GEOFENCE' | 'MANUAL') => void;
   
   submitPostTeachingRecord: (record: PostTeachingRecord) => void;

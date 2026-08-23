@@ -33,6 +33,7 @@ import { StudentAssessmentDetailModal } from './components/StudentAssessmentDeta
 
 export function ParentPortal() {
   const { 
+    user,
     students, 
     analytics, 
     attendanceRecords, 
@@ -42,13 +43,22 @@ export function ParentPortal() {
     selfAssessments
   } = useStore();
   
+  // Filter students linked to this parent (if logged in as parent)
+  const linkedStudents = React.useMemo(() => {
+    if (user?.uid) {
+      const matched = students.filter(s => (s as any).parentUid === user.uid || (s as any).parentId === user.uid);
+      if (matched.length > 0) return matched;
+    }
+    return students;
+  }, [user, students]);
+
   // Selected student state
   const [selectedStudentId, setSelectedStudentId] = useState<string>(() => {
-    const defaultStudent = students.find(s => s.studentId === '38502') || students[0];
-    return defaultStudent ? defaultStudent.studentId : '38502';
+    const defaultStudent = linkedStudents.find(s => s.studentId === '38501' || s.studentId === '38502') || linkedStudents[0] || students[0];
+    return defaultStudent ? defaultStudent.studentId : '38501';
   });
 
-  const student = students.find(s => s.studentId === selectedStudentId) || students[0];
+  const student = linkedStudents.find(s => s.studentId === selectedStudentId) || linkedStudents[0] || students[0];
   const studentAnalytics = student ? analytics.find(a => a.studentId === student.studentId) : null;
   const bScore = studentAnalytics?.behaviorScore ?? 98;
   const myAssessment = selfAssessments[student?.studentId || '38502'];
@@ -117,7 +127,7 @@ export function ParentPortal() {
               onChange={(e) => setSelectedStudentId(e.target.value)}
               className="bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-1.5 font-bold focus:outline-none focus:border-emerald-500"
             >
-              {students.map(s => (
+              {linkedStudents.map(s => (
                 <option key={s.studentId} value={s.studentId}>
                   {s.name} (ม.{s.room || '5/8'})
                 </option>

@@ -153,7 +153,7 @@ export async function updateBehaviorScoreAndTriggerAlert(
       const studentData = studentDoc.data();
       const currentScore = typeof studentData.behaviorScore === 'number' ? studentData.behaviorScore : 100;
       const studentName = studentData.fullName || studentData.name || `นักเรียนรหัส ${studentId}`;
-      const parentId = studentData.parentId || `parent_${studentId}`;
+      const parentUid = studentData.parentUid || studentData.parentId || '';
       const dateToday = new Date().toISOString().split('T')[0];
 
       // Deduct score ensuring it stays within [0, 100]
@@ -194,7 +194,8 @@ export async function updateBehaviorScoreAndTriggerAlert(
       const alertMessage = `แจ้งเตือนจากระบบประจำวันที่ ${dateToday}: น้อง${studentName} ${statusTextTranslation} ${Math.abs(scoreDeducted)} คะแนน จากสาเหตุ "${reason}" ส่งผลให้ขณะนี้คะแนนความประพฤติสะสมเหลือ ${newScore} คะแนน`;
 
       transaction.set(notificationRef, {
-        parentId,
+        parentUid,
+        parentId: parentUid,
         studentId,
         studentName,
         title: alertTitle,
@@ -210,7 +211,8 @@ export async function updateBehaviorScoreAndTriggerAlert(
       if (newScore < 80) {
         const warningNotifRef = doc(collection(db, 'parent_notifications'));
         transaction.set(warningNotifRef, {
-          parentId,
+          parentUid,
+          parentId: parentUid,
           studentId,
           studentName,
           title: "⚠️ คะแนนพฤติกรรมเริ่มลดลง",
@@ -229,7 +231,8 @@ export async function updateBehaviorScoreAndTriggerAlert(
         transaction.set(confRef, {
           studentId,
           studentName,
-          parentId,
+          parentUid,
+          parentId: parentUid,
           status: 'PENDING',
           title: "นัดหมายพบฝ่ายปกครอง (คะแนนต่ำกว่า 70 คะแนน)",
           message: `เนื่องจากคะแนนพฤติกรรมคงเหลือของน้อง${studentName} อยู่ในระดับวิกฤต (ปัจจุบันเหลือ ${newScore} คะแนน) ซึ่งต่ำกว่าเกณฑ์ของโรงเรียน เพื่อดูแลช่วยเหลือนักเรียนอย่างมีประสิทธิภาพ ทางฝ่ายปกครองจึงจำเป็นต้องขอสัญญานัดหมายเพื่อพูดคุยปรับทัศนคติร่วมกัน`,
@@ -301,7 +304,9 @@ export async function seedDatabaseWeb(): Promise<void> {
         room: "ม.5/8",
         behaviorScore: 100,
         riskLevel: "NORMAL",
-        parentId: "parent_38501"
+        parentUid: "test_parent_001",
+        parentId: "test_parent_001",
+        studentUid: "test_student_001"
       },
       {
         studentId: "38502",
@@ -313,7 +318,8 @@ export async function seedDatabaseWeb(): Promise<void> {
         room: "ม.5/8",
         behaviorScore: 100,
         riskLevel: "NORMAL",
-        parentId: "parent_38502"
+        parentUid: "test_parent_002",
+        parentId: "test_parent_002"
       },
       {
         studentId: "38503",
@@ -325,7 +331,8 @@ export async function seedDatabaseWeb(): Promise<void> {
         room: "ม.5/8",
         behaviorScore: 100,
         riskLevel: "NORMAL",
-        parentId: "parent_38503"
+        parentUid: "test_parent_003",
+        parentId: "test_parent_003"
       },
       {
         studentId: "38504",
@@ -337,7 +344,8 @@ export async function seedDatabaseWeb(): Promise<void> {
         room: "ม.5/8",
         behaviorScore: 100,
         riskLevel: "NORMAL",
-        parentId: "parent_38504"
+        parentUid: "test_parent_004",
+        parentId: "test_parent_004"
       }
     ];
 
@@ -554,3 +562,62 @@ export async function getAllSelfAssessmentRecords(): Promise<Record<string, Stud
     return {};
   }
 }
+
+/**
+ * Link a Parent's Firebase Auth UID to a Student document
+ */
+export async function linkParentToStudent(
+  studentId: string, 
+  parentUid: string, 
+  parentEmail?: string
+): Promise<void> {
+  const collectionPath = 'students';
+  try {
+    const ref = doc(db, collectionPath, studentId);
+    await setDoc(ref, {
+      parentUid: parentUid.trim(),
+      parentId: parentUid.trim(),
+      ...(parentEmail ? { parentEmail: parentEmail.trim() } : {}),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    console.log(`[linkParentToStudent] Linked student ${studentId} with parentUid: ${parentUid}`);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${studentId}`);
+  }
+}
+
+/**
+ * Update student profile information in Firestore
+ */
+export async function updateStudentProfileFirestore(
+  studentId: string,
+  profile: {
+    nickname?: string;
+    photoUrl?: string;
+    address?: string;
+    parentUid?: string;
+    parentEmail?: string;
+  }
+): Promise<void> {
+  const collectionPath = 'students';
+  try {
+    const ref = doc(db, collectionPath, studentId);
+    const updatePayload: Record<string, any> = {
+      updatedAt: serverTimestamp()
+    };
+    if (profile.nickname !== undefined) updatePayload.nickname = profile.nickname;
+    if (profile.photoUrl !== undefined) updatePayload.photoUrl = profile.photoUrl;
+    if (profile.address !== undefined) updatePayload['homeLocation.address'] = profile.address;
+    if (profile.parentUid !== undefined) {
+      updatePayload.parentUid = profile.parentUid.trim();
+      updatePayload.parentId = profile.parentUid.trim();
+    }
+    if (profile.parentEmail !== undefined) {
+      updatePayload.parentEmail = profile.parentEmail.trim();
+    }
+    await updateDoc(ref, updatePayload);
+  } catch (error) {
+    console.warn(`[updateStudentProfileFirestore] Notice: Firestore update handled:`, error);
+  }
+}
+

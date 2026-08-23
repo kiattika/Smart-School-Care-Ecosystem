@@ -128,7 +128,7 @@ class FirestoreRulesEvaluator {
         const allowed =
           hasRole('SUPER_ADMIN') ||
           hasRole('HOMEROOM_TEACHER') ||
-          (isSignedIn && resourceData?.parentId === context.uid);
+          (isSignedIn && (resourceData?.parentUid === context.uid || resourceData?.parentId === context.uid));
         return allowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Parent cannot read other parents notifications.' };
       }
       const writeAllowed =
@@ -144,7 +144,7 @@ class FirestoreRulesEvaluator {
         const allowed =
           hasRole('SUPER_ADMIN') ||
           hasRole('HOMEROOM_TEACHER') ||
-          (isSignedIn && resourceData?.parentId === context.uid);
+          (isSignedIn && (resourceData?.parentUid === context.uid || resourceData?.parentId === context.uid));
         return allowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Parent cannot read other parents conferences.' };
       }
       const writeAllowed = hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
@@ -293,14 +293,16 @@ describe('Firestore Security Rules Suite Verification', () => {
     });
 
     it('isolates parent notifications so parents only read their own', () => {
+      expect(evaluator.evaluate('read', 'parent_notifications', 'n1', parent1Context, { parentUid: 'parent_01' }).allowed).toBe(true);
       expect(evaluator.evaluate('read', 'parent_notifications', 'n1', parent1Context, { parentId: 'parent_01' }).allowed).toBe(true);
-      expect(evaluator.evaluate('read', 'parent_notifications', 'n2', parent1Context, { parentId: 'parent_02' }).allowed).toBe(false);
+      expect(evaluator.evaluate('read', 'parent_notifications', 'n2', parent1Context, { parentUid: 'parent_02' }).allowed).toBe(false);
       expect(evaluator.evaluate('write', 'parent_notifications', 'n1', parent1Context).allowed).toBe(false);
     });
 
     it('isolates parent conferences so parents only read their own conference records', () => {
+      expect(evaluator.evaluate('read', 'parent_conferences', 'conf_01', parent1Context, { parentUid: 'parent_01' }).allowed).toBe(true);
       expect(evaluator.evaluate('read', 'parent_conferences', 'conf_01', parent1Context, { parentId: 'parent_01' }).allowed).toBe(true);
-      expect(evaluator.evaluate('read', 'parent_conferences', 'conf_02', parent1Context, { parentId: 'parent_02' }).allowed).toBe(false);
+      expect(evaluator.evaluate('read', 'parent_conferences', 'conf_02', parent1Context, { parentUid: 'parent_02' }).allowed).toBe(false);
       expect(evaluator.evaluate('write', 'parent_conferences', 'conf_01', parent1Context).allowed).toBe(false);
     });
   });

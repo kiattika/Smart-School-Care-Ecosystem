@@ -100,7 +100,9 @@ const students = [
     room: "ม.5/8",
     behaviorScore: 100,
     riskLevel: "NORMAL",
-    parentId: "parent_38501"
+    parentUid: "test_parent_001",
+    parentId: "test_parent_001",
+    studentUid: "test_student_001"
   },
   {
     studentId: "38502",
@@ -112,7 +114,8 @@ const students = [
     room: "ม.5/8",
     behaviorScore: 100,
     riskLevel: "NORMAL",
-    parentId: "parent_38502"
+    parentUid: "test_parent_002",
+    parentId: "test_parent_002"
   },
   {
     studentId: "38503",
@@ -124,7 +127,8 @@ const students = [
     room: "ม.5/8",
     behaviorScore: 100,
     riskLevel: "NORMAL",
-    parentId: "parent_38503"
+    parentUid: "test_parent_003",
+    parentId: "test_parent_003"
   },
   {
     studentId: "38504",
@@ -136,7 +140,8 @@ const students = [
     room: "ม.5/8",
     behaviorScore: 100,
     riskLevel: "NORMAL",
-    parentId: "parent_38504"
+    parentUid: "test_parent_004",
+    parentId: "test_parent_004"
   }
 ];
 

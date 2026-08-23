@@ -98,6 +98,10 @@ export async function buildAppUser(fbUser: FirebaseUser): Promise<User> {
     if (matched) {
       roles = matched.roles;
       userProfile = matched;
+    } else if (fbUser.email.toLowerCase().includes('parent')) {
+      roles = ['PARENT' as UserRole];
+    } else if (fbUser.email.toLowerCase().includes('student')) {
+      roles = ['STUDENT' as UserRole];
     }
   }
 
@@ -111,6 +115,8 @@ export async function buildAppUser(fbUser: FirebaseUser): Promise<User> {
   if (activeRole === 'SUPER_ADMIN') legacyRole = 'admin';
   else if (activeRole === 'EXECUTIVE') legacyRole = 'executive';
   else if (activeRole === 'HOMEROOM_TEACHER') legacyRole = 'advisor';
+  else if (activeRole === ('PARENT' as any) || roles.includes('PARENT' as any)) legacyRole = 'parent';
+  else if (activeRole === ('STUDENT' as any) || roles.includes('STUDENT' as any)) legacyRole = 'student';
 
   if (!userProfile) {
     userProfile = {

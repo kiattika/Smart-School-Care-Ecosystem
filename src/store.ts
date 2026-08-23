@@ -61,7 +61,7 @@ import {
   INITIAL_PARENT_TEACHER_MESSAGES,
   INITIAL_PARENT_APPOINTMENTS
 } from './data/mockStudentParentData';
-import { saveSelfAssessmentRecord } from './services/firestoreService';
+import { saveSelfAssessmentRecord, updateStudentProfileFirestore } from './services/firestoreService';
 
 const defaultKiattisakProfile = MOCK_MULTI_ROLE_USERS[0];
 
@@ -453,7 +453,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const studentObj = state.students.find(s => s.studentId === studentId);
     const studentName = studentObj ? studentObj.name : `นักเรียนรหัส ${studentId}`;
-    const parentId = studentObj?.studentId ? `parent_${studentObj.studentId}` : `parent_${studentId}`;
+    const parentUid = (studentObj as any)?.parentUid || (studentObj as any)?.parentId || `parent_${studentId}`;
+    const parentId = (studentObj as any)?.parentId || parentUid;
 
     // Handle warning threshold (< 80)
     if (newScore < 80) {
@@ -461,6 +462,7 @@ export const useStore = create<StoreState>((set, get) => ({
       if (!hasWarning) {
         updatedNotifications.push({
           id: `notif_warn_${Date.now()}`,
+          parentUid,
           parentId,
           studentId,
           studentName,
@@ -483,6 +485,7 @@ export const useStore = create<StoreState>((set, get) => ({
           id: `conf_${Date.now()}`,
           studentId,
           studentName,
+          parentUid,
           parentId,
           status: 'PENDING',
           title: "นัดหมายพบฝ่ายปกครอง (คะแนนต่ำกว่า 70 คะแนน)",
@@ -683,24 +686,43 @@ export const useStore = create<StoreState>((set, get) => ({
       }
     };
   }),
-  updateStudentProfile: (studentId, profile) => set((state) => ({
-    students: state.students.map(s => {
-      if (s.studentId === studentId) {
-        return {
-          ...s,
-          nickname: profile.nickname,
-          photoUrl: profile.photoUrl,
-          avatar: profile.photoUrl,
-          name: s.name.includes("(") ? `${s.name.split(" ")[0]} ${s.name.split(" ")[1]} ${profile.nickname} (เลขที่ ${s.studentNo})` : s.name,
-          homeLocation: {
-            ...s.homeLocation,
-            address: profile.address
+  updateStudentProfile: (studentId, profile) => {
+    set((state) => ({
+      students: state.students.map(s => {
+        if (s.studentId === studentId) {
+          const updatedStudent: any = {
+            ...s,
+            nickname: profile.nickname,
+            photoUrl: profile.photoUrl,
+            avatar: profile.photoUrl,
+            name: s.name.includes("(") ? `${s.name.split(" ")[0]} ${s.name.split(" ")[1]} ${profile.nickname} (เลขที่ ${s.studentNo})` : s.name,
+            homeLocation: {
+              ...s.homeLocation,
+              address: profile.address
+            }
+          };
+          if (profile.parentUid !== undefined) {
+            updatedStudent.parentUid = profile.parentUid;
+            updatedStudent.parentId = profile.parentUid;
           }
-        };
-      }
-      return s;
-    })
-  })),
+          if (profile.parentEmail !== undefined) {
+            updatedStudent.parentEmail = profile.parentEmail;
+          }
+          return updatedStudent;
+        }
+        return s;
+      })
+    }));
+
+    // Async persist to Firestore
+    try {
+      updateStudentProfileFirestore(studentId, profile).catch(err => {
+        console.warn("Notice: Firestore persistence for student profile update handled optimistically", err);
+      });
+    } catch {
+      // ignore
+    }
+  },
   updateMorningAttendance: (studentId, status, method) => set((state) => ({
     students: state.students.map(s => {
       if (s.studentId === studentId) {
@@ -812,9 +834,14 @@ export const useStore = create<StoreState>((set, get) => ({
       return c;
     });
 
+    const student = state.students.find(s => s.studentId === studentId);
+    const parentUid = (student as any)?.parentUid || (student as any)?.parentId || `parent_${studentId}`;
+    const parentId = (student as any)?.parentId || parentUid;
+
     const newNotif = {
       id: `notif_sch_${Date.now()}`,
-      parentId: `parent_${studentId}`,
+      parentUid,
+      parentId,
       studentId,
       studentName,
       title: "🗓️ ยืนยันการนัดพบคณะกรรมการสถานศึกษาเรียบร้อยแล้ว",
@@ -834,17 +861,24 @@ export const useStore = create<StoreState>((set, get) => ({
     };
   }),
 
-  addMockParentNotification: (notif) => set((state) => ({
-    parentNotifications: [
-      {
-        ...notif,
-        id: `notif_${Date.now()}`,
-        status: 'unread' as const,
-        createdAt: new Date()
-      },
-      ...state.parentNotifications
-    ]
-  })),
+  addMockParentNotification: (notif) => set((state) => {
+    const student = state.students.find(s => s.studentId === notif.studentId);
+    const parentUid = notif.parentUid || (student as any)?.parentUid || notif.parentId || `parent_${notif.studentId}`;
+    const parentId = notif.parentId || parentUid;
+    return {
+      parentNotifications: [
+        {
+          ...notif,
+          parentUid,
+          parentId,
+          id: `notif_${Date.now()}`,
+          status: 'unread' as const,
+          createdAt: new Date()
+        },
+        ...state.parentNotifications
+      ]
+    };
+  }),
 
   addActiveLearningPoints: (studentId: string, points: number, category: ActiveLearningCategory = 'GENERAL', note?: string, courseId?: string) => set((state) => {
     const currentPoints = state.activeLearningPoints[studentId] || 0;
@@ -894,6 +928,8 @@ export const useStore = create<StoreState>((set, get) => ({
   recordGateAttendance: (studentId: string, type: 'ENTRY' | 'EXIT', method: GateAttendanceRecord['method']) => set((state) => {
     const student = state.students.find(s => s.studentId === studentId);
     const studentName = student ? student.name : `นักเรียน (${studentId})`;
+    const parentUid = (student as any)?.parentUid || (student as any)?.parentId || `parent_${studentId}`;
+    const parentId = (student as any)?.parentId || parentUid;
     const now = new Date();
     const hours = now.getHours().toString().padStart(2, '0');
     const minutes = now.getMinutes().toString().padStart(2, '0');
@@ -917,7 +953,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const newNotification = {
       id: `notif-gate-${Date.now()}`,
-      parentId: `parent_${studentId}`,
+      parentUid,
+      parentId,
       studentId,
       studentName,
       title: type === 'ENTRY' ? `🔔 แจ้งเตือนการมาถึงโรงเรียน (${studentName})` : `👋 แจ้งเตือนการเดินทางออกจากโรงเรียน (${studentName})`,
@@ -939,6 +976,8 @@ export const useStore = create<StoreState>((set, get) => ({
 
   submitDetailedLeave: (req) => set((state) => {
     const student = state.students.find(s => s.studentId === req.studentId);
+    const parentUid = (student as any)?.parentUid || (student as any)?.parentId || `parent_${req.studentId}`;
+    const parentId = (student as any)?.parentId || parentUid;
     const newLeave: DetailedLeaveRequest = {
       ...req,
       id: `leave-${Date.now()}`,
@@ -951,7 +990,8 @@ export const useStore = create<StoreState>((set, get) => ({
       parentNotifications: [
         {
           id: `notif-leave-${Date.now()}`,
-          parentId: `parent_${req.studentId}`,
+          parentUid,
+          parentId,
           studentId: req.studentId,
           studentName: student ? student.name : 'นักเรียน',
           title: '📝 ยื่นใบลาออนไลน์ (e-Leave) เรียบร้อยแล้ว',
@@ -983,6 +1023,8 @@ export const useStore = create<StoreState>((set, get) => ({
     const targetLeave = state.detailedLeaveRequests.find(l => l.id === id);
     const studentId = targetLeave ? targetLeave.studentId : '';
     const student = state.students.find(s => s.studentId === studentId);
+    const parentUid = (student as any)?.parentUid || (student as any)?.parentId || `parent_${studentId}`;
+    const parentId = (student as any)?.parentId || parentUid;
 
     // Auto-update student morning status to LEAVE if applicable
     const updatedStudents = state.students.map(s => {
@@ -1006,7 +1048,8 @@ export const useStore = create<StoreState>((set, get) => ({
       parentNotifications: studentId ? [
         {
           id: `notif-leave-approved-${Date.now()}`,
-          parentId: `parent_${studentId}`,
+          parentUid,
+          parentId,
           studentId,
           studentName: student ? student.name : 'นักเรียน',
           title: '✅ ใบลาได้รับการอนุมัติแล้ว',
@@ -1129,6 +1172,8 @@ export const useStore = create<StoreState>((set, get) => ({
     });
 
     const student = state.students.find(s => s.studentId === studentId);
+    const parentUid = (student as any)?.parentUid || (student as any)?.parentId || `parent_${studentId}`;
+    const parentId = (student as any)?.parentId || parentUid;
 
     return {
       meritDemeritLogs: [newRecord, ...state.meritDemeritLogs],
@@ -1136,7 +1181,8 @@ export const useStore = create<StoreState>((set, get) => ({
       parentNotifications: [
         {
           id: `notif-behavior-${Date.now()}`,
-          parentId: `parent_${studentId}`,
+          parentUid,
+          parentId,
           studentId,
           studentName: student ? student.name : 'นักเรียน',
           title: type === 'MERIT' ? `🌟 บันทึกคะแนนความดี (+${Math.abs(points)} คะแนน)` : `⚠️ แจ้งเตือนการตัดคะแนนพฤติกรรม (-${Math.abs(points)} คะแนน)`,
