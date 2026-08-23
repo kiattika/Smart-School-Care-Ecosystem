@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "emulators": "firebase emulators:start --import=./emulator-data --export-on-exit",
+    "emulators:exec": "firebase emulators:exec --import=./emulator-data 'vitest run'",
+    "seed:emulator": "tsx scripts/seedEmulatorAuth.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -44,6 +47,7 @@
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
+    "firebase-tools": "^15.28.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",

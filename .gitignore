@@ -4,5 +4,9 @@ dist/
 coverage/
 .DS_Store
 *.log
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+emulator-data/
 .env*
 !.env.example

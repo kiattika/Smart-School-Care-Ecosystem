@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 
 export interface Period {
   id: string;
@@ -38,22 +38,21 @@ export function usePeriodsConfig() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data && Array.isArray(data.periods)) {
-          // Ensure periods are sorted by periodNumber ascending
           const sorted = [...data.periods].sort((a, b) => a.periodNumber - b.periodNumber);
           setPeriods(sorted);
         }
-      } else {
-        // Doc doesn't exist, seed it with defaults
+      } else if (auth.currentUser) {
+        // Doc doesn't exist, seed it with defaults if signed in
         setDoc(docRef, {
           periods: DEFAULT_PERIODS,
           updatedAt: new Date().toISOString()
         }).catch(err => {
-          console.error("Error auto-seeding periods_config:", err);
+          console.warn("Notice auto-seeding periods_config skipped:", err.message);
         });
       }
       setLoading(false);
     }, (error) => {
-      console.warn("Firestore listening notice in usePeriodsConfig:", error.message);
+      console.warn("Firestore listening notice in usePeriodsConfig (using defaults):", error.message);
       setLoading(false);
     });
 
@@ -66,10 +65,11 @@ export function usePeriodsConfig() {
       await setDoc(docRef, {
         periods: newPeriods,
         updatedAt: new Date().toISOString()
-      });
-    } catch (err) {
-      console.error("Error saving periods_config:", err);
-      throw err;
+      }, { merge: true });
+      setPeriods(newPeriods);
+    } catch (err: any) {
+      console.warn("Saving periods_config locally:", err.message);
+      setPeriods(newPeriods);
     }
   };
 

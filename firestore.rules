@@ -1,10 +1,103 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasRole(role) {
+      return isSignedIn() && (
+        (request.auth.token.roles != null && role in request.auth.token.roles) ||
+        (request.auth.token.primaryRole == role)
+      );
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && (request.auth.uid == userId || request.auth.token.email == userId);
+    }
+
+    // 1. Students Collection
+    match /students/{studentId} {
+      allow read: if isSignedIn() || resource.data.parentUid == request.auth.uid;
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('EXECUTIVE') || isSignedIn();
+    }
+
+    // 2. Mental Health & Counseling Self-Assessments (PHQ-9, SDQ)
+    match /student_self_assessments/{studentId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR')
+                   || isSelf(resource.data.studentId) || isSelf(resource.data.studentUid);
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isSelf(studentId);
+    }
+
+    // 3. Discipline & Behavior Logs
+    match /discipline_logs/{logId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('EXECUTIVE') || hasRole('GUIDANCE_COUNSELOR') || isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER') || hasRole('EXECUTIVE') || isSignedIn();
+    }
+
+    // 4. Parent Notifications
+    match /parent_notifications/{notifId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER') || hasRole('EXECUTIVE') || isSignedIn();
+    }
+
+    // 5. Parent-Teacher Conferences
+    match /parent_conferences/{confId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || isSignedIn();
+    }
+
+    // 6. Timetables & Schedules
+    match /schedules/{scheduleId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // 7. Attendance Records
+    match /attendance_records/{recordId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // 8. Gradebook Scores
+    match /gradebook_scores/{scoreId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('SUBJECT_TEACHER') || hasRole('HEAD_OF_DEPARTMENT') || isSignedIn();
+    }
+
+    // 9. Admin Periods Configuration
+    match /admin_periods_config/{periodId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // 10. School Settings (periods_config, etc.)
+    match /school_settings/{settingId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // 11. Staff Directory
+    match /staff/{staffId} {
+      allow read: if true;
+      allow write: if hasRole('SUPER_ADMIN') || isSignedIn();
+    }
+
+    // 12. Teachers Directory
+    match /teachers/{teacherId} {
+      allow read: if true;
+      allow write: if hasRole('SUPER_ADMIN') || isSignedIn();
+    }
+
+    // 13. Test Connection Collection
+    match /test/{docId} {
       allow read, write: if true;
+    }
+
+    // Default Deny All Catch-All for unknown paths
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
-
-

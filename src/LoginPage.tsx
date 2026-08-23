@@ -1,76 +1,74 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useStore } from './store';
-import { LogIn, User, Shield, Users, Award } from 'lucide-react';
-import { User as UserType, Role, UserProfile, MOCK_MULTI_ROLE_USERS, UserRole } from './types';
+import { LogIn, AlertCircle, Loader2, KeyRound, Sparkles } from 'lucide-react';
+import { signInWithGoogle, signInWithEmailPassword } from './lib/auth';
+
+const EMULATOR_TEST_USERS = [
+  { email: 'teacher.test@utd.ac.th', label: 'ครูผู้สอน', roleTag: 'SUBJECT_TEACHER', desc: 'ครูสมปอง สอนดี' },
+  { email: 'advisor.test@utd.ac.th', label: 'ครูประจำชั้น ม.5/8', roleTag: 'HOMEROOM_TEACHER', desc: 'ครูเกียรติศักดิ์ สถิตการุณย์' },
+  { email: 'exec.test@utd.ac.th', label: 'ผู้บริหารโรงเรียน', roleTag: 'EXECUTIVE', desc: 'ดร.สมเกียรติ บริหารวิชาการ' },
+  { email: 'admin.test@utd.ac.th', label: 'ผู้ดูแลระบบ (Admin)', roleTag: 'SUPER_ADMIN', desc: 'แอดมินศูนย์ไอที' },
+  { email: 'guidance.test@utd.ac.th', label: 'ครูแนะแนว / จิตวิทยา', roleTag: 'GUIDANCE_COUNSELOR', desc: 'ดร.สุดา (สิทธิ์เข้าถึง PHQ-9)' },
+  { email: 'finance.test@utd.ac.th', label: 'ฝ่ายการเงิน', roleTag: 'FINANCE_STAFF', desc: 'นางศิริพร การเงินพัสดุ' },
+  { email: 'infirmary.test@utd.ac.th', label: 'ห้องพยาบาล', roleTag: 'INFIRMARY_STAFF', desc: 'น.ส.กนกวรรณ พยาบาล' },
+  { email: 'parent.test@gmail.com', label: 'ผู้ปกครอง (นายกิตติคุณ)', roleTag: 'PARENT', desc: 'คุณพ่อมนตรี มงคลศิลป์' },
+  { email: 'student.test@utd.ac.th', label: 'นักเรียน (ม.5/8)', roleTag: 'STUDENT', desc: 'นายกิตติคุณ มงคลศิลป์' },
+];
 
 export function LoginPage() {
   const { setUser } = useStore();
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('test1234');
+  const [showManualEmailForm, setShowManualEmailForm] = useState(false);
 
-  const handleLogin = (role: Role) => {
-    let email = 'user@example.com';
-    let displayName = 'User';
-    let profile: UserProfile | undefined = undefined;
-    let activeRole: UserRole | undefined = undefined;
+  const handleGoogleLogin = async () => {
+    try {
+      setLoading(true);
+      setErrorMessage(null);
+      const appUser = await signInWithGoogle();
+      setUser(appUser);
+    } catch (err: any) {
+      if (
+        err.code === 'auth/popup-closed-by-user' || 
+        err.code === 'auth/cancelled-popup-request' ||
+        err.message?.includes('auth/popup-closed-by-user')
+      ) {
+        return;
+      }
 
-    const kiattisakProfile = MOCK_MULTI_ROLE_USERS.find(p => p.id === 'teacher-kiattisak') || MOCK_MULTI_ROLE_USERS[0];
-
-    if (role === 'teacher') {
-      email = kiattisakProfile.email;
-      displayName = 'Mr. Kiattisak (ครูผู้สอน)';
-      profile = kiattisakProfile;
-      activeRole = 'SUBJECT_TEACHER';
-    } else if (role === 'advisor') {
-      email = kiattisakProfile.email;
-      displayName = 'Mr. Kiattisak (ที่ปรึกษา ม.5/8)';
-      profile = kiattisakProfile;
-      activeRole = 'HOMEROOM_TEACHER';
-    } else if (role === 'parent') {
-      email = 'parent@example.com';
-      displayName = 'ผู้ปกครอง สมชาย';
-    } else if (role === 'executive') {
-      email = 'exec@utd.ac.th';
-      displayName = 'ผู้อำนวยการ';
-      profile = MOCK_MULTI_ROLE_USERS.find(p => p.roles.includes('EXECUTIVE'));
-      activeRole = 'EXECUTIVE';
-    } else if (role === 'student') {
-      email = 'student@utd.ac.th';
-      displayName = 'ด.ช. นักเรียน';
-    } else if (role === 'admin') {
-      email = 'admin@utd.ac.th';
-      displayName = 'Admin';
-      profile = MOCK_MULTI_ROLE_USERS.find(p => p.roles.includes('SUPER_ADMIN'));
-      activeRole = 'SUPER_ADMIN';
+      console.error('Google Sign-In Error:', err);
+      if (err.message?.includes('AUTH_DOMAIN_RESTRICTED')) {
+        setErrorMessage('กรุณาใช้อีเมล Google Workspace ของโรงเรียน (@utd.ac.th) เท่านั้น');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setErrorMessage('โดเมนนี้ยังไม่ได้รับอนุญาตใน Firebase Console (Authorized Domains)');
+      } else if (err.code === 'auth/popup-blocked') {
+        setErrorMessage('เบราว์เซอร์บล็อกหน้าต่างป๊อปอัป กรุณาอนุญาตป๊อปอัปเพื่อเข้าสู่ระบบ');
+      } else {
+        setErrorMessage(err.message || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบด้วย Google');
+      }
+    } finally {
+      setLoading(false);
     }
-
-    const mockUser: UserType = {
-      uid: profile ? profile.id : Math.random().toString(36).substring(7),
-      role: role,
-      email: email,
-      displayName: displayName,
-      profile: profile,
-      activeRole: activeRole
-    };
-    setUser(mockUser);
   };
 
-  const handleMultiRoleLogin = (profile: UserProfile) => {
-    // กำหนด Active Role เริ่มต้นเป็นอันแรกในรายการสิทธิ์
-    const activeRole = profile.roles[0];
-    let legacyRole: Role = 'teacher';
-    if (activeRole === 'SUPER_ADMIN') legacyRole = 'admin';
-    else if (activeRole === 'EXECUTIVE') legacyRole = 'executive';
-    else if (activeRole === 'HOMEROOM_TEACHER') legacyRole = 'advisor';
-    else legacyRole = 'teacher';
+  const handleEmulatorTestAccountLogin = async (email: string, pass: string = 'test1234') => {
+    try {
+      setLoading(true);
+      setErrorMessage(null);
+      const appUser = await signInWithEmailPassword(email, pass);
+      setUser(appUser);
+    } catch (err: any) {
+      console.error('Emulator Sign-In Error:', err);
+      setErrorMessage(`เข้าสู่ระบบไม่สำเร็จ (${err.message}). หากใช้ Emulator ตรวจสอบว่ารัน 'npm run seed:emulator' แล้ว`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const mockUser: UserType = {
-      uid: profile.id,
-      email: profile.email,
-      displayName: `${profile.prefix}${profile.firstName} ${profile.lastName}`,
-      role: legacyRole,
-      profile: profile,
-      activeRole: activeRole
-    };
-    setUser(mockUser);
+  const handleLineParentLogin = () => {
+    setErrorMessage('ระบบเข้าสู่ระบบสำหรับผู้ปกครองผ่าน LINE Official Account กำลังเชื่อมต่อ API Gateway (LINE LIFF & Cloud Functions)');
   };
 
   return (
@@ -85,19 +83,34 @@ export function LoginPage() {
           <p className="text-slate-400 text-xs sm:text-sm px-2">เข้าสู่ระบบเพื่อเข้าใช้งานระบบบริหารจัดการและช่วยเหลือนักเรียน</p>
         </div>
 
-        {/* ระบบเข้าใช้งานหลัก */}
+        {errorMessage && (
+          <div className="w-full p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-2.5 text-left text-xs text-red-400">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        {/* ระบบเข้าใช้งานหลักแบบ Real Firebase Auth */}
         <div className="w-full space-y-3 pt-1">
           <button 
-            onClick={() => handleLogin('teacher')}
-            className="w-full min-h-[48px] flex items-center justify-center gap-3 bg-white hover:bg-slate-100 text-slate-900 font-medium py-3 px-4 rounded-xl text-xs sm:text-sm transition-all shadow-md active:scale-[0.98] cursor-pointer"
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className="w-full min-h-[48px] flex items-center justify-center gap-3 bg-white hover:bg-slate-100 disabled:opacity-60 text-slate-900 font-medium py-3 px-4 rounded-xl text-xs sm:text-sm transition-all shadow-md active:scale-[0.98] cursor-pointer"
           >
-            <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
-            <span className="truncate">เข้าสู่ระบบบุคลากรและนักเรียน (@utd.ac.th)</span>
+            {loading ? (
+              <Loader2 className="w-5 h-5 animate-spin text-slate-700" />
+            ) : (
+              <>
+                <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4 sm:w-5 sm:h-5 shrink-0" />
+                <span className="truncate">เข้าสู่ระบบด้วย Google Workspace (@utd.ac.th)</span>
+              </>
+            )}
           </button>
           
           <button 
-            onClick={() => handleLogin('parent')}
-            className="w-full min-h-[48px] flex items-center justify-center gap-3 bg-[#00B900] hover:bg-[#00A000] text-white font-medium py-3 px-4 rounded-xl text-xs sm:text-sm transition-all shadow-md active:scale-[0.98] cursor-pointer"
+            onClick={handleLineParentLogin}
+            disabled={loading}
+            className="w-full min-h-[48px] flex items-center justify-center gap-3 bg-[#00B900] hover:bg-[#00A000] disabled:opacity-60 text-white font-medium py-3 px-4 rounded-xl text-xs sm:text-sm transition-all shadow-md active:scale-[0.98] cursor-pointer"
           >
             <div className="w-4 h-4 sm:w-5 sm:h-5 bg-white text-[#00B900] rounded-full flex items-center justify-center font-bold text-[10px] sm:text-xs shrink-0">
               L
@@ -106,66 +119,94 @@ export function LoginPage() {
           </button>
         </div>
 
-        {/* บัญชีทดสอบระบบใหม่ (Multi-role Switcher Accounts) */}
-        <div className="w-full pt-4 sm:pt-5 border-t border-white/10 space-y-2.5 sm:space-y-3">
-          <div className="text-left">
-            <span className="text-[11px] sm:text-xs font-bold text-indigo-400 uppercase tracking-wider block mb-0.5">
-              Multi-role Switcher Accounts
-            </span>
-            <p className="text-[10px] sm:text-[11px] text-slate-400">
-              ทดสอบบัญชีของบุคลากรที่รับผิดชอบหลายหน้าที่ (สลับสิทธิ์ผ่าน Navbar ได้ทันที)
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 gap-2 text-left">
-            {MOCK_MULTI_ROLE_USERS.map((profile) => (
+        {/* บัญชีทดสอบสำหรับ Development & Firebase Emulator (Gated behind import.meta.env.DEV) */}
+        {import.meta.env.DEV && (
+          <div className="w-full pt-4 sm:pt-5 border-t border-white/10 space-y-2.5 sm:space-y-3">
+            <div className="text-left flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-[11px] sm:text-xs font-bold text-amber-400 uppercase tracking-wider block">
+                  Local Dev / Emulator Test Accounts
+                </span>
+              </div>
               <button
-                key={profile.id}
-                onClick={() => handleMultiRoleLogin(profile)}
-                className="w-full p-2.5 sm:p-3 bg-slate-800/40 hover:bg-slate-800/80 border border-slate-800 hover:border-indigo-500/40 rounded-xl transition-all flex items-center justify-between group cursor-pointer active:scale-[0.99]"
+                type="button"
+                onClick={() => setShowManualEmailForm(!showManualEmailForm)}
+                className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
               >
-                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 pr-2">
-                  <div className="w-8 h-8 sm:w-9 sm:h-9 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg flex items-center justify-center font-bold text-xs group-hover:bg-indigo-500/20 shrink-0">
-                    {profile.firstName[0]}
-                  </div>
-                  <div className="min-w-0">
-                    <h4 className="text-xs font-bold text-slate-200 group-hover:text-white truncate">
-                      {profile.prefix}{profile.firstName} {profile.lastName}
-                    </h4>
-                    <p className="text-[9.5px] sm:text-[10px] text-slate-400 truncate">{profile.position}</p>
-                  </div>
-                </div>
-                
-                <div className="flex flex-wrap gap-1 justify-end max-w-[130px] sm:max-w-[160px] shrink-0">
-                  {profile.roles.map((role) => (
-                    <span 
-                      key={role} 
-                      className="text-[8.5px] sm:text-[9px] px-1.5 py-0.5 bg-slate-900 text-slate-300 rounded border border-slate-700/50"
-                    >
-                      {role === 'SUPER_ADMIN' ? 'Admin' :
-                       role === 'EXECUTIVE' ? 'ผู้บริหาร' :
-                       role === 'HEAD_OF_DEPARTMENT' ? 'หัวหน้าสาระฯ' :
-                       role === 'HOMEROOM_TEACHER' ? 'ประจำชั้น' :
-                       role === 'SUBJECT_TEACHER' ? 'ครูผู้สอน' : 'ครูนิเทศ'}
-                    </span>
-                  ))}
-                </div>
+                {showManualEmailForm ? 'ซ่อนฟอร์ม' : 'กรอกอีเมลเอง'}
               </button>
-            ))}
+            </div>
+            <p className="text-[10px] sm:text-[11px] text-slate-400 text-left">
+              คลิกเพื่อเข้าสู่ระบบทันทีด้วยบัญชีทดสอบในเครื่อง (รหัสผ่าน: <code className="text-amber-300">test1234</code>)
+            </p>
+
+            {showManualEmailForm && (
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (emailInput) handleEmulatorTestAccountLogin(emailInput, passwordInput);
+                }}
+                className="p-3 bg-slate-800/60 rounded-xl border border-slate-700/60 text-left space-y-2"
+              >
+                <div>
+                  <label className="text-[10px] text-slate-300 block mb-1">Email (@utd.ac.th / @gmail.com)</label>
+                  <input 
+                    type="email" 
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    placeholder="advisor.test@utd.ac.th"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-300 block mb-1">Password</label>
+                  <input 
+                    type="password" 
+                    value={passwordInput}
+                    onChange={(e) => setPasswordInput(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full mt-2 py-1.5 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>เข้าสู่ระบบด้วย Email/Password</span>
+                </button>
+              </form>
+            )}
+
+            <div className="grid grid-cols-1 gap-1.5 text-left max-h-60 overflow-y-auto pr-1">
+              {EMULATOR_TEST_USERS.map((item) => (
+                <button
+                  key={item.email}
+                  type="button"
+                  onClick={() => handleEmulatorTestAccountLogin(item.email, 'test1234')}
+                  disabled={loading}
+                  className="w-full p-2 bg-slate-800/40 hover:bg-slate-800/90 border border-slate-800 hover:border-indigo-500/40 rounded-xl transition-all flex items-center justify-between group cursor-pointer active:scale-[0.99]"
+                >
+                  <div className="min-w-0 pr-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold text-slate-200 group-hover:text-white truncate">
+                        {item.label}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 truncate">{item.email} • {item.desc}</p>
+                  </div>
+                  
+                  <span className="text-[9px] px-1.5 py-0.5 bg-slate-900 text-slate-300 rounded border border-slate-700/50 shrink-0">
+                    {item.roleTag}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-        
-        {/* Developer Bypass / Quick Login */}
-        <div className="w-full pt-3 sm:pt-4 border-t border-white/5 space-y-2 pb-safe">
-          <p className="text-[11px] text-slate-500">Developer Bypass / Quick Login</p>
-          <div className="flex flex-wrap justify-center gap-1.5">
-            <button onClick={() => handleLogin('teacher')} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5 active:scale-95">Subject Teacher</button>
-            <button onClick={() => handleLogin('advisor')} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5 active:scale-95">Homeroom Advisor</button>
-            <button onClick={() => handleLogin('executive')} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5 active:scale-95">Executive</button>
-            <button onClick={() => handleLogin('student')} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5 active:scale-95">Student</button>
-            <button onClick={() => handleLogin('admin')} className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] rounded-lg transition-colors border border-white/5 active:scale-95">Admin</button>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -14,8 +14,6 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { StudentSelfAssessment } from '../types';
-import { isSameRoom } from '../lib/utils';
-import { REAL_STUDENTS } from '../data/realStudents';
 
 export enum OperationType {
   CREATE = 'create',
@@ -39,7 +37,9 @@ interface FirestoreErrorInfo {
 }
 
 /**
- * Standardized Firestore error handler for robust diagnostics
+ * Standardized Firestore error handler:
+ * - Logs full diagnostic payload with auth info to console for authorized developers/debugger
+ * - Throws sanitized, PII-free Error to caller
  */
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
   const errInfo: FirestoreErrorInfo = {
@@ -53,8 +53,13 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   };
-  console.error('Firestore Service Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+
+  // Safe developer console output
+  console.error('[Firestore Diagnostic Error]:', JSON.stringify(errInfo));
+
+  // PII-free generic error thrown to UI components
+  const sanitizedCode = error instanceof Error && (error as any).code ? (error as any).code : 'PERMISSION_OR_NETWORK_ERROR';
+  throw new Error(`FIRESTORE_${sanitizedCode.toUpperCase()}: Operation '${operationType}' failed on resource.`);
 }
 
 export interface FirestoreSchedule {
@@ -82,45 +87,27 @@ export interface FirestoreAttendanceRecord {
 }
 
 /**
- * 1. Fetch today's schedule for a specific teacher on a specific weekday
+ * 1. Targeted query to fetch today's schedule for a teacher on a specific weekday
+ * Uses where('teacherIds', 'array-contains', teacherId) and where('dayOfWeek', '==', dayOfWeek)
  */
 export async function getTodayScheduleByTeacher(teacherId: string, dayOfWeek: string): Promise<FirestoreSchedule[]> {
   const collectionPath = 'schedules';
   try {
-    const dayLower = dayOfWeek.toLowerCase();
-    const dayMap: Record<string, number> = {
-      monday: 1, mon: 1,
-      tuesday: 2, tue: 2,
-      wednesday: 3, wed: 3,
-      thursday: 4, thu: 4,
-      friday: 5, fri: 5,
-      saturday: 6, sat: 6,
-      sunday: 0, sun: 0
-    };
-    const dayNum = dayMap[dayLower] || 1;
-
+    const dayLower = dayOfWeek.toLowerCase().trim();
     const schedulesCol = collection(db, collectionPath);
-    const querySnapshot = await getDocs(schedulesCol);
+
+    // Direct indexed query
+    const targetQuery = query(
+      schedulesCol,
+      where('teacherIds', 'array-contains', teacherId),
+      where('dayOfWeek', '==', dayLower)
+    );
+
+    const querySnapshot = await getDocs(targetQuery);
     const schedules: FirestoreSchedule[] = [];
 
     querySnapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      const matchesDay = (
-        (data.dayOfWeek && String(data.dayOfWeek).toLowerCase() === dayLower) ||
-        (data.scheduleDay && data.scheduleDay === dayNum)
-      );
-
-      const matchesTeacher = (
-        (data.teacherIds && Array.isArray(data.teacherIds) && (data.teacherIds.includes(teacherId) || data.teacherIds.includes('teacher_kiattisak'))) ||
-        (data.teacherEmail && data.teacherEmail === teacherId) ||
-        (teacherId.includes('@') && data.teacherEmail && data.teacherEmail.toLowerCase() === teacherId.toLowerCase()) ||
-        (data.teacherId && data.teacherId === teacherId) ||
-        !teacherId
-      );
-
-      if (matchesDay && matchesTeacher) {
-        schedules.push({ id: docSnap.id, ...data } as FirestoreSchedule);
-      }
+      schedules.push({ id: docSnap.id, ...docSnap.data() } as FirestoreSchedule);
     });
 
     return schedules;
@@ -140,16 +127,13 @@ export async function saveAttendanceRecord(recordData: FirestoreAttendanceRecord
       ...recordData,
       checkedAt: recordData.checkedAt || serverTimestamp(),
     }, { merge: true });
-    console.log(`Successfully saved attendance record '${recordData.id}'`);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${recordData.id}`);
   }
 }
 
 /**
- * 3. Update behavior score and automatically trigger alert banners and conference documents based on score thresholds
- * - Warning threshold: < 80 points (Creates a parent warning notification)
- * - Critical threshold: < 70 points (Updates student riskLevel to CRITICAL and creates parent_conference document)
+ * 3. Update behavior score and automatically trigger alert banners and conference documents
  */
 export async function updateBehaviorScoreAndTriggerAlert(
   studentId: string,
@@ -272,7 +256,7 @@ export async function updateBehaviorScoreAndTriggerAlert(
 }
 
 /**
- * 4. Seed database via client-side Web SDK (fully authenticated/authorized under client rules if needed)
+ * 4. Batched client-side seeder using writeBatch
  */
 export async function seedDatabaseWeb(): Promise<void> {
   const collectionPath = "admin_periods_config";
@@ -308,9 +292,24 @@ export async function seedDatabaseWeb(): Promise<void> {
 
     const students = [
       {
+        studentId: "38501",
+        studentNumber: 1,
+        studentNo: 1,
+        fullName: "นายกิตติคุณ มงคลศิลป์",
+        nickname: "กิต",
+        className: "ม.5/8",
+        room: "ม.5/8",
+        behaviorScore: 100,
+        riskLevel: "NORMAL",
+        parentId: "parent_38501"
+      },
+      {
         studentId: "38502",
+        studentNumber: 2,
+        studentNo: 2,
         fullName: "สมชาย ใจดี",
         nickname: "ชาย",
+        className: "ม.5/8",
         room: "ม.5/8",
         behaviorScore: 100,
         riskLevel: "NORMAL",
@@ -318,8 +317,11 @@ export async function seedDatabaseWeb(): Promise<void> {
       },
       {
         studentId: "38503",
+        studentNumber: 3,
+        studentNo: 3,
         fullName: "สมหญิง มุ่งมั่น",
         nickname: "หญิง",
+        className: "ม.5/8",
         room: "ม.5/8",
         behaviorScore: 100,
         riskLevel: "NORMAL",
@@ -327,8 +329,11 @@ export async function seedDatabaseWeb(): Promise<void> {
       },
       {
         studentId: "38504",
+        studentNumber: 4,
+        studentNo: 4,
         fullName: "วิชัย ชัยชนะ",
         nickname: "ชัย",
+        className: "ม.5/8",
         room: "ม.5/8",
         behaviorScore: 100,
         riskLevel: "NORMAL",
@@ -346,32 +351,21 @@ export async function seedDatabaseWeb(): Promise<void> {
       { id: "sch_math_tuesday", dayOfWeek: "tuesday", periodNumber: 8, subjectCode: "ค32101", subjectType: "MAIN", teacherIds: ["teacher_kiattisak"], room: "ม.5/8" }
     ];
 
-    // Seed Admin Periods
-    for (const period of periods) {
-      await setDoc(doc(db, "admin_periods_config", period.id), period);
-    }
-    // Seed Teachers
-    for (const teacher of teachers) {
-      await setDoc(doc(db, "teachers", teacher.teacherId), teacher);
-    }
-    // Seed Students
-    for (const student of students) {
-      await setDoc(doc(db, "students", student.studentId), student);
-    }
-    // Seed Schedules
-    for (const schedule of schedules) {
-      await setDoc(doc(db, "schedules", schedule.id), schedule);
-    }
+    // Seed using batched writes
+    const { writeBatch } = await import('firebase/firestore');
+    const batch = writeBatch(db);
+    periods.forEach(p => batch.set(doc(db, "admin_periods_config", p.id), p, { merge: true }));
+    teachers.forEach(t => batch.set(doc(db, "teachers", t.teacherId), t, { merge: true }));
+    students.forEach(s => batch.set(doc(db, "students", s.studentId), s, { merge: true }));
+    schedules.forEach(sc => batch.set(doc(db, "schedules", sc.id), sc, { merge: true }));
+    await batch.commit();
 
-    console.log("Seeding finished completely via client Web SDK!");
+    console.log("Client batched seeding finished completely!");
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, collectionPath);
   }
 }
 
-/**
- * Update Parent Conference schedule status to SCHEDULED in Firestore
- */
 export async function updateParentConferenceSchedule(
   conferenceId: string,
   scheduledDate: string,
@@ -407,72 +401,47 @@ export interface GradebookScoreRecord {
 }
 
 /**
- * Helper function to fetch students by class/room name
- * using query(collection(db, 'students'), where('className', '==', className), orderBy('studentNumber', 'asc'))
+ * Normalized targeted query to fetch students by class name
+ * Uses canonical `className` field indexed with `studentNumber`
  */
 export async function getStudentsByClass(className: string): Promise<any[]> {
   const collectionPath = 'students';
   try {
+    // Normalize room/class format (e.g. 'M.5/8' -> 'ม.5/8')
+    let canonicalClass = className.trim();
+    if (canonicalClass.startsWith('M.') || canonicalClass.startsWith('m.')) {
+      canonicalClass = canonicalClass.replace(/^M\./i, 'ม.');
+    }
+
     const studentsCol = collection(db, collectionPath);
-    let docs: any[] = [];
+    const q = query(
+      studentsCol, 
+      where('className', '==', canonicalClass), 
+      orderBy('studentNumber', 'asc')
+    );
+
+    const snap = await getDocs(q);
     
-    // Attempt standard query using where('className', '==', className) and orderBy('studentNumber', 'asc')
-    try {
-      const q = query(studentsCol, where('className', '==', className), orderBy('studentNumber', 'asc'));
-      const snap = await getDocs(q);
-      docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    } catch (e) {
-      // Fallback query if composite index or field variation
-      let snap = await getDocs(query(studentsCol, where('className', '==', className)));
-      if (snap.empty) {
-        snap = await getDocs(query(studentsCol, where('room', '==', className)));
-      }
-      docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (snap.empty) {
+      console.warn(`[getStudentsByClass] No student records found for canonical class '${canonicalClass}'.`);
+      return [];
     }
 
-    if (docs.length === 0) {
-      // Client-side fallback matching room or className with normalization for "M.5/8" vs "ม.5/8"
-      try {
-        const allSnap = await getDocs(studentsCol);
-        docs = allSnap.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .filter(data => {
-            const r = (data as any).className || (data as any).room || '';
-            return isSameRoom(r, className);
-          });
-      } catch (err) {
-        console.warn('Notice: Firestore getDocs fallback error in getStudentsByClass', err);
-      }
-    }
-
-    // If still 0 documents, fallback to local REAL_STUDENTS dataset
-    if (docs.length === 0) {
-      let matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, className));
-      if (matched.length === 0) {
-        matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, 'ม.5/8'));
-      }
-      docs = matched;
-    }
-
-    // Sort by studentNumber / studentNo / number asc
-    docs.sort((a, b) => {
-      const numA = Number(a.studentNumber ?? a.studentNo ?? a.number ?? 0);
-      const numB = Number(b.studentNumber ?? b.studentNo ?? b.number ?? 0);
-      return numA - numB;
+    return snap.docs.map(d => {
+      const data = d.data();
+      return {
+        id: d.id,
+        studentId: data.studentId || d.id,
+        studentNumber: data.studentNumber ?? data.studentNo ?? 0,
+        studentNo: data.studentNumber ?? data.studentNo ?? 0,
+        name: data.fullName || data.name || `นักเรียน ${data.studentId || d.id}`,
+        fullName: data.fullName || data.name || `นักเรียน ${data.studentId || d.id}`,
+        className: data.className || canonicalClass,
+        room: data.className || canonicalClass,
+        avatar: data.avatar || data.photoUrl || '',
+        parentId: data.parentId || ''
+      };
     });
-
-    return docs.map(d => ({
-      id: d.id,
-      studentId: d.studentId || d.studentCode || d.id,
-      studentNumber: d.studentNumber ?? d.studentNo ?? d.number ?? 0,
-      studentNo: d.studentNo ?? d.studentNumber ?? d.number ?? 0,
-      name: d.fullName || d.name || `นักเรียน ${d.studentId || d.id}`,
-      fullName: d.fullName || d.name || `นักเรียน ${d.studentId || d.id}`,
-      className: d.className || d.room || className,
-      room: d.room || d.className || className,
-      avatar: d.avatar || d.photoUrl || '',
-      parentId: d.parentId || ''
-    }));
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, `${collectionPath}?className=${className}`);
   }
@@ -506,12 +475,18 @@ export async function getGradebookScoresByClass(
 ): Promise<Record<string, GradebookScoreRecord>> {
   const collectionPath = 'gradebook_scores';
   try {
-    const scoresCol = collection(db, collectionPath);
-    let snap = await getDocs(query(scoresCol, where('courseCode', '==', courseCode), where('className', '==', className)));
-    if (snap.empty) {
-      // Fallback: query all scores for courseCode
-      snap = await getDocs(query(scoresCol, where('courseCode', '==', courseCode)));
+    let canonicalClass = className.trim();
+    if (canonicalClass.startsWith('M.') || canonicalClass.startsWith('m.')) {
+      canonicalClass = canonicalClass.replace(/^M\./i, 'ม.');
     }
+
+    const scoresCol = collection(db, collectionPath);
+    const snap = await getDocs(query(
+      scoresCol, 
+      where('courseCode', '==', courseCode), 
+      where('className', '==', canonicalClass)
+    ));
+    
     const resultMap: Record<string, GradebookScoreRecord> = {};
     snap.docs.forEach(docSnap => {
       const data = docSnap.data() as GradebookScoreRecord;
@@ -579,6 +554,3 @@ export async function getAllSelfAssessmentRecords(): Promise<Record<string, Stud
     return {};
   }
 }
-
-
-

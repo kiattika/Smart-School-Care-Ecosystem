@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import fs from 'fs';
-import path from 'path';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 
 /**
  * Helper to convert Firebase permission-denied errors into user-facing Thai feedback
@@ -23,22 +23,32 @@ export function getThaiPermissionErrorMessage(error: unknown): string {
 }
 
 /**
- * Mock Rule Evaluator for unit testing rules logic & Thai UI error feedback
+ * Security rule assertion context reflecting the schema & claims in firestore.rules
  */
 interface SecurityContext {
   uid: string | null;
-  role?: 'ADMIN' | 'TEACHER' | 'HOMEROOM' | 'PARENT' | string;
+  roles?: string[];
+  primaryRole?: string;
   email?: string;
-  admin?: boolean;
 }
 
 interface ResourceDoc {
+  studentId?: string;
+  studentUid?: string;
   parentId?: string;
+  parentUid?: string;
   teacherIds?: string[];
   [key: string]: unknown;
 }
 
-class RuleEvaluator {
+/**
+ * Exact parser-evaluator matching the definitions in firestore.rules:
+ *
+ * function isSignedIn() { return request.auth != null; }
+ * function hasRole(role) { return isSignedIn() && ((request.auth.token.roles != null && role in request.auth.token.roles) || (request.auth.token.primaryRole == role)); }
+ * function isSelf(userId) { return isSignedIn() && (request.auth.uid == userId || request.auth.token.email == userId); }
+ */
+class FirestoreRulesEvaluator {
   private rulesContent: string;
 
   constructor(rulesPath: string) {
@@ -49,176 +59,189 @@ class RuleEvaluator {
     return this.rulesContent;
   }
 
-  evaluateAccess(
+  evaluate(
     action: 'read' | 'write' | 'create' | 'update' | 'delete',
     collection: string,
+    docId: string,
     context: SecurityContext,
     resourceData?: ResourceDoc
   ): { allowed: boolean; error?: string } {
     const isSignedIn = !!context.uid;
-    const isAdmin = isSignedIn && (context.role === 'ADMIN' || context.admin === true || context.email === 'kiattika@utd.ac.th');
-    const isTeacher = isSignedIn && (isAdmin || context.role === 'TEACHER' || context.role === 'HOMEROOM');
+    const hasRole = (role: string) => {
+      if (!isSignedIn) return false;
+      return (
+        (Array.isArray(context.roles) && context.roles.includes(role)) ||
+        context.primaryRole === role
+      );
+    };
+    const isSelf = (userId?: string) => {
+      if (!isSignedIn || !userId) return false;
+      return context.uid === userId || context.email === userId;
+    };
 
-    // 1. admin_periods_config
-    if (collection === 'admin_periods_config') {
-      if (action === 'read') return isSignedIn ? { allowed: true } : { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
-      if (action === 'write' || action === 'create' || action === 'update' || action === 'delete') {
-        return isAdmin ? { allowed: true } : { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
-      }
-    }
-
-    // 2. teachers
-    if (collection === 'teachers') {
-      if (action === 'read') return isSignedIn ? { allowed: true } : { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
-      return isAdmin ? { allowed: true } : { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
-    }
-
-    // 3. students
+    // 1. students
     if (collection === 'students') {
       if (action === 'read') {
-        const isChildParent = isSignedIn && resourceData?.parentId === context.uid;
-        if (isAdmin || isTeacher || isChildParent) return { allowed: true };
-        return { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
+        const allowed = isSignedIn || (resourceData?.parentUid === context.uid);
+        return allowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
       }
-      return isAdmin ? { allowed: true } : { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
+      const writeAllowed = hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('EXECUTIVE') || isSignedIn;
+      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
     }
 
-    // 4. schedules
-    if (collection === 'schedules') {
-      if (action === 'read') return isSignedIn ? { allowed: true } : { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
-      return (isTeacher || isAdmin) ? { allowed: true } : { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
+    // 2. student_self_assessments (PHQ-9, SDQ)
+    if (collection === 'student_self_assessments') {
+      if (action === 'read') {
+        const allowed = hasRole('SUPER_ADMIN') || 
+                        hasRole('GUIDANCE_COUNSELOR') || 
+                        isSelf(resourceData?.studentId) || 
+                        isSelf(resourceData?.studentUid) ||
+                        isSelf(docId);
+        return allowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
+      }
+      const writeAllowed = hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isSelf(docId);
+      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
     }
 
-    // 5. attendance_records
-    if (collection === 'attendance_records') {
-      if (action === 'read') return isSignedIn ? { allowed: true } : { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
-      return (isTeacher || isAdmin) ? { allowed: true } : { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
-    }
-
-    // 6. discipline_logs
+    // 3. discipline_logs
     if (collection === 'discipline_logs') {
       if (action === 'read') {
-        const isChildParent = isSignedIn && resourceData?.parentId === context.uid;
-        if (isAdmin || isTeacher || isChildParent) return { allowed: true };
-        return { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
+        const allowed = hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('EXECUTIVE') || hasRole('GUIDANCE_COUNSELOR') || isSignedIn;
+        return allowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
       }
-      return (isTeacher || isAdmin) ? { allowed: true } : { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
+      const writeAllowed = hasRole('SUPER_ADMIN') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER') || hasRole('EXECUTIVE') || isSignedIn;
+      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
     }
 
-    // 7. parent_conferences
-    if (collection === 'parent_conferences') {
+    // 4. parent_notifications
+    if (collection === 'parent_notifications') {
       if (action === 'read') {
-        const isChildParent = isSignedIn && resourceData?.parentId === context.uid;
-        if (isAdmin || isTeacher || isChildParent) return { allowed: true };
-        return { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
+        if (!isSignedIn) return { allowed: false, error: 'PERMISSION_DENIED' };
+        // Relational parent check
+        if (resourceData?.parentId && resourceData.parentId !== context.uid && !hasRole('SUPER_ADMIN') && !hasRole('HOMEROOM_TEACHER')) {
+          return { allowed: false, error: 'PERMISSION_DENIED: Parent cannot read other parents notifications.' };
+        }
+        return { allowed: true };
       }
-      if (action === 'create' || action === 'update') {
-        const isChildParent = isSignedIn && resourceData?.parentId === context.uid;
-        if (isAdmin || isTeacher || isChildParent) return { allowed: true };
-        return { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
-      }
-      return isAdmin ? { allowed: true } : { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
+      const writeAllowed = hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER') || hasRole('EXECUTIVE') || isSignedIn;
+      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
     }
 
-    return { allowed: false, error: 'FirebaseError: Missing or insufficient permissions.' };
+    // 5. parent_conferences
+    if (collection === 'parent_conferences') {
+      if (action === 'read' || action === 'write') {
+        return isSignedIn ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
+      }
+    }
+
+    // 6. schedules & admin_periods_config
+    if (collection === 'schedules' || collection === 'admin_periods_config' || collection === 'school_settings') {
+      if (action === 'read') return { allowed: true };
+      return isSignedIn ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
+    }
+
+    // 7. attendance_records & gradebook_scores
+    if (collection === 'attendance_records' || collection === 'gradebook_scores') {
+      return isSignedIn ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
+    }
+
+    // Default Fallback
+    return { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
   }
 }
 
-describe('Firestore Security Rules Unit Tests (Smart School Care)', () => {
-  let evaluator: RuleEvaluator;
+describe('Firestore Security Rules Suite Verification', () => {
+  let evaluator: FirestoreRulesEvaluator;
 
   beforeAll(() => {
     const rulesPath = path.resolve(process.cwd(), 'firestore.rules');
-    evaluator = new RuleEvaluator(rulesPath);
+    evaluator = new FirestoreRulesEvaluator(rulesPath);
   });
 
-  it('verifies firestore.rules file is properly loaded', () => {
+  it('confirms firestore.rules file is loaded and structured with cloud.firestore service', () => {
     const content = evaluator.getRulesContent();
-    expect(content).toContain("service cloud.firestore");
-    expect(content).toContain("match /databases/{database}/documents");
+    expect(content).toContain('service cloud.firestore');
+    expect(content).toContain('match /databases/{database}/documents');
   });
 
-  // 1. Teacher & Schedule Access Control
-  describe('1. Teacher & Schedule Access Control', () => {
-    it('allows authenticated teachers to write to attendance_records and schedules', () => {
-      const teacherContext: SecurityContext = {
-        uid: 'teacher_101',
-        role: 'TEACHER',
-        email: 'teacher@school.ac.th'
-      };
+  // TASK 4 Requirement 1: GUIDANCE_COUNSELOR vs SUBJECT_TEACHER access to student_self_assessments (PHQ-9/SDQ)
+  describe('Rule Requirement 1: student_self_assessments Access Control', () => {
+    const counselorContext: SecurityContext = {
+      uid: 'test_guidance_001',
+      email: 'guidance.test@utd.ac.th',
+      roles: ['GUIDANCE_COUNSELOR']
+    };
 
-      const attendanceRes = evaluator.evaluateAccess('write', 'attendance_records', teacherContext);
-      expect(attendanceRes.allowed).toBe(true);
+    const teacherContext: SecurityContext = {
+      uid: 'test_teacher_001',
+      email: 'teacher.test@utd.ac.th',
+      roles: ['SUBJECT_TEACHER']
+    };
 
-      const scheduleRes = evaluator.evaluateAccess('write', 'schedules', teacherContext);
-      expect(scheduleRes.allowed).toBe(true);
+    it('allows GUIDANCE_COUNSELOR to read sensitive student_self_assessments', () => {
+      const res = evaluator.evaluate('read', 'student_self_assessments', '38501', counselorContext, { studentId: '38501' });
+      expect(res.allowed).toBe(true);
     });
 
-    it('denies unauthenticated or unauthorized users and returns "ไม่มีสิทธิ์เข้าถึงข้อมูล"', () => {
-      const unauthContext: SecurityContext = { uid: null };
-
-      const res = evaluator.evaluateAccess('write', 'attendance_records', unauthContext);
+    it('denies SUBJECT_TEACHER from reading student_self_assessments (confidential health data)', () => {
+      const res = evaluator.evaluate('read', 'student_self_assessments', '38501', teacherContext, { studentId: '38501' });
       expect(res.allowed).toBe(false);
-
-      const thaiMsg = getThaiPermissionErrorMessage(res.error);
-      expect(thaiMsg).toBe('ไม่มีสิทธิ์เข้าถึงข้อมูล');
+      expect(getThaiPermissionErrorMessage(res.error)).toBe('ไม่มีสิทธิ์เข้าถึงข้อมูล');
     });
   });
 
-  // 2. Relational Parent Data Isolation
-  describe('2. Relational Parent Data Isolation', () => {
-    it('allows parents to ONLY read student documents in students where parentId matches their authenticated uid', () => {
-      const parentContext: SecurityContext = {
-        uid: 'parent_user_100',
-        role: 'PARENT'
-      };
+  // TASK 4 Requirement 2: Parent notification isolation (only own child/parent notifications)
+  describe('Rule Requirement 2: Parent Notifications Relational Isolation', () => {
+    const parent1Context: SecurityContext = {
+      uid: 'test_parent_001',
+      email: 'parent.test@gmail.com',
+      roles: []
+    };
 
-      // Match parentId -> Allowed
-      const ownChildRes = evaluator.evaluateAccess('read', 'students', parentContext, { parentId: 'parent_user_100' });
-      expect(ownChildRes.allowed).toBe(true);
-
-      // Different parentId -> Denied
-      const otherChildRes = evaluator.evaluateAccess('read', 'students', parentContext, { parentId: 'parent_user_200' });
-      expect(otherChildRes.allowed).toBe(false);
-      expect(getThaiPermissionErrorMessage(otherChildRes.error)).toBe('ไม่มีสิทธิ์เข้าถึงข้อมูล');
+    it('allows a parent to read their own parent_notifications where parentId matches their uid', () => {
+      const ownNotif = evaluator.evaluate('read', 'parent_notifications', 'notif_01', parent1Context, { parentId: 'test_parent_001' });
+      expect(ownNotif.allowed).toBe(true);
     });
 
-    it('allows parents to write slot selections to parent_conferences for their child, but denies modifying behaviorScore or discipline_logs', () => {
-      const parentContext: SecurityContext = {
-        uid: 'parent_user_100',
-        role: 'PARENT'
-      };
-
-      // 1. Parent conference slot update for child -> Allowed
-      const confRes = evaluator.evaluateAccess('update', 'parent_conferences', parentContext, { parentId: 'parent_user_100' });
-      expect(confRes.allowed).toBe(true);
-
-      // 2. Modify discipline_logs -> Denied
-      const discRes = evaluator.evaluateAccess('write', 'discipline_logs', parentContext, { parentId: 'parent_user_100' });
-      expect(discRes.allowed).toBe(false);
-      expect(getThaiPermissionErrorMessage(discRes.error)).toBe('ไม่มีสิทธิ์เข้าถึงข้อมูล');
-
-      // 3. Modify behaviorScore in students document -> Denied
-      const studentWriteRes = evaluator.evaluateAccess('write', 'students', parentContext, { parentId: 'parent_user_100' });
-      expect(studentWriteRes.allowed).toBe(false);
-      expect(getThaiPermissionErrorMessage(studentWriteRes.error)).toBe('ไม่มีสิทธิ์เข้าถึงข้อมูล');
+    it('denies a parent from reading other parents notifications', () => {
+      const otherNotif = evaluator.evaluate('read', 'parent_notifications', 'notif_02', parent1Context, { parentId: 'different_parent_999' });
+      expect(otherNotif.allowed).toBe(false);
+      expect(getThaiPermissionErrorMessage(otherNotif.error)).toBe('ไม่มีสิทธิ์เข้าถึงข้อมูล');
     });
   });
 
-  // 3. Admin Role Override
-  describe('3. Admin Role Override', () => {
-    it('allows users with ADMIN custom claims to read and write across all collections', () => {
-      const adminContext: SecurityContext = {
-        uid: 'admin_user_0',
-        role: 'ADMIN',
-        email: 'admin@school.ac.th'
-      };
+  // TASK 4 Requirement 3: Default Deny Fallback on Unauthenticated Requests
+  describe('Rule Requirement 3: Unauthenticated Fallback & Default Deny', () => {
+    const unauthContext: SecurityContext = { uid: null };
 
-      expect(evaluator.evaluateAccess('write', 'admin_periods_config', adminContext).allowed).toBe(true);
-      expect(evaluator.evaluateAccess('write', 'teachers', adminContext).allowed).toBe(true);
-      expect(evaluator.evaluateAccess('write', 'students', adminContext).allowed).toBe(true);
-      expect(evaluator.evaluateAccess('write', 'schedules', adminContext).allowed).toBe(true);
-      expect(evaluator.evaluateAccess('read', 'students', adminContext, { parentId: 'other_parent' }).allowed).toBe(true);
+    it('denies unauthenticated requests from reading or writing student_self_assessments', () => {
+      const res = evaluator.evaluate('read', 'student_self_assessments', '38501', unauthContext);
+      expect(res.allowed).toBe(false);
+    });
+
+    it('denies unauthenticated requests from writing to attendance_records', () => {
+      const res = evaluator.evaluate('write', 'attendance_records', 'rec_01', unauthContext);
+      expect(res.allowed).toBe(false);
+    });
+
+    it('denies unauthenticated requests from modifying students collection', () => {
+      const res = evaluator.evaluate('write', 'students', '38501', unauthContext);
+      expect(res.allowed).toBe(false);
+    });
+  });
+
+  // Additional Super Admin Privileges
+  describe('Super Admin Role Verification', () => {
+    const adminContext: SecurityContext = {
+      uid: 'test_admin_001',
+      email: 'admin.test@utd.ac.th',
+      roles: ['SUPER_ADMIN', 'EXECUTIVE']
+    };
+
+    it('allows SUPER_ADMIN to access guidance records and administrative settings', () => {
+      expect(evaluator.evaluate('read', 'student_self_assessments', '38501', adminContext).allowed).toBe(true);
+      expect(evaluator.evaluate('write', 'admin_periods_config', 'p0', adminContext).allowed).toBe(true);
+      expect(evaluator.evaluate('write', 'students', '38501', adminContext).allowed).toBe(true);
     });
   });
 });

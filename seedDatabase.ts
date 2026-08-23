@@ -32,6 +32,46 @@ const periods = [
   { id: "period_8", periodNumber: 8, periodName: "คาบเรียนที่ 8", startTime: "14:30", endTime: "15:20" }
 ];
 
+const staffUsers = [
+  {
+    id: "teacher_kiattisak",
+    email: "kiattika@utd.ac.th",
+    prefix: "นาย",
+    firstName: "เกียรติศักดิ์",
+    lastName: "สถิตการุณย์",
+    position: "ครู คศ.2 (กลุ่มสาระฯ คณิตศาสตร์)",
+    roles: ["SUPER_ADMIN", "HOMEROOM_TEACHER", "SUBJECT_TEACHER"],
+    assignments: {
+      homeroomClass: "ม.5/8",
+      departmentId: "math-dept"
+    }
+  },
+  {
+    id: "nurse_kanokwan",
+    email: "kanokwan.n@utd.ac.th",
+    prefix: "นางสาว",
+    firstName: "กนกวรรณ",
+    lastName: "พยาบาลวิชาชีพ",
+    position: "พยาบาลโรงเรียน",
+    roles: ["INFIRMARY_STAFF"],
+    assignments: {
+      departmentId: "health-dept"
+    }
+  },
+  {
+    id: "counselor_suda",
+    email: "suda.c@utd.ac.th",
+    prefix: "ดร.",
+    firstName: "สุดา",
+    lastName: "จิตวิทยา",
+    position: "ครูแนะแนวและจิตวิทยา",
+    roles: ["GUIDANCE_COUNSELOR"],
+    assignments: {
+      departmentId: "guidance-dept"
+    }
+  }
+];
+
 const teachers = [
   {
     teacherId: "teacher_kiattisak",
@@ -51,9 +91,24 @@ const teachers = [
 
 const students = [
   {
+    studentId: "38501",
+    studentNumber: 1,
+    studentNo: 1,
+    fullName: "นายกิตติคุณ มงคลศิลป์",
+    nickname: "กิต",
+    className: "ม.5/8",
+    room: "ม.5/8",
+    behaviorScore: 100,
+    riskLevel: "NORMAL",
+    parentId: "parent_38501"
+  },
+  {
     studentId: "38502",
+    studentNumber: 2,
+    studentNo: 2,
     fullName: "สมชาย ใจดี",
     nickname: "ชาย",
+    className: "ม.5/8",
     room: "ม.5/8",
     behaviorScore: 100,
     riskLevel: "NORMAL",
@@ -61,8 +116,11 @@ const students = [
   },
   {
     studentId: "38503",
+    studentNumber: 3,
+    studentNo: 3,
     fullName: "สมหญิง มุ่งมั่น",
     nickname: "หญิง",
+    className: "ม.5/8",
     room: "ม.5/8",
     behaviorScore: 100,
     riskLevel: "NORMAL",
@@ -70,8 +128,11 @@ const students = [
   },
   {
     studentId: "38504",
+    studentNumber: 4,
+    studentNo: 4,
     fullName: "วิชัย ชัยชนะ",
     nickname: "ชัย",
+    className: "ม.5/8",
     room: "ม.5/8",
     behaviorScore: 100,
     riskLevel: "NORMAL",
@@ -92,38 +153,49 @@ const schedules = [
   { id: "sch_math_tuesday", dayOfWeek: "tuesday", periodNumber: 8, subjectCode: "ค32101", subjectType: "MAIN", teacherIds: ["teacher_kiattisak"], room: "ม.5/8" }
 ];
 
+interface BatchItem {
+  collection: string;
+  docId: string;
+  data: Record<string, any>;
+}
+
 async function seed() {
-  console.log("🌱 Starting Firebase Admin SDK Firestore Seeding...");
+  console.log("🌱 Starting Batched Firebase Admin SDK Firestore Seeding...");
 
-  // 1. Seed Periods Config
-  console.log("⏳ Seeding admin_periods_config...");
-  for (const period of periods) {
-    const ref = db.collection('admin_periods_config').doc(period.id);
-    await ref.set(period);
+  const allItems: BatchItem[] = [
+    ...periods.map(p => ({ collection: 'admin_periods_config', docId: p.id, data: p })),
+    ...staffUsers.map(s => ({ collection: 'staff', docId: s.id, data: s })),
+    ...teachers.map(t => ({ collection: 'teachers', docId: t.teacherId, data: t })),
+    ...students.map(s => ({ collection: 'students', docId: s.studentId, data: s })),
+    ...schedules.map(sch => ({ collection: 'schedules', docId: sch.id, data: sch }))
+  ];
+
+  const BATCH_SIZE = 450; // Keep safely under Firestore 500 limit
+  let batch = db.batch();
+  let countInBatch = 0;
+  let totalBatches = 0;
+
+  for (const item of allItems) {
+    const docRef = db.collection(item.collection).doc(item.docId);
+    batch.set(docRef, item.data, { merge: true });
+    countInBatch++;
+
+    if (countInBatch >= BATCH_SIZE) {
+      await batch.commit();
+      totalBatches++;
+      console.log(`📦 Committed batch #${totalBatches} (${countInBatch} writes)`);
+      batch = db.batch();
+      countInBatch = 0;
+    }
   }
 
-  // 2. Seed Teachers
-  console.log("⏳ Seeding teachers...");
-  for (const teacher of teachers) {
-    const ref = db.collection('teachers').doc(teacher.teacherId);
-    await ref.set(teacher);
+  if (countInBatch > 0) {
+    await batch.commit();
+    totalBatches++;
+    console.log(`📦 Committed final batch #${totalBatches} (${countInBatch} writes)`);
   }
 
-  // 3. Seed Students
-  console.log("⏳ Seeding students...");
-  for (const student of students) {
-    const ref = db.collection('students').doc(student.studentId);
-    await ref.set(student);
-  }
-
-  // 4. Seed Schedules
-  console.log("⏳ Seeding schedules...");
-  for (const schedule of schedules) {
-    const ref = db.collection('schedules').doc(schedule.id);
-    await ref.set(schedule);
-  }
-
-  console.log("✅ Seeding completed successfully using Firebase Admin SDK!");
+  console.log(`✅ Batched Seeding completed successfully! Total records: ${allItems.length} across ${totalBatches} batch(es).`);
 }
 
 seed().catch((err) => {

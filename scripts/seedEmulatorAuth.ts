@@ -1,0 +1,318 @@
+import * as admin from 'firebase-admin';
+import * as fs from 'fs';
+import * as path from 'path';
+
+// Force point to local Firebase Emulators if not already set
+process.env.FIREBASE_AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
+process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
+
+// Read config for projectId
+let projectId = 'ai-studio-smartschoolcaree-3b0997bf-b447-4da7-ac95-d7b1332165e0';
+let databaseId = '(default)';
+const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+if (fs.existsSync(configPath)) {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (cfg.projectId) projectId = cfg.projectId;
+    if (cfg.firestoreDatabaseId) databaseId = cfg.firestoreDatabaseId;
+  } catch (err) {
+    console.warn('Notice reading firebase-applet-config.json:', err);
+  }
+}
+
+if (!admin.apps.length) {
+  admin.initializeApp({ projectId });
+}
+
+const auth = admin.auth();
+const db = admin.firestore();
+
+export interface TestUserDef {
+  uid: string;
+  email: string;
+  password: string;
+  displayName: string;
+  roles: string[];
+  position: string;
+  prefix: string;
+  firstName: string;
+  lastName: string;
+  assignments?: {
+    homeroomClass?: string;
+    departmentId?: string;
+  };
+  studentInfo?: {
+    studentId: string;
+    studentNumber: number;
+    className: string;
+    parentId: string;
+  };
+}
+
+export const SEEDED_TEST_USERS: TestUserDef[] = [
+  {
+    uid: 'test_teacher_001',
+    email: 'teacher.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'ครูสมปอง สอนดี',
+    prefix: 'นาย',
+    firstName: 'สมปอง',
+    lastName: 'สอนดี',
+    position: 'ครู คศ.2 (กลุ่มสาระฯ คณิตศาสตร์)',
+    roles: ['SUBJECT_TEACHER'],
+    assignments: { departmentId: 'math-dept' }
+  },
+  {
+    uid: 'test_advisor_001',
+    email: 'advisor.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'ครูเกียรติศักดิ์ ประจำชั้น ม.5/8',
+    prefix: 'นาย',
+    firstName: 'เกียรติศักดิ์',
+    lastName: 'สถิตการุณย์',
+    position: 'ครูที่ปรึกษาประจำชั้น ม.5/8',
+    roles: ['HOMEROOM_TEACHER', 'SUBJECT_TEACHER'],
+    assignments: { homeroomClass: 'ม.5/8', departmentId: 'math-dept' }
+  },
+  {
+    uid: 'test_exec_001',
+    email: 'exec.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'ดร.สมเกียรติ บริหารวิชาการ',
+    prefix: 'ดร.',
+    firstName: 'สมเกียรติ',
+    lastName: 'บริหารวิชาการ',
+    position: 'รองผู้อำนวยการฝ่ายบริหารงานวิชาการ',
+    roles: ['EXECUTIVE']
+  },
+  {
+    uid: 'test_admin_001',
+    email: 'admin.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'แอดมินศูนย์ไอที สพม.',
+    prefix: 'นาย',
+    firstName: 'แอดมิน',
+    lastName: 'ระบบเทคโนโลยี',
+    position: 'ผู้ดูแลระบบสารสนเทศ (SUPER_ADMIN)',
+    roles: ['SUPER_ADMIN', 'EXECUTIVE', 'HOMEROOM_TEACHER', 'SUBJECT_TEACHER']
+  },
+  {
+    uid: 'test_guidance_001',
+    email: 'guidance.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'ดร.สุดา จิตวิทยาแนะแนว',
+    prefix: 'ดร.',
+    firstName: 'สุดา',
+    lastName: 'จิตวิทยาแนะแนว',
+    position: 'ครูแนะแนวและผู้ให้คำปรึกษาทางจิตวิทยา (PHQ-9/SDQ)',
+    roles: ['GUIDANCE_COUNSELOR']
+  },
+  {
+    uid: 'test_finance_001',
+    email: 'finance.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'นางศิริพร การเงินพัสดุ',
+    prefix: 'นาง',
+    firstName: 'ศิริพร',
+    lastName: 'การเงินพัสดุ',
+    position: 'เจ้าหน้าที่การเงินและบัญชีโรงเรียน',
+    roles: ['FINANCE_STAFF']
+  },
+  {
+    uid: 'test_infirmary_001',
+    email: 'infirmary.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'น.ส.กนกวรรณ พยาบาลวิชาชีพ',
+    prefix: 'นางสาว',
+    firstName: 'กนกวรรณ',
+    lastName: 'พยาบาลวิชาชีพ',
+    position: 'เจ้าหน้าที่พยาบาลและสุขอนามัย',
+    roles: ['INFIRMARY_STAFF']
+  },
+  {
+    uid: 'test_supervisor_001',
+    email: 'supervisor.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'ดร.วิชัย นิเทศการศึกษา',
+    prefix: 'ดร.',
+    firstName: 'วิชัย',
+    lastName: 'นิเทศการศึกษา',
+    position: 'ศึกษานิเทศก์ชำนาญการพิเศษ',
+    roles: ['INSTRUCTIONAL_SUPERVISOR']
+  },
+  {
+    uid: 'test_parent_001',
+    email: 'parent.test@gmail.com',
+    password: 'test1234',
+    displayName: 'คุณพ่อมนตรี (ผู้ปกครองนายกิตติคุณ)',
+    prefix: 'นาย',
+    firstName: 'มนตรี',
+    lastName: 'มงคลศิลป์',
+    position: 'ผู้ปกครองนักเรียน (นายกิตติคุณ มงคลศิลป์ ม.5/8)',
+    roles: [],
+    studentInfo: {
+      studentId: '38501',
+      studentNumber: 1,
+      className: 'ม.5/8',
+      parentId: 'test_parent_001'
+    }
+  },
+  {
+    uid: 'test_student_001',
+    email: 'student.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'นายกิตติคุณ มงคลศิลป์ (ม.5/8)',
+    prefix: 'นาย',
+    firstName: 'กิตติคุณ',
+    lastName: 'มงคลศิลป์',
+    position: 'นักเรียนชั้น ม.5/8 เลขที่ 1',
+    roles: ['STUDENT'],
+    studentInfo: {
+      studentId: '38501',
+      studentNumber: 1,
+      className: 'ม.5/8',
+      parentId: 'test_parent_001'
+    }
+  }
+];
+
+export async function seedEmulatorAuth() {
+  console.log(`\n======================================================`);
+  console.log(`⚡ Seeding Firebase Auth & Firestore to Emulator Suite`);
+  console.log(`Auth Host: ${process.env.FIREBASE_AUTH_EMULATOR_HOST}`);
+  console.log(`Firestore Host: ${process.env.FIRESTORE_EMULATOR_HOST}`);
+  console.log(`Project ID: ${projectId}`);
+  console.log(`======================================================\n`);
+
+  for (const userDef of SEEDED_TEST_USERS) {
+    try {
+      // 1. Create or Update Auth Record
+      let userRecord: admin.auth.UserRecord;
+      try {
+        userRecord = await auth.getUserByEmail(userDef.email);
+        await auth.updateUser(userRecord.uid, {
+          password: userDef.password,
+          displayName: userDef.displayName,
+          emailVerified: true
+        });
+        console.log(`🔄 Updated existing Auth user: ${userDef.email} (${userRecord.uid})`);
+      } catch (err: any) {
+        if (err.code === 'auth/user-not-found') {
+          userRecord = await auth.createUser({
+            uid: userDef.uid,
+            email: userDef.email,
+            password: userDef.password,
+            displayName: userDef.displayName,
+            emailVerified: true
+          });
+          console.log(`✨ Created new Auth user: ${userDef.email} (${userRecord.uid})`);
+        } else {
+          throw err;
+        }
+      }
+
+      // 2. Assign Custom User Claims (matching firestore.rules request.auth.token.roles)
+      await auth.setCustomUserClaims(userRecord.uid, {
+        roles: userDef.roles,
+        primaryRole: userDef.roles[0] || (userDef.roles.length === 0 ? 'PARENT' : 'USER'),
+        email: userDef.email,
+        emailVerified: true
+      });
+      console.log(`   🏷️ Set custom claims: roles=[${userDef.roles.join(', ')}]`);
+
+      // 3. Write Staff/User Profile in Firestore
+      const staffDocRef = db.collection('staff').doc(userRecord.uid);
+      await staffDocRef.set({
+        id: userRecord.uid,
+        email: userDef.email,
+        displayName: userDef.displayName,
+        prefix: userDef.prefix,
+        firstName: userDef.firstName,
+        lastName: userDef.lastName,
+        position: userDef.position,
+        roles: userDef.roles,
+        assignments: userDef.assignments || {},
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      // Also create an alias by email for robust lookups
+      await db.collection('staff').doc(userDef.email).set({
+        id: userRecord.uid,
+        email: userDef.email,
+        displayName: userDef.displayName,
+        prefix: userDef.prefix,
+        firstName: userDef.firstName,
+        lastName: userDef.lastName,
+        position: userDef.position,
+        roles: userDef.roles,
+        assignments: userDef.assignments || {},
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      // 4. If student/parent info is attached, write matching student record
+      if (userDef.studentInfo) {
+        const studentDocRef = db.collection('students').doc(userDef.studentInfo.studentId);
+        await studentDocRef.set({
+          studentId: userDef.studentInfo.studentId,
+          studentNumber: userDef.studentInfo.studentNumber,
+          studentNo: userDef.studentInfo.studentNumber,
+          fullName: 'นายกิตติคุณ มงคลศิลป์',
+          nickname: 'กิต',
+          className: userDef.studentInfo.className,
+          room: userDef.studentInfo.className,
+          behaviorScore: 100,
+          riskLevel: 'NORMAL',
+          parentId: userDef.studentInfo.parentId,
+          parentUid: userDef.studentInfo.parentId,
+          studentUid: userDef.uid,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+
+        // Add a sample parent notification for testing relational parent rules
+        const notifDocRef = db.collection('parent_notifications').doc(`notif_parent_test_01`);
+        await notifDocRef.set({
+          id: `notif_parent_test_01`,
+          parentId: userDef.studentInfo.parentId,
+          studentId: userDef.studentInfo.studentId,
+          studentName: 'นายกิตติคุณ มงคลศิลป์',
+          title: 'ยินดีต้อนรับสู่ระบบ Smart School Care',
+          message: 'บัญชีผู้ปกครองได้รับการเชื่อมโยงกับนักเรียนเรียบร้อยแล้วค่ะ',
+          status: 'unread',
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      }
+
+    } catch (err: any) {
+      console.error(`❌ Error seeding user ${userDef.email}:`, err.message);
+    }
+  }
+
+  // 5. Seed a sample self-assessment document for testing GUIDANCE_COUNSELOR rules
+  try {
+    const assessmentRef = db.collection('student_self_assessments').doc('38501');
+    await assessmentRef.set({
+      studentId: '38501',
+      studentName: 'นายกิตติคุณ มงคลศิลป์',
+      phq9Score: 6,
+      sdqTotal: 12,
+      evaluationDate: new Date().toISOString(),
+      counselingNotes: 'ทดสอบบันทึกข้อมูลสุขภาพจิต (จำกัดเฉพาะครูแนะแนวและแอดมินเท่านั้น)'
+    }, { merge: true });
+    console.log(`\n📋 Seeded sample PHQ-9/SDQ record in 'student_self_assessments/38501'`);
+  } catch (err: any) {
+    console.warn('Notice seeding student_self_assessments:', err.message);
+  }
+
+  console.log(`\n🎉 Seeded all ${SEEDED_TEST_USERS.length} test accounts successfully!`);
+}
+
+// Run directly if invoked via CLI
+if (process.argv[1]?.includes('seedEmulatorAuth')) {
+  seedEmulatorAuth().then(() => {
+    console.log('Done!');
+    process.exit(0);
+  }).catch((err) => {
+    console.error('Fatal error during emulator seeding:', err);
+    process.exit(1);
+  });
+}
