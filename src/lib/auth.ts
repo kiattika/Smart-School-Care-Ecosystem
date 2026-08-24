@@ -2,7 +2,6 @@ import {
   GoogleAuthProvider, 
   signInWithPopup, 
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   signOut, 
   onAuthStateChanged,
   User as FirebaseUser,
@@ -40,195 +39,17 @@ export async function signInWithGoogle(): Promise<User> {
 }
 
 /**
- * Sign in using email and password (ideal for Firebase Emulator Suite local testing)
- * Automatically falls back to user creation if user doesn't exist, and supports dev mock fallback.
+ * Sign in using email and password against Firebase Auth / Emulator
  */
 export async function signInWithEmailPassword(email: string, password: string): Promise<User> {
-  try {
-    const result = await signInWithEmailAndPassword(auth, email, password);
-    const fbUser = result.user;
-    const appUser = await buildAppUser(fbUser);
-    return appUser;
-  } catch (err: any) {
-    // 1. If user doesn't exist in the active Auth provider / emulator, attempt auto-creation
-    if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-      try {
-        const createResult = await createUserWithEmailAndPassword(auth, email, password);
-        const appUser = await buildAppUser(createResult.user);
-        return appUser;
-      } catch (createErr: any) {
-        // If createUser also failed with already in use, throw original error
-        if (createErr.code !== 'auth/email-already-in-use') {
-          console.warn('Auto-create in emulator failed:', createErr.message);
-        }
-      }
-    }
-
-    // 2. If network request failed (e.g. emulator not running on 127.0.0.1:9099) or in Dev mode,
-    // generate a functional mock session so testing/reviewing is never blocked.
-    if (
-      import.meta.env.DEV ||
-      err.code === 'auth/network-request-failed' ||
-      err.message?.includes('network-request-failed')
-    ) {
-      console.warn('Firebase Auth emulator not active. Activating dev test session for:', email);
-      return createDevMockUser(email);
-    }
-
-    throw err;
-  }
-}
-
-export function createDevMockUser(email: string): User {
-  const emailLower = email.toLowerCase();
-  const matched = MOCK_MULTI_ROLE_USERS.find(
-    u => u.email.toLowerCase() === emailLower
-  );
-
-  let roles: UserRole[] = matched?.roles || ['SUBJECT_TEACHER'];
-  let userProfile: UserProfile | undefined = matched;
-
-  if (!matched) {
-    if (emailLower.includes('advisor') || emailLower.includes('homeroom')) {
-      roles = ['HOMEROOM_TEACHER', 'SUBJECT_TEACHER'];
-      userProfile = {
-        id: `mock-advisor-${Date.now()}`,
-        email: email,
-        prefix: 'ครู',
-        firstName: 'เกียรติศักดิ์',
-        lastName: 'สถิตการุณย์',
-        position: 'ครูประจำชั้น ม.5/8 (คศ.2)',
-        roles: roles,
-        assignments: {
-          homeroomClass: 'ม.5/8'
-        }
-      };
-    } else if (emailLower.includes('admin')) {
-      roles = ['SUPER_ADMIN', 'EXECUTIVE'];
-      userProfile = {
-        id: `mock-admin-${Date.now()}`,
-        email: email,
-        prefix: '',
-        firstName: 'ผู้ดูแลระบบ',
-        lastName: 'ศูนย์ไอที',
-        position: 'System Administrator',
-        roles: roles
-      };
-    } else if (emailLower.includes('exec')) {
-      roles = ['EXECUTIVE', 'SUPER_ADMIN'];
-      userProfile = {
-        id: `mock-exec-${Date.now()}`,
-        email: email,
-        prefix: 'ดร.',
-        firstName: 'สมเกียรติ',
-        lastName: 'บริหารวิชาการ',
-        position: 'ผู้อำนวยการโรงเรียน',
-        roles: roles
-      };
-    } else if (emailLower.includes('guidance')) {
-      roles = ['GUIDANCE_COUNSELOR', 'SUBJECT_TEACHER'];
-      userProfile = {
-        id: `mock-guidance-${Date.now()}`,
-        email: email,
-        prefix: 'ดร.',
-        firstName: 'สุดา',
-        lastName: 'จิตวิทยาการปรึกษา',
-        position: 'ครูแนะแนว (ผู้เชี่ยวชาญ PHQ-9)',
-        roles: roles
-      };
-    } else if (emailLower.includes('finance')) {
-      roles = ['FINANCE_STAFF'];
-      userProfile = {
-        id: `mock-finance-${Date.now()}`,
-        email: email,
-        prefix: 'นาง',
-        firstName: 'ศิริพร',
-        lastName: 'การเงินพัสดุ',
-        position: 'เจ้าหน้าที่การเงินและพัสดุ',
-        roles: roles
-      };
-    } else if (emailLower.includes('infirmary')) {
-      roles = ['INFIRMARY_STAFF'];
-      userProfile = {
-        id: `mock-infirmary-${Date.now()}`,
-        email: email,
-        prefix: 'นางสาว',
-        firstName: 'กนกวรรณ',
-        lastName: 'พยาบาลวิชาชีพ',
-        position: 'พยาบาลประจำห้องพยาบาล',
-        roles: roles
-      };
-    } else if (emailLower.includes('supervisor')) {
-      roles = ['INSTRUCTIONAL_SUPERVISOR', 'SUPERVISORY_TEACHER'];
-      userProfile = {
-        id: `mock-supervisor-${Date.now()}`,
-        email: email,
-        prefix: 'ดร.',
-        firstName: 'ณรงค์',
-        lastName: 'ศึกษานิเทศก์',
-        position: 'หัวหน้าฝ่ายวิชาการและนิเทศการสอน',
-        roles: roles
-      };
-    } else if (emailLower.includes('parent')) {
-      roles = ['PARENT' as UserRole];
-      userProfile = {
-        id: `mock-parent-${Date.now()}`,
-        email: email,
-        prefix: 'นาย',
-        firstName: 'มนตรี',
-        lastName: 'มงคลศิลป์ (ผู้ปกครองนายกิตติคุณ)',
-        position: 'ผู้ปกครองนักเรียน',
-        roles: roles
-      };
-    } else if (emailLower.includes('student')) {
-      roles = ['STUDENT' as UserRole];
-      userProfile = {
-        id: `mock-student-${Date.now()}`,
-        email: email,
-        prefix: 'นาย',
-        firstName: 'กิตติคุณ',
-        lastName: 'มงคลศิลป์',
-        position: 'นักเรียนชั้น ม.5/8 เลขที่ 1',
-        roles: roles
-      };
-    } else {
-      roles = ['SUBJECT_TEACHER'];
-      userProfile = {
-        id: `mock-teacher-${Date.now()}`,
-        email: email,
-        prefix: 'ครู',
-        firstName: 'สมปอง',
-        lastName: 'สอนดี',
-        position: 'ครูผู้สอนกลุ่มสาระฯ',
-        roles: roles
-      };
-    }
-  }
-
-  const activeRole: UserRole = roles[0];
-  let legacyRole: Role = 'teacher';
-  if (activeRole === 'SUPER_ADMIN') legacyRole = 'admin';
-  else if (activeRole === 'EXECUTIVE') legacyRole = 'executive';
-  else if (activeRole === 'HOMEROOM_TEACHER') legacyRole = 'advisor';
-  else if (activeRole === ('PARENT' as any) || roles.includes('PARENT' as any)) legacyRole = 'parent';
-  else if (activeRole === ('STUDENT' as any) || roles.includes('STUDENT' as any)) legacyRole = 'student';
-
-  return {
-    uid: userProfile.id,
-    email: email,
-    displayName: `${userProfile.prefix}${userProfile.firstName} ${userProfile.lastName}`.trim(),
-    role: legacyRole,
-    activeRole: activeRole,
-    profile: userProfile
-  };
+  const result = await signInWithEmailAndPassword(auth, email, password);
+  const fbUser = result.user;
+  const appUser = await buildAppUser(fbUser);
+  return appUser;
 }
 
 export async function signOutUser(): Promise<void> {
-  try {
-    await signOut(auth);
-  } catch (err) {
-    console.warn('Sign-out note:', err);
-  }
+  await signOut(auth);
 }
 
 /**
@@ -276,9 +97,17 @@ export async function buildAppUser(fbUser: FirebaseUser): Promise<User> {
 
   // 3. Fallback matching with predefined staff list if in dev or during initial bootstrap
   if (roles.length === 0 && fbUser.email) {
-    const devUser = createDevMockUser(fbUser.email);
-    roles = devUser.profile?.roles || ['SUBJECT_TEACHER'];
-    userProfile = devUser.profile;
+    const matched = MOCK_MULTI_ROLE_USERS.find(
+      u => u.email.toLowerCase() === fbUser.email?.toLowerCase()
+    );
+    if (matched) {
+      roles = matched.roles;
+      userProfile = matched;
+    } else if (fbUser.email.toLowerCase().includes('parent')) {
+      roles = ['PARENT' as UserRole];
+    } else if (fbUser.email.toLowerCase().includes('student')) {
+      roles = ['STUDENT' as UserRole];
+    }
   }
 
   // Default fallback role if no roles assigned

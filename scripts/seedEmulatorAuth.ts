@@ -6,8 +6,10 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 process.env.FIREBASE_AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
-// Initialize Firebase Admin with just projectId - no need for service account when using emulator
-const projectId = 'ai-studio-smartschoolcaree-3b0997bf-b447-4da7-ac95-d7b1332165e0';
+import firebaseConfig from '../firebase-applet-config.json';
+
+// Initialize Firebase Admin with the matching project ID
+const projectId = process.env.GCLOUD_PROJECT || firebaseConfig.projectId || 'kiattisak-project-001';
 
 if (!getApps().length) {
   initializeApp({
