@@ -18,8 +18,13 @@ import * as XLSX from 'xlsx';
 import { writeBatch, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useStore } from '../store';
-import { Student, Course, GlobalCourse, UserRole } from '../types';
+import { Student, Course, GlobalCourse, UserRole, MOCK_MULTI_ROLE_USERS } from '../types';
 import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
+import { 
+  isTeacherLoadReportFormat, 
+  parseTeacherLoadReport, 
+  THAI_DAY_MAP 
+} from '../utils/teacherLoadReportParser';
 
 export type ImportType = 'STUDENT' | 'TEACHER' | 'COURSE';
 
@@ -37,6 +42,7 @@ export interface ValidatedRow {
   col4: string; // e.g. Student No / Position / Instructor
   isValid: boolean;
   errorMessage?: string;
+  warnings?: string[];
   parsedData: Record<string, any>;
 }
 
@@ -162,6 +168,40 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
 
   // Real validation against parsed rows
   const validateRows = (rawRows: Record<string, any>[], type: ImportType): ValidatedRow[] => {
+    // 1. Dedicated Teacher Load Report (รายงานภาระงานสอน) Parser for COURSE
+    if (type === 'COURSE' && isTeacherLoadReportFormat(rawRows)) {
+      const knownStaff = [...MOCK_MULTI_ROLE_USERS];
+      const { courseRows } = parseTeacherLoadReport(rawRows, knownStaff);
+      
+      return courseRows.map((row, idx) => ({
+        id: `course_load_${idx + 1}`,
+        col1: row.subjectCode || 'ไม่มีรหัส',
+        col2: `${row.subjectName}${row.subjectType === 'ACTIVITY' ? ' (กิจกรรม)' : ''}`,
+        col3: `${row.teacherName} • ${row.slots.length} คาบ (${row.scheduleRaw})`,
+        col4: `${row.room ? `ห้อง ${row.room}` : '-'} • ${row.level || '-'}`,
+        isValid: row.isValid,
+        errorMessage: row.errors.length > 0 ? `⚠️ ${row.errors.join(', ')}` : undefined,
+        warnings: row.warnings,
+        parsedData: {
+          isTeacherLoadReport: true,
+          subjectCode: row.subjectCode,
+          subjectName: row.subjectName,
+          room: row.room,
+          level: row.level,
+          credits: 1.5,
+          slots: row.slots,
+          subjectType: row.subjectType,
+          teacherName: row.teacherName,
+          department: row.department,
+          matchedTeacherId: row.matchedTeacherId,
+          unlinkedTeacherName: row.unlinkedTeacherName,
+          expectedPeriodCount: row.expectedPeriodCount,
+          scheduleRaw: row.scheduleRaw
+        }
+      }));
+    }
+
+    // 2. Standard / Legacy Row Validation
     const seenIds = new Set<string>();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const phoneRegex = /^0[0-9]{8,9}$/;
@@ -585,53 +625,120 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
             batch.set(staffRef, teacherPayload, { merge: true });
 
           } else {
-            // COURSE
-            const cleanRoom = parsedData.room.replace(/[^a-zA-Z0-9]/g, '_');
-            const scheduleDocId = `sch_${parsedData.courseCode}_${cleanRoom}`;
-            const scheduleRef = doc(db, 'schedules', scheduleDocId);
+            // COURSE Import
+            if (parsedData.isTeacherLoadReport) {
+              // Dedicated multi-slot expansion for Teacher Load Report (TASK 7 & TASK 8)
+              const cleanRoom = (parsedData.room || parsedData.level || 'all').replace(/[^a-zA-Z0-9]/g, '_');
+              const dayThNames: Record<string, string> = {
+                monday: 'จันทร์',
+                tuesday: 'อังคาร',
+                wednesday: 'พุธ',
+                thursday: 'พฤหัสบดี',
+                friday: 'ศุกร์',
+                saturday: 'เสาร์',
+                sunday: 'อาทิตย์'
+              };
 
-            const schedulePayload = {
-              id: scheduleDocId,
-              subjectCode: parsedData.courseCode,
-              subjectName: parsedData.courseName,
-              room: parsedData.room,
-              level: parsedData.level,
-              credits: parsedData.credits,
-              teacherIds: parsedData.instructorId ? [parsedData.instructorId] : ['teacher-kiattisak'],
-              subjectType: 'MAIN',
-              dayOfWeek: 'monday',
-              periodNumber: 1,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp()
-            };
+              for (const slot of (parsedData.slots || [])) {
+                const scheduleDocId = `sch_${parsedData.subjectCode}_${cleanRoom}_${slot.dayOfWeek}_p${slot.periodNumber}`;
+                const scheduleRef = doc(db, 'schedules', scheduleDocId);
 
-            batch.set(scheduleRef, schedulePayload, { merge: true });
+                const schedulePayload = {
+                  id: scheduleDocId,
+                  subjectCode: parsedData.subjectCode,
+                  subjectName: parsedData.subjectName,
+                  room: parsedData.room || '',
+                  level: parsedData.level || '',
+                  credits: parsedData.credits || 1.5,
+                  teacherIds: parsedData.matchedTeacherId ? [parsedData.matchedTeacherId] : [],
+                  unlinkedTeacherName: parsedData.matchedTeacherId ? null : (parsedData.unlinkedTeacherName || parsedData.teacherName || null),
+                  subjectType: parsedData.subjectType, // 'MAIN' or 'ACTIVITY'
+                  dayOfWeek: slot.dayOfWeek,
+                  periodNumber: slot.periodNumber,
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp()
+                };
 
-            const courseId = `course_${parsedData.courseCode}_${cleanRoom}`;
-            newCoursesToStore.push({
-              id: courseId,
-              code: parsedData.courseCode,
-              name: parsedData.courseName,
-              room: parsedData.room,
-              term: '1/2569',
-              studentsCount: 40,
-              periodIndex: 1,
-              schedule: 'จันทร์ 08:30 - 09:20 น.',
-              attendanceTaken: false,
-              teacherName: parsedData.instructorId || 'ครูผู้สอน',
-              teacherEmail: 'kiattisak@utd.ac.th'
-            });
+                batch.set(scheduleRef, schedulePayload, { merge: true });
 
-            newGlobalCoursesToStore.push({
-              courseId,
-              code: parsedData.courseCode,
-              courseName: parsedData.courseName,
-              teacherName: parsedData.instructorId || 'ครูผู้สอน',
-              teacherEmail: 'kiattisak@utd.ac.th',
-              roomName: parsedData.room,
-              scheduleString: 'จันทร์ 08:30 - 09:20 น.',
-              level: parsedData.level
-            });
+                const scheduleLabel = `${dayThNames[slot.dayOfWeek] || slot.dayOfWeek} คาบ ${slot.periodNumber}`;
+                const courseSlotId = `course_${parsedData.subjectCode}_${cleanRoom}_${slot.dayOfWeek}_p${slot.periodNumber}`;
+
+                newCoursesToStore.push({
+                  id: courseSlotId,
+                  code: parsedData.subjectCode,
+                  name: parsedData.subjectName,
+                  room: parsedData.room || parsedData.level || '',
+                  term: '1/2569',
+                  studentsCount: 40,
+                  periodIndex: slot.periodNumber,
+                  schedule: scheduleLabel,
+                  attendanceTaken: false,
+                  teacherName: parsedData.teacherName || 'ครูผู้สอน',
+                  teacherEmail: parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : 'kiattisak@utd.ac.th'
+                });
+
+                newGlobalCoursesToStore.push({
+                  courseId: courseSlotId,
+                  code: parsedData.subjectCode,
+                  courseName: parsedData.subjectName,
+                  teacherName: parsedData.teacherName || 'ครูผู้สอน',
+                  teacherEmail: parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : 'kiattisak@utd.ac.th',
+                  roomName: parsedData.room || parsedData.level || '',
+                  scheduleString: scheduleLabel,
+                  level: parsedData.level || ''
+                });
+              }
+            } else {
+              // Legacy Flat Template Course Write
+              const cleanRoom = (parsedData.room || 'all').replace(/[^a-zA-Z0-9]/g, '_');
+              const scheduleDocId = `sch_${parsedData.courseCode}_${cleanRoom}`;
+              const scheduleRef = doc(db, 'schedules', scheduleDocId);
+
+              const schedulePayload = {
+                id: scheduleDocId,
+                subjectCode: parsedData.courseCode,
+                subjectName: parsedData.courseName,
+                room: parsedData.room,
+                level: parsedData.level,
+                credits: parsedData.credits,
+                teacherIds: parsedData.instructorId ? [parsedData.instructorId] : [],
+                unlinkedTeacherName: parsedData.instructorId ? null : 'Unlinked Instructor',
+                subjectType: 'MAIN',
+                dayOfWeek: 'monday',
+                periodNumber: 1,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
+              };
+
+              batch.set(scheduleRef, schedulePayload, { merge: true });
+
+              const courseId = `course_${parsedData.courseCode}_${cleanRoom}`;
+              newCoursesToStore.push({
+                id: courseId,
+                code: parsedData.courseCode,
+                name: parsedData.courseName,
+                room: parsedData.room,
+                term: '1/2569',
+                studentsCount: 40,
+                periodIndex: 1,
+                schedule: 'จันทร์ 08:30 - 09:20 น.',
+                attendanceTaken: false,
+                teacherName: parsedData.instructorId || 'ครูผู้สอน',
+                teacherEmail: 'kiattisak@utd.ac.th'
+              });
+
+              newGlobalCoursesToStore.push({
+                courseId,
+                code: parsedData.courseCode,
+                courseName: parsedData.courseName,
+                teacherName: parsedData.instructorId || 'ครูผู้สอน',
+                teacherEmail: 'kiattisak@utd.ac.th',
+                roomName: parsedData.room,
+                scheduleString: 'จันทร์ 08:30 - 09:20 น.',
+                level: parsedData.level
+              });
+            }
           }
         }
 
@@ -901,9 +1008,21 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
                           <td className="px-4 py-3">{row.col4}</td>
                           <td className="px-4 py-3">
                             {row.isValid ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
-                                <CheckCircle2 className="w-3 h-3" /> ผ่านการตรวจสอบ
-                              </span>
+                              <div className="space-y-1">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
+                                  <CheckCircle2 className="w-3 h-3" /> ผ่านการตรวจสอบ {row.parsedData?.slots ? `(${row.parsedData.slots.length} คาบสอน)` : ''}
+                                </span>
+                                {row.warnings && row.warnings.length > 0 && (
+                                  <div className="space-y-0.5">
+                                    {row.warnings.map((w: string, wIdx: number) => (
+                                      <p key={wIdx} className="text-[10px] text-amber-300/90 font-light flex items-center gap-1 leading-tight">
+                                        <AlertTriangle className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+                                        {w}
+                                      </p>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
                             ) : (
                               <div className="space-y-0.5">
                                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded">
