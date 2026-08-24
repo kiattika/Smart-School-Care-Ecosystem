@@ -90,4 +90,23 @@ describe('Task 4: Write Failure Handling & Auto-seed Removal', () => {
     expect(seedSource).toContain('school_settings');
     expect(seedSource).toContain('periods_config');
   });
+
+  it('verifies useTeacherFirestoreSchedule initializes schedules as [] and exposes isSchedulesEmpty', () => {
+    const hookSource = fs.readFileSync(path.join(process.cwd(), 'src/hooks/useTeacherFirestoreSchedule.ts'), 'utf8');
+    // schedules state must initialize with empty array []
+    expect(hookSource).toContain('const [schedules, setSchedules] = useState<ScheduleItem[]>([]);');
+    expect(hookSource).not.toContain('useState<ScheduleItem[]>(() => getSchedulesToSeed());');
+    // return values must include isSchedulesEmpty and emptySchedulesMessage
+    expect(hookSource).toContain('isSchedulesEmpty: !loading && schedules.length === 0');
+    expect(hookSource).toContain("emptySchedulesMessage: 'ยังไม่มีตารางสอนในระบบ กรุณาติดต่อผู้ดูแลระบบ'");
+    // getSchedulesToSeed must not be used as fallback
+    expect(hookSource).not.toContain('getSchedulesToSeed');
+  });
+
+  it('verifies TeacherPortal displays emptySchedulesMessage and avoids silent fake schedule fallback', () => {
+    const teacherPortalSource = fs.readFileSync(path.join(process.cwd(), 'src/TeacherPortal.tsx'), 'utf8');
+    expect(teacherPortalSource).toContain('isSchedulesEmpty');
+    expect(teacherPortalSource).toContain('emptySchedulesMessage');
+    expect(teacherPortalSource).toContain('id="empty-schedules-banner"');
+  });
 });

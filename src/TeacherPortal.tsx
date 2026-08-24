@@ -68,6 +68,8 @@ export function TeacherPortal() {
     error: fsError,
     isPeriodsEmpty,
     emptyPeriodsMessage,
+    isSchedulesEmpty,
+    emptySchedulesMessage,
     clearError: clearFsError,
     updateScheduleAttendance, 
     updatePartnerAttendance 
@@ -768,68 +770,6 @@ export function TeacherPortal() {
                     partnerCheckedAttendance: item.partnerCheckedAttendance
                   });
                 });
-              } else {
-                // Fallback to local myCourses calculation
-                myCourses.forEach(course => {
-                  const segments = parseSchedule(course.schedule); // e.g. [{ day: 3, periodIndex: 0 }, { day: 3, periodIndex: 4 }, ...]
-                  const todaySegments = segments.filter(seg => seg.day === targetDayOfWeek);
-
-                  if (todaySegments.length > 0) {
-                    // Sort segments ascending
-                    todaySegments.sort((a, b) => a.periodIndex - b.periodIndex);
-
-                    // Group consecutive periods (e.g., 6 and 7)
-                    const blocks: number[][] = [];
-                    todaySegments.forEach(seg => {
-                      if (blocks.length === 0) {
-                        blocks.push([seg.periodIndex]);
-                      } else {
-                        const lastBlock = blocks[blocks.length - 1];
-                        const lastPeriod = lastBlock[lastBlock.length - 1];
-                        if (seg.periodIndex === lastPeriod + 1) {
-                          lastBlock.push(seg.periodIndex);
-                        } else {
-                          blocks.push([seg.periodIndex]);
-                        }
-                      }
-                    });
-
-                    blocks.forEach(block => {
-                      const pIndex = block[0];
-                      const endPIndex = block[block.length - 1];
-                      const { start } = getPeriodTimes(pIndex);
-                      const { end: latestEnd } = getPeriodTimes(endPIndex);
-
-                      const recordDate = format(targetDate, 'yyyy-MM-dd');
-                      const existingRecord = postTeachingRecords.find(r => (r.courseId === course.id || r.courseId === `${course.id}-${pIndex}`) && r.date === recordDate);
-                      const isAct = course.code === 'HR' || course.code === 'CZ' || course.name.includes('กิจกรรม');
-
-                      const hasRecords = !!(
-                        (attendanceRecords[course.id] && Object.keys(attendanceRecords[course.id]).length > 0) ||
-                        (attendanceRecords[`${course.id}-${pIndex}`] && Object.keys(attendanceRecords[`${course.id}-${pIndex}`]).length > 0)
-                      );
-
-                      rawMappedPeriods.push({
-                        id: `${course.id}-${pIndex}`,
-                        courseId: course.id,
-                        periodNumber: pIndex,
-                        startTime: formatTime(start),
-                        endTime: formatTime(latestEnd),
-                        subjectCode: course.code,
-                        subjectName: course.name,
-                        className: course.room || 'ม.5/8',
-                        room: course.room?.includes('5/8') ? '[943] HR 5/8' : course.room?.includes('5/9') ? '[935] HR 5/9' : (course.room || 'อาคาร 3 ห้อง 321'),
-                        attendanceTaken: course.attendanceTaken || hasRecords,
-                        hasPostTeachingRecord: !!existingRecord,
-                        roleLabel: isAct ? 'กิจกรรม' : (course.roleLabel || 'วิชาการ'),
-                        studentsCount: course.studentsCount,
-                        type: isAct ? 'ACTIVITY' : 'MAIN',
-                        teachingPartner: course.code === 'HR' ? 'Mrs. Koy K.' : undefined,
-                        partnerCheckedAttendance: false
-                      });
-                    });
-                  }
-                });
               }
 
               // Deduplicate schedule items by period slot (periodNumber + subjectCode + className)
@@ -878,6 +818,14 @@ export function TeacherPortal() {
                     <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-center gap-3 text-amber-300 text-sm">
                       <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400" />
                       <span>{emptyPeriodsMessage || "ยังไม่มีการตั้งค่าคาบเรียนจากผู้ดูแลระบบ"}</span>
+                    </div>
+                  )}
+
+                  {/* Empty schedules alert if no schedules configured in Firestore */}
+                  {isSchedulesEmpty && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-center gap-3 text-amber-300 text-sm" id="empty-schedules-banner">
+                      <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400" />
+                      <span>{emptySchedulesMessage || "ยังไม่มีตารางสอนในระบบ กรุณาติดต่อผู้ดูแลระบบ"}</span>
                     </div>
                   )}
 

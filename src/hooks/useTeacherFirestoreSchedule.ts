@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot, getDocs, doc, setDoc } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
-import { TEACHING_LOAD_DATA } from '../data/teachingLoadData';
-import { parseThaiSchedule } from '../lib/utils';
+import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 
 export interface AdminPeriodConfig {
   id: string;
@@ -50,47 +48,6 @@ export const isTeacherEmailMatch = (email1?: string, email2?: string): boolean =
   return false;
 };
 
-// Helper to generate the default schedules cleanly
-const getSchedulesToSeed = (): ScheduleItem[] => {
-  const items: ScheduleItem[] = [];
-
-  TEACHING_LOAD_DATA.forEach(teacher => {
-    const email = teacher.teacherEmail || `${teacher.teacherName.toLowerCase().replace(/[^a-z0-9]/g, '')}@utd.ac.th`;
-
-    teacher.subjects.forEach((subj) => {
-      const segments = parseThaiSchedule(subj.schedule);
-      segments.forEach(seg => {
-        const daySuffix = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][seg.day === 0 ? 6 : seg.day - 1] || `d${seg.day}`;
-        const isAct = subj.subjectCode === 'HR' || subj.subjectCode === 'CZ';
-        const cleanEmail = email.replace(/[@.]/g, '-');
-        const cleanCode = subj.subjectCode.replace(/[^a-zA-Z0-9\u0E00-\u0E7F]/g, '');
-        const cleanClass = subj.level.replace(/[^a-zA-Z0-9]/g, '');
-
-        const itemData: ScheduleItem = {
-          id: `sched-${cleanEmail}-${cleanCode}-${cleanClass}-${daySuffix}-p${seg.periodIndex}`,
-          courseCode: subj.subjectCode,
-          courseName: subj.subjectName,
-          periodNumber: seg.periodIndex,
-          scheduleDay: seg.day,
-          room: subj.room,
-          targetClass: subj.level,
-          type: isAct ? 'ACTIVITY' : 'MAIN',
-          teacherEmail: email,
-          teacherName: teacher.teacherName,
-          teachingPartner: subj.subjectCode === 'HR' ? 'Mrs. Koy K.' : null,
-          partnerCheckedAttendance: false,
-          attendanceTaken: false,
-          studentsCount: subj.level.includes('5/8') ? 40 : subj.level.includes('5/9') ? 38 : subj.level.includes('5/11') ? 42 : 35
-        };
-
-        items.push(itemData);
-      });
-    });
-  });
-
-  return items;
-};
-
 // Helper to remove any undefined properties from an object before saving to Firestore
 const sanitizeForFirestore = <T extends Record<string, any>>(obj: T): Partial<T> => {
   return Object.fromEntries(
@@ -100,7 +57,7 @@ const sanitizeForFirestore = <T extends Record<string, any>>(obj: T): Partial<T>
 
 export function useTeacherFirestoreSchedule() {
   const [periods, setPeriods] = useState<AdminPeriodConfig[]>(DEFAULT_ADMIN_PERIODS);
-  const [schedules, setSchedules] = useState<ScheduleItem[]>(() => getSchedulesToSeed());
+  const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,7 +82,7 @@ export function useTeacherFirestoreSchedule() {
             setPeriods([]);
           }
         }, (err) => {
-          console.warn("Notice: admin_periods_config listener fallback to defaults:", err.message);
+          console.error("admin_periods_config listener error:", err.message);
         });
 
         unsubscribeSchedules = onSnapshot(schedulesColRef, (snapshot) => {
@@ -135,15 +92,17 @@ export function useTeacherFirestoreSchedule() {
               list.push({ id: docSnap.id, ...docSnap.data() } as ScheduleItem);
             });
             setSchedules(list);
+          } else {
+            setSchedules([]);
           }
           setLoading(false);
         }, (err) => {
-          console.warn("Notice: schedules listener fallback to defaults:", err.message);
+          console.error("schedules listener error:", err.message);
           setLoading(false);
         });
 
       } catch (err: any) {
-        console.warn("Notice: Using local schedule fallback:", err.message);
+        console.error("Firestore schedule sync setup error:", err.message);
         setLoading(false);
       }
     };
@@ -209,6 +168,8 @@ export function useTeacherFirestoreSchedule() {
     error, 
     isPeriodsEmpty: !loading && periods.length === 0,
     emptyPeriodsMessage: 'ยังไม่มีการตั้งค่าคาบเรียนจากผู้ดูแลระบบ',
+    isSchedulesEmpty: !loading && schedules.length === 0,
+    emptySchedulesMessage: 'ยังไม่มีตารางสอนในระบบ กรุณาติดต่อผู้ดูแลระบบ',
     clearError, 
     updateScheduleAttendance, 
     updatePartnerAttendance 

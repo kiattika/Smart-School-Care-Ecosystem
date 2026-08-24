@@ -10,10 +10,14 @@ setLogLevel('error');
 if (typeof window !== 'undefined') {
   const originalConsoleError = console.error;
   console.error = (...args: any[]) => {
+    const fullText = args
+      .map(arg => (typeof arg === 'string' ? arg : (arg?.message || (arg ? String(arg) : ''))))
+      .join(' ');
+
     if (
-      typeof args[0] === 'string' &&
-      args[0].includes('@firebase/firestore') &&
-      args[0].includes('Could not reach Cloud Firestore backend')
+      fullText.includes('@firebase/firestore') &&
+      (fullText.includes('Could not reach Cloud Firestore backend') ||
+       fullText.includes('offline mode until it is able to successfully connect'))
     ) {
       console.warn('Notice: Firestore operating in offline/retry mode until backend connection establishes.');
       return;
