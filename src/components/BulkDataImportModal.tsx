@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { 
   Upload, 
   FileSpreadsheet, 
@@ -9,12 +9,17 @@ import {
   RefreshCw, 
   Trash2, 
   X, 
-  Play, 
   Database,
-  ArrowRight,
-  Sparkles,
-  Info
+  Info,
+  ShieldAlert
 } from 'lucide-react';
+import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
+import { writeBatch, doc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { useStore } from '../store';
+import { Student, Course, GlobalCourse, UserRole } from '../types';
+import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
 
 export type ImportType = 'STUDENT' | 'TEACHER' | 'COURSE';
 
@@ -24,49 +29,127 @@ export interface BulkDataImportModalProps {
   onImportSuccess?: (type: ImportType, count: number) => void;
 }
 
-// แถวจำลองข้อมูลที่ผ่าน และ ติด Error เพื่อจำลองการทำ Validation ให้ตรงตามข้อกำหนดอย่างสมบูรณ์แบบ
-interface PreviewRow {
-  id: string;
-  col1: string; // เช่น รหัสนักเรียน/รหัสครู/รหัสวิชา
-  col2: string; // เช่น ชื่อ-นามสกุล / ชื่อวิชา
-  col3: string; // เช่น อีเมล / ระดับชั้น / หน่วยกิต
-  col4: string; // เช่น ห้องเรียน / ตำแหน่ง / อาจารย์ผู้สอน
+export interface ValidatedRow {
+  id: string; // Row index or unique key
+  col1: string; // e.g. Student ID / Teacher ID / Course Code
+  col2: string; // e.g. Name / Course Name
+  col3: string; // e.g. Room / Email / Credits
+  col4: string; // e.g. Student No / Position / Instructor
   isValid: boolean;
   errorMessage?: string;
+  parsedData: Record<string, any>;
+}
+
+// Normalize object keys for flexible column matching
+function normalizeRowKeys(row: Record<string, any>): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(row)) {
+    const cleanKey = key.trim().toLowerCase().replace(/[\s_\-\.\/]+/g, '');
+    result[cleanKey] = typeof value === 'string' ? value.trim() : value;
+  }
+  return result;
+}
+
+// Helper to extract value using multiple candidate column names
+function getFieldValue(normalized: Record<string, any>, candidates: string[]): string {
+  for (const candidate of candidates) {
+    const cleanCandidate = candidate.toLowerCase().replace(/[\s_\-\.\/]+/g, '');
+    if (normalized[cleanCandidate] !== undefined && normalized[cleanCandidate] !== null && normalized[cleanCandidate] !== '') {
+      return String(normalized[cleanCandidate]).trim();
+    }
+  }
+  return '';
 }
 
 export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDataImportModalProps) {
   const [importType, setImportType] = useState<ImportType>('STUDENT');
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const [previewData, setPreviewData] = useState<PreviewRow[]>([]);
+  const [previewData, setPreviewData] = useState<ValidatedRow[]>([]);
   const [isValidated, setIsValidated] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
+  const [importError, setImportError] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Access current user role from store
+  const user = useStore(state => state.user);
+  const addStudentsToStore = (newStudents: Student[]) => {
+    const currentStudents = useStore.getState().students;
+    const studentMap = new Map(currentStudents.map(s => [s.studentId, s]));
+    newStudents.forEach(s => studentMap.set(s.studentId, s));
+    useStore.setState({ students: Array.from(studentMap.values()) });
+  };
+
+  const addCoursesToStore = (newCourses: Course[], newGlobalCourses: GlobalCourse[]) => {
+    const currentCourses = useStore.getState().courses;
+    const currentGlobal = useStore.getState().globalCourses;
+    const courseMap = new Map(currentCourses.map(c => [c.id, c]));
+    const globalMap = new Map(currentGlobal.map(g => [g.courseId, g]));
+
+    newCourses.forEach(c => courseMap.set(c.id, c));
+    newGlobalCourses.forEach(g => globalMap.set(g.courseId, g));
+
+    useStore.setState({ 
+      courses: Array.from(courseMap.values()),
+      globalCourses: Array.from(globalMap.values())
+    });
+  };
+
+  // Determine current user's permissions
+  const userRoles: UserRole[] = useMemo(() => {
+    if (!user) return [];
+    const roles: UserRole[] = [];
+    if (user.activeRole) roles.push(user.activeRole);
+    if (user.profile?.roles) {
+      user.profile.roles.forEach(r => {
+        if (!roles.includes(r)) roles.push(r);
+      });
+    }
+    if (user.role === 'admin' && !roles.includes('SUPER_ADMIN')) {
+      roles.push('SUPER_ADMIN');
+    }
+    return roles;
+  }, [user]);
+
+  const hasPermissionForCurrentType = useMemo(() => {
+    const isSuperAdmin = userRoles.includes('SUPER_ADMIN');
+    const isHomeroom = userRoles.includes('HOMEROOM_TEACHER');
+    const isSubjectTeacher = userRoles.includes('SUBJECT_TEACHER');
+
+    if (importType === 'TEACHER') {
+      return isSuperAdmin;
+    }
+    if (importType === 'STUDENT') {
+      return isSuperAdmin || isHomeroom;
+    }
+    if (importType === 'COURSE') {
+      return isSuperAdmin || isHomeroom || isSubjectTeacher;
+    }
+    return false;
+  }, [importType, userRoles]);
+
   if (!isOpen) return null;
 
-  // การจำลองดาวน์โหลดไฟล์เทมเพลตตัวอย่าง
+  // Download template CSV file
   const handleDownloadTemplate = () => {
-    // ในสถานการณ์จริง จะเป็นการดาวน์โหลดไฟล์จากพาร์ท หรือใช้ xlsx บิลด์ขึ้นมา
-    // ตรงนี้เราทำฟังก์ชันจำลองให้เซฟเป็นไฟล์ csv หลอก ๆ ให้ผู้ใช้ได้อารมณ์เสมือนจริงสูงสุด
     let headers = '';
     let filename = '';
     
     if (importType === 'STUDENT') {
-      headers = 'Student ID,Prefix,FirstName,LastName,Room,StudentNo,ParentMobile\n620101,นาย,สมรักษ์,คำสิงห์,ม.5/8,1,0812345678\n620102,นางสาว,สมศรี,ใจดี,ม.5/8,2,0898765432';
+      headers = 'Student ID,Prefix,FirstName,LastName,Room,StudentNo,ParentMobile\n38501,นาย,กฤตยชญ์,บุญช่วย,ม.5/8,1,0812345678\n38502,นาย,ณัฐพล,สุขสบาย,ม.5/8,2,0898765432\n38503,นางสาว,สมศรี,ใจดี,ม.5/8,3,0861112233';
       filename = 'Student_Template.csv';
     } else if (importType === 'TEACHER') {
-      headers = 'Teacher ID,Prefix,FirstName,LastName,Position,Email,Roles\nteacher-01,นาย,ทวี,รักเรียน,ครู คศ.1,tawee@school.ac.th,"SUBJECT_TEACHER,HOMEROOM_TEACHER"';
+      headers = 'Teacher ID,Prefix,FirstName,LastName,Position,Email,Roles,Department\nteacher-01,นาย,ทวี,รักเรียน,ครู คศ.1,tawee@school.ac.th,"SUBJECT_TEACHER,HOMEROOM_TEACHER",math-dept\nteacher-02,นางสาว,สมจิต,แข็งขัน,ครู คศ.2,somjit@school.ac.th,SUBJECT_TEACHER,sci-dept\nteacher-03,นางสาว,พิมลวรรณ,ศรีงาม,ครูผู้ช่วย,pimonwan@school.ac.th,SUBJECT_TEACHER,thai-dept';
       filename = 'Teacher_Template.csv';
     } else {
-      headers = 'Course Code,Course Name,Level,Room,Credits,Instructor ID\nTH32101,ภาษาไทย 3,ม.5,ม.5/8,1.5,teacher-somchai';
+      headers = 'Course Code,Course Name,Level,Room,Credits,Instructor ID\nTH32101,ภาษาไทย 3,ม.5,ม.5/8,1.5,teacher-somchai\nMA32101,คณิตศาสตร์พื้นฐาน 3,ม.5,ม.5/8,1.5,teacher-kiattisak\nSCI32201,ฟิสิกส์เพิ่มเติม 1,ม.5,ม.5/8,2.0,teacher-somjai\nEN32101,ภาษาอังกฤษ 3,ม.5,ม.5/8,1.0,teacher-weena';
       filename = 'Course_Template.csv';
     }
 
-    const blob = new Blob([headers], { type: 'text/csv;charset=utf-8;' });
+    const bom = '\uFEFF';
+    const blob = new Blob([bom + headers], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -74,33 +157,224 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
-  // ดึงข้อมูลพรีวิวจำลองตามประเภทการนำเข้า เพื่อส่งมอบประสบการณ์เหมือนจริงที่แสดง Validation แดง-เขียว ได้ชัดเจน
-  const generateMockPreviewData = (type: ImportType, fileName: string): PreviewRow[] => {
-    if (type === 'STUDENT') {
-      return [
-        { id: '1', col1: '38501', col2: 'นายกฤตยชญ์ บุญช่วย', col3: 'ม.5/8', col4: 'เลขที่ 1', isValid: true },
-        { id: '2', col1: '38502', col2: 'นายณัฐพล สุขสบาย', col3: 'ม.5/8', col4: 'เลขที่ 2', isValid: true },
-        { id: '3', col1: '38501', col2: 'นายสิทธิชัย กลิ่นส้ม', col3: 'ม.5/8', col4: 'เลขที่ 3', isValid: false, errorMessage: '⚠️ รหัสประจำตัวซ้ำซ้อนกับลำดับที่ 1' },
-        { id: '4', col1: '38504', col2: 'เด็กชายสมชาย ไม่มีนามสกุล', col3: 'ม.5', col4: '', isValid: false, errorMessage: '⚠️ ข้อมูลไม่สมบูรณ์ (ขาดระบุห้องเรียน หรือ เลขที่ประจำตัว)' },
-        { id: '5', col1: '38505', col2: 'นางสาวจารุวรรณ ใฝ่เรียน', col3: 'ม.5/8', col4: 'เลขที่ 4', isValid: true },
-      ];
-    } else if (type === 'TEACHER') {
-      return [
-        { id: '1', col1: 'tch-001', col2: 'นางสมจิต แข็งขัน', col3: 'somjit@school.ac.th', col4: 'ครู คศ.2', isValid: true },
-        { id: '2', col1: 'tch-002', col2: 'นายชลิต นามสมมติ', col3: 'chalit_email_invalid', col4: 'ครู คศ.1', isValid: false, errorMessage: '⚠️ รูปแบบอีเมลไม่ถูกต้องตามข้อกำหนด (@school.ac.th)' },
-        { id: '3', col1: 'tch-003', col2: 'นางสาวพิมลวรรณ ศรีงาม', col3: 'pimonwan@school.ac.th', col4: 'ครูผู้ช่วย', isValid: true },
-        { id: '4', col1: '', col2: 'นายบุญชู แสนดี', col3: 'boonchoo@school.ac.th', col4: 'ครูอัตราจ้าง', isValid: false, errorMessage: '⚠️ ขาดรหัสประจำตัวครู (ID)' },
-      ];
-    } else {
-      return [
-        { id: '1', col1: 'TH32101', col2: 'ภาษาไทย 3', col3: '1.5 หน่วยกิต', col4: 'ม.5/8', isValid: true },
-        { id: '2', col1: 'MA32101', col2: 'คณิตศาสตร์พื้นฐาน 3', col3: '1.5 หน่วยกิต', col4: 'ม.5/8', isValid: true },
-        { id: '3', col1: 'SCI32201', col2: 'ฟิสิกส์เพิ่มเติม 1', col3: '-9 หน่วยกิต', col4: 'ม.5/8', isValid: false, errorMessage: '⚠️ จำนวนหน่วยกิตติดลบ หรืออยู่นอกเกณฑ์ (0.5 - 3.0)' },
-        { id: '4', col1: 'EN32101', col2: 'ภาษาอังกฤษ 3', col3: '1.0 หน่วยกิต', col4: 'ม.5/8', isValid: true },
-      ];
-    }
+  // Real validation against parsed rows
+  const validateRows = (rawRows: Record<string, any>[], type: ImportType): ValidatedRow[] => {
+    const seenIds = new Set<string>();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const phoneRegex = /^0[0-9]{8,9}$/;
+
+    return rawRows.map((raw, idx) => {
+      const normalized = normalizeRowKeys(raw);
+      const rowId = String(idx + 1);
+
+      if (type === 'STUDENT') {
+        const studentId = getFieldValue(normalized, ['studentid', 'id', 'studentcode', 'code', 'รหัสนักเรียน', 'รหัสประจำตัว', 'เลขประจำตัว']);
+        let prefix = getFieldValue(normalized, ['prefix', 'title', 'คำนำหน้า', 'คำนำหน้านาม']);
+        let firstName = getFieldValue(normalized, ['firstname', 'first_name', 'ชื่อ', 'ชื่อจริง']);
+        let lastName = getFieldValue(normalized, ['lastname', 'last_name', 'นามสกุล']);
+        const rawFullName = getFieldValue(normalized, ['fullname', 'name', 'ชื่อนามสกุล', 'ชื่อและนามสกุล']);
+        const room = getFieldValue(normalized, ['room', 'classname', 'class', 'grade', 'graderoom', 'ห้อง', 'ห้องเรียน', 'ระดับชั้น']);
+        const studentNoStr = getFieldValue(normalized, ['studentno', 'number', 'no', 'studentnumber', 'เลขที่']);
+        const parentMobile = getFieldValue(normalized, ['parentmobile', 'parentphone', 'mobile', 'phone', 'เบอร์โทรผู้ปกครอง', 'เบอร์ผู้ปกครอง', 'เบอร์โทร']);
+
+        // Handle single fullName column if separate fields are not given
+        if (!firstName && rawFullName) {
+          const parts = rawFullName.trim().split(/\s+/);
+          if (['นาย', 'นางสาว', 'นาง', 'เด็กชาย', 'เด็กหญิง', 'ด.ช.', 'ด.ญ.'].includes(parts[0])) {
+            prefix = parts[0];
+            firstName = parts[1] || '';
+            lastName = parts.slice(2).join(' ') || '';
+          } else {
+            firstName = parts[0] || '';
+            lastName = parts.slice(1).join(' ') || '';
+          }
+        }
+
+        const fullName = `${prefix ? prefix : ''}${firstName} ${lastName}`.trim() || rawFullName;
+        const studentNo = parseInt(studentNoStr, 10);
+
+        let isValid = true;
+        const errors: string[] = [];
+
+        if (!studentId) {
+          isValid = false;
+          errors.push('ขาดรหัสประจำตัวนักเรียน (Student ID)');
+        } else if (seenIds.has(studentId)) {
+          isValid = false;
+          errors.push(`รหัสประจำตัวซ้ำซ้อน (${studentId})`);
+        } else {
+          seenIds.add(studentId);
+        }
+
+        if (!firstName && !rawFullName) {
+          isValid = false;
+          errors.push('ขาดชื่อ-นามสกุลนักเรียน');
+        }
+
+        if (!room) {
+          isValid = false;
+          errors.push('ขาดการระบุห้องเรียน (เช่น ม.5/8)');
+        }
+
+        if (studentNoStr && (isNaN(studentNo) || studentNo <= 0)) {
+          isValid = false;
+          errors.push('เลขที่ต้องเป็นจำนวนเต็มบวก');
+        }
+
+        if (parentMobile && !phoneRegex.test(parentMobile.replace(/[-\s]/g, ''))) {
+          isValid = false;
+          errors.push('เบอร์โทรศัพท์ผู้ปกครองไม่ถูกต้อง (ต้องเป็นตัวเลข 9-10 หลักขึ้นต้นด้วย 0)');
+        }
+
+        return {
+          id: rowId,
+          col1: studentId || 'ไม่มีข้อมูล',
+          col2: fullName || 'ไม่มีข้อมูล',
+          col3: room || 'ไม่มีข้อมูล',
+          col4: studentNoStr ? `เลขที่ ${studentNoStr}` : 'ไม่ได้ระบุเลขที่',
+          isValid,
+          errorMessage: errors.length > 0 ? `⚠️ ${errors.join(', ')}` : undefined,
+          parsedData: {
+            studentId,
+            prefix: prefix || 'นาย',
+            firstName,
+            lastName,
+            fullName,
+            room,
+            studentNo: isNaN(studentNo) || studentNo <= 0 ? (idx + 1) : studentNo,
+            parentMobile: parentMobile ? parentMobile.replace(/[-\s]/g, '') : '',
+          }
+        };
+      } else if (type === 'TEACHER') {
+        const teacherId = getFieldValue(normalized, ['teacherid', 'id', 'staffid', 'รหัสครู', 'รหัสประจำตัวครู', 'รหัสบุคลากร']);
+        let prefix = getFieldValue(normalized, ['prefix', 'title', 'คำนำหน้า']);
+        let firstName = getFieldValue(normalized, ['firstname', 'first_name', 'ชื่อ', 'ชื่อจริง']);
+        let lastName = getFieldValue(normalized, ['lastname', 'last_name', 'นามสกุล']);
+        const rawFullName = getFieldValue(normalized, ['fullname', 'name', 'ชื่อนามสกุล']);
+        const position = getFieldValue(normalized, ['position', 'ตำแหน่ง']);
+        const email = getFieldValue(normalized, ['email', 'e-mail', 'อีเมล', 'อีเมล์']);
+        const rolesStr = getFieldValue(normalized, ['roles', 'role', 'บทบาท', 'สิทธิ์']);
+        const department = getFieldValue(normalized, ['department', 'departmentid', 'dept', 'กลุ่มสาระ', 'กลุ่มสาระฯ', 'สังกัด']);
+
+        if (!firstName && rawFullName) {
+          const parts = rawFullName.trim().split(/\s+/);
+          if (['นาย', 'นางสาว', 'นาง', 'ดร.'].includes(parts[0])) {
+            prefix = parts[0];
+            firstName = parts[1] || '';
+            lastName = parts.slice(2).join(' ') || '';
+          } else {
+            firstName = parts[0] || '';
+            lastName = parts.slice(1).join(' ') || '';
+          }
+        }
+
+        const fullName = `${prefix ? prefix : ''}${firstName} ${lastName}`.trim() || rawFullName;
+
+        let isValid = true;
+        const errors: string[] = [];
+
+        if (!teacherId) {
+          isValid = false;
+          errors.push('ขาดรหัสประจำตัวครู (ID)');
+        } else if (seenIds.has(teacherId)) {
+          isValid = false;
+          errors.push(`รหัสประจำตัวซ้ำซ้อน (${teacherId})`);
+        } else {
+          seenIds.add(teacherId);
+        }
+
+        if (!firstName && !rawFullName) {
+          isValid = false;
+          errors.push('ขาดชื่อ-นามสกุลครู');
+        }
+
+        if (!email) {
+          isValid = false;
+          errors.push('ขาดอีเมลบุคลากร');
+        } else if (!emailRegex.test(email)) {
+          isValid = false;
+          errors.push('รูปแบบอีเมลไม่ถูกต้อง');
+        }
+
+        const rolesArray: UserRole[] = rolesStr
+          ? (rolesStr.split(/[,;|]/).map(r => r.trim()).filter(Boolean) as UserRole[])
+          : ['SUBJECT_TEACHER'];
+
+        return {
+          id: rowId,
+          col1: teacherId || 'ไม่มีข้อมูล',
+          col2: fullName || 'ไม่มีข้อมูล',
+          col3: email || 'ไม่มีข้อมูล',
+          col4: position || 'ครูผู้สอน',
+          isValid,
+          errorMessage: errors.length > 0 ? `⚠️ ${errors.join(', ')}` : undefined,
+          parsedData: {
+            teacherId,
+            prefix: prefix || 'ครู',
+            firstName,
+            lastName,
+            fullName,
+            position: position || 'ครูผู้สอน',
+            email,
+            roles: rolesArray,
+            departmentId: department || ''
+          }
+        };
+      } else {
+        // COURSE
+        const courseCode = getFieldValue(normalized, ['coursecode', 'code', 'subjectcode', 'รหัสวิชา']);
+        const courseName = getFieldValue(normalized, ['coursename', 'name', 'subjectname', 'ชื่อวิชา', 'รายวิชา']);
+        const level = getFieldValue(normalized, ['level', 'grade', 'ระดับชั้น']);
+        const room = getFieldValue(normalized, ['room', 'classname', 'class', 'ห้อง', 'ห้องเรียน']);
+        const creditsStr = getFieldValue(normalized, ['credits', 'credit', 'หน่วยกิต']);
+        const instructorId = getFieldValue(normalized, ['instructorid', 'teacherid', 'teachername', 'อาจารย์ผู้สอน', 'ครูผู้สอน']);
+
+        const credits = parseFloat(creditsStr);
+        let isValid = true;
+        const errors: string[] = [];
+
+        if (!courseCode) {
+          isValid = false;
+          errors.push('ขาดรหัสวิชา (Course Code)');
+        }
+
+        if (!courseName) {
+          isValid = false;
+          errors.push('ขาดชื่อรายวิชา');
+        }
+
+        if (!room && !level) {
+          isValid = false;
+          errors.push('ขาดการระบุระดับชั้นหรือห้องเรียน');
+        }
+
+        if (!creditsStr || isNaN(credits) || credits < 0.5 || credits > 5.0) {
+          isValid = false;
+          errors.push('จำนวนหน่วยกิตอยู่นอกเกณฑ์มาตรฐาน (0.5 - 5.0)');
+        }
+
+        return {
+          id: rowId,
+          col1: courseCode || 'ไม่มีข้อมูล',
+          col2: courseName || 'ไม่มีข้อมูล',
+          col3: !isNaN(credits) ? `${credits} หน่วยกิต` : (creditsStr || 'ไม่มีข้อมูล'),
+          col4: room || level || 'ทุกห้อง',
+          isValid,
+          errorMessage: errors.length > 0 ? `⚠️ ${errors.join(', ')}` : undefined,
+          parsedData: {
+            courseCode,
+            courseName,
+            level: level || (room.includes('/') ? room.split('/')[0] : room),
+            room: room || level,
+            credits: isNaN(credits) ? 1.5 : credits,
+            instructorId
+          }
+        };
+      }
+    });
   };
 
   // Drag behavior
@@ -131,60 +405,266 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
     }
   };
 
-  const processFile = (selectedFile: File) => {
+  // Real file processing with PapaParse and SheetJS (XLSX)
+  const processFile = async (selectedFile: File) => {
+    setImportError(null);
     const extension = selectedFile.name.split('.').pop()?.toLowerCase();
+    
     if (extension !== 'xlsx' && extension !== 'xls' && extension !== 'csv') {
-      alert('❌ กรุณาเลือกอัปโหลดไฟล์ตระกูล Excel (.xlsx, .xls) หรือ CSV (.csv) เท่านั้น');
+      setImportError('❌ กรุณาเลือกอัปโหลดไฟล์ตระกูล Excel (.xlsx, .xls) หรือ CSV (.csv) เท่านั้น');
       return;
     }
+
     setFile(selectedFile);
-    
-    // จำลองการตรวจวิเคราะห์ความถูกต้องและพรีวิวข้อมูลหลังการอัปโหลดไฟล์
-    const data = generateMockPreviewData(importType, selectedFile.name);
-    setPreviewData(data);
-    setIsValidated(true);
+
+    try {
+      if (extension === 'csv') {
+        Papa.parse<Record<string, any>>(selectedFile, {
+          header: true,
+          skipEmptyLines: 'greedy',
+          complete: (results) => {
+            if (results.errors && results.errors.length > 0 && results.data.length === 0) {
+              setImportError(`เกิดข้อผิดพลาดในการอ่านไฟล์ CSV: ${results.errors[0].message}`);
+              return;
+            }
+            const validated = validateRows(results.data, importType);
+            setPreviewData(validated);
+            setIsValidated(true);
+          },
+          error: (error) => {
+            setImportError(`ไม่สามารถอ่านไฟล์ CSV ได้: ${error.message}`);
+          }
+        });
+      } else {
+        // Excel files (.xlsx, .xls)
+        const arrayBuffer = await selectedFile.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        
+        if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+          setImportError('ไม่พบแผ่นงาน (Worksheet) ในไฟล์ Excel ที่เลือก');
+          return;
+        }
+
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawJson = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+
+        if (rawJson.length === 0) {
+          setImportError('ไม่พบแถวข้อมูลในไฟล์ Excel ที่เลือก');
+          return;
+        }
+
+        const validated = validateRows(rawJson, importType);
+        setPreviewData(validated);
+        setIsValidated(true);
+      }
+    } catch (err: any) {
+      console.error('[BulkDataImportModal] Parsing Error:', err);
+      setImportError(`เกิดข้อผิดพลาดในการประมวลผลไฟล์: ${err?.message || 'รูปแบบไฟล์ไม่ถูกต้อง'}`);
+    }
   };
 
   const handleRemoveFile = () => {
     setFile(null);
     setPreviewData([]);
     setIsValidated(false);
+    setImportError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // ดำเนินการอัปโหลดเข้าฐานข้อมูล (บันทึกข้อมูล)
-  const handleConfirmImport = () => {
+  // Real batched Firestore writes (chunked <= 500)
+  const handleConfirmImport = async () => {
     if (previewData.length === 0) return;
+
+    if (!hasPermissionForCurrentType) {
+      alert(`❌ คุณไม่มีสิทธิ์ในการนำเข้าข้อมูลประเภท ${importType}`);
+      return;
+    }
     
-    // กรองเฉพาะแถวที่ผ่านการตรวจสอบ
-    const validRowsCount = previewData.filter(r => r.isValid).length;
-    if (validRowsCount === 0) {
-      alert('❌ ไม่พบแถวข้อมูลที่ผ่านการตรวจสอบความถูกต้อง กรุณาตรวจสอบหรือแก้ไของค์ประกอบไฟล์ก่อน');
+    // Filter only valid rows
+    const validRows = previewData.filter(r => r.isValid);
+    if (validRows.length === 0) {
+      alert('❌ ไม่พบแถวข้อมูลที่ผ่านการตรวจสอบความถูกต้อง กรุณาปรับปรุงไฟล์เอกสารก่อนนำเข้า');
       return;
     }
 
     setIsImporting(true);
-    setImportProgress(0);
+    setImportProgress(10);
+    setImportError(null);
 
-    // จำลอง Progress Bar วิ่ง
-    const interval = setInterval(() => {
-      setImportProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setTimeout(() => {
-            setIsImporting(false);
-            if (onImportSuccess) {
-              onImportSuccess(importType, validRowsCount);
-            }
-            onClose();
-            // เคลียร์ค่า
-            handleRemoveFile();
-          }, 400);
-          return 100;
+    const BATCH_SIZE = 450; // Keep safely below 500 Firestore limit
+    const totalValid = validRows.length;
+    let processedCount = 0;
+
+    try {
+      const newStudentsToStore: Student[] = [];
+      const newCoursesToStore: Course[] = [];
+      const newGlobalCoursesToStore: GlobalCourse[] = [];
+
+      for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
+        const chunk = validRows.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+
+        for (const row of chunk) {
+          const { parsedData } = row;
+
+          if (importType === 'STUDENT') {
+            const studentRef = doc(db, 'students', parsedData.studentId);
+            
+            // Clean Firestore Document payload with NO synthetic parent placeholder
+            const studentPayload = {
+              id: parsedData.studentId,
+              studentId: parsedData.studentId,
+              studentCode: parsedData.studentId,
+              studentNo: parsedData.studentNo,
+              studentNumber: parsedData.studentNo,
+              number: parsedData.studentNo,
+              title: parsedData.prefix,
+              prefix: parsedData.prefix,
+              firstName: parsedData.firstName,
+              lastName: parsedData.lastName,
+              name: parsedData.fullName,
+              fullName: parsedData.fullName,
+              nickname: '',
+              room: parsedData.room,
+              className: parsedData.room,
+              grade: parsedData.room.includes('/') ? parsedData.room.split('/')[0] : parsedData.room,
+              behaviorScore: 100,
+              riskLevel: 'NORMAL',
+              status: 'ACTIVE',
+              parentUid: null, // Critical: Unset/null on initial import until linked
+              parentId: null,
+              parentMobile: parsedData.parentMobile || '',
+              homeLocation: {
+                address: '',
+                coordinates: [13.7563, 100.5018],
+                routeImage: ''
+              },
+              attendance: {
+                morningStatus: 'PRESENT',
+                checkInMethod: 'MANUAL',
+                checkInTime: null
+              },
+              seatIndex: null,
+              photoUrl: '',
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            };
+
+            batch.set(studentRef, studentPayload, { merge: true });
+
+            newStudentsToStore.push({
+              ...studentPayload,
+              attendance: {
+                morningStatus: 'PRESENT',
+                checkInMethod: 'MANUAL',
+                checkInTime: null
+              }
+            } as unknown as Student);
+
+          } else if (importType === 'TEACHER') {
+            const teacherRef = doc(db, 'teachers', parsedData.teacherId);
+            const staffRef = doc(db, 'staff', parsedData.teacherId);
+
+            const teacherPayload = {
+              id: parsedData.teacherId,
+              teacherId: parsedData.teacherId,
+              prefix: parsedData.prefix,
+              firstName: parsedData.firstName,
+              lastName: parsedData.lastName,
+              fullName: parsedData.fullName,
+              position: parsedData.position,
+              email: parsedData.email,
+              roles: parsedData.roles,
+              departmentId: parsedData.departmentId,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            };
+
+            batch.set(teacherRef, teacherPayload, { merge: true });
+            batch.set(staffRef, teacherPayload, { merge: true });
+
+          } else {
+            // COURSE
+            const cleanRoom = parsedData.room.replace(/[^a-zA-Z0-9]/g, '_');
+            const scheduleDocId = `sch_${parsedData.courseCode}_${cleanRoom}`;
+            const scheduleRef = doc(db, 'schedules', scheduleDocId);
+
+            const schedulePayload = {
+              id: scheduleDocId,
+              subjectCode: parsedData.courseCode,
+              subjectName: parsedData.courseName,
+              room: parsedData.room,
+              level: parsedData.level,
+              credits: parsedData.credits,
+              teacherIds: parsedData.instructorId ? [parsedData.instructorId] : ['teacher-kiattisak'],
+              subjectType: 'MAIN',
+              dayOfWeek: 'monday',
+              periodNumber: 1,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            };
+
+            batch.set(scheduleRef, schedulePayload, { merge: true });
+
+            const courseId = `course_${parsedData.courseCode}_${cleanRoom}`;
+            newCoursesToStore.push({
+              id: courseId,
+              code: parsedData.courseCode,
+              name: parsedData.courseName,
+              room: parsedData.room,
+              term: '1/2569',
+              studentsCount: 40,
+              periodIndex: 1,
+              schedule: 'จันทร์ 08:30 - 09:20 น.',
+              attendanceTaken: false,
+              teacherName: parsedData.instructorId || 'ครูผู้สอน',
+              teacherEmail: 'kiattisak@utd.ac.th'
+            });
+
+            newGlobalCoursesToStore.push({
+              courseId,
+              code: parsedData.courseCode,
+              courseName: parsedData.courseName,
+              teacherName: parsedData.instructorId || 'ครูผู้สอน',
+              teacherEmail: 'kiattisak@utd.ac.th',
+              roomName: parsedData.room,
+              scheduleString: 'จันทร์ 08:30 - 09:20 น.',
+              level: parsedData.level
+            });
+          }
         }
-        return prev + 10;
-      });
-    }, 150);
+
+        // Commit batch
+        await batch.commit();
+        processedCount += chunk.length;
+        setImportProgress(Math.min(95, Math.round((processedCount / totalValid) * 90) + 10));
+      }
+
+      // Update local Zustand store
+      if (newStudentsToStore.length > 0) {
+        addStudentsToStore(newStudentsToStore);
+      }
+      if (newCoursesToStore.length > 0) {
+        addCoursesToStore(newCoursesToStore, newGlobalCoursesToStore);
+      }
+
+      setImportProgress(100);
+
+      setTimeout(() => {
+        setIsImporting(false);
+        if (onImportSuccess) {
+          onImportSuccess(importType, totalValid);
+        }
+        onClose();
+        handleRemoveFile();
+      }, 500);
+
+    } catch (err: any) {
+      console.error('[BulkDataImportModal] Batch Commit Error:', err);
+      setIsImporting(false);
+      setImportError(`เกิดข้อผิดพลาดในการบันทึกข้อมูลเข้า Firestore: ${err?.message || 'กรุณาลองใหม่อีกครั้ง'}`);
+    }
   };
 
   const validCount = previewData.filter(r => r.isValid).length;
@@ -203,7 +683,7 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
             <div>
               <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-0.5">Bulk Integration Engine</span>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                นำเข้าข้อมูลนักเรียนและบุคลากรชุดใหญ่
+                นำเข้าข้อมูลนักเรียน บุคลากร และตารางสอนชุดใหญ่
               </h3>
             </div>
           </div>
@@ -219,15 +699,45 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           
-          {/* 1. Import Type Selector (ประเภทการนำเข้าข้อมูล) */}
+          {/* Permission warning banner if current user lacks required role */}
+          {!hasPermissionForCurrentType && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-start gap-3 text-amber-300 animate-in fade-in">
+              <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-xs font-bold">แจ้งเตือนสิทธิ์การเข้าถึงข้อมูล</h4>
+                <p className="text-[11px] text-amber-200/90 mt-0.5">
+                  บทบาทปัจจุบันของคุณ ({userRoles.map(r => ROLE_NAMES_TH[r] || r).join(', ') || 'ไม่มีบทบาท'}) ไม่มีสิทธิ์ในการนำเข้าข้อมูลประเภท <strong>{importType === 'TEACHER' ? 'บุคลากร (ต้องเป็น Super Admin)' : importType === 'STUDENT' ? 'นักเรียน (ต้องเป็น Super Admin หรือ ครูประจำชั้น)' : 'ตารางสอน (ต้องเป็น Super Admin หรือ ครู)'}</strong>
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Error Alert */}
+          {importError && (
+            <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-4 flex items-start gap-3 text-rose-300 animate-in fade-in">
+              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <h4 className="text-xs font-bold">พบข้อผิดพลาด</h4>
+                <p className="text-[11px] text-rose-200/90 mt-0.5">{importError}</p>
+              </div>
+              <button 
+                onClick={() => setImportError(null)}
+                className="text-rose-400 hover:text-rose-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* 1. Import Type Selector */}
           <div className="space-y-2">
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
               ขั้นตอนที่ 1: เลือกประเภทข้อมูลที่ต้องการนำเข้า
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {[
-                { type: 'STUDENT', label: 'รายชื่อนักเรียนในสังกัด', desc: 'ข้อมูลรหัสประจำตัว, ชื่อ-นามสกุล, ห้องประจำชั้น' },
-                { type: 'TEACHER', label: 'รายชื่อครูและสิทธิ์ผู้ใช้', desc: 'ข้อมูลรหัสบุคลากร, ชื่อ, อีเมล, สิทธิบทบาทเบื้องต้น' },
+                { type: 'STUDENT', label: 'รายชื่อนักเรียนในสังกัด', desc: 'ข้อมูลรหัสประจำตัว, ชื่อ-นามสกุล, ห้องประจำชั้น, เลขที่' },
+                { type: 'TEACHER', label: 'รายชื่อครูและบุคลากร', desc: 'ข้อมูลรหัสบุคลากร, ชื่อ, อีเมล, สิทธิบทบาทเบื้องต้น' },
                 { type: 'COURSE', label: 'ตารางสอนและวิชาเรียน', desc: 'ข้อมูลรหัสวิชา, ชื่อวิชา, หน่วยกิต, ห้องเรียนที่เปิดสอน' }
               ].map(item => {
                 const isSelected = importType === item.type;
@@ -238,7 +748,6 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
                     onClick={() => {
                       if (!isImporting) {
                         setImportType(item.type as ImportType);
-                        // เคลียร์ไฟล์เดิมเมื่อสลับประเภท
                         if (file) handleRemoveFile();
                       }
                     }}
@@ -267,7 +776,7 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
               <button
                 type="button"
                 onClick={handleDownloadTemplate}
-                className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+                className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 ดาวน์โหลดไฟล์เทมเพลตตัวอย่าง ({importType === 'STUDENT' ? 'Student_Template.csv' : importType === 'TEACHER' ? 'Teacher_Template.csv' : 'Course_Template.csv'})
@@ -299,7 +808,7 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
                 </div>
                 <div>
                   <p className="text-xs font-bold text-slate-200">ลากไฟล์มาวางตรงนี้ หรือคลิกเพื่อเลือกไฟล์นำเข้า</p>
-                  <p className="text-[10px] text-slate-500 mt-1">รองรับไฟล์ประเภท Excel (.xlsx, .xls) หรือ CSV (.csv) ขนาดสูงสุดไม่เกิน 10MB</p>
+                  <p className="text-[10px] text-slate-500 mt-1">รองรับไฟล์จริงทั้ง CSV (.csv) และ Excel (.xlsx, .xls) ทำการอ่านและตรวจสอบความถูกต้องแบบอัตโนมัติ</p>
                 </div>
               </div>
             ) : (
@@ -310,7 +819,7 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
                   </div>
                   <div>
                     <h4 className="text-xs font-bold text-slate-200">{file.name}</h4>
-                    <p className="text-[10px] text-slate-500">ขนาดไฟล์: {(file.size / 1024).toFixed(1)} KB • สแกนความปลอดภัยแล้ว</p>
+                    <p className="text-[10px] text-slate-500">ขนาดไฟล์: {(file.size / 1024).toFixed(1)} KB • สแกนและแยกโครงสร้างข้อมูลแล้ว</p>
                   </div>
                 </div>
                 <button
@@ -333,10 +842,10 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 uppercase tracking-wider">
                   <CheckCircle2 className="w-4 h-4 text-indigo-400" />
-                  <span>ขั้นตอนที่ 3: ตรวจสอบความถูกต้องของข้อมูล ({previewData.length} แถวที่ประมวลผล)</span>
+                  <span>ขั้นตอนที่ 3: ตรวจสอบความถูกต้องของข้อมูลจริง ({previewData.length} แถวจากไฟล์)</span>
                 </div>
                 
-                {/* Badges สรุปผลความปลอดภัยข้อมูล */}
+                {/* Badges Summary */}
                 <div className="flex items-center gap-2">
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded-lg shadow-sm">
                     <CheckCircle2 className="w-3 h-3" />
@@ -351,12 +860,12 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
                 </div>
               </div>
 
-              {/* ตารางจัดแสดง Preview */}
+              {/* Preview Table */}
               <div className="border border-white/5 rounded-xl overflow-hidden bg-slate-950/40">
                 <div className="max-h-60 overflow-y-auto">
                   <table className="w-full text-left border-collapse">
                     <thead>
-                      <tr className="bg-slate-900/50 border-b border-white/5 text-slate-400 text-[11px] font-semibold">
+                      <tr className="bg-slate-900/50 border-b border-white/5 text-slate-400 text-[11px] font-semibold sticky top-0 z-10 backdrop-blur-md">
                         <th className="px-4 py-3 text-center w-12">แถวที่</th>
                         <th className="px-4 py-3">
                           {importType === 'STUDENT' ? 'รหัสนักเรียน' : importType === 'TEACHER' ? 'รหัสประจำตัวครู' : 'รหัสวิชา'}
@@ -380,7 +889,7 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
                           className={`transition-colors ${
                             row.isValid 
                               ? 'hover:bg-white/[0.01]' 
-                              : 'bg-rose-500/[0.03] hover:bg-rose-500/[0.05]'
+                              : 'bg-rose-500/[0.04] hover:bg-rose-500/[0.07]'
                           }`}
                         >
                           <td className="px-4 py-3 text-center font-mono text-slate-500">{index + 1}</td>
@@ -392,12 +901,12 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
                           <td className="px-4 py-3">{row.col4}</td>
                           <td className="px-4 py-3">
                             {row.isValid ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
                                 <CheckCircle2 className="w-3 h-3" /> ผ่านการตรวจสอบ
                               </span>
                             ) : (
                               <div className="space-y-0.5">
-                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded">
                                   <XCircle className="w-3 h-3" /> ข้อมูลขัดข้อง
                                 </span>
                                 <p className="text-[10px] text-rose-300 font-light mt-0.5 leading-tight">{row.errorMessage}</p>
@@ -411,11 +920,11 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
                 </div>
               </div>
 
-              {/* ข้อความช่วยเหลือ */}
+              {/* Security note */}
               <div className="bg-slate-900/30 p-3 rounded-xl border border-white/5 text-[10px] text-slate-400 flex items-start gap-2">
                 <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
                 <p>
-                  <strong>คำแนะนำด้านความปลอดภัย:</strong> ระบบจะละเว้นหรือข้ามแถวข้อมูลที่ "พบข้อผิดพลาด" และนำเข้าเฉพาะแถวที่ "ผ่านเกณฑ์ตรวจสอบ" เท่านั้นเพื่อป้องกันฐานข้อมูลพังเสียหาย หากท่านต้องการแก้ไขข้อผิดพลาด สามารถดาวน์โหลดไฟล์มาปรับปรุงโครงสร้างแถวนั้นแล้วทำการอัปโหลดใหม่อีกครั้ง
+                  <strong>เกณฑ์ความปลอดภัย Firestore Batched Writes:</strong> ระบบจะละเว้นแถวที่ "พบข้อผิดพลาด" และนำเข้าเฉพาะแถวที่ "ผ่านเกณฑ์ตรวจสอบ" จำนวน {validCount} รายการ เข้าสู่ฐานข้อมูล Firestore ในรูปแบบ Batched Write แบบกลุ่มละไม่เกิน 500 รายการอย่างเสถียร
                 </p>
               </div>
 
@@ -424,32 +933,32 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
 
           {/* 4. Progress Loading Section */}
           {isImporting && (
-            <div className="bg-slate-950/80 border border-indigo-500/30 rounded-2xl p-6 text-center space-y-4 animate-pulse">
+            <div className="bg-slate-950/80 border border-indigo-500/30 rounded-2xl p-6 text-center space-y-4 animate-in fade-in">
               <div className="flex items-center justify-between text-xs text-slate-300 font-bold">
                 <div className="flex items-center gap-2">
                   <RefreshCw className="w-4 h-4 text-indigo-400 animate-spin" />
-                  <span>กำลังอัปโหลดและผสานความสัมพันธ์ข้อมูล (Database Syncing)...</span>
+                  <span>กำลังเขียนข้อมูลลง Firestore Database (Batched Writes)...</span>
                 </div>
                 <span className="font-mono text-indigo-400">{importProgress}%</span>
               </div>
               
-              {/* Progress Bar Container */}
+              {/* Progress Bar */}
               <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
                 <div 
-                  className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 h-full rounded-full transition-all duration-150"
+                  className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-500 h-full rounded-full transition-all duration-300 ease-out"
                   style={{ width: `${importProgress}%` }}
                 />
               </div>
-              <p className="text-[10px] text-slate-500">กรุณาอย่าเพิ่งปิดหน้าต่าง หรือสลับหน้าโปรแกรมขณะที่การจัดระเบียบตารางคะแนนและสิทธิ์กำลังดำเนินการ</p>
+              <p className="text-[10px] text-slate-500">กรุณาอย่าเพิ่งปิดหน้าต่าง ระบบกำลังประมวลผลการบันทึกข้อมูลเข้าฐานข้อมูลจริง</p>
             </div>
           )}
 
         </div>
 
-        {/* Modal Footer (Control Buttons) */}
+        {/* Modal Footer */}
         <div className="p-6 border-t border-white/5 bg-[#0a0f16] flex items-center justify-between">
           <div className="text-[10px] text-slate-500">
-            School Management System • Bulk Import Engine
+            School Management System • Batched Firestore Import Engine
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -461,13 +970,13 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
               ยกเลิก (Cancel)
             </button>
             
-            {/* Upload New File Trigger */}
+            {/* Re-upload trigger */}
             {file && (
               <button
                 type="button"
                 onClick={handleRemoveFile}
                 disabled={isImporting}
-                className="px-4 py-2 bg-slate-900 hover:bg-slate-850 text-slate-300 text-xs font-bold rounded-xl border border-white/5 transition-colors flex items-center gap-1 cursor-pointer"
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-bold rounded-xl border border-white/5 transition-colors flex items-center gap-1 cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 อัปโหลดไฟล์ใหม่
@@ -477,15 +986,15 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
             <button
               type="button"
               onClick={handleConfirmImport}
-              disabled={isImporting || !file || previewData.length === 0}
+              disabled={isImporting || !file || validCount === 0 || !hasPermissionForCurrentType}
               className={`px-5 py-2 text-xs font-bold rounded-xl transition-all shadow-md flex items-center gap-1.5 ${
-                !file || previewData.length === 0
+                !file || validCount === 0 || !hasPermissionForCurrentType
                   ? 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
-                  : 'bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shadow-[0_4px_15px_rgba(99,102,241,0.25)]'
+                  : 'bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shadow-[0_4px_15px_rgba(99,102,241,0.25)] active:scale-[0.98]'
               }`}
             >
               <Database className="w-4 h-4" />
-              ยืนยันการนำเข้าข้อมูล (Confirm)
+              ยืนยันการนำเข้าข้อมูล ({validCount} แถว)
             </button>
           </div>
         </div>
@@ -494,3 +1003,4 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
     </div>
   );
 }
+
