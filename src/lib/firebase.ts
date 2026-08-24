@@ -3,8 +3,24 @@ import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { initializeFirestore, getFirestore, connectFirestoreEmulator, setLogLevel } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-// Silence internal SDK connection retry logs so offline fallback notices do not surface as unhandled errors
-setLogLevel('silent');
+// Keep real errors visible while suppressing noisy info/warn logs
+setLogLevel('error');
+
+// Filter out internal SDK initial connection retry notices from bubbling as unhandled application crashes
+if (typeof window !== 'undefined') {
+  const originalConsoleError = console.error;
+  console.error = (...args: any[]) => {
+    if (
+      typeof args[0] === 'string' &&
+      args[0].includes('@firebase/firestore') &&
+      args[0].includes('Could not reach Cloud Firestore backend')
+    ) {
+      console.warn('Notice: Firestore operating in offline/retry mode until backend connection establishes.');
+      return;
+    }
+    originalConsoleError.apply(console, args);
+  };
+}
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 

@@ -30,10 +30,12 @@ const DEFAULT_PERIODS: Period[] = [
 export function usePeriodsConfig() {
   const [periods, setPeriods] = useState<Period[]>(DEFAULT_PERIODS);
   const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const docRef = doc(db, 'school_settings', 'periods_config');
     
+    // Read-only real-time listener (no auto-seeding writes on mount for any role)
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -41,18 +43,10 @@ export function usePeriodsConfig() {
           const sorted = [...data.periods].sort((a, b) => a.periodNumber - b.periodNumber);
           setPeriods(sorted);
         }
-      } else if (auth.currentUser) {
-        // Doc doesn't exist, seed it with defaults if signed in
-        setDoc(docRef, {
-          periods: DEFAULT_PERIODS,
-          updatedAt: new Date().toISOString()
-        }).catch(err => {
-          console.warn("Notice auto-seeding periods_config skipped:", err.message);
-        });
       }
       setLoading(false);
-    }, (error) => {
-      console.warn("Firestore listening notice in usePeriodsConfig (using defaults):", error.message);
+    }, (err) => {
+      console.warn("Firestore listening notice in usePeriodsConfig (using defaults):", err.message);
       setLoading(false);
     });
 
@@ -60,18 +54,29 @@ export function usePeriodsConfig() {
   }, []);
 
   const updatePeriodsConfig = async (newPeriods: Period[]) => {
+    const previousPeriods = periods;
+    // 1. Optimistic update
+    setPeriods(newPeriods);
+    setError(null);
+
     try {
+      // 2. Attempt Firestore write
       const docRef = doc(db, 'school_settings', 'periods_config');
       await setDoc(docRef, {
         periods: newPeriods,
         updatedAt: new Date().toISOString()
       }, { merge: true });
-      setPeriods(newPeriods);
     } catch (err: any) {
-      console.warn("Saving periods_config locally:", err.message);
-      setPeriods(newPeriods);
+      // 3. Revert optimistic state on failure
+      setPeriods(previousPeriods);
+      const errorMsg = 'บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
+      setError(errorMsg);
+      console.error("Firestore write failed in updatePeriodsConfig:", err);
+      throw err;
     }
   };
 
-  return { periods, loading, updatePeriodsConfig };
+  const clearError = () => setError(null);
+
+  return { periods, loading, error, clearError, updatePeriodsConfig };
 }

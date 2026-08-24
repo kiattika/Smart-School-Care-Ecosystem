@@ -60,11 +60,15 @@ export function TeacherPortal() {
     updateCourseScoreSetting
   } = useStore();
 
-  const { periods: dbPeriods } = usePeriodsConfig();
+  const { periods: dbPeriods, error: periodsError } = usePeriodsConfig();
   const { 
     periods: fsPeriods, 
     schedules: fsSchedules, 
     loading: fsLoading, 
+    error: fsError,
+    isPeriodsEmpty,
+    emptyPeriodsMessage,
+    clearError: clearFsError,
     updateScheduleAttendance, 
     updatePartnerAttendance 
   } = useTeacherFirestoreSchedule();
@@ -869,10 +873,34 @@ export function TeacherPortal() {
 
               return (
                 <div className="space-y-4">
+                  {/* Empty periods alert for regular teachers if no periods configured */}
+                  {(!fsLoading && fsPeriods.length === 0 && dbPeriods.length === 0) && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-center gap-3 text-amber-300 text-sm">
+                      <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400" />
+                      <span>{emptyPeriodsMessage || "ยังไม่มีการตั้งค่าคาบเรียนจากผู้ดูแลระบบ"}</span>
+                    </div>
+                  )}
+
+                  {/* Non-blocking visible write error alert */}
+                  {(fsError || periodsError) && (
+                    <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-4 flex items-center justify-between gap-3 text-rose-300 text-sm">
+                      <div className="flex items-center gap-3">
+                        <AlertOctagon className="w-5 h-5 shrink-0 text-rose-400" />
+                        <span>{fsError || periodsError}</span>
+                      </div>
+                      {clearFsError && (
+                        <button onClick={clearFsError} className="text-rose-400 hover:text-rose-200">
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex justify-end">
                     <button
                       onClick={async () => {
                         if (mappedPeriods.length > 0) {
+                          let hasError = false;
                           for (const p of mappedPeriods) {
                             markAttendanceDone(p.courseId);
                             if (p.id) {
@@ -880,7 +908,8 @@ export function TeacherPortal() {
                               try {
                                 await updateScheduleAttendance(p.id, true);
                               } catch(e) {
-                                console.warn("Could not update firestore schedule mock", e);
+                                hasError = true;
+                                console.error("Could not update firestore schedule attendance:", e);
                               }
                             }
                             if (p.subjectCode) {
@@ -888,7 +917,11 @@ export function TeacherPortal() {
                             }
                           }
                           
-                          setToast('จำลองเช็คชื่อสำเร็จแล้ว (ทุกคาบเรียน)');
+                          if (hasError) {
+                            setToast('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+                          } else {
+                            setToast('จำลองเช็คชื่อสำเร็จแล้ว (ทุกคาบเรียน)');
+                          }
                           setTimeout(() => setToast(null), 3000);
                         } else {
                           setToast('ไม่มีคาบเรียนให้จำลองเช็คชื่อ');
@@ -947,6 +980,8 @@ export function TeacherPortal() {
                         setTimeout(() => setToast(null), 3000);
                       } catch (err) {
                         console.error("Failed to toggle partner attendance:", err);
+                        setToast('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+                        setTimeout(() => setToast(null), 4000);
                       }
                     }}
                     onEnterClassroom={(periodId) => {

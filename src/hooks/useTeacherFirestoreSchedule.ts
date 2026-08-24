@@ -108,35 +108,12 @@ export function useTeacherFirestoreSchedule() {
     let unsubscribePeriods = () => {};
     let unsubscribeSchedules = () => {};
 
-    const syncData = async () => {
+    const syncData = () => {
       try {
         const periodsColRef = collection(db, 'admin_periods_config');
         const schedulesColRef = collection(db, 'schedules');
 
-        // Check and seed periods safely if user has authenticated write permission
-        if (auth.currentUser) {
-          try {
-            const periodSnap = await getDocs(periodsColRef);
-            if (periodSnap.empty) {
-              for (const p of DEFAULT_ADMIN_PERIODS) {
-                await setDoc(doc(db, 'admin_periods_config', p.id), sanitizeForFirestore(p), { merge: true });
-              }
-            }
-
-            const scheduleSnap = await getDocs(schedulesColRef);
-            const batchToSeed = getSchedulesToSeed();
-            if (scheduleSnap.empty) {
-              for (const s of batchToSeed) {
-                await setDoc(doc(db, 'schedules', s.id), sanitizeForFirestore(s), { merge: true });
-              }
-            }
-          } catch (seedErr) {
-            // Non-fatal seed error (e.g. read-only user)
-            console.warn("Notice: Firestore schedule auto-seeder bypassed:", seedErr);
-          }
-        }
-
-        // Setup real-time listeners
+        // Setup strictly read-only real-time listeners (no mount auto-seeding writes for non-admin users)
         unsubscribePeriods = onSnapshot(periodsColRef, (snapshot) => {
           if (!snapshot.empty) {
             const list: AdminPeriodConfig[] = [];
@@ -144,6 +121,8 @@ export function useTeacherFirestoreSchedule() {
               list.push({ id: docSnap.id, ...docSnap.data() } as AdminPeriodConfig);
             });
             setPeriods(list.sort((a, b) => a.periodNumber - b.periodNumber));
+          } else {
+            setPeriods([]);
           }
         }, (err) => {
           console.warn("Notice: admin_periods_config listener fallback to defaults:", err.message);
@@ -178,28 +157,60 @@ export function useTeacherFirestoreSchedule() {
   }, []);
 
   const updateScheduleAttendance = async (scheduleId: string, status: boolean) => {
+    const target = schedules.find(s => s.id === scheduleId);
+    const previousStatus = target?.attendanceTaken;
+
+    // 1. Optimistic local update for responsive UI
+    setSchedules(prev => prev.map(s => s.id === scheduleId ? { ...s, attendanceTaken: status } : s));
+    setError(null);
+
     try {
+      // 2. Attempt Firestore write
       const docRef = doc(db, 'schedules', scheduleId);
       await setDoc(docRef, { attendanceTaken: status }, { merge: true });
-      // Update local state immediately
-      setSchedules(prev => prev.map(s => s.id === scheduleId ? { ...s, attendanceTaken: status } : s));
     } catch (err: any) {
-      console.warn("Local update fallback for schedule attendance:", err.message);
-      setSchedules(prev => prev.map(s => s.id === scheduleId ? { ...s, attendanceTaken: status } : s));
+      // 3. Revert local state to prior value on failure
+      setSchedules(prev => prev.map(s => s.id === scheduleId ? { ...s, attendanceTaken: previousStatus } : s));
+      const errorMsg = 'บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
+      setError(errorMsg);
+      console.error("Firestore write failed for updateScheduleAttendance:", err);
+      throw err;
     }
   };
 
   const updatePartnerAttendance = async (scheduleId: string, status: boolean) => {
+    const target = schedules.find(s => s.id === scheduleId);
+    const previousStatus = target?.partnerCheckedAttendance;
+
+    // 1. Optimistic local update for responsive UI
+    setSchedules(prev => prev.map(s => s.id === scheduleId ? { ...s, partnerCheckedAttendance: status } : s));
+    setError(null);
+
     try {
+      // 2. Attempt Firestore write
       const docRef = doc(db, 'schedules', scheduleId);
       await setDoc(docRef, { partnerCheckedAttendance: status }, { merge: true });
-      // Update local state immediately
-      setSchedules(prev => prev.map(s => s.id === scheduleId ? { ...s, partnerCheckedAttendance: status } : s));
     } catch (err: any) {
-      console.warn("Local update fallback for partner attendance:", err.message);
-      setSchedules(prev => prev.map(s => s.id === scheduleId ? { ...s, partnerCheckedAttendance: status } : s));
+      // 3. Revert local state to prior value on failure
+      setSchedules(prev => prev.map(s => s.id === scheduleId ? { ...s, partnerCheckedAttendance: previousStatus } : s));
+      const errorMsg = 'บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
+      setError(errorMsg);
+      console.error("Firestore write failed for updatePartnerAttendance:", err);
+      throw err;
     }
   };
 
-  return { periods, schedules, loading, error, updateScheduleAttendance, updatePartnerAttendance };
+  const clearError = () => setError(null);
+
+  return { 
+    periods, 
+    schedules, 
+    loading, 
+    error, 
+    isPeriodsEmpty: !loading && periods.length === 0,
+    emptyPeriodsMessage: 'ยังไม่มีการตั้งค่าคาบเรียนจากผู้ดูแลระบบ',
+    clearError, 
+    updateScheduleAttendance, 
+    updatePartnerAttendance 
+  };
 }

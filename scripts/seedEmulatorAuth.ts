@@ -321,6 +321,36 @@ export async function seedEmulatorAuth() {
     console.warn('Notice seeding student_self_assessments:', err.message);
   }
 
+  // 6. Seed admin_periods_config and school_settings/periods_config
+  try {
+    const defaultAdminPeriods = [
+      { id: 'p0', periodNumber: 0, periodName: 'HR กิจกรรมโฮมรูม', startTime: '08:00', endTime: '08:30', periodType: 'ACTIVITY' },
+      { id: 'p1', periodNumber: 1, periodName: 'คาบเรียนวิชาการที่ 1', startTime: '08:30', endTime: '09:20', periodType: 'MAIN' },
+      { id: 'p2', periodNumber: 2, periodName: 'คาบเรียนวิชาการที่ 2', startTime: '09:20', endTime: '10:10', periodType: 'MAIN' },
+      { id: 'p3', periodNumber: 3, periodName: 'คาบเรียนวิชาการที่ 3', startTime: '10:10', endTime: '11:00', periodType: 'MAIN' },
+      { id: 'p4', periodNumber: 4, periodName: 'คาบเรียนวิชาการที่ 4', startTime: '11:00', endTime: '11:50', periodType: 'MAIN' },
+      { id: 'p5', periodNumber: 5, periodName: 'พักกลางวัน', startTime: '11:50', endTime: '12:40', periodType: 'BREAK' },
+      { id: 'p6', periodNumber: 6, periodName: 'คาบเรียนวิชาการที่ 5', startTime: '12:40', endTime: '13:30', periodType: 'MAIN' },
+      { id: 'p7', periodNumber: 7, periodName: 'คาบเรียนวิชาการที่ 6', startTime: '13:30', endTime: '14:20', periodType: 'MAIN' },
+      { id: 'p8', periodNumber: 8, periodName: 'คาบเรียนวิชาการที่ 7', startTime: '14:20', endTime: '15:10', periodType: 'MAIN' }
+    ];
+
+    const batch = db.batch();
+    for (const p of defaultAdminPeriods) {
+      batch.set(db.collection('admin_periods_config').doc(p.id), p, { merge: true });
+    }
+
+    batch.set(db.collection('school_settings').doc('periods_config'), {
+      periods: defaultAdminPeriods,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    await batch.commit();
+    console.log(`\n🕒 Seeded admin_periods_config and school_settings/periods_config`);
+  } catch (err: any) {
+    console.warn('Notice seeding periods config:', err.message);
+  }
+
   console.log(`\n🎉 Seeded all ${SEEDED_TEST_USERS.length} test accounts successfully!`);
 }
 
