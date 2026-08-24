@@ -11,7 +11,7 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "emulators": "firebase emulators:start --import=./emulator-data --export-on-exit",
-    "emulators:exec": "firebase emulators:exec --import=./emulator-data 'vitest run'",
+    "emulators:exec": "firebase emulators:exec --project=kiattisak-project-001 --import=./emulator-data \"npx vitest run src/__tests__/firestore.rules.test.ts\"",
     "seed:emulator": "tsx scripts/seedEmulatorAuth.ts"
   },
   "dependencies": {

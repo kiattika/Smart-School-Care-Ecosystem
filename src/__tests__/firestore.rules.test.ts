@@ -1,343 +1,476 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  initializeTestEnvironment,
+  RulesTestEnvironment,
+  assertSucceeds,
+  assertFails,
+} from '@firebase/rules-unit-testing';
 
-/**
- * Helper to convert Firebase permission-denied errors into user-facing Thai feedback
- */
-export function getThaiPermissionErrorMessage(error: unknown): string {
-  if (!error) return '';
-  const errString = typeof error === 'object' && error !== null && 'message' in error
-    ? String((error as { message: unknown }).message)
-    : String(error);
+let testEnv: RulesTestEnvironment;
 
-  if (
-    errString.includes('permission') ||
-    errString.includes('PERMISSION_DENIED') ||
-    errString.includes('Missing or insufficient permissions') ||
-    errString.includes('ไม่มีสิทธิ์')
-  ) {
-    return 'ไม่มีสิทธิ์เข้าถึงข้อมูล';
-  }
-  return 'ไม่มีสิทธิ์เข้าถึงข้อมูล';
+beforeAll(async () => {
+  testEnv = await initializeTestEnvironment({
+    projectId: 'kiattisak-project-001',
+    firestore: {
+      rules: fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8'),
+      host: '127.0.0.1',
+      port: 8080,
+    },
+  });
+});
+
+afterAll(async () => {
+  await testEnv.cleanup();
+});
+
+beforeEach(async () => {
+  await testEnv.clearFirestore();
+});
+
+function asRole(...roles: string[]) {
+  return testEnv.authenticatedContext('test-uid', { roles });
 }
 
-/**
- * Security rule assertion context reflecting the schema & claims in firestore.rules
- */
-interface SecurityContext {
-  uid: string | null;
-  roles?: string[];
-  primaryRole?: string;
-  email?: string;
+function asUser(uid: string, roles: string[] = []) {
+  return testEnv.authenticatedContext(uid, { roles });
 }
 
-interface ResourceDoc {
-  studentId?: string;
-  studentUid?: string;
-  parentId?: string;
-  parentUid?: string;
-  teacherIds?: string[];
-  [key: string]: unknown;
+function asAnonymous() {
+  return testEnv.unauthenticatedContext();
 }
 
-/**
- * Exact evaluator mirror matching firestore.rules:
- */
-class FirestoreRulesEvaluator {
-  private rulesContent: string;
+describe('Firestore Security Rules Engine Unit Tests', () => {
+  // 1. students collection
+  describe('students collection', () => {
+    it('allows SUPER_ADMIN, EXECUTIVE, HOMEROOM_TEACHER, and SUBJECT_TEACHER to read', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-101').set({ name: 'Somchai', parentUid: 'parent-101' });
+      });
 
-  constructor(rulesPath: string) {
-    this.rulesContent = fs.readFileSync(rulesPath, 'utf8');
-  }
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('students/std-101').get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('students/std-101').get());
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('students/std-101').get());
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('students/std-101').get());
+    });
 
-  getRulesContent(): string {
-    return this.rulesContent;
-  }
+    it('allows a linked parent (parentUid matching auth.uid) to read student record', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-101').set({ name: 'Somchai', parentUid: 'parent-alice' });
+      });
 
-  evaluate(
-    action: 'read' | 'write' | 'create' | 'update' | 'delete',
-    collection: string,
-    docId: string,
-    context: SecurityContext,
-    resourceData?: ResourceDoc
-  ): { allowed: boolean; error?: string } {
-    const isSignedIn = !!context.uid;
-    const hasRole = (role: string) => {
-      if (!isSignedIn) return false;
-      return (
-        (Array.isArray(context.roles) && context.roles.includes(role)) ||
-        context.primaryRole === role
+      const parentDb = asUser('parent-alice', ['PARENT']).firestore();
+      await assertSucceeds(parentDb.doc('students/std-101').get());
+    });
+
+    it('denies an unlinked parent from reading another student record', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-101').set({ name: 'Somchai', parentUid: 'parent-alice' });
+      });
+
+      const otherParentDb = asUser('parent-bob', ['PARENT']).firestore();
+      await assertFails(otherParentDb.doc('students/std-101').get());
+    });
+
+    it('denies unauthenticated access to students', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-101').set({ name: 'Somchai', parentUid: 'parent-alice' });
+      });
+
+      await assertFails(asAnonymous().firestore().doc('students/std-101').get());
+    });
+
+    it('allows SUPER_ADMIN and HOMEROOM_TEACHER to write to students', async () => {
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('students/std-new').set({ name: 'New Student' })
       );
-    };
-    const isSelf = (userId?: string) => {
-      if (!isSignedIn || !userId) return false;
-      return context.uid === userId || context.email === userId;
-    };
-
-    // 1. students
-    if (collection === 'students') {
-      if (action === 'read') {
-        const allowed =
-          hasRole('SUPER_ADMIN') ||
-          hasRole('EXECUTIVE') ||
-          hasRole('SUBJECT_TEACHER') ||
-          hasRole('HOMEROOM_TEACHER') ||
-          (isSignedIn && resourceData?.parentUid === context.uid);
-        return allowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
-      }
-      const writeAllowed = hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
-      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
-    }
-
-    // 2. student_self_assessments (PHQ-9, SDQ)
-    if (collection === 'student_self_assessments') {
-      if (action === 'read') {
-        const allowed =
-          hasRole('SUPER_ADMIN') ||
-          hasRole('GUIDANCE_COUNSELOR') ||
-          isSelf(resourceData?.studentId) ||
-          isSelf(resourceData?.studentUid) ||
-          isSelf(docId);
-        return allowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
-      }
-      const writeAllowed = hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isSelf(docId);
-      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
-    }
-
-    // 3. discipline_logs
-    if (collection === 'discipline_logs') {
-      if (action === 'read') {
-        const allowed =
-          hasRole('SUPER_ADMIN') ||
-          hasRole('HOMEROOM_TEACHER') ||
-          hasRole('EXECUTIVE') ||
-          hasRole('GUIDANCE_COUNSELOR');
-        return allowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
-      }
-      const writeAllowed =
-        hasRole('SUPER_ADMIN') ||
-        hasRole('SUBJECT_TEACHER') ||
-        hasRole('HOMEROOM_TEACHER');
-      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
-    }
-
-    // 4. parent_notifications
-    if (collection === 'parent_notifications') {
-      if (action === 'read') {
-        const allowed =
-          hasRole('SUPER_ADMIN') ||
-          hasRole('HOMEROOM_TEACHER') ||
-          (isSignedIn && (resourceData?.parentUid === context.uid || resourceData?.parentId === context.uid));
-        return allowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Parent cannot read other parents notifications.' };
-      }
-      const writeAllowed =
-        hasRole('SUPER_ADMIN') ||
-        hasRole('HOMEROOM_TEACHER') ||
-        hasRole('SUBJECT_TEACHER');
-      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
-    }
-
-    // 5. parent_conferences
-    if (collection === 'parent_conferences') {
-      if (action === 'read') {
-        const allowed =
-          hasRole('SUPER_ADMIN') ||
-          hasRole('HOMEROOM_TEACHER') ||
-          (isSignedIn && (resourceData?.parentUid === context.uid || resourceData?.parentId === context.uid));
-        return allowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED: Parent cannot read other parents conferences.' };
-      }
-      const writeAllowed = hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
-      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
-    }
-
-    // 6. schedules
-    if (collection === 'schedules') {
-      if (action === 'read') {
-        return isSignedIn ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
-      }
-      const writeAllowed =
-        hasRole('SUPER_ADMIN') ||
-        hasRole('HOMEROOM_TEACHER') ||
-        hasRole('SUBJECT_TEACHER');
-      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
-    }
-
-    // 7. attendance_records
-    if (collection === 'attendance_records') {
-      if (action === 'read') {
-        const allowed =
-          hasRole('SUPER_ADMIN') ||
-          hasRole('EXECUTIVE') ||
-          hasRole('SUBJECT_TEACHER') ||
-          hasRole('HOMEROOM_TEACHER') ||
-          (isSignedIn &&
-            (resourceData?.parentUid === context.uid ||
-              resourceData?.studentUid === context.uid ||
-              resourceData?.studentId === context.uid));
-        return allowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
-      }
-      const writeAllowed =
-        hasRole('SUPER_ADMIN') ||
-        hasRole('SUBJECT_TEACHER') ||
-        hasRole('HOMEROOM_TEACHER');
-      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
-    }
-
-    // 8. gradebook_scores
-    if (collection === 'gradebook_scores') {
-      if (action === 'read') {
-        const allowed =
-          hasRole('SUPER_ADMIN') ||
-          hasRole('EXECUTIVE') ||
-          hasRole('SUBJECT_TEACHER') ||
-          hasRole('HOMEROOM_TEACHER') ||
-          hasRole('HEAD_OF_DEPARTMENT') ||
-          (isSignedIn &&
-            (resourceData?.parentUid === context.uid ||
-              resourceData?.studentUid === context.uid ||
-              resourceData?.studentId === context.uid));
-        return allowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
-      }
-      const writeAllowed =
-        hasRole('SUPER_ADMIN') ||
-        hasRole('SUBJECT_TEACHER') ||
-        hasRole('HEAD_OF_DEPARTMENT');
-      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
-    }
-
-    // 9. admin_periods_config, school_settings, staff, teachers
-    if (
-      collection === 'admin_periods_config' ||
-      collection === 'school_settings' ||
-      collection === 'staff' ||
-      collection === 'teachers'
-    ) {
-      if (action === 'read') {
-        return isSignedIn ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
-      }
-      const writeAllowed = hasRole('SUPER_ADMIN');
-      return writeAllowed ? { allowed: true } : { allowed: false, error: 'PERMISSION_DENIED' };
-    }
-
-    // Default Fallback
-    return { allowed: false, error: 'PERMISSION_DENIED: Missing or insufficient permissions.' };
-  }
-}
-
-describe('Firestore Security Rules Suite Verification', () => {
-  let evaluator: FirestoreRulesEvaluator;
-
-  beforeAll(() => {
-    const rulesPath = path.resolve(process.cwd(), 'firestore.rules');
-    evaluator = new FirestoreRulesEvaluator(rulesPath);
-  });
-
-  it('confirms firestore.rules file is loaded and structured with cloud.firestore service', () => {
-    const content = evaluator.getRulesContent();
-    expect(content).toContain('service cloud.firestore');
-    expect(content).toContain('match /databases/{database}/documents');
-  });
-
-  it('confirms test collection rule is deleted from firestore.rules', () => {
-    const content = evaluator.getRulesContent();
-    expect(content).not.toContain('match /test/');
-  });
-
-  // TASK 1: Role-scoped student record access
-  describe('TASK 1: Student Record & Write Scoping', () => {
-    const homeroomContext: SecurityContext = {
-      uid: 'teacher_hr_01',
-      roles: ['HOMEROOM_TEACHER'],
-    };
-    const executiveContext: SecurityContext = {
-      uid: 'exec_01',
-      roles: ['EXECUTIVE'],
-    };
-    const parentContext: SecurityContext = {
-      uid: 'parent_01',
-      roles: [],
-    };
-
-    it('allows HOMEROOM_TEACHER to read and write student records', () => {
-      expect(evaluator.evaluate('read', 'students', '38501', homeroomContext).allowed).toBe(true);
-      expect(evaluator.evaluate('write', 'students', '38501', homeroomContext).allowed).toBe(true);
+      await assertSucceeds(
+        asRole('HOMEROOM_TEACHER').firestore().doc('students/std-new-2').set({ name: 'New Student 2' })
+      );
     });
 
-    it('allows EXECUTIVE to read but NOT write student records', () => {
-      expect(evaluator.evaluate('read', 'students', '38501', executiveContext).allowed).toBe(true);
-      expect(evaluator.evaluate('write', 'students', '38501', executiveContext).allowed).toBe(false);
-    });
-
-    it('allows parent to read only their own child student record', () => {
-      expect(evaluator.evaluate('read', 'students', '38501', parentContext, { parentUid: 'parent_01' }).allowed).toBe(true);
-      expect(evaluator.evaluate('read', 'students', '38501', parentContext, { parentUid: 'other_parent' }).allowed).toBe(false);
-      expect(evaluator.evaluate('write', 'students', '38501', parentContext).allowed).toBe(false);
+    // Regression Test 1: A SUBJECT_TEACHER cannot write to students
+    it('REGRESSION: denies a SUBJECT_TEACHER (not SUPER_ADMIN/HOMEROOM_TEACHER) from writing to students', async () => {
+      await assertFails(
+        asRole('SUBJECT_TEACHER').firestore().doc('students/std-bad-write').set({ name: 'Illegal Write' })
+      );
     });
   });
 
-  // TASK 1: Discipline logs and Parent Notifications
-  describe('TASK 1: Discipline Logs and Parent Notifications', () => {
-    const subjectTeacherContext: SecurityContext = {
-      uid: 'teacher_sub_01',
-      roles: ['SUBJECT_TEACHER'],
-    };
-    const parent1Context: SecurityContext = {
-      uid: 'parent_01',
-      roles: [],
-    };
+  // 2. student_self_assessments (PHQ-9, SDQ)
+  describe('student_self_assessments collection', () => {
+    it('allows GUIDANCE_COUNSELOR and SUPER_ADMIN to read', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_self_assessments/assess-01').set({ studentUid: 'std-uid-1', score: 9 });
+      });
 
-    it('allows SUBJECT_TEACHER to write discipline logs but NOT read all logs', () => {
-      expect(evaluator.evaluate('write', 'discipline_logs', 'log_01', subjectTeacherContext).allowed).toBe(true);
-      expect(evaluator.evaluate('read', 'discipline_logs', 'log_01', subjectTeacherContext).allowed).toBe(false);
+      await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc('student_self_assessments/assess-01').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('student_self_assessments/assess-01').get());
     });
 
-    it('isolates parent notifications so parents only read their own', () => {
-      expect(evaluator.evaluate('read', 'parent_notifications', 'n1', parent1Context, { parentUid: 'parent_01' }).allowed).toBe(true);
-      expect(evaluator.evaluate('read', 'parent_notifications', 'n1', parent1Context, { parentId: 'parent_01' }).allowed).toBe(true);
-      expect(evaluator.evaluate('read', 'parent_notifications', 'n2', parent1Context, { parentUid: 'parent_02' }).allowed).toBe(false);
-      expect(evaluator.evaluate('write', 'parent_notifications', 'n1', parent1Context).allowed).toBe(false);
+    it('allows the student self to read their own self-assessment', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_self_assessments/assess-01').set({ studentUid: 'std-uid-1', score: 9 });
+      });
+
+      const studentDb = asUser('std-uid-1', ['STUDENT']).firestore();
+      await assertSucceeds(studentDb.doc('student_self_assessments/assess-01').get());
     });
 
-    it('isolates parent conferences so parents only read their own conference records', () => {
-      expect(evaluator.evaluate('read', 'parent_conferences', 'conf_01', parent1Context, { parentUid: 'parent_01' }).allowed).toBe(true);
-      expect(evaluator.evaluate('read', 'parent_conferences', 'conf_01', parent1Context, { parentId: 'parent_01' }).allowed).toBe(true);
-      expect(evaluator.evaluate('read', 'parent_conferences', 'conf_02', parent1Context, { parentUid: 'parent_02' }).allowed).toBe(false);
-      expect(evaluator.evaluate('write', 'parent_conferences', 'conf_01', parent1Context).allowed).toBe(false);
-    });
-  });
+    it('denies a SUBJECT_TEACHER from reading student self assessments', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_self_assessments/assess-01').set({ studentUid: 'std-uid-1', score: 9 });
+      });
 
-  // TASK 2: Unauthenticated access removal & Config protection
-  describe('TASK 2: Protected Staff & Config Collections', () => {
-    const unauthContext: SecurityContext = { uid: null };
-    const authUserContext: SecurityContext = { uid: 'user_01', roles: [] };
-    const adminContext: SecurityContext = { uid: 'admin_01', roles: ['SUPER_ADMIN'] };
-
-    it('denies unauthenticated read on schedules, admin_periods_config, staff, teachers', () => {
-      expect(evaluator.evaluate('read', 'schedules', 'sch_1', unauthContext).allowed).toBe(false);
-      expect(evaluator.evaluate('read', 'admin_periods_config', 'p1', unauthContext).allowed).toBe(false);
-      expect(evaluator.evaluate('read', 'school_settings', 'set_1', unauthContext).allowed).toBe(false);
-      expect(evaluator.evaluate('read', 'staff', 'staff_1', unauthContext).allowed).toBe(false);
-      expect(evaluator.evaluate('read', 'teachers', 'teach_1', unauthContext).allowed).toBe(false);
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('student_self_assessments/assess-01').get());
     });
 
-    it('allows signed-in users to read config/staff but only SUPER_ADMIN to write', () => {
-      expect(evaluator.evaluate('read', 'admin_periods_config', 'p1', authUserContext).allowed).toBe(true);
-      expect(evaluator.evaluate('write', 'admin_periods_config', 'p1', authUserContext).allowed).toBe(false);
-      expect(evaluator.evaluate('write', 'admin_periods_config', 'p1', adminContext).allowed).toBe(true);
-      expect(evaluator.evaluate('write', 'staff', 'staff_1', authUserContext).allowed).toBe(false);
-      expect(evaluator.evaluate('write', 'staff', 'staff_1', adminContext).allowed).toBe(true);
+    it('allows GUIDANCE_COUNSELOR and student self to write self assessment', async () => {
+      await assertSucceeds(
+        asRole('GUIDANCE_COUNSELOR').firestore().doc('student_self_assessments/assess-g').set({ score: 10 })
+      );
+      await assertSucceeds(
+        asUser('student-me').firestore().doc('student_self_assessments/student-me').set({ score: 12 })
+      );
     });
   });
 
-  // Default Deny
-  describe('Default Deny Fallback', () => {
-    const unauthContext: SecurityContext = { uid: null };
+  // 3. discipline_logs
+  describe('discipline_logs collection', () => {
+    it('allows HOMEROOM_TEACHER, EXECUTIVE, GUIDANCE_COUNSELOR, SUPER_ADMIN to read', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('discipline_logs/log-01').set({ studentId: 'std-101', points: -5 });
+      });
 
-    it('denies unauthenticated requests across sensitive collections', () => {
-      expect(evaluator.evaluate('read', 'student_self_assessments', '38501', unauthContext).allowed).toBe(false);
-      expect(evaluator.evaluate('write', 'attendance_records', 'rec_01', unauthContext).allowed).toBe(false);
-      expect(evaluator.evaluate('write', 'students', '38501', unauthContext).allowed).toBe(false);
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('discipline_logs/log-01').get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('discipline_logs/log-01').get());
+      await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc('discipline_logs/log-01').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('discipline_logs/log-01').get());
+    });
+
+    it('denies unassigned roles and parents from reading discipline logs', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('discipline_logs/log-01').set({ studentId: 'std-101', points: -5 });
+      });
+
+      await assertFails(asRole('PARENT').firestore().doc('discipline_logs/log-01').get());
+      await assertFails(asAnonymous().firestore().doc('discipline_logs/log-01').get());
+    });
+
+    it('allows SUBJECT_TEACHER, HOMEROOM_TEACHER, SUPER_ADMIN to write discipline logs', async () => {
+      await assertSucceeds(
+        asRole('SUBJECT_TEACHER').firestore().doc('discipline_logs/log-new-1').set({ studentId: 'std-101', points: -2 })
+      );
+      await assertSucceeds(
+        asRole('HOMEROOM_TEACHER').firestore().doc('discipline_logs/log-new-2').set({ studentId: 'std-101', points: -3 })
+      );
+    });
+
+    it('denies parents and unauthenticated users from writing discipline logs', async () => {
+      await assertFails(
+        asRole('PARENT').firestore().doc('discipline_logs/log-new-3').set({ points: 100 })
+      );
+      await assertFails(
+        asAnonymous().firestore().doc('discipline_logs/log-new-4').set({ points: 100 })
+      );
+    });
+  });
+
+  // 4. parent_notifications
+  describe('parent_notifications collection', () => {
+    it('allows linked parent to read their notifications and HOMEROOM_TEACHER to read all', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('parent_notifications/notif-01').set({ parentUid: 'parent-alice', message: 'Hello' });
+      });
+
+      await assertSucceeds(asUser('parent-alice', ['PARENT']).firestore().doc('parent_notifications/notif-01').get());
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('parent_notifications/notif-01').get());
+    });
+
+    it('denies a different parent from reading notifications intended for another parent', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('parent_notifications/notif-01').set({ parentUid: 'parent-alice', message: 'Hello' });
+      });
+
+      await assertFails(asUser('parent-bob', ['PARENT']).firestore().doc('parent_notifications/notif-01').get());
+    });
+
+    it('allows SUBJECT_TEACHER and HOMEROOM_TEACHER to write parent notifications', async () => {
+      await assertSucceeds(
+        asRole('SUBJECT_TEACHER').firestore().doc('parent_notifications/notif-new-1').set({ parentUid: 'parent-alice', msg: 'Update' })
+      );
+      await assertSucceeds(
+        asRole('HOMEROOM_TEACHER').firestore().doc('parent_notifications/notif-new-2').set({ parentUid: 'parent-alice', msg: 'Update 2' })
+      );
+    });
+  });
+
+  // 5. parent_conferences
+  describe('parent_conferences collection', () => {
+    it('allows HOMEROOM_TEACHER and SUPER_ADMIN to read and write parent conferences', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('parent_conferences/conf-01').set({ parentUid: 'parent-alice', topic: 'Academic Review' });
+      });
+
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('parent_conferences/conf-01').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('parent_conferences/conf-01').get());
+      await assertSucceeds(
+        asRole('HOMEROOM_TEACHER').firestore().doc('parent_conferences/conf-new').set({ topic: 'Discussion' })
+      );
+    });
+
+    // Regression Test 4: A parent can read a parent_conferences doc where they are the linked parent, and cannot read one for a different parent
+    it('REGRESSION: allows linked parent to read parent_conferences and denies a different parent', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('parent_conferences/conf-01').set({ parentUid: 'parent-alice', topic: 'Behavior Progress' });
+      });
+
+      const linkedParentDb = asUser('parent-alice', ['PARENT']).firestore();
+      const otherParentDb = asUser('parent-bob', ['PARENT']).firestore();
+
+      await assertSucceeds(linkedParentDb.doc('parent_conferences/conf-01').get());
+      await assertFails(otherParentDb.doc('parent_conferences/conf-01').get());
+    });
+
+    it('denies SUBJECT_TEACHER and PARENT from writing parent conferences', async () => {
+      await assertFails(
+        asRole('SUBJECT_TEACHER').firestore().doc('parent_conferences/conf-invalid').set({ topic: 'Denied' })
+      );
+      await assertFails(
+        asRole('PARENT').firestore().doc('parent_conferences/conf-invalid').set({ topic: 'Denied' })
+      );
+    });
+  });
+
+  // 6. schedules
+  describe('schedules collection', () => {
+    it('allows any authenticated user to read schedules', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('schedules/sch-01').set({ classRoom: 'ม.5/8', subjectCode: 'ว30201' });
+      });
+
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('schedules/sch-01').get());
+      await assertSucceeds(asRole('PARENT').firestore().doc('schedules/sch-01').get());
+      await assertSucceeds(asUser('student-001', ['STUDENT']).firestore().doc('schedules/sch-01').get());
+    });
+
+    // Regression Test 2 (part): An unauthenticated context cannot read schedules
+    it('REGRESSION: denies unauthenticated context from reading schedules', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('schedules/sch-01').set({ classRoom: 'ม.5/8' });
+      });
+
+      await assertFails(asAnonymous().firestore().doc('schedules/sch-01').get());
+    });
+
+    it('allows SUBJECT_TEACHER, HOMEROOM_TEACHER, and SUPER_ADMIN to write schedules', async () => {
+      await assertSucceeds(
+        asRole('SUBJECT_TEACHER').firestore().doc('schedules/sch-new-1').set({ classRoom: 'ม.5/8' })
+      );
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('schedules/sch-new-2').set({ classRoom: 'ม.5/8' })
+      );
+    });
+  });
+
+  // 7. attendance_records
+  describe('attendance_records collection', () => {
+    it('allows SUBJECT_TEACHER, EXECUTIVE, and HOMEROOM_TEACHER to read and write attendance', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('attendance_records/att-01').set({ parentUid: 'parent-alice', status: 'present' });
+      });
+
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('attendance_records/att-01').get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('attendance_records/att-01').get());
+      await assertSucceeds(
+        asRole('SUBJECT_TEACHER').firestore().doc('attendance_records/att-new').set({ status: 'present' })
+      );
+    });
+
+    // Regression Test 3 (part): A parent whose parentUid matches student's parentUid can read attendance; different parent cannot
+    it('REGRESSION: allows linked parent to read attendance_records and denies different parent', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('attendance_records/att-01').set({ parentUid: 'parent-alice', status: 'present' });
+      });
+
+      const linkedParent = asUser('parent-alice', ['PARENT']).firestore();
+      const otherParent = asUser('parent-bob', ['PARENT']).firestore();
+
+      await assertSucceeds(linkedParent.doc('attendance_records/att-01').get());
+      await assertFails(otherParent.doc('attendance_records/att-01').get());
+    });
+
+    it('denies unauthenticated context from reading attendance_records', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('attendance_records/att-01').set({ parentUid: 'parent-alice', status: 'present' });
+      });
+
+      await assertFails(asAnonymous().firestore().doc('attendance_records/att-01').get());
+    });
+  });
+
+  // 8. gradebook_scores
+  describe('gradebook_scores collection', () => {
+    it('allows SUBJECT_TEACHER, HEAD_OF_DEPARTMENT, and EXECUTIVE to read and write gradebook_scores', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gradebook_scores/score-01').set({ parentUid: 'parent-alice', score: 85 });
+      });
+
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('gradebook_scores/score-01').get());
+      await assertSucceeds(asRole('HEAD_OF_DEPARTMENT').firestore().doc('gradebook_scores/score-01').get());
+      await assertSucceeds(
+        asRole('HEAD_OF_DEPARTMENT').firestore().doc('gradebook_scores/score-new').set({ score: 90 })
+      );
+    });
+
+    // Regression Test 3 (part): A parent whose parentUid matches can read gradebook_scores; different parent cannot
+    it('REGRESSION: allows linked parent to read gradebook_scores and denies different parent', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gradebook_scores/score-01').set({ parentUid: 'parent-alice', score: 85 });
+      });
+
+      const linkedParent = asUser('parent-alice', ['PARENT']).firestore();
+      const otherParent = asUser('parent-bob', ['PARENT']).firestore();
+
+      await assertSucceeds(linkedParent.doc('gradebook_scores/score-01').get());
+      await assertFails(otherParent.doc('gradebook_scores/score-01').get());
+    });
+
+    it('denies unauthenticated context from reading gradebook_scores', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gradebook_scores/score-01').set({ score: 85 });
+      });
+
+      await assertFails(asAnonymous().firestore().doc('gradebook_scores/score-01').get());
+    });
+  });
+
+  // 9. admin_periods_config
+  describe('admin_periods_config collection', () => {
+    it('allows any signed-in user to read admin_periods_config', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('admin_periods_config/config-01').set({ active: true });
+      });
+
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('admin_periods_config/config-01').get());
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('admin_periods_config/config-01').get());
+    });
+
+    it('denies unauthenticated context from reading admin_periods_config', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('admin_periods_config/config-01').set({ active: true });
+      });
+
+      await assertFails(asAnonymous().firestore().doc('admin_periods_config/config-01').get());
+    });
+
+    it('allows SUPER_ADMIN to write admin_periods_config and denies non-admin', async () => {
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('admin_periods_config/config-new').set({ active: true })
+      );
+      await assertFails(
+        asRole('SUBJECT_TEACHER').firestore().doc('admin_periods_config/config-new-bad').set({ active: false })
+      );
+    });
+  });
+
+  // 10. school_settings
+  describe('school_settings collection', () => {
+    it('allows signed-in users to read school_settings', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('school_settings/periods_config').set({ name: 'Default Schedule' });
+      });
+
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('school_settings/periods_config').get());
+    });
+
+    // Regression Test 2 (part): An unauthenticated context cannot read school_settings
+    it('REGRESSION: denies unauthenticated context from reading school_settings', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('school_settings/periods_config').set({ name: 'Default Schedule' });
+      });
+
+      await assertFails(asAnonymous().firestore().doc('school_settings/periods_config').get());
+    });
+
+    it('allows SUPER_ADMIN to write school_settings and denies non-admin', async () => {
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('school_settings/periods_config').set({ name: 'Updated' })
+      );
+      await assertFails(
+        asRole('SUBJECT_TEACHER').firestore().doc('school_settings/periods_config').set({ name: 'Hacked' })
+      );
+    });
+  });
+
+  // 11. staff collection
+  describe('staff collection', () => {
+    it('allows signed-in users to read staff directory', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('staff/staff-001').set({ name: 'Teacher Sompong' });
+      });
+
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('staff/staff-001').get());
+    });
+
+    // Regression Test 2 (part): An unauthenticated context cannot read staff
+    it('REGRESSION: denies unauthenticated context from reading staff', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('staff/staff-001').set({ name: 'Teacher Sompong' });
+      });
+
+      await assertFails(asAnonymous().firestore().doc('staff/staff-001').get());
+    });
+
+    it('allows SUPER_ADMIN to write to staff and denies non-admin', async () => {
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('staff/staff-new').set({ name: 'New Staff' })
+      );
+      await assertFails(
+        asRole('HOMEROOM_TEACHER').firestore().doc('staff/staff-new').set({ name: 'Illegal Edit' })
+      );
+    });
+  });
+
+  // 12. teachers collection
+  describe('teachers collection', () => {
+    it('allows signed-in users to read teachers directory', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('teachers/tch-001').set({ name: 'Dr. Kiattisak' });
+      });
+
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('teachers/tch-001').get());
+    });
+
+    // Regression Test 2 (part): An unauthenticated context cannot read teachers
+    it('REGRESSION: denies unauthenticated context from reading teachers', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('teachers/tch-001').set({ name: 'Dr. Kiattisak' });
+      });
+
+      await assertFails(asAnonymous().firestore().doc('teachers/tch-001').get());
+    });
+
+    it('allows SUPER_ADMIN to write to teachers and denies non-admin', async () => {
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('teachers/tch-new').set({ name: 'New Teacher' })
+      );
+      await assertFails(
+        asRole('SUBJECT_TEACHER').firestore().doc('teachers/tch-new').set({ name: 'Denied Edit' })
+      );
+    });
+  });
+
+  // 13. Default Deny Catch-All (Regression Test 5)
+  describe('Default Deny Catch-All (Undeclared paths)', () => {
+    it('REGRESSION: denies authenticated user with no matching role from reading or writing undeclared collections', async () => {
+      const db = asRole('SOME_ARBITRARY_ROLE').firestore();
+
+      await assertFails(db.doc('some_future_collection/doc1').get());
+      await assertFails(db.doc('some_future_collection/doc1').set({ data: 123 }));
+      await assertFails(db.doc('internal_audit_logs/log_01').get());
+      await assertFails(db.doc('internal_audit_logs/log_01').set({ note: 'attempt' }));
     });
   });
 });
