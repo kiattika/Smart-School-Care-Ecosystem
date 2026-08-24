@@ -1,31 +1,24 @@
-import * as admin from 'firebase-admin';
-import * as fs from 'fs';
-import * as path from 'path';
+import { initializeApp, getApps } from 'firebase-admin/app';
+import { getAuth, UserRecord } from 'firebase-admin/auth';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
-// Force point to local Firebase Emulators if not already set
+// Force point to local Firebase Emulator
 process.env.FIREBASE_AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
-// Read config for projectId
-let projectId = 'ai-studio-smartschoolcaree-3b0997bf-b447-4da7-ac95-d7b1332165e0';
-let databaseId = '(default)';
-const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
-if (fs.existsSync(configPath)) {
-  try {
-    const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    if (cfg.projectId) projectId = cfg.projectId;
-    if (cfg.firestoreDatabaseId) databaseId = cfg.firestoreDatabaseId;
-  } catch (err) {
-    console.warn('Notice reading firebase-applet-config.json:', err);
-  }
+// Initialize Firebase Admin with just projectId - no need for service account when using emulator
+const projectId = 'ai-studio-smartschoolcaree-3b0997bf-b447-4da7-ac95-d7b1332165e0';
+
+if (!getApps().length) {
+  initializeApp({
+    projectId: projectId,
+  });
 }
 
-if (!admin.apps.length) {
-  admin.initializeApp({ projectId });
-}
+const auth = getAuth();
+const db = getFirestore();
 
-const auth = admin.auth();
-const db = admin.firestore();
+console.log(`✅ Connected to Firebase Emulator (Auth: 127.0.0.1:9099, Firestore: 127.0.0.1:8080)`);
 
 export interface TestUserDef {
   uid: string;
@@ -187,7 +180,7 @@ export async function seedEmulatorAuth() {
   for (const userDef of SEEDED_TEST_USERS) {
     try {
       // 1. Create or Update Auth Record
-      let userRecord: admin.auth.UserRecord;
+      let userRecord: UserRecord;
       try {
         userRecord = await auth.getUserByEmail(userDef.email);
         await auth.updateUser(userRecord.uid, {
@@ -232,7 +225,7 @@ export async function seedEmulatorAuth() {
         position: userDef.position,
         roles: userDef.roles,
         assignments: userDef.assignments || {},
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        updatedAt: FieldValue.serverTimestamp()
       }, { merge: true });
 
       // Also create an alias by email for robust lookups
@@ -246,7 +239,7 @@ export async function seedEmulatorAuth() {
         position: userDef.position,
         roles: userDef.roles,
         assignments: userDef.assignments || {},
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        updatedAt: FieldValue.serverTimestamp()
       }, { merge: true });
 
       // 4. If student/parent info is attached, write matching student record
@@ -265,7 +258,7 @@ export async function seedEmulatorAuth() {
           parentId: userDef.studentInfo.parentId,
           parentUid: userDef.studentInfo.parentId,
           studentUid: userDef.uid,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          updatedAt: FieldValue.serverTimestamp()
         }, { merge: true });
 
         // Add a sample parent notification for testing relational parent rules
@@ -279,7 +272,7 @@ export async function seedEmulatorAuth() {
           title: 'ยินดีต้อนรับสู่ระบบ Smart School Care',
           message: 'บัญชีผู้ปกครองได้รับการเชื่อมโยงกับนักเรียนเรียบร้อยแล้วค่ะ',
           status: 'unread',
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
+          createdAt: FieldValue.serverTimestamp()
         }, { merge: true });
 
         // Add a sample parent conference for testing parent conference rules
@@ -296,7 +289,7 @@ export async function seedEmulatorAuth() {
           scheduledDate: '2026-08-28',
           scheduledTime: '13:00 - 14:00 น.',
           remainingScore: 100,
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
+          createdAt: FieldValue.serverTimestamp()
         }, { merge: true });
       }
 
@@ -342,7 +335,7 @@ export async function seedEmulatorAuth() {
 
     batch.set(db.collection('school_settings').doc('periods_config'), {
       periods: defaultAdminPeriods,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      updatedAt: FieldValue.serverTimestamp()
     }, { merge: true });
 
     await batch.commit();
