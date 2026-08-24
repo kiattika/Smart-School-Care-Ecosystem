@@ -23,7 +23,7 @@ import { HeaderRealTimeClock } from './HeaderRealTimeClock';
 import { GPSGeofenceCheckinModal } from './GPSGeofenceCheckinModal';
 
 // สีของ Badge และธีมประจำแต่ละบทบาท
-interface RoleVisualConfig {
+export interface RoleVisualConfig {
   label: string;
   badgeBg: string;
   badgeText: string;
@@ -33,7 +33,17 @@ interface RoleVisualConfig {
   description: string;
 }
 
-export const ROLE_VISUALS: Record<UserRole, RoleVisualConfig> = {
+export const DEFAULT_ROLE_VISUAL: RoleVisualConfig = {
+  label: 'ผู้ใช้งาน',
+  badgeBg: 'bg-indigo-500/10',
+  badgeText: 'text-indigo-400',
+  badgeBorder: 'border-indigo-500/20',
+  iconBg: 'bg-indigo-500/20',
+  iconColor: 'text-indigo-400',
+  description: 'เข้าถึงระบบสารสนเทศตามสิทธิ์การใช้งาน'
+};
+
+export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
   SUPER_ADMIN: {
     label: 'ผู้ดูแลระบบ',
     badgeBg: 'bg-rose-500/10',
@@ -123,8 +133,85 @@ export const ROLE_VISUALS: Record<UserRole, RoleVisualConfig> = {
     iconBg: 'bg-cyan-500/20',
     iconColor: 'text-cyan-400',
     description: 'ตรวจแผนการสอน นิเทศชั้นเรียน และประเมินสมรรถนะ'
+  },
+  PARENT: {
+    label: 'ผู้ปกครอง',
+    badgeBg: 'bg-amber-500/10',
+    badgeText: 'text-amber-400',
+    badgeBorder: 'border-amber-500/20',
+    iconBg: 'bg-amber-500/20',
+    iconColor: 'text-amber-400',
+    description: 'ติดตามผลการเรียน การเข้าแถว และความประพฤตินักเรียน'
+  },
+  STUDENT: {
+    label: 'นักเรียน',
+    badgeBg: 'bg-sky-500/10',
+    badgeText: 'text-sky-400',
+    badgeBorder: 'border-sky-500/20',
+    iconBg: 'bg-sky-500/20',
+    iconColor: 'text-sky-400',
+    description: 'ตรวจสอบตารางเรียน ผลการเรียน และภารกิจการเข้าแถว'
+  },
+  admin: {
+    label: 'ผู้ดูแลระบบ',
+    badgeBg: 'bg-rose-500/10',
+    badgeText: 'text-rose-400',
+    badgeBorder: 'border-rose-500/20',
+    iconBg: 'bg-rose-500/20',
+    iconColor: 'text-rose-400',
+    description: 'ดูแลระบบความปลอดภัยและการจัดการสิทธิ์ทั้งหมด'
+  },
+  executive: {
+    label: 'ผู้บริหารสถานศึกษา',
+    badgeBg: 'bg-blue-500/10',
+    badgeText: 'text-blue-400',
+    badgeBorder: 'border-blue-500/20',
+    iconBg: 'bg-blue-500/20',
+    iconColor: 'text-blue-400',
+    description: 'เข้าถึงข้อมูลภาพรวม อนุมัติผลการเรียน และนิเทศ'
+  },
+  advisor: {
+    label: 'ครูประจำชั้น',
+    badgeBg: 'bg-emerald-500/10',
+    badgeText: 'text-emerald-400',
+    badgeBorder: 'border-emerald-500/20',
+    iconBg: 'bg-emerald-500/20',
+    iconColor: 'text-emerald-400',
+    description: 'บันทึกการเข้าเรียน พฤติกรรม และดูแลนักเรียนในที่ปรึกษา'
+  },
+  teacher: {
+    label: 'ครูประจำวิชา',
+    badgeBg: 'bg-indigo-500/10',
+    badgeText: 'text-indigo-400',
+    badgeBorder: 'border-indigo-500/20',
+    iconBg: 'bg-indigo-500/20',
+    iconColor: 'text-indigo-400',
+    description: 'บันทึกคะแนนเก็บ จัดเก็บสถิติการเรียนรายห้อง'
+  },
+  parent: {
+    label: 'ผู้ปกครอง',
+    badgeBg: 'bg-amber-500/10',
+    badgeText: 'text-amber-400',
+    badgeBorder: 'border-amber-500/20',
+    iconBg: 'bg-amber-500/20',
+    iconColor: 'text-amber-400',
+    description: 'ติดตามผลการเรียน การเข้าแถว และความประพฤตินักเรียน'
+  },
+  student: {
+    label: 'นักเรียน',
+    badgeBg: 'bg-sky-500/10',
+    badgeText: 'text-sky-400',
+    badgeBorder: 'border-sky-500/20',
+    iconBg: 'bg-sky-500/20',
+    iconColor: 'text-sky-400',
+    description: 'ตรวจสอบตารางเรียน ผลการเรียน และภารกิจการเข้าแถว'
   }
 };
+
+export function getRoleVisual(role?: string): RoleVisualConfig {
+  if (!role) return DEFAULT_ROLE_VISUAL;
+  return ROLE_VISUALS[role] || DEFAULT_ROLE_VISUAL;
+}
 
 // แปลชื่อสิทธิ์ (Permission) เป็นภาษาไทยเพื่อการจัดแสดง
 export const PERMISSION_LABELS: Record<Permission, string> = {
@@ -176,7 +263,7 @@ export function NavbarWithRoleSwitcher({
     };
   }, []);
 
-  const activeVisual = ROLE_VISUALS[activeRole];
+  const activeVisual = getRoleVisual(activeRole);
 
   // ค้นหารายละเอียดบทบาทเพื่อจัดแสดงข้อมูลบริบทเพิ่มเติม
   const getRoleContextDetails = (role: UserRole): string => {
@@ -280,8 +367,8 @@ export function NavbarWithRoleSwitcher({
               </div>
 
               <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-                {user.roles.map((role) => {
-                  const visual = ROLE_VISUALS[role];
+                {(user.roles || []).map((role) => {
+                  const visual = getRoleVisual(role);
                   const isSelected = role === activeRole;
                   const context = getRoleContextDetails(role);
 
@@ -370,7 +457,7 @@ export function NavbarWithRoleSwitcher({
           >
             <div className="text-right hidden sm:block">
               <p className="text-xs font-semibold text-slate-200 group-hover:text-white transition-colors">
-                {user.prefix}{user.firstName} {user.lastName}
+                {user.prefix || ''}{user.firstName || ''} {user.lastName || ''}
               </p>
               <p className="text-[10px] text-slate-400">{user.position || 'บุคลากรทางการศึกษา'}</p>
             </div>
@@ -393,15 +480,15 @@ export function NavbarWithRoleSwitcher({
               {/* ข้อมูลโปรไฟล์แบบละเอียด */}
               <div className="flex items-center gap-3 p-2 bg-slate-800/25 rounded-xl border border-slate-800/40 mb-3">
                 <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-sm text-white">
-                  {user.firstName[0]}
+                  {user.firstName?.[0] || 'U'}
                 </div>
                 <div>
                   <h4 className="text-xs font-bold text-slate-100">
-                    {user.prefix}{user.firstName} {user.lastName}
+                    {user.prefix || ''}{user.firstName || ''} {user.lastName || ''}
                   </h4>
-                  <p className="text-[10px] text-slate-400">{user.email}</p>
+                  <p className="text-[10px] text-slate-400">{user.email || ''}</p>
                   <p className="text-[9.5px] mt-0.5 text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 inline-block font-mono">
-                    ID: {user.id}
+                    ID: {user.id || 'N/A'}
                   </p>
                 </div>
               </div>

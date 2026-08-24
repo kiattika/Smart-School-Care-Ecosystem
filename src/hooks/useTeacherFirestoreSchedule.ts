@@ -42,9 +42,18 @@ const DEFAULT_ADMIN_PERIODS: AdminPeriodConfig[] = [
 
 export const isTeacherEmailMatch = (email1?: string, email2?: string): boolean => {
   if (!email1 || !email2) return false;
-  if (email1.toLowerCase() === email2.toLowerCase()) return true;
-  const kiattisakEmails = ['kiattisak@utd.ac.th', 'kiattika@utd.ac.th', 'kiattika@gmail.com', 'teacher@utd.ac.th'];
-  if (kiattisakEmails.includes(email1.toLowerCase()) && kiattisakEmails.includes(email2.toLowerCase())) return true;
+  const e1 = email1.toLowerCase();
+  const e2 = email2.toLowerCase();
+  if (e1 === e2) return true;
+  const kiattisakEmails = [
+    'kiattisak@utd.ac.th', 
+    'kiattika@utd.ac.th', 
+    'kiattika@gmail.com', 
+    'teacher@utd.ac.th',
+    'teacher.test@utd.ac.th',
+    'advisor.test@utd.ac.th'
+  ];
+  if (kiattisakEmails.includes(e1) && kiattisakEmails.includes(e2)) return true;
   return false;
 };
 
@@ -82,7 +91,7 @@ export function useTeacherFirestoreSchedule() {
             setPeriods([]);
           }
         }, (err) => {
-          console.error("admin_periods_config listener error:", err.message);
+          console.warn("Notice: admin_periods_config listener (using defaults):", err.message);
         });
 
         unsubscribeSchedules = onSnapshot(schedulesColRef, (snapshot) => {
@@ -97,12 +106,12 @@ export function useTeacherFirestoreSchedule() {
           }
           setLoading(false);
         }, (err) => {
-          console.error("schedules listener error:", err.message);
+          console.warn("Notice: schedules listener (using defaults):", err.message);
           setLoading(false);
         });
 
       } catch (err: any) {
-        console.error("Firestore schedule sync setup error:", err.message);
+        console.warn("Notice: Firestore schedule sync setup:", err.message);
         setLoading(false);
       }
     };

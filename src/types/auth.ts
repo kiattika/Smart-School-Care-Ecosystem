@@ -9,7 +9,9 @@ export type UserRole =
   | 'INFIRMARY_STAFF'      // ครูพยาบาล / เจ้าหน้าที่ห้องพยาบาล
   | 'GUIDANCE_COUNSELOR'   // ครูแนะแนว / ให้คำปรึกษา
   | 'FINANCE_STAFF'        // เจ้าหน้าที่งานการเงิน / บัญชี
-  | 'INSTRUCTIONAL_SUPERVISOR'; // ครูผู้นิเทศ / หัวหน้าฝ่ายวิชาการ
+  | 'INSTRUCTIONAL_SUPERVISOR' // ครูผู้นิเทศ / หัวหน้าฝ่ายวิชาการ
+  | 'PARENT'               // ผู้ปกครองนักเรียน
+  | 'STUDENT';             // นักเรียน
 
 // 2. นิยามสิทธิ์การเข้าถึง (Permissions)
 export type Permission = 
@@ -93,7 +95,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'MANAGE_SUPERVISION',
     'EVALUATE_TEACHERS',
     'VIEW_ALL_REPORTS'
-  ]
+  ],
+  PARENT: [],
+  STUDENT: []
 };
 
 // 4. Helper Function ในการตรวจสอบสิทธิ์การเข้าถึงแบบจำเพาะเจาะจงบทบาทที่ใช้งานอยู่
