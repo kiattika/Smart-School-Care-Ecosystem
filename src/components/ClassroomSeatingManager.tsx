@@ -43,6 +43,9 @@ import { RandomStudentPickerModal, ClassroomDeskGroup } from './RandomStudentPic
 import { SeatHistoryModal } from './seating/SeatHistoryModal';
 import { TemplatePickerModal } from './seating/TemplatePickerModal';
 import { CreateGroupModal } from './seating/CreateGroupModal';
+import { TakeAttendanceModal } from './seating/TakeAttendanceModal';
+import { getAttendanceRecord } from '../services/firestoreService';
+import { format } from 'date-fns';
 import { 
   getSeatingLayoutFromFirestore, 
   saveSeatingLayoutToFirestore,
@@ -58,13 +61,15 @@ interface ClassroomSeatingManagerProps {
   students: Student[];
   onBackToDashboard?: () => void;
   onSelectStudentDetail?: (student: Student) => void;
+  onTakeAttendance?: () => void;
 }
 
 export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = ({
   course: propCourse,
   students,
   onBackToDashboard,
-  onSelectStudentDetail
+  onSelectStudentDetail,
+  onTakeAttendance
 }) => {
   const course = propCourse || {
     id: 'course-m58-default',
@@ -78,12 +83,12 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
 
   const { 
     user,
+    currentDate,
     attendanceRecords, 
     setAttendanceStatus, 
     adjustBehaviorScore, 
     addActiveLearningPoints,
     activeLearningPoints,
-    markAttendanceDone,
     analytics
   } = useStore();
 
@@ -147,6 +152,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   const [showTemplateModal, setShowTemplateModal] = useState<boolean>(false);
   const [showCreateGroupModal, setShowCreateGroupModal] = useState<boolean>(false);
   const [showRandomPicker, setShowRandomPicker] = useState<boolean>(false);
+  const [showAttendanceModal, setShowAttendanceModal] = useState<boolean>(false);
   const [selectedSeatForHistory, setSelectedSeatForHistory] = useState<{ seat: SeatingSeat; group: SeatingGroup } | null>(null);
   const [selectedStudentForHistory, setSelectedStudentForHistory] = useState<Student | null>(null);
 
@@ -157,11 +163,39 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingGroupName, setEditingGroupName] = useState<string>('');
 
-  // 2. Attendance Status & Gating
+  // 2. Attendance Status & Gating (Firestore-backed)
   const courseId = course?.id || 'default-course';
-  const currentAttendance = attendanceRecords[courseId] || attendanceRecords[course.code] || {};
+  const [firestoreAttendance, setFirestoreAttendance] = useState<Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'> | null>(null);
+
+  // Fetch real attendance record from Firestore for today's course/period
+  useEffect(() => {
+    let isMounted = true;
+    const fetchAttendance = async () => {
+      try {
+        const dateStr = format(currentDate || new Date(), 'yyyy-MM-dd');
+        const rawRoom = course?.room || 'ม.5/8';
+        const roomStr = rawRoom.replace('/', '-');
+        const periodNum = course?.periodIndex || 1;
+        const recordId = `${dateStr}_${roomStr}_p${periodNum}`;
+
+        const rec = await getAttendanceRecord(recordId);
+        if (rec && rec.students && isMounted) {
+          setFirestoreAttendance(rec.students);
+        }
+      } catch (err) {
+        console.error('Error loading attendance from Firestore:', err);
+      }
+    };
+    fetchAttendance();
+    return () => {
+      isMounted = false;
+    };
+  }, [course?.room, course?.periodIndex, currentDate]);
+
+  const currentAttendance = firestoreAttendance || attendanceRecords[courseId] || attendanceRecords[course.code] || {};
   const hasAttendanceRecords = Object.keys(currentAttendance).length > 0;
-  const isAttendanceDone = course?.attendanceTaken || hasAttendanceRecords;
+  // Gated strictly when real student attendance statuses exist
+  const isAttendanceDone = hasAttendanceRecords;
 
   // Derived Total Capacity
   const totalCapacity = useMemo(() => {
@@ -901,7 +935,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
         </div>
       </header>
 
-      {/* Attendance Gating Warning Banner (Task 6) */}
+      {/* Attendance Gating Warning Banner */}
       {!isAttendanceDone && (
         <div className="bg-amber-500/15 border-b border-amber-500/30 px-5 py-2.5 flex items-center justify-between gap-3 text-xs text-amber-200">
           <div className="flex items-center gap-2">
@@ -911,10 +945,18 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
             </span>
           </div>
           <button
-            onClick={() => markAttendanceDone(course.id || course.code)}
-            className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-[11px] transition-all whitespace-nowrap shadow-sm"
+            type="button"
+            onClick={() => {
+              if (onTakeAttendance) {
+                onTakeAttendance();
+              } else {
+                setShowAttendanceModal(true);
+              }
+            }}
+            className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs transition-all whitespace-nowrap shadow-md flex items-center gap-1.5 cursor-pointer"
           >
-            เช็คชื่อทันที (Mark Done)
+            <UserCheck className="w-3.5 h-3.5" />
+            <span>บันทึกการเช็คชื่อ (Take Attendance)</span>
           </button>
         </div>
       )}
@@ -1297,6 +1339,32 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
         attendanceRecords={currentAttendance}
         courseId={courseId}
         onSelectHighlight={(ids) => setHighlightedStudentIds(ids)}
+      />
+
+      {/* Real Firestore Attendance Modal */}
+      <TakeAttendanceModal
+        isOpen={showAttendanceModal}
+        onClose={() => setShowAttendanceModal(false)}
+        course={course}
+        students={courseStudents}
+        currentDate={currentDate}
+        initialAttendance={currentAttendance}
+        teacherId={user?.uid || 'teacher_001'}
+        teacherName={user?.displayName || 'ครูผู้สอน'}
+        onAttendanceSaved={(newStatuses) => {
+          setFirestoreAttendance(newStatuses);
+          // Also sync to store
+          const { setAttendanceRecords, attendanceRecords: currRecs } = useStore.getState() as any;
+          if (setAttendanceRecords) {
+            setAttendanceRecords({
+              ...currRecs,
+              [courseId]: newStatuses,
+              [course.code]: newStatuses
+            });
+          }
+          setSaveToast('บันทึกการเช็คชื่อเข้าเรียนลง Firestore เรียบร้อยแล้ว');
+          setTimeout(() => setSaveToast(null), 3000);
+        }}
       />
 
     </div>

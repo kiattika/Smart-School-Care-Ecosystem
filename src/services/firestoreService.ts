@@ -133,6 +133,23 @@ export async function saveAttendanceRecord(recordData: FirestoreAttendanceRecord
 }
 
 /**
+ * 2.1 Fetch a single attendance record by document ID
+ */
+export async function getAttendanceRecord(recordId: string): Promise<FirestoreAttendanceRecord | null> {
+  const collectionPath = 'attendance_records';
+  try {
+    const recordRef = doc(db, collectionPath, recordId);
+    const snap = await getDoc(recordRef);
+    if (snap.exists()) {
+      return { id: snap.id, ...snap.data() } as FirestoreAttendanceRecord;
+    }
+    return null;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, `${collectionPath}/${recordId}`);
+  }
+}
+
+/**
  * 3. Update behavior score and automatically trigger alert banners and conference documents
  */
 export async function updateBehaviorScoreAndTriggerAlert(
