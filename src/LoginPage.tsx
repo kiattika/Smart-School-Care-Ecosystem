@@ -4,6 +4,7 @@ import { LogIn, AlertCircle, Loader2, KeyRound, Sparkles } from 'lucide-react';
 import { signInWithGoogle, signInWithEmailPassword } from './lib/auth';
 
 const EMULATOR_TEST_USERS = [
+  { email: 'kiattika@utd.ac.th', label: 'ผู้ดูแลระบบ (นายเกียรติศักดิ์ แก้วหล้า)', roleTag: 'SUPER_ADMIN', desc: 'ผู้ดูแลระบบสูงสุด (Admin)' },
   { email: 'teacher.test@utd.ac.th', label: 'ครูผู้สอน', roleTag: 'SUBJECT_TEACHER', desc: 'ครูสมปอง สอนดี' },
   { email: 'advisor.test@utd.ac.th', label: 'ครูประจำชั้น ม.5/8', roleTag: 'HOMEROOM_TEACHER', desc: 'ครูเกียรติศักดิ์ สถิตการุณย์' },
   { email: 'exec.test@utd.ac.th', label: 'ผู้บริหารโรงเรียน', roleTag: 'EXECUTIVE', desc: 'ดร.สมเกียรติ บริหารวิชาการ' },

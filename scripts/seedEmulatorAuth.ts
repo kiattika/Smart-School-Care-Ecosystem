@@ -46,6 +46,18 @@ export interface TestUserDef {
 
 export const SEEDED_TEST_USERS: TestUserDef[] = [
   {
+    uid: 'test_admin_kiattika_001',
+    email: 'kiattika@utd.ac.th',
+    password: 'test1234',
+    displayName: 'นายเกียรติศักดิ์ แก้วหล้า',
+    prefix: 'นาย',
+    firstName: 'เกียรติศักดิ์',
+    lastName: 'แก้วหล้า',
+    position: 'ผู้ดูแลระบบสารสนเทศ (SUPER_ADMIN)',
+    roles: ['SUPER_ADMIN', 'EXECUTIVE', 'HOMEROOM_TEACHER', 'SUBJECT_TEACHER'],
+    assignments: { departmentId: 'admin-dept', homeroomClass: 'ม.5/8' }
+  },
+  {
     uid: 'test_teacher_001',
     email: 'teacher.test@utd.ac.th',
     password: 'test1234',
