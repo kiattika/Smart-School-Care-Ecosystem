@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Search, 
   Filter, 
@@ -22,9 +22,13 @@ import {
   CheckSquare,
   Square,
   AlertCircle,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
-import { UserProfile, UserRole, MOCK_MULTI_ROLE_USERS } from '../types';
+import { collection, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { UserProfile, UserRole } from '../types';
 import { BulkDataImportModal, ImportType } from './BulkDataImportModal';
 
 // พจนานุกรมชื่อภาษาไทยของบทบาท
@@ -76,88 +80,52 @@ const ROOM_OPTIONS = [
 ];
 
 export function StaffRoleManagementPage() {
-  // ข้อมูลเริ่มต้นสำหรับระบบจัดการ (นำสตาฟฟ์ที่มีอยู่มาเซ็ตต้นแบบ และเซ็ตเพิ่มเติมเพื่อจำลองความหลากหลาย)
-  const [staffList, setStaffList] = useState<UserProfile[]>(() => {
-    const existing = [...MOCK_MULTI_ROLE_USERS];
-    
-    // เพื่มบุคลากรเพิ่มเติมเพื่อให้ครบครันและสมจริงขึ้น
-    const extraStaff: UserProfile[] = [
-      {
-        id: 'teacher-somjai',
-        email: 'somjai@utd.ac.th',
-        prefix: 'นางสาว',
-        firstName: 'สมใจ',
-        lastName: 'รักสอน',
-        position: 'ครู คศ.2',
-        roles: ['SUBJECT_TEACHER', 'HOMEROOM_TEACHER'],
-        assignments: {
-          departmentId: 'sci-dept',
-          homeroomClass: 'ม.4/1',
-          teachingSubjects: [
-            { subjectCode: 'ว30101', className: 'ม.4/1' },
-            { subjectCode: 'ว30101', className: 'ม.4/2' }
-          ]
-        }
-      },
-      {
-        id: 'teacher-mana',
-        email: 'mana@utd.ac.th',
-        prefix: 'นาย',
-        firstName: 'มานะ',
-        lastName: 'บากบั่น',
-        position: 'ครู คศ.1',
-        roles: ['SUBJECT_TEACHER'],
-        assignments: {
-          departmentId: 'math-dept',
-          teachingSubjects: [
-            { subjectCode: 'ค31101', className: 'ม.1/1' },
-            { subjectCode: 'ค31101', className: 'ม.1/2' }
-          ]
-        }
-      },
-      {
-        id: 'teacher-weena',
-        email: 'weena@utd.ac.th',
-        prefix: 'นางสาว',
-        firstName: 'วีณา',
-        lastName: 'รื่นรมย์',
-        position: 'ครูผู้ช่วย',
-        roles: ['SUBJECT_TEACHER'],
-        assignments: {
-          departmentId: 'art-dept',
-          teachingSubjects: [
-            { subjectCode: 'ศ32101', className: 'ม.2/3' }
-          ]
-        }
-      },
-      {
-        id: 'teacher-kiattisak',
-        email: 'kiattisak@utd.ac.th',
-        prefix: 'นาย',
-        firstName: 'เกียรติศักดิ์',
-        lastName: 'ใจมั่น',
-        position: 'ครู คศ.2',
-        roles: ['HOMEROOM_TEACHER', 'SUBJECT_TEACHER'],
-        assignments: {
-          departmentId: 'sci-dept',
-          homeroomClass: 'ม.5/8',
-          teachingSubjects: [
-            { subjectCode: 'ว30201', className: 'ม.5/8' }
-          ]
-        }
-      }
-    ];
+  // ดึงข้อมูลบุคลากรจริงจาก Firestore 'staff' collection แบบ Real-time
+  const [staffList, setStaffList] = useState<UserProfile[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
-    // ป้องกันการแอดซ้ำตาม ID
-    const merged = [...existing];
-    extraStaff.forEach(s => {
-      if (!merged.some(m => m.id === s.id)) {
-        merged.push(s);
-      }
-    });
+  useEffect(() => {
+    setIsLoading(true);
+    const unsubscribe = onSnapshot(
+      collection(db, 'staff'),
+      (snapshot) => {
+        const docs: UserProfile[] = snapshot.docs.map(docSnap => {
+          const data = docSnap.data();
+          const roles = Array.isArray(data.roles) && data.roles.length > 0
+            ? (data.roles as UserRole[])
+            : ['SUBJECT_TEACHER' as UserRole];
 
-    return merged;
-  });
+          return {
+            id: docSnap.id,
+            email: data.email || '',
+            prefix: data.prefix || '',
+            firstName: data.firstName || '',
+            lastName: data.lastName || '',
+            position: data.position || 'ครูผู้สอน',
+            roles: roles,
+            assignments: data.assignments || {
+              departmentId: data.departmentId || '',
+              homeroomClass: data.homeroomClass || '',
+              teachingSubjects: data.teachingSubjects || [],
+              supervisoryMentees: data.supervisoryMentees || []
+            }
+          } as UserProfile;
+        });
+
+        // เรียงลำดับตามชื่อหรืออีเมล
+        docs.sort((a, b) => (a.firstName || a.email).localeCompare(b.firstName || b.email, 'th'));
+        setStaffList(docs);
+        setIsLoading(false);
+      },
+      (err) => {
+        console.error('Error fetching staff from Firestore:', err);
+        setIsLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
 
   // State การค้นหาและกรอง
   const [searchQuery, setSearchQuery] = useState('');
@@ -289,8 +257,8 @@ export function StaffRoleManagementPage() {
     }
   };
 
-  // บันทึกการเปลี่ยนแปลงจาก Modal
-  const handleSave = (e: React.FormEvent) => {
+  // บันทึกการเปลี่ยนแปลงจาก Modal ไปยัง Firestore
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStaff) return;
 
@@ -343,31 +311,41 @@ export function StaffRoleManagementPage() {
       updatedAssignments.supervisoryMentees = formMentees;
     }
 
-    // อัปเดตรายชื่อ Staff list
-    const updatedStaffList = staffList.map(s => {
-      if (s.id === editingStaff.id) {
-        return {
-          ...s,
-          prefix: formPrefix,
-          firstName: formFirstName,
-          lastName: formLastName,
-          position: formPosition,
-          roles: formRoles,
-          assignments: updatedAssignments,
-        };
-      }
-      return s;
-    });
+    setIsSaving(true);
+    try {
+      const staffRef = doc(db, 'staff', editingStaff.id);
+      const teacherRef = doc(db, 'teachers', editingStaff.id);
 
-    setStaffList(updatedStaffList);
-    setIsModalOpen(false);
+      const staffPayload = {
+        prefix: formPrefix,
+        firstName: formFirstName,
+        lastName: formLastName,
+        fullName: `${formPrefix}${formFirstName} ${formLastName}`.trim(),
+        position: formPosition,
+        roles: formRoles,
+        assignments: updatedAssignments,
+        departmentId: updatedAssignments.departmentId || '',
+        homeroomClass: updatedAssignments.homeroomClass || '',
+        updatedAt: serverTimestamp()
+      };
 
-    // แจ้งเตือนความสำเร็จในรูปแบบ SweetAlert
-    triggerSweetAlert(
-      'บันทึกสิทธิ์สำเร็จ!',
-      `ระบบได้อัปเดตบทบาทหน้าที่และสิทธิ์การเข้าใช้งานของ ${formPrefix}${formFirstName} ${formLastName} เรียบร้อยแล้ว`,
-      'success'
-    );
+      await setDoc(staffRef, staffPayload, { merge: true });
+      await setDoc(teacherRef, staffPayload, { merge: true }).catch(() => {});
+
+      setIsModalOpen(false);
+
+      // แจ้งเตือนความสำเร็จในรูปแบบ SweetAlert
+      triggerSweetAlert(
+        'บันทึกสิทธิ์สำเร็จ!',
+        `ระบบได้อัปเดตบทบาทหน้าที่และสิทธิ์การเข้าใช้งานของ ${formPrefix}${formFirstName} ${formLastName} ลงฐานข้อมูล Firestore เรียบร้อยแล้ว`,
+        'success'
+      );
+    } catch (error) {
+      console.error('Error saving staff roles to Firestore:', error);
+      triggerToast(`❌ บันทึกข้อมูลไม่สำเร็จ: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -518,7 +496,37 @@ export function StaffRoleManagementPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5 text-slate-300">
-              {filteredStaff.length === 0 ? (
+              {isLoading ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-16 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center space-y-3">
+                      <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
+                      <p className="text-xs font-semibold text-slate-300">กำลังโหลดรายชื่อบุคลากรจากฐานข้อมูล Firestore...</p>
+                    </div>
+                  </td>
+                </tr>
+              ) : staffList.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-16 text-center text-slate-500">
+                    <div className="flex flex-col items-center justify-center space-y-3 max-w-md mx-auto">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                        <Users className="w-6 h-6" />
+                      </div>
+                      <p className="text-sm font-bold text-slate-200">ยังไม่มีข้อมูลบุคลากรในฐานข้อมูล Firestore</p>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        ท่านสามารถนำเข้าข้อมูลบัญชีรายชื่อครูและบุคลากรผ่านระบบนำเข้าข้อมูลชุดใหญ่ (Bulk Data Import) เพื่อเริ่มกำหนดบทบาทหน้าที่
+                      </p>
+                      <button
+                        onClick={() => setIsBulkImportOpen(true)}
+                        className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
+                      >
+                        <FileSpreadsheet className="w-4 h-4" />
+                        <span>นำเข้ารายชื่อครู/บุคลากร (Bulk Import)</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : filteredStaff.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-12 text-center text-slate-500">
                     <div className="flex flex-col items-center justify-center space-y-2">

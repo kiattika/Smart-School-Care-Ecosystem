@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, connectAuthEmulator } from 'firebase/auth';
+import { getAuth, connectAuthEmulator, setPersistence, browserSessionPersistence } from 'firebase/auth';
 import { initializeFirestore, getFirestore, connectFirestoreEmulator, setLogLevel } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -38,6 +38,13 @@ try {
 
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
 export const auth = getAuth(app);
+
+// TASK 5: In dev mode, enforce session-scoped persistence to prevent stale tab states
+if (import.meta.env.DEV) {
+  setPersistence(auth, browserSessionPersistence).catch(err => {
+    console.warn('Notice: Could not set session persistence for auth in dev mode:', err);
+  });
+}
 
 // Connect to local Firebase Emulators if explicitly enabled in local development mode
 if (import.meta.env.DEV && import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true') {

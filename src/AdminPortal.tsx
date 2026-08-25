@@ -1,39 +1,25 @@
 import { cn } from "./lib/utils";
-import { mockImportedData } from "./data/mockData";
 import React, { useState } from 'react';
-import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, Mailbox, Edit3, Check, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, PanelLeft, PanelLeftClose, PanelLeftOpen, Menu, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, Mailbox, Edit3, Check, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, PanelLeft, PanelLeftClose, PanelLeftOpen, Menu, X, ChevronLeft, ChevronRight, FileSpreadsheet, ArrowRight } from 'lucide-react';
 import clsx, { ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useStore } from './store';
-import { GlobalCourse } from './types';
 import { StaffRoleManagementPage } from './components/StaffRoleManagementPage';
 import { SystemSettingsAndLocksPage } from './components/SystemSettingsAndLocksPage';
 import { PeriodManagementPage } from './components/PeriodManagementPage';
 import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
 import { SubstituteTeachingAnalyticsModule } from './components/SubstituteTeachingAnalyticsModule';
 import { TeachingLoadTable } from './components/TeachingLoadTable';
+import { BulkDataImportModal, ImportType } from './components/BulkDataImportModal';
 import { BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-
-
-
-import Papa from 'papaparse';
-
-const RAW_EXCEL_MOCK = [
-  { TeacherName: "นาย ก", TeacherEmail: "teacher@utd.ac.th", CourseCode: "ท32101", CourseName: "ภาษาไทย 3", Room: "ม.5/1", Schedule: "จ1-2", Level: "ม.5", Homeroom: "ม.5/8" },
-  { TeacherName: "", TeacherEmail: "", CourseCode: "ท32101", CourseName: "ภาษาไทย 3", Room: "ม.5/2", Schedule: "อ3-4", Level: "ม.5", Homeroom: "" },
-  { TeacherName: "", TeacherEmail: "", CourseCode: "รวมคาบสอน", CourseName: "12", Room: "", Schedule: "", Level: "", Homeroom: "" },
-  { TeacherName: "คุณครู สมใจ รักสอน", TeacherEmail: "somjai@utd.ac.th", CourseCode: "ว30101", CourseName: "วิทยาศาสตร์", Room: "ม.4/1", Schedule: "พฤ3-4", Level: "ม.4", Homeroom: "ม.4/1" },
-  { TeacherName: "", TeacherEmail: "", CourseCode: "ว30101", CourseName: "วิทยาศาสตร์", Room: "ม.4/2", Schedule: "ศ5", Level: "ม.4", Homeroom: "" }
-];
 
 export function AdminPortal() {
   const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'requests' | 'absence-sub' | 'sub-analytics' | 'users' | 'settings' | 'periods'>('teaching-load');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [importStatus, setImportStatus] = useState<'idle' | 'uploading' | 'preview' | 'syncing' | 'success'>('idle');
-  const [importedData, setImportedData] = useState<GlobalCourse[]>([]);
-  const [tempHomerooms, setTempHomerooms] = useState<Record<string, string>>({});
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
+  const [bulkImportType, setBulkImportType] = useState<ImportType>('COURSE');
   const [toast, setToast] = useState<string | null>(null);
   
   const { 
@@ -41,14 +27,11 @@ export function AdminPortal() {
     updateScheduleChangeRequestStatus, 
     updateCourseSchedule, 
     courses, 
-    setGlobalCourses, 
-    setHomeroomAssignments,
     periodSwaps,
     substituteAssignments,
     updatePeriodSwapStatus,
     assignSubstituteTeacher,
     removeSubstituteAssignment,
-    globalCourses
   } = useStore();
   
   const [editingSchedule, setEditingSchedule] = useState<{ id: string, value: string } | null>(null);
@@ -57,82 +40,6 @@ export function AdminPortal() {
   const [subCourseId, setSubCourseId] = useState<string>('');
   const [subSubstituteEmail, setSubSubstituteEmail] = useState<string>('');
   const [subDate, setSubDate] = useState<string>(new Date().toISOString().split('T')[0]);
-
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files?.length) return;
-    
-    setImportStatus('uploading');
-    const file = e.target.files[0];
-
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const parsedCourses: GlobalCourse[] = [];
-        const hrAssignments: Record<string, string> = {};
-        
-        let currentTeacher = "";
-        let currentEmail = "";
-
-        results.data.forEach((row: any, i: number) => {
-          // Map dynamic headers commonly used in Thai schools
-          const teacherName = row["Teacher Name"] || row["TeacherName"] || row["ชื่อครู"] || row.TeacherName || "";
-          const teacherEmail = row["Teacher Email"] || row["TeacherEmail"] || row["อีเมล"] || row.TeacherEmail || "";
-          const courseCode = row["Subject Code"] || row["Course Code"] || row["CourseCode"] || row["รหัสวิชา"] || row.CourseCode || "";
-          const courseName = row["Subject Name"] || row["Course Name"] || row["CourseName"] || row["ชื่อวิชา"] || row.CourseName || "";
-          const room = row["Room"] || row["ห้อง"] || row.Room || "";
-          const schedule = row["Schedule"] || row["คาบเรียน"] || row.Schedule || "";
-          const level = row["Level"] || row["ระดับชั้น"] || row.Level || "";
-          const homeroom = row["Homeroom"] || row["โฮมรูม"] || row.Homeroom || "";
-
-          if (teacherName) currentTeacher = teacherName;
-          if (teacherEmail) currentEmail = teacherEmail;
-
-          if (!courseCode || courseCode.includes("รวมคาบสอน")) return;
-
-          if (homeroom) {
-            hrAssignments[currentEmail] = homeroom;
-          }
-
-          parsedCourses.push({
-            courseId: `GC-${Date.now()}-${i}`,
-            code: courseCode,
-            courseName: courseName,
-            teacherName: currentTeacher,
-            teacherEmail: currentEmail,
-            roomName: room,
-            scheduleString: schedule,
-            level: level
-          });
-        });
-
-        setImportedData(parsedCourses);
-        setTempHomerooms(hrAssignments);
-        setImportStatus('preview');
-      },
-      error: (error) => {
-        console.error("Parse error:", error);
-        setImportStatus('idle');
-      }
-    });
-  };
-
-  const handleSync = () => {
-    setImportStatus('syncing');
-    
-    setTimeout(() => {
-      setGlobalCourses(importedData);
-      setHomeroomAssignments(tempHomerooms);
-      setImportStatus('success');
-      showToast(`นำเข้าข้อมูลและอัปเดตระบบเรียบร้อยแล้ว (${importedData.length} รายการ)`);
-      
-      setTimeout(() => {
-        setImportStatus('idle');
-        setImportedData([]);
-      }, 3000);
-    }, 2000);
-  };
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -215,6 +122,10 @@ export function AdminPortal() {
               <button 
                 key={item.id}
                 onClick={() => {
+                  if (item.id === 'import') {
+                    setBulkImportType('COURSE');
+                    setIsBulkImportOpen(true);
+                  }
                   setActiveTab(item.id as any);
                   setIsMobileMenuOpen(false);
                 }}
@@ -326,7 +237,13 @@ export function AdminPortal() {
               return (
                 <button 
                   key={item.id}
-                  onClick={() => setActiveTab(item.id as any)}
+                  onClick={() => {
+                    if (item.id === 'import') {
+                      setBulkImportType('COURSE');
+                      setIsBulkImportOpen(true);
+                    }
+                    setActiveTab(item.id as any);
+                  }}
                   title={isSidebarCollapsed ? item.fullLabel : undefined}
                   className={cn(
                     "w-full flex items-center rounded-xl text-sm font-medium transition-all duration-200 relative group",
@@ -408,157 +325,109 @@ export function AdminPortal() {
                   <div className="flex justify-between items-end border-b border-white/5 pb-4">
                     <div>
                       <h2 className="text-2xl font-bold text-white tracking-tight">ตารางภาระงานสอนครู (Teaching Load Roster)</h2>
-                      <p className="text-slate-400 mt-1 text-sm">ข้อมูลภาระงานสอนอย่างเป็นทางการจากฐานข้อมูลตารางเรียน-ตารางสอนของโรงเรียน</p>
+                      <p className="text-slate-400 mt-1 text-sm">ข้อมูลภาระงานสอนอย่างเป็นทางการจากฐานข้อมูล Firestore ของโรงเรียน</p>
                     </div>
                   </div>
-                  <TeachingLoadTable />
+                  <TeachingLoadTable onOpenImport={() => {
+                    setBulkImportType('COURSE');
+                    setIsBulkImportOpen(true);
+                  }} />
                 </div>
               )}
 
               {activeTab === 'import' && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              
-              <div className="flex justify-between items-end border-b border-white/5 pb-4">
-                <div>
-                  <h2 className="text-2xl font-bold text-white tracking-tight">Teaching Load Import</h2>
-                  <p className="text-slate-400 mt-1 text-sm">อัปโหลดไฟล์ Excel (.xlsx) หรือ CSV เพื่อจัดการภาระงานสอนของครูทั้งระบบ</p>
-                </div>
-              </div>
-
-              {/* Upload Zone */}
-              {importStatus === 'idle' && (
-                <div className="bg-[#0f1219] border-2 border-dashed border-slate-700 hover:border-blue-500/50 rounded-2xl p-12 transition-all duration-300 relative group text-center flex flex-col items-center justify-center min-h-[300px]">
-                  <input 
-                    type="file" 
-                    accept=".csv, .xlsx"
-                    onChange={handleFileUpload}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                  />
-                  
-                  <div className="w-20 h-20 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-500">
-                    <FileDown className="w-10 h-10 text-blue-400" />
-                  </div>
-                  <h3 className="text-xl font-bold text-white mb-2">อัปโหลดไฟล์รายงานภาระงานสอน .xlsx</h3>
-                  <p className="text-slate-400 max-w-sm mx-auto">
-                    ลากไฟล์มาวาง หรือ คลิกเพื่อเลือกไฟล์
-                  </p>
-                  
-                  <div className="mt-8 flex items-center justify-center gap-4 text-sm text-slate-500">
-                    <span className="flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-emerald-500" /> Column: Teacher Name</span>
-                    <span className="flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-emerald-500" /> Column: Subject Code</span>
-                    <span className="flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4 text-emerald-500" /> Column: Room</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Uploading State */}
-              {importStatus === 'uploading' && (
-                <div className="bg-[#0f1219] border border-white/5 rounded-2xl p-12 text-center flex flex-col items-center justify-center min-h-[300px]">
-                  <Loader2 className="w-12 h-12 text-blue-400 animate-spin mb-6" />
-                  <h3 className="text-xl font-bold text-white mb-2">กำลังประมวลผลไฟล์...</h3>
-                  <p className="text-slate-400">ระบบกำลังอ่านข้อมูลและตรวจสอบความถูกต้อง</p>
-                </div>
-              )}
-
-              {/* Preview State */}
-              {(importStatus === 'preview' || importStatus === 'syncing') && (
-                <div className="bg-[#0f1219] border border-white/5 rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in-95 duration-300">
-                  <div className="p-6 border-b border-white/5 flex justify-between items-center bg-[#0a0f16]">
+                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
                     <div>
-                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                        <Database className="w-5 h-5 text-blue-400" />
-                        ตัวอย่างข้อมูลที่อ่านได้
-                      </h3>
-                      <p className="text-slate-400 text-sm mt-1">พบข้อมูลทั้งหมด 405 รายการ (แสดงตัวอย่าง 5 รายการ)</p>
+                      <h2 className="text-2xl font-bold text-white tracking-tight">ระบบนำเข้าข้อมูลขนาดใหญ่ (Bulk Data Import)</h2>
+                      <p className="text-slate-400 mt-1 text-sm">นำเข้าข้อมูลบุคลากรครู, นักเรียน, และรายงานภาระงานสอนลงฐานข้อมูล Firestore</p>
                     </div>
-                    
+
                     <button
-                      onClick={handleSync}
-                      disabled={importStatus === 'syncing'}
-                      className={cn(
-                        "px-6 py-2.5 rounded-lg font-bold flex items-center gap-2 transition-all",
-                        importStatus === 'syncing'
-                          ? "bg-blue-600/50 text-blue-200 cursor-not-allowed"
-                          : "bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.3)]"
-                      )}
+                      onClick={() => {
+                        setBulkImportType('COURSE');
+                        setIsBulkImportOpen(true);
+                      }}
+                      className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.35)] flex items-center gap-2 transition-all cursor-pointer shrink-0"
                     >
-                      {importStatus === 'syncing' ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          กำลังซิงค์...
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-5 h-5" />
-                          Confirm & Sync to Database
-                        </>
-                      )}
+                      <FileSpreadsheet className="w-4 h-4" />
+                      เปิดหน้าต่างนำเข้าข้อมูล (Open Import Modal)
                     </button>
                   </div>
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left">
-                      <thead className="bg-[#0a0f16]/50 text-slate-400 font-medium border-b border-white/5">
-                        <tr>
-                          <th className="px-6 py-4">Teacher Name</th>
-                          <th className="px-6 py-4">Subject Code</th>
-                          <th className="px-6 py-4">Subject Name</th>
-                          <th className="px-6 py-4">Room</th>
-                          <th className="px-6 py-4">คาบสอน (Schedule)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/5">
-                        {importedData.map((row) => (
-                          <tr key={row.courseId} className="hover:bg-white/5 transition-colors">
-                            <td className="px-6 py-4 font-medium text-slate-200">
-                              {row.teacherName}
-                              <div className="text-xs text-slate-500 font-normal">{row.teacherEmail}</div>
-                            </td>
-                            <td className="px-6 py-4 font-mono text-blue-400">{row.code}</td>
-                            <td className="px-6 py-4 text-slate-300">{row.courseName}</td>
-                            <td className="px-6 py-4">
-                              <span className="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 text-xs font-medium">
-                                {row.roomName}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 text-slate-400 font-mono">
-                              <div className="flex items-center gap-1.5">
-                                <Clock className="w-3.5 h-3.5" />
-                                {row.scheduleString}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  
-                  {importStatus === 'syncing' && (
-                    <div className="absolute inset-0 bg-[#0f1219]/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center">
-                      <div className="w-16 h-16 relative mb-6">
-                        <div className="absolute inset-0 border-4 border-blue-500/20 rounded-full"></div>
-                        <div className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
+                  {/* 3 Unified Import Flow Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                    {/* Course & Schedule Import Card */}
+                    <div className="bg-[#0f1219] border border-blue-500/30 rounded-2xl p-6 shadow-xl relative overflow-hidden flex flex-col justify-between group hover:border-blue-500/60 transition-all">
+                      <div className="space-y-3">
+                        <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                          <BookOpen className="w-6 h-6" />
+                        </div>
+                        <h3 className="text-lg font-bold text-white">1. นำเข้าตารางสอน & ภาระงานครู</h3>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          อ่านไฟล์รายงานภาระงานสอน Excel (.xlsx) และสร้างเอกสารลงใน Collection <code className="text-blue-400 font-mono">schedules</code> พร้อมจับคู่ครูผู้สอนอัตโนมัติ
+                        </p>
                       </div>
-                      <h3 className="text-xl font-bold text-white tracking-wide">Syncing Roster Data</h3>
-                      <p className="text-blue-400 font-mono mt-2">Writing to global state...</p>
+                      <button
+                        onClick={() => {
+                          setBulkImportType('COURSE');
+                          setIsBulkImportOpen(true);
+                        }}
+                        className="mt-6 w-full py-2.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                      >
+                        <span>นำเข้าไฟล์ตารางสอน</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                  )}
-                </div>
-              )}
 
-              {/* Success State */}
-              {importStatus === 'success' && (
-                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-12 text-center flex flex-col items-center justify-center min-h-[300px] animate-in zoom-in-95 duration-300">
-                  <div className="w-20 h-20 bg-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(16,185,129,0.4)]">
-                    <CheckCircle2 className="w-10 h-10 text-white" />
+                    {/* Teacher Import Card */}
+                    <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl relative overflow-hidden flex flex-col justify-between group hover:border-white/20 transition-all">
+                      <div className="space-y-3">
+                        <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                          <Users className="w-6 h-6" />
+                        </div>
+                        <h3 className="text-lg font-bold text-white">2. นำเข้าข้อมูลครู & บุคลากร</h3>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          นำเข้ารายชื่อครู, อีเมล (@utd.ac.th), ตำแหน่ง และกลุ่มสาระการเรียนรู้ลง Collection <code className="text-emerald-400 font-mono">staff</code>
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setBulkImportType('TEACHER');
+                          setIsBulkImportOpen(true);
+                        }}
+                        className="mt-6 w-full py-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                      >
+                        <span>นำเข้ารายชื่อครู</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Student Import Card */}
+                    <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl relative overflow-hidden flex flex-col justify-between group hover:border-white/20 transition-all">
+                      <div className="space-y-3">
+                        <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+                          <UserCheck className="w-6 h-6" />
+                        </div>
+                        <h3 className="text-lg font-bold text-white">3. นำเข้าข้อมูลนักเรียน & โฮมรูม</h3>
+                        <p className="text-xs text-slate-400 leading-relaxed">
+                          นำเข้าทะเบียนนักเรียนรายห้อง (ม.1 - ม.6), เลขประจำตัว, และครูที่ปรึกษาลง Collection <code className="text-purple-400 font-mono">students</code>
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setBulkImportType('STUDENT');
+                          setIsBulkImportOpen(true);
+                        }}
+                        className="mt-6 w-full py-2.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                      >
+                        <span>นำเข้ารายชื่อนักเรียน</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <h3 className="text-2xl font-bold text-emerald-400 mb-2">ซิงค์ข้อมูลสำเร็จ!</h3>
-                  <p className="text-slate-300">ข้อมูลภาระงานสอนถูกบันทึกลงฐานข้อมูลและพร้อมให้ครูผู้สอนใช้งานแล้ว</p>
                 </div>
               )}
-
-            </div>
-          )}
 
           {activeTab === 'requests' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -737,6 +606,16 @@ export function AdminPortal() {
           </AnimatePresence>
         </div>
       </main>
+
+      {/* Real Firestore Bulk Data Import Modal */}
+      <BulkDataImportModal
+        isOpen={isBulkImportOpen}
+        onClose={() => setIsBulkImportOpen(false)}
+        initialImportType={bulkImportType}
+        onImportSuccess={(type, count) => {
+          showToast(`นำเข้าข้อมูล ${type} สำเร็จ (${count} รายการ)`);
+        }}
+      />
     </div>
   );
 }

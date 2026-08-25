@@ -28,6 +28,7 @@ export interface TeacherLoadCourseRow {
   errors: string[];
   warnings: string[];
   matchedTeacherId?: string;
+  matchedTeacherEmail?: string;
   unlinkedTeacherName?: string;
 }
 
@@ -39,6 +40,8 @@ export interface GeneratedScheduleDocument {
   level: string;
   credits: number;
   teacherIds: string[];
+  teacherId?: string | null;
+  teacherEmail?: string | null;
   unlinkedTeacherName: string | null;
   subjectType: 'MAIN' | 'ACTIVITY';
   dayOfWeek: DayOfWeek;
@@ -195,12 +198,13 @@ export function detectSubjectType(subjectName: string, subjectCode: string): 'MA
 }
 
 /**
- * Matches teacher name against existing staff records without fabricating IDs
+ * Matches teacher name against existing staff records without fabricating IDs.
+ * Matches by full name, first name, last name, display name, email prefix, etc.
  */
 export function matchTeacherByName(
   teacherName: string,
-  staffList: Array<{ id: string; fullName?: string; firstName?: string; lastName?: string; displayName?: string; email?: string; name?: string }>
-): string | undefined {
+  staffList: Array<{ id: string; fullName?: string; firstName?: string; lastName?: string; displayName?: string; email?: string; name?: string; prefix?: string }>
+): { id: string; email?: string } | undefined {
   if (!teacherName || !teacherName.trim()) return undefined;
 
   const normalize = (str: string) =>
@@ -218,6 +222,7 @@ export function matchTeacherByName(
     const displayNorm = normalize(staff.displayName || '');
     const nameNorm = normalize(staff.name || '');
     const firstLastNorm = normalize(`${staff.firstName || ''}${staff.lastName || ''}`);
+    const emailPrefixNorm = normalize((staff.email || '').split('@')[0]);
 
     if (
       queryNorm === idNorm ||
@@ -225,10 +230,11 @@ export function matchTeacherByName(
       queryNorm === displayNorm ||
       queryNorm === nameNorm ||
       queryNorm === firstLastNorm ||
+      (queryNorm.length > 2 && emailPrefixNorm === queryNorm) ||
       (fullNorm.length > 2 && (fullNorm.includes(queryNorm) || queryNorm.includes(fullNorm))) ||
       (displayNorm.length > 2 && (displayNorm.includes(queryNorm) || queryNorm.includes(displayNorm)))
     ) {
-      return staff.id;
+      return { id: staff.id, email: staff.email };
     }
   }
 
@@ -369,7 +375,9 @@ export function parseTeacherLoadReport(
 
     // TASK 8: Match teacher linkage without fabricating IDs
     const teacherName = currentTeacherName || 'ไม่ระบุครูผู้สอน';
-    const matchedTeacherId = matchTeacherByName(teacherName, staffList);
+    const matchResult = matchTeacherByName(teacherName, staffList);
+    const matchedTeacherId = matchResult?.id;
+    const matchedTeacherEmail = matchResult?.email;
     let unlinkedTeacherName: string | undefined = undefined;
 
     if (!matchedTeacherId) {
@@ -402,6 +410,7 @@ export function parseTeacherLoadReport(
       errors,
       warnings,
       matchedTeacherId,
+      matchedTeacherEmail,
       unlinkedTeacherName,
     });
   }
@@ -438,6 +447,8 @@ export function generateScheduleDocuments(
         level: row.level || '',
         credits: 1.5,
         teacherIds: row.matchedTeacherId ? [row.matchedTeacherId] : [],
+        teacherId: row.matchedTeacherId || null,
+        teacherEmail: row.matchedTeacherEmail || null,
         unlinkedTeacherName: row.matchedTeacherId ? null : (row.unlinkedTeacherName || row.teacherName || null),
         subjectType: row.subjectType,
         dayOfWeek: slot.dayOfWeek,

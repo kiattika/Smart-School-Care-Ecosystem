@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
   Upload, 
   FileSpreadsheet, 
@@ -11,14 +11,16 @@ import {
   X, 
   Database,
   Info,
-  ShieldAlert
+  ShieldAlert,
+  Users,
+  ArrowRight
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import { writeBatch, doc, serverTimestamp } from 'firebase/firestore';
+import { writeBatch, doc, serverTimestamp, collection, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useStore } from '../store';
-import { Student, Course, GlobalCourse, UserRole, MOCK_MULTI_ROLE_USERS } from '../types';
+import { Student, Course, GlobalCourse, UserRole } from '../types';
 import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
 import { 
   isTeacherLoadReportFormat, 
@@ -31,6 +33,7 @@ export type ImportType = 'STUDENT' | 'TEACHER' | 'COURSE';
 export interface BulkDataImportModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialImportType?: ImportType;
   onImportSuccess?: (type: ImportType, count: number) => void;
 }
 
@@ -67,8 +70,8 @@ function getFieldValue(normalized: Record<string, any>, candidates: string[]): s
   return '';
 }
 
-export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDataImportModalProps) {
-  const [importType, setImportType] = useState<ImportType>('STUDENT');
+export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImportSuccess }: BulkDataImportModalProps) {
+  const [importType, setImportType] = useState<ImportType>(initialImportType || 'STUDENT');
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [previewData, setPreviewData] = useState<ValidatedRow[]>([]);
@@ -76,8 +79,46 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importError, setImportError] = useState<string | null>(null);
+  const [realStaffList, setRealStaffList] = useState<Array<{ id: string; fullName?: string; firstName?: string; lastName?: string; displayName?: string; email?: string; prefix?: string }>>([]);
+  const [isStaffLoading, setIsStaffLoading] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync initialImportType when modal opens
+  useEffect(() => {
+    if (isOpen && initialImportType) {
+      setImportType(initialImportType);
+    }
+  }, [isOpen, initialImportType]);
+
+  // Load real staff from Firestore for teacher matching
+  useEffect(() => {
+    if (!isOpen) return;
+    const fetchStaff = async () => {
+      setIsStaffLoading(true);
+      try {
+        const snap = await getDocs(collection(db, 'staff'));
+        const staff = snap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            email: data.email || '',
+            prefix: data.prefix || '',
+            firstName: data.firstName || '',
+            lastName: data.lastName || '',
+            fullName: data.fullName || `${data.prefix || ''}${data.firstName || ''} ${data.lastName || ''}`.trim(),
+            displayName: data.displayName || '',
+          };
+        });
+        setRealStaffList(staff);
+      } catch (err) {
+        console.error('[BulkDataImportModal] Error loading staff roster:', err);
+      } finally {
+        setIsStaffLoading(false);
+      }
+    };
+    fetchStaff();
+  }, [isOpen]);
 
   // Access current user role from store
   const user = useStore(state => state.user);
@@ -147,7 +188,7 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
       headers = 'Student ID,Prefix,FirstName,LastName,Room,StudentNo,ParentMobile\n38501,นาย,กฤตยชญ์,บุญช่วย,ม.5/8,1,0812345678\n38502,นาย,ณัฐพล,สุขสบาย,ม.5/8,2,0898765432\n38503,นางสาว,สมศรี,ใจดี,ม.5/8,3,0861112233';
       filename = 'Student_Template.csv';
     } else if (importType === 'TEACHER') {
-      headers = 'Teacher ID,Prefix,FirstName,LastName,Position,Email,Roles,Department\nteacher-01,นาย,ทวี,รักเรียน,ครู คศ.1,tawee@school.ac.th,"SUBJECT_TEACHER,HOMEROOM_TEACHER",math-dept\nteacher-02,นางสาว,สมจิต,แข็งขัน,ครู คศ.2,somjit@school.ac.th,SUBJECT_TEACHER,sci-dept\nteacher-03,นางสาว,พิมลวรรณ,ศรีงาม,ครูผู้ช่วย,pimonwan@school.ac.th,SUBJECT_TEACHER,thai-dept';
+      headers = 'Teacher ID,Prefix,FirstName,LastName,Position,Email,Roles,Department\nteacher-01,นาย,ทวี,รักเรียน,ครู คศ.1,tawee@utd.ac.th,"SUBJECT_TEACHER,HOMEROOM_TEACHER",math-dept\nteacher-02,นางสาว,สมจิต,แข็งขัน,ครู คศ.2,somjit@utd.ac.th,SUBJECT_TEACHER,sci-dept\nteacher-03,นางสาว,พิมลวรรณ,ศรีงาม,ครูผู้ช่วย,pimonwan@utd.ac.th,SUBJECT_TEACHER,thai-dept';
       filename = 'Teacher_Template.csv';
     } else {
       headers = 'Course Code,Course Name,Level,Room,Credits,Instructor ID\nTH32101,ภาษาไทย 3,ม.5,ม.5/8,1.5,teacher-somchai\nMA32101,คณิตศาสตร์พื้นฐาน 3,ม.5,ม.5/8,1.5,teacher-kiattisak\nSCI32201,ฟิสิกส์เพิ่มเติม 1,ม.5,ม.5/8,2.0,teacher-somjai\nEN32101,ภาษาอังกฤษ 3,ม.5,ม.5/8,1.0,teacher-weena';
@@ -170,8 +211,7 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
   const validateRows = (rawRows: Record<string, any>[], type: ImportType): ValidatedRow[] => {
     // 1. Dedicated Teacher Load Report (รายงานภาระงานสอน) Parser for COURSE
     if (type === 'COURSE' && isTeacherLoadReportFormat(rawRows)) {
-      const knownStaff = [...MOCK_MULTI_ROLE_USERS];
-      const { courseRows } = parseTeacherLoadReport(rawRows, knownStaff);
+      const { courseRows } = parseTeacherLoadReport(rawRows, realStaffList);
       
       return courseRows.map((row, idx) => ({
         id: `course_load_${idx + 1}`,
@@ -194,6 +234,7 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
           teacherName: row.teacherName,
           department: row.department,
           matchedTeacherId: row.matchedTeacherId,
+          matchedTeacherEmail: row.matchedTeacherEmail,
           unlinkedTeacherName: row.unlinkedTeacherName,
           expectedPeriodCount: row.expectedPeriodCount,
           scheduleRaw: row.scheduleRaw
@@ -651,6 +692,10 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
                   level: parsedData.level || '',
                   credits: parsedData.credits || 1.5,
                   teacherIds: parsedData.matchedTeacherId ? [parsedData.matchedTeacherId] : [],
+                  teacherId: parsedData.matchedTeacherId || null,
+                  teacherEmail: parsedData.matchedTeacherEmail || (parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : null),
+                  sourceTeacherName: parsedData.teacherName || '',
+                  department: parsedData.department || '',
                   unlinkedTeacherName: parsedData.matchedTeacherId ? null : (parsedData.unlinkedTeacherName || parsedData.teacherName || null),
                   subjectType: parsedData.subjectType, // 'MAIN' or 'ACTIVITY'
                   dayOfWeek: slot.dayOfWeek,
@@ -675,7 +720,7 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
                   schedule: scheduleLabel,
                   attendanceTaken: false,
                   teacherName: parsedData.teacherName || 'ครูผู้สอน',
-                  teacherEmail: parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : 'kiattisak@utd.ac.th'
+                  teacherEmail: parsedData.matchedTeacherEmail || (parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : 'kiattisak@utd.ac.th')
                 });
 
                 newGlobalCoursesToStore.push({
@@ -683,7 +728,7 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
                   code: parsedData.subjectCode,
                   courseName: parsedData.subjectName,
                   teacherName: parsedData.teacherName || 'ครูผู้สอน',
-                  teacherEmail: parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : 'kiattisak@utd.ac.th',
+                  teacherEmail: parsedData.matchedTeacherEmail || (parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : 'kiattisak@utd.ac.th'),
                   roomName: parsedData.room || parsedData.level || '',
                   scheduleString: scheduleLabel,
                   level: parsedData.level || ''
@@ -871,6 +916,32 @@ export function BulkDataImportModal({ isOpen, onClose, onImportSuccess }: BulkDa
               })}
             </div>
           </div>
+
+          {/* Prerequisite Alert for COURSE import if staff roster is empty in Firestore */}
+          {importType === 'COURSE' && !isStaffLoading && realStaffList.length === 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-start justify-between gap-3 text-amber-300 animate-in fade-in">
+              <div className="flex items-start gap-3">
+                <Users className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-xs font-bold">ข้อแนะนำก่อนนำเข้าตารางภาระงานสอน</h4>
+                  <p className="text-[11px] text-amber-200/90 mt-0.5 leading-relaxed">
+                    ยังไม่พบข้อมูลบัญชีครู/บุคลากรในระบบ ขอแนะนำให้นำเข้ารายชื่อครู (TEACHER) ให้เรียบร้อยก่อน เพื่อให้ระบบสามารถจับคู่อีเมลและชื่อครูเข้ากับตารางสอนได้อย่างถูกต้องสมบูรณ์
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setImportType('TEACHER');
+                  if (file) handleRemoveFile();
+                }}
+                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold rounded-lg border border-amber-500/40 transition-colors cursor-pointer"
+              >
+                <span>สลับไปนำเข้ารายชื่อครู</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* 2. Drag & Drop Upload Zone + Download Template */}
           <div className="space-y-2">

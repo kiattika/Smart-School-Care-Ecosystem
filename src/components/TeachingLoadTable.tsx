@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   BookOpen, 
   Users, 
@@ -8,37 +8,346 @@ import {
   ChevronDown, 
   ChevronRight, 
   FileSpreadsheet, 
-  Calendar, 
   Layers, 
-  Sparkles, 
-  CheckCircle2, 
-  Award,
-  Download
+  Download,
+  Loader2,
+  AlertCircle,
+  Sparkles
 } from 'lucide-react';
-import { TEACHING_LOAD_DATA, TeacherTeachingLoad, TeachingSubject } from '../data/teachingLoadData';
+import { collection, onSnapshot, query } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { cn } from '../lib/utils';
+import { matchTeacherByName } from '../utils/teacherLoadReportParser';
+
+export interface TeachingSubject {
+  order: number;
+  subjectCode: string;
+  subjectName: string;
+  level: string;
+  room: string;
+  schedule: string;
+  periodsPerWeek: number;
+  totalPeriods: number;
+  subjectType: 'MAIN' | 'ACTIVITY';
+}
+
+export interface TeacherTeachingLoad {
+  id: string | number;
+  staffDocId: string;
+  teacherName: string;
+  teacherEmail: string;
+  department: string;
+  homeroom: string;
+  subjects: TeachingSubject[];
+  totalMainPeriods: number;
+  totalActivityPeriods: number;
+  totalPeriods: number;
+  isUnlinked?: boolean;
+}
+
+const DAY_ORDER: Record<string, number> = {
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+  sunday: 7
+};
+
+const DAY_SHORT_TH: Record<string, string> = {
+  monday: 'จ.',
+  tuesday: 'อ.',
+  wednesday: 'พ.',
+  thursday: 'พฤ.',
+  friday: 'ศ.',
+  saturday: 'ส.',
+  sunday: 'อา.'
+};
 
 interface TeachingLoadTableProps {
   initialTeacherName?: string;
   onSelectTeacher?: (teacher: TeacherTeachingLoad) => void;
+  onOpenImport?: () => void;
   className?: string;
 }
 
-export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, className }: TeachingLoadTableProps) {
+export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenImport, className }: TeachingLoadTableProps) {
   const [searchTerm, setSearchTerm] = useState(initialTeacherName || '');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('ALL');
-  const [expandedTeacherIds, setExpandedTeacherIds] = useState<number[]>([4]); // Default expand Mr. Kiattisak
+  const [expandedTeacherIds, setExpandedTeacherIds] = useState<string[]>([]);
+  
+  const [staffData, setStaffData] = useState<any[]>([]);
+  const [schedulesData, setSchedulesData] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Subscribe to real Firestore collections
+  useEffect(() => {
+    setIsLoading(true);
+
+    const unsubStaff = onSnapshot(collection(db, 'staff'), (snap) => {
+      const staffList = snap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setStaffData(staffList);
+    }, (err) => {
+      console.error('[TeachingLoadTable] Staff listener error:', err);
+    });
+
+    const unsubSchedules = onSnapshot(collection(db, 'schedules'), (snap) => {
+      const scheduleList = snap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setSchedulesData(scheduleList);
+      setIsLoading(false);
+    }, (err) => {
+      console.error('[TeachingLoadTable] Schedules listener error:', err);
+      setIsLoading(false);
+    });
+
+    return () => {
+      unsubStaff();
+      unsubSchedules();
+    };
+  }, []);
+
+  // Compute live Teacher Teaching Loads by joining staff and schedules
+  const teachingLoads: TeacherTeachingLoad[] = useMemo(() => {
+    // Index schedules by teacher
+    // We map each teacher staff record, plus any unlinked schedules
+    const staffLoadsMap = new Map<string, {
+      staffDocId: string;
+      teacherName: string;
+      teacherEmail: string;
+      department: string;
+      homeroom: string;
+      scheduleItems: any[];
+    }>();
+
+    // 1. Initialize staff members
+    staffData.forEach((st) => {
+      const name = st.fullName || `${st.prefix || ''}${st.firstName || ''} ${st.lastName || ''}`.trim() || st.displayName || st.email || st.id;
+      const dept = st.department || st.departmentId || 'กลุ่มสาระการเรียนรู้ทั่วไป';
+      const homeroom = st.homeroom || st.homeroomClass || st.room || '-';
+
+      staffLoadsMap.set(st.id, {
+        staffDocId: st.id,
+        teacherName: name,
+        teacherEmail: st.email || '',
+        department: dept,
+        homeroom,
+        scheduleItems: []
+      });
+    });
+
+    // 2. Associate schedules to staff
+    const unlinkedScheduleMap = new Map<string, any[]>();
+
+    schedulesData.forEach((sch) => {
+      let matchedStaffId: string | null = null;
+
+      // Check direct teacherIds or teacherId
+      if (sch.teacherIds && Array.isArray(sch.teacherIds) && sch.teacherIds.length > 0) {
+        matchedStaffId = sch.teacherIds[0];
+      } else if (sch.teacherId) {
+        matchedStaffId = sch.teacherId;
+      }
+
+      // Check email match
+      if (!matchedStaffId && sch.teacherEmail) {
+        const found = staffData.find(s => s.email && s.email.toLowerCase() === sch.teacherEmail.toLowerCase());
+        if (found) matchedStaffId = found.id;
+      }
+
+      // Check name match against staff
+      if (!matchedStaffId && sch.sourceTeacherName) {
+        const matchRes = matchTeacherByName(sch.sourceTeacherName, staffData);
+        if (matchRes?.id) matchedStaffId = matchRes.id;
+      }
+
+      if (matchedStaffId && staffLoadsMap.has(matchedStaffId)) {
+        staffLoadsMap.get(matchedStaffId)!.scheduleItems.push(sch);
+      } else {
+        // Collect into unlinked teacher
+        const unlinkedKey = sch.unlinkedTeacherName || sch.sourceTeacherName || 'ครูผู้สอนที่ยังไม่ได้จับคู่';
+        if (!unlinkedScheduleMap.has(unlinkedKey)) {
+          unlinkedScheduleMap.set(unlinkedKey, []);
+        }
+        unlinkedScheduleMap.get(unlinkedKey)!.push(sch);
+      }
+    });
+
+    const result: TeacherTeachingLoad[] = [];
+
+    // Format staff records
+    Array.from(staffLoadsMap.values()).forEach((entry, idx) => {
+      const subjects = groupSchedulesIntoSubjects(entry.scheduleItems);
+      const totalMainPeriods = subjects.filter(s => s.subjectType === 'MAIN').reduce((sum, s) => sum + s.totalPeriods, 0);
+      const totalActivityPeriods = subjects.filter(s => s.subjectType === 'ACTIVITY').reduce((sum, s) => sum + s.totalPeriods, 0);
+      const totalPeriods = totalMainPeriods + totalActivityPeriods;
+
+      result.push({
+        id: entry.staffDocId,
+        staffDocId: entry.staffDocId,
+        teacherName: entry.teacherName,
+        teacherEmail: entry.teacherEmail,
+        department: entry.department,
+        homeroom: entry.homeroom,
+        subjects,
+        totalMainPeriods,
+        totalActivityPeriods,
+        totalPeriods
+      });
+    });
+
+    // Format unlinked records if any exist
+    Array.from(unlinkedScheduleMap.entries()).forEach(([teacherName, items], idx) => {
+      const subjects = groupSchedulesIntoSubjects(items);
+      const totalMainPeriods = subjects.filter(s => s.subjectType === 'MAIN').reduce((sum, s) => sum + s.totalPeriods, 0);
+      const totalActivityPeriods = subjects.filter(s => s.subjectType === 'ACTIVITY').reduce((sum, s) => sum + s.totalPeriods, 0);
+      const totalPeriods = totalMainPeriods + totalActivityPeriods;
+      const dept = items[0]?.department || 'ยังไม่ได้ระบุกลุ่มสาระ';
+
+      result.push({
+        id: `unlinked_${idx}`,
+        staffDocId: `unlinked_${idx}`,
+        teacherName: `${teacherName} (ยังไม่ผูกบัญชี)`,
+        teacherEmail: items[0]?.teacherEmail || '-',
+        department: dept,
+        homeroom: '-',
+        subjects,
+        totalMainPeriods,
+        totalActivityPeriods,
+        totalPeriods,
+        isUnlinked: true
+      });
+    });
+
+    return result;
+  }, [staffData, schedulesData]);
+
+  // Helper to group flat schedule slots into aggregated subjects
+  function groupSchedulesIntoSubjects(scheduleSlots: any[]): TeachingSubject[] {
+    if (!scheduleSlots || scheduleSlots.length === 0) return [];
+
+    const grouped = new Map<string, {
+      subjectCode: string;
+      subjectName: string;
+      level: string;
+      room: string;
+      subjectType: 'MAIN' | 'ACTIVITY';
+      slots: Array<{ dayOfWeek: string; periodNumber: number }>;
+    }>();
+
+    scheduleSlots.forEach(slot => {
+      const key = `${slot.subjectCode || 'UNK'}_${slot.room || ''}_${slot.level || ''}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          subjectCode: slot.subjectCode || '-',
+          subjectName: slot.subjectName || slot.name || '-',
+          level: slot.level || '-',
+          room: slot.room || '-',
+          subjectType: slot.subjectType || (slot.subjectCode === 'HR' || slot.subjectCode === 'CZ' || (slot.subjectName && slot.subjectName.includes('กิจกรรม')) ? 'ACTIVITY' : 'MAIN'),
+          slots: []
+        });
+      }
+      if (slot.dayOfWeek && slot.periodNumber) {
+        grouped.get(key)!.slots.push({
+          dayOfWeek: slot.dayOfWeek,
+          periodNumber: Number(slot.periodNumber)
+        });
+      }
+    });
+
+    const subjects: TeachingSubject[] = [];
+    let order = 1;
+
+    grouped.forEach((val) => {
+      // Sort slots by day then period
+      val.slots.sort((a, b) => {
+        const dayDiff = (DAY_ORDER[a.dayOfWeek.toLowerCase()] || 99) - (DAY_ORDER[b.dayOfWeek.toLowerCase()] || 99);
+        if (dayDiff !== 0) return dayDiff;
+        return a.periodNumber - b.periodNumber;
+      });
+
+      // Format schedule string: e.g. "จ.1, อ.3-4"
+      const scheduleString = formatSlotsSummary(val.slots);
+      const periodCount = val.slots.length;
+
+      subjects.push({
+        order: order++,
+        subjectCode: val.subjectCode,
+        subjectName: val.subjectName,
+        level: val.level,
+        room: val.room,
+        schedule: scheduleString || '-',
+        periodsPerWeek: periodCount,
+        totalPeriods: periodCount,
+        subjectType: val.subjectType
+      });
+    });
+
+    return subjects;
+  }
+
+  // Format array of slots into compact human-readable Thai strings
+  function formatSlotsSummary(slots: Array<{ dayOfWeek: string; periodNumber: number }>): string {
+    if (slots.length === 0) return '-';
+
+    const dayMap = new Map<string, number[]>();
+    slots.forEach(s => {
+      const d = s.dayOfWeek.toLowerCase();
+      if (!dayMap.has(d)) dayMap.set(d, []);
+      if (!dayMap.get(d)!.includes(s.periodNumber)) {
+        dayMap.get(d)!.push(s.periodNumber);
+      }
+    });
+
+    const parts: string[] = [];
+    dayMap.forEach((periods, day) => {
+      periods.sort((a, b) => a - b);
+      const dayPrefix = DAY_SHORT_TH[day] || day;
+      
+      // Group contiguous period numbers
+      const periodRanges: string[] = [];
+      let start = periods[0];
+      let prev = periods[0];
+
+      for (let i = 1; i <= periods.length; i++) {
+        if (i < periods.length && periods[i] === prev + 1) {
+          prev = periods[i];
+        } else {
+          if (start === prev) {
+            periodRanges.push(`${start}`);
+          } else {
+            periodRanges.push(`${start}-${prev}`);
+          }
+          if (i < periods.length) {
+            start = periods[i];
+            prev = periods[i];
+          }
+        }
+      }
+      parts.push(`${dayPrefix}${periodRanges.join(',')}`);
+    });
+
+    return parts.join(', ');
+  }
 
   // Distinct departments
   const departments = useMemo(() => {
     const set = new Set<string>();
-    TEACHING_LOAD_DATA.forEach(t => set.add(t.department));
+    teachingLoads.forEach(t => {
+      if (t.department) set.add(t.department);
+    });
     return Array.from(set);
-  }, []);
+  }, [teachingLoads]);
 
   // Filtered teachers
   const filteredData = useMemo(() => {
-    return TEACHING_LOAD_DATA.filter(teacher => {
+    return teachingLoads.filter(teacher => {
       const matchDept = selectedDepartment === 'ALL' || teacher.department === selectedDepartment;
       const matchSearch = searchTerm.trim() === '' || 
         teacher.teacherName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -52,22 +361,23 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, classNa
         );
       return matchDept && matchSearch;
     });
-  }, [searchTerm, selectedDepartment]);
+  }, [teachingLoads, searchTerm, selectedDepartment]);
 
   // High-level metrics
-  const totalTeachers = TEACHING_LOAD_DATA.length;
-  const totalMainPeriods = TEACHING_LOAD_DATA.reduce((acc, t) => acc + t.totalMainPeriods, 0);
-  const totalActivityPeriods = TEACHING_LOAD_DATA.reduce((acc, t) => acc + t.totalActivityPeriods, 0);
-  const totalOverallPeriods = TEACHING_LOAD_DATA.reduce((acc, t) => acc + t.totalPeriods, 0);
+  const totalTeachers = teachingLoads.length;
+  const totalMainPeriods = teachingLoads.reduce((acc, t) => acc + t.totalMainPeriods, 0);
+  const totalActivityPeriods = teachingLoads.reduce((acc, t) => acc + t.totalActivityPeriods, 0);
+  const totalOverallPeriods = teachingLoads.reduce((acc, t) => acc + t.totalPeriods, 0);
 
-  const toggleExpand = (id: number) => {
+  const toggleExpand = (id: string | number) => {
+    const stringId = String(id);
     setExpandedTeacherIds(prev => 
-      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+      prev.includes(stringId) ? prev.filter(item => item !== stringId) : [...prev, stringId]
     );
   };
 
   const expandAll = () => {
-    setExpandedTeacherIds(TEACHING_LOAD_DATA.map(t => t.id));
+    setExpandedTeacherIds(teachingLoads.map(t => String(t.id)));
   };
 
   const collapseAll = () => {
@@ -76,15 +386,16 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, classNa
 
   const handleExportCSV = () => {
     const rows = [
-      ['ID', 'Department', 'Teacher Name', 'Homeroom', 'Order', 'Subject Code', 'Subject Name', 'Periods/Week', 'Room', 'Schedule', 'Level', 'Total Periods']
+      ['ID', 'Department', 'Teacher Name', 'Email', 'Homeroom', 'Order', 'Subject Code', 'Subject Name', 'Periods/Week', 'Room', 'Schedule', 'Level', 'Total Periods']
     ];
 
-    TEACHING_LOAD_DATA.forEach(t => {
+    teachingLoads.forEach(t => {
       if (t.subjects.length === 0) {
         rows.push([
-          t.id.toString(),
+          String(t.id),
           t.department,
           t.teacherName,
+          t.teacherEmail,
           t.homeroom,
           '-',
           '-',
@@ -98,9 +409,10 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, classNa
       } else {
         t.subjects.forEach(s => {
           rows.push([
-            t.id.toString(),
+            String(t.id),
             t.department,
             t.teacherName,
+            t.teacherEmail,
             t.homeroom,
             s.order.toString(),
             s.subjectCode,
@@ -119,11 +431,49 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, classNa
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', 'teaching_load_official_roster.csv');
+    link.setAttribute('download', 'teaching_load_roster.csv');
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
+
+  if (isLoading) {
+    return (
+      <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-16 flex flex-col items-center justify-center text-center space-y-4">
+        <Loader2 className="w-10 h-10 text-blue-400 animate-spin" />
+        <div>
+          <h3 className="text-base font-bold text-white">กำลังโหลดข้อมูลภาระงานสอนจาก Firestore...</h3>
+          <p className="text-xs text-slate-400 mt-1">กำลังประมวลผลการจับคู่ข้อมูลครูกับตารางสอนแบบเรียลไทม์</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Global Empty State when no teaching load data exists at all
+  if (teachingLoads.length === 0 || schedulesData.length === 0) {
+    return (
+      <div className="bg-[#0f1219] border border-dashed border-white/15 rounded-2xl p-12 text-center flex flex-col items-center justify-center space-y-4">
+        <div className="w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shadow-inner">
+          <BookOpen className="w-8 h-8" />
+        </div>
+        <div className="max-w-md">
+          <h3 className="text-lg font-bold text-white">ยังไม่มีข้อมูลภาระงานสอนในระบบ</h3>
+          <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+            ยังไม่พบข้อมูลตารางสอนในฐานข้อมูล Firestore คุณสามารถนำเข้าไฟล์รายงานภาระงานสอน (.xlsx / .csv) เพื่อสร้างตารางภาระงานสอนแบบสมบูรณ์
+          </p>
+        </div>
+        {onOpenImport && (
+          <button
+            onClick={onOpenImport}
+            className="mt-2 inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-blue-600/20 transition-all cursor-pointer"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>นำเข้าภาระงานสอน (Bulk Data Import)</span>
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={cn("space-y-6", className)}>
@@ -131,13 +481,13 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, classNa
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-5 shadow-xl relative overflow-hidden group">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">จำนวนครูทั้งหมด</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">จำนวนครูในระบบ</span>
             <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
               <Users className="w-5 h-5" />
             </div>
           </div>
           <div className="text-3xl font-black text-white">{totalTeachers} <span className="text-sm font-normal text-slate-400">คน</span></div>
-          <p className="text-xs text-slate-500 mt-1">4 กลุ่มสาระการเรียนรู้</p>
+          <p className="text-xs text-slate-500 mt-1">{departments.length} กลุ่มสาระการเรียนรู้</p>
         </div>
 
         <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-5 shadow-xl relative overflow-hidden group">
@@ -159,7 +509,7 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, classNa
             </div>
           </div>
           <div className="text-3xl font-black text-purple-400">{totalActivityPeriods} <span className="text-sm font-normal text-slate-400">คาบ/สัปดาห์</span></div>
-          <p className="text-xs text-slate-500 mt-1">HomeRoom & Cleaning Zone</p>
+          <p className="text-xs text-slate-500 mt-1">HomeRoom & กิจกรรมพัฒนาผู้เรียน</p>
         </div>
 
         <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-5 shadow-xl relative overflow-hidden group">
@@ -170,7 +520,7 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, classNa
             </div>
           </div>
           <div className="text-3xl font-black text-amber-400">{totalOverallPeriods} <span className="text-sm font-normal text-slate-400">คาบ</span></div>
-          <p className="text-xs text-slate-500 mt-1">เฉลี่ย {(totalOverallPeriods / totalTeachers).toFixed(1)} คาบ/คน/สัปดาห์</p>
+          <p className="text-xs text-slate-500 mt-1">เฉลี่ย {totalTeachers > 0 ? (totalOverallPeriods / totalTeachers).toFixed(1) : 0} คาบ/คน/สัปดาห์</p>
         </div>
       </div>
 
@@ -184,7 +534,7 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, classNa
               type="text" 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="ค้นหาชื่อครู, รหัสวิชา (ค32201), ห้อง (943), ชั้น (M.5/8)..."
+              placeholder="ค้นหาชื่อครู, รหัสวิชา (ค32201), ห้อง (943), ชั้น (ม.5/8)..."
               className="w-full pl-9 pr-4 py-2 bg-black/40 border border-white/10 rounded-xl text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500/50"
             />
           </div>
@@ -209,19 +559,19 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, classNa
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={expandAll}
-            className="px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+            className="px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 transition-colors cursor-pointer"
           >
             ขยายทั้งหมด
           </button>
           <button
             onClick={collapseAll}
-            className="px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+            className="px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 transition-colors cursor-pointer"
           >
             ยุบทั้งหมด
           </button>
           <button
             onClick={handleExportCSV}
-            className="px-3.5 py-2 rounded-xl text-xs font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 flex items-center gap-1.5 transition-colors shadow-[0_0_15px_rgba(16,185,129,0.15)]"
+            className="px-3.5 py-2 rounded-xl text-xs font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 flex items-center gap-1.5 transition-colors shadow-[0_0_15px_rgba(16,185,129,0.15)] cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
             ส่งออก CSV
@@ -239,8 +589,7 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, classNa
           </div>
         ) : (
           filteredData.map(teacher => {
-            const isExpanded = expandedTeacherIds.includes(teacher.id);
-            const isPrimary = teacher.totalPeriods > 0;
+            const isExpanded = expandedTeacherIds.includes(String(teacher.id));
 
             return (
               <div 
@@ -277,11 +626,13 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, classNa
                         <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
                           {teacher.department}
                         </span>
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-white/5 text-slate-300 border border-white/10">
-                          ครูที่ปรึกษา: {teacher.homeroom}
-                        </span>
+                        {teacher.homeroom && teacher.homeroom !== '-' && (
+                          <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-white/5 text-slate-300 border border-white/10">
+                            ครูที่ปรึกษา: {teacher.homeroom}
+                          </span>
+                        )}
                       </div>
-                      <p className="text-xs text-slate-500 mt-0.5">ID: #{teacher.id} • {teacher.teacherEmail || `${teacher.teacherName.toLowerCase().replace(/[^a-z0-9]/g, '')}@utd.ac.th`}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">ID: {teacher.staffDocId} {teacher.teacherEmail && teacher.teacherEmail !== '-' ? `• ${teacher.teacherEmail}` : ''}</p>
                     </div>
                   </div>
 
@@ -332,10 +683,10 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, classNa
                           </thead>
                           <tbody className="divide-y divide-white/5 bg-[#0f1219]/60">
                             {teacher.subjects.map((subj) => {
-                              const isActivity = subj.subjectCode === 'HR' || subj.subjectCode === 'CZ' || subj.subjectName.includes('กิจกรรม');
+                              const isActivity = subj.subjectType === 'ACTIVITY';
 
                               return (
-                                <tr key={`${teacher.id}-${subj.order}-${subj.subjectCode}`} className="hover:bg-white/[0.03] transition-colors">
+                                <tr key={`${teacher.id}-${subj.order}-${subj.subjectCode}-${subj.room}`} className="hover:bg-white/[0.03] transition-colors">
                                   <td className="px-4 py-3.5 text-center text-xs text-slate-500 font-mono">
                                     {subj.order}
                                   </td>
