@@ -144,6 +144,76 @@
         "futureGoals": { "type": "object", "description": "Section 6: Future goals, self-improvement, and notes to teacher" }
       },
       "required": ["studentId", "isCompleted"]
+    },
+    "SeatingLayout": {
+      "title": "SeatingLayout",
+      "description": "Dynamic classroom seating layout and desk grouping configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique layout ID" },
+        "name": { "type": "string", "description": "Display name of layout" },
+        "subjectCode": { "type": "string", "description": "Subject code e.g. ว32204" },
+        "room": { "type": "string", "description": "Classroom designation e.g. ม.5/8" },
+        "teacherId": { "type": "string", "description": "Teacher UID or ID" },
+        "teacherEmail": { "type": "string", "description": "Teacher school email" },
+        "category": { "type": "string", "enum": ["CLASSROOM", "LABORATORY", "OUTDOOR", "EXAM", "CUSTOM"] },
+        "isTemplate": { "type": "boolean", "description": "Whether this layout is shared as a reusable template" },
+        "isLocked": { "type": "boolean", "description": "Lock status" },
+        "totalCapacity": { "type": "integer", "description": "Derived total capacity across all groups" },
+        "zoomScale": { "type": "number", "description": "Canvas zoom scale" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["id", "name", "subjectCode", "room", "category", "totalCapacity"]
+    },
+    "SeatingGroup": {
+      "title": "SeatingGroup",
+      "description": "Individual desk pod/group within a seating layout",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique group ID" },
+        "name": { "type": "string", "description": "Group name" },
+        "groupIndex": { "type": "integer", "description": "Order index" },
+        "capacity": { "type": "integer", "description": "Number of seats in this group" },
+        "positionX": { "type": "number", "description": "Canvas X coordinate" },
+        "positionY": { "type": "number", "description": "Canvas Y coordinate" },
+        "color": { "type": "string", "description": "Theme color code" },
+        "shape": { "type": "string", "description": "Visual pod arrangement shape" }
+      },
+      "required": ["id", "name", "capacity", "positionX", "positionY"]
+    },
+    "SeatingSeat": {
+      "title": "SeatingSeat",
+      "description": "Specific individual seat in a desk group",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique seat ID" },
+        "seatNumber": { "type": "integer", "description": "Seat index" },
+        "relativeRow": { "type": "integer", "description": "Row position inside group" },
+        "relativeCol": { "type": "integer", "description": "Column position inside group" },
+        "label": { "type": "string", "description": "Seat label" }
+      },
+      "required": ["id", "seatNumber"]
+    },
+    "SeatingAssignment": {
+      "title": "SeatingAssignment",
+      "description": "Historical and active student seat assignment records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Assignment unique ID" },
+        "layoutId": { "type": "string", "description": "Referenced layout ID" },
+        "groupId": { "type": "string", "description": "Referenced group ID" },
+        "seatId": { "type": "string", "description": "Referenced seat ID" },
+        "studentId": { "type": "string", "description": "Assigned student ID" },
+        "studentName": { "type": "string", "description": "Student full name" },
+        "studentNo": { "type": "integer", "description": "Student roll number" },
+        "effectiveFrom": { "type": "string", "description": "Start ISO timestamp" },
+        "effectiveTo": { "type": "string", "description": "End ISO timestamp or null if currently seated" },
+        "assignedBy": { "type": "string", "description": "Teacher/Admin ID who assigned" },
+        "room": { "type": "string", "description": "Classroom room" },
+        "subjectCode": { "type": "string", "description": "Course subject code" }
+      },
+      "required": ["id", "layoutId", "groupId", "seatId", "studentId", "effectiveFrom"]
     }
   },
   "firestore": {
@@ -182,6 +252,22 @@
     "/student_self_assessments/{studentId}": {
       "schema": "StudentSelfAssessment",
       "description": "Individual student self-assessments"
+    },
+    "/seating_layouts/{layoutId}": {
+      "schema": "SeatingLayout",
+      "description": "Classroom seating layouts"
+    },
+    "/seating_layouts/{layoutId}/groups/{groupId}": {
+      "schema": "SeatingGroup",
+      "description": "Desk groups within a layout"
+    },
+    "/seating_layouts/{layoutId}/groups/{groupId}/seats/{seatId}": {
+      "schema": "SeatingSeat",
+      "description": "Seats within a desk group"
+    },
+    "/seating_assignments/{assignmentId}": {
+      "schema": "SeatingAssignment",
+      "description": "Active and historical student seat assignments"
     }
   }
 }

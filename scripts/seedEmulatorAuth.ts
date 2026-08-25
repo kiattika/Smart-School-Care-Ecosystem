@@ -346,6 +346,50 @@ export async function seedEmulatorAuth() {
     console.warn('Notice seeding periods config:', err.message);
   }
 
+  // 7. Seed sample today's attendance record and seating layout for M.5/8
+  try {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const attendanceDocId = `att_m58_${todayStr}_p1`;
+    await db.collection('attendance_records').doc(attendanceDocId).set({
+      id: attendanceDocId,
+      date: todayStr,
+      room: 'ม.5/8',
+      periodNumber: 1,
+      checkedByTeacherId: 'test_advisor_001',
+      checkedByName: 'ครูเกียรติศักดิ์ สถิตการุณย์',
+      checkedAt: FieldValue.serverTimestamp(),
+      isLocked: false,
+      students: {
+        '38501': 'PRESENT',
+        '38502': 'PRESENT',
+        '38503': 'LATE',
+        '38504': 'ABSENT'
+      }
+    }, { merge: true });
+
+    // Seed Seating Layout for Physics M.5/8
+    const layoutId = 'layout_ว32204_m58';
+    await db.collection('seating_layouts').doc(layoutId).set({
+      id: layoutId,
+      name: 'ผังห้องเรียนฟิสิกส์ 4 (ม.5/8)',
+      subjectCode: 'ว32204',
+      room: 'ม.5/8',
+      teacherId: 'test_advisor_001',
+      teacherEmail: 'advisor.test@utd.ac.th',
+      category: 'CLASSROOM',
+      isTemplate: true,
+      isLocked: false,
+      totalCapacity: 40,
+      zoomScale: 100,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+
+    console.log(`\n🪑 Seeded sample attendance record and seating layout '${layoutId}'`);
+  } catch (err: any) {
+    console.warn('Notice seeding attendance & seating layout:', err.message);
+  }
+
   console.log(`\n🎉 Seeded all ${SEEDED_TEST_USERS.length} test accounts successfully!`);
 }
 

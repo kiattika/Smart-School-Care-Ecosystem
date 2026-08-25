@@ -464,7 +464,98 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
-  // 13. Default Deny Catch-All (Regression Test 5)
+  // 13. seating_layouts and subcollections (groups, seats)
+  describe('seating_layouts collection & subcollections', () => {
+    it('allows signed-in users to read seating layouts', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('seating_layouts/layout_m58').set({
+          name: 'Physics M58',
+          room: 'ม.5/8',
+          totalCapacity: 40
+        });
+      });
+
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('seating_layouts/layout_m58').get());
+      await assertSucceeds(asUser('student-101', ['STUDENT']).firestore().doc('seating_layouts/layout_m58').get());
+      await assertFails(asAnonymous().firestore().doc('seating_layouts/layout_m58').get());
+    });
+
+    it('allows teachers and SUPER_ADMIN to create and update seating layouts and nested groups/seats', async () => {
+      await assertSucceeds(
+        asRole('SUBJECT_TEACHER').firestore().doc('seating_layouts/layout_new').set({
+          name: 'New Layout',
+          room: 'ม.5/8',
+          category: 'CLASSROOM'
+        })
+      );
+      await assertSucceeds(
+        asRole('HOMEROOM_TEACHER').firestore().doc('seating_layouts/layout_new/groups/group_1').set({
+          name: 'Group 1',
+          capacity: 4
+        })
+      );
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('seating_layouts/layout_new/groups/group_1/seats/seat_1').set({
+          seatNumber: 1
+        })
+      );
+      await assertFails(
+        asUser('student-101', ['STUDENT']).firestore().doc('seating_layouts/layout_new').set({
+          name: 'Hacked Layout'
+        })
+      );
+    });
+  });
+
+  // 14. seating_assignments collection
+  describe('seating_assignments collection', () => {
+    it('allows teachers and admins to read and write assignments', async () => {
+      await assertSucceeds(
+        asRole('SUBJECT_TEACHER').firestore().doc('seating_assignments/assign_001').set({
+          layoutId: 'layout_m58',
+          studentId: 'std_38501',
+          seatId: 'seat_1',
+          effectiveFrom: '2026-08-25T08:00:00Z',
+          effectiveTo: null
+        })
+      );
+      await assertSucceeds(
+        asRole('HOMEROOM_TEACHER').firestore().doc('seating_assignments/assign_001').get()
+      );
+      await assertSucceeds(
+        asRole('EXECUTIVE').firestore().doc('seating_assignments/assign_001').get()
+      );
+    });
+
+    it('allows a student to read their own seating assignment', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('seating_assignments/assign_std1').set({
+          studentId: 'student-alice',
+          layoutId: 'layout_m58',
+          seatId: 'seat_1',
+          effectiveFrom: '2026-08-25T08:00:00Z'
+        });
+      });
+
+      await assertSucceeds(
+        asUser('student-alice', ['STUDENT']).firestore().doc('seating_assignments/assign_std1').get()
+      );
+      await assertFails(
+        asUser('student-bob', ['STUDENT']).firestore().doc('seating_assignments/assign_std1').get()
+      );
+    });
+
+    it('denies students from writing to seating assignments', async () => {
+      await assertFails(
+        asUser('student-alice', ['STUDENT']).firestore().doc('seating_assignments/assign_new').set({
+          studentId: 'student-alice',
+          seatId: 'seat_front'
+        })
+      );
+    });
+  });
+
+  // 15. Default Deny Catch-All (Regression Test 5)
   describe('Default Deny Catch-All (Undeclared paths)', () => {
     it('REGRESSION: denies authenticated user with no matching role from reading or writing undeclared collections', async () => {
       const db = asRole('SOME_ARBITRARY_ROLE').firestore();
@@ -476,3 +567,4 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 });
+

@@ -120,6 +120,29 @@ service cloud.firestore {
       allow write: if hasRole('SUPER_ADMIN');
     }
 
+    // 13. Seating Layouts & Subcollections (groups, seats)
+    match /seating_layouts/{layoutId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER');
+
+      match /{document=**} {
+        allow read: if isSignedIn();
+        allow write: if hasRole('SUPER_ADMIN') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER');
+      }
+    }
+
+    // 14. Seating Assignments (History and Active)
+    match /seating_assignments/{assignmentId} {
+      allow read: if hasRole('SUPER_ADMIN') || 
+                     hasRole('EXECUTIVE') || 
+                     hasRole('SUBJECT_TEACHER') || 
+                     hasRole('HOMEROOM_TEACHER') || 
+                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid));
+      allow write: if hasRole('SUPER_ADMIN') || 
+                      hasRole('SUBJECT_TEACHER') || 
+                      hasRole('HOMEROOM_TEACHER');
+    }
+
     // Default Deny All Catch-All for unknown paths
     match /{document=**} {
       allow read, write: if false;
