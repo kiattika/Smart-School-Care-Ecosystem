@@ -148,20 +148,23 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
     schedulesData.forEach((sch) => {
       let matchedStaffId: string | null = null;
 
-      // Check direct teacherIds or teacherId
-      if (sch.teacherIds && Array.isArray(sch.teacherIds) && sch.teacherIds.length > 0) {
-        matchedStaffId = sch.teacherIds[0];
-      } else if (sch.teacherId) {
-        matchedStaffId = sch.teacherId;
-      }
-
-      // Check email match
-      if (!matchedStaffId && sch.teacherEmail) {
-        const found = staffData.find(s => s.email && s.email.toLowerCase() === sch.teacherEmail.toLowerCase());
+      // 1. Check direct email match (Primary)
+      if (sch.teacherEmail) {
+        const cleanEmail = sch.teacherEmail.toLowerCase().trim();
+        const found = staffData.find(s => s.email && s.email.toLowerCase().trim() === cleanEmail);
         if (found) matchedStaffId = found.id;
       }
 
-      // Check name match against staff
+      // 2. Check direct teacherIds or teacherId
+      if (!matchedStaffId) {
+        if (sch.teacherIds && Array.isArray(sch.teacherIds) && sch.teacherIds.length > 0) {
+          matchedStaffId = sch.teacherIds[0];
+        } else if (sch.teacherId) {
+          matchedStaffId = sch.teacherId;
+        }
+      }
+
+      // 3. Check name match against staff as fallback
       if (!matchedStaffId && sch.sourceTeacherName) {
         const matchRes = matchTeacherByName(sch.sourceTeacherName, staffData);
         if (matchRes?.id) matchedStaffId = matchRes.id;
@@ -170,7 +173,7 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
       if (matchedStaffId && staffLoadsMap.has(matchedStaffId)) {
         staffLoadsMap.get(matchedStaffId)!.scheduleItems.push(sch);
       } else {
-        // Collect into unlinked teacher
+        // Collect into unlinked teacher bucket
         const unlinkedKey = sch.unlinkedTeacherName || sch.sourceTeacherName || 'ครูผู้สอนที่ยังไม่ได้จับคู่';
         if (!unlinkedScheduleMap.has(unlinkedKey)) {
           unlinkedScheduleMap.set(unlinkedKey, []);
@@ -209,12 +212,13 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
       const totalActivityPeriods = subjects.filter(s => s.subjectType === 'ACTIVITY').reduce((sum, s) => sum + s.totalPeriods, 0);
       const totalPeriods = totalMainPeriods + totalActivityPeriods;
       const dept = items[0]?.department || 'ยังไม่ได้ระบุกลุ่มสาระ';
+      const unlinkedEmail = items[0]?.unlinkedTeacherEmail || items[0]?.teacherEmail || '-';
 
       result.push({
         id: `unlinked_${idx}`,
         staffDocId: `unlinked_${idx}`,
         teacherName: `${teacherName} (ยังไม่ผูกบัญชี)`,
-        teacherEmail: items[0]?.teacherEmail || '-',
+        teacherEmail: unlinkedEmail,
         department: dept,
         homeroom: '-',
         subjects,
@@ -253,7 +257,8 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
           slots: []
         });
       }
-      if (slot.dayOfWeek && slot.periodNumber) {
+      // CRITICAL FIX: Ensure period 0 (Homeroom) is preserved and not dropped by Boolean(0) === false
+      if (slot.dayOfWeek && slot.periodNumber !== undefined && slot.periodNumber !== null) {
         grouped.get(key)!.slots.push({
           dayOfWeek: slot.dayOfWeek,
           periodNumber: Number(slot.periodNumber)

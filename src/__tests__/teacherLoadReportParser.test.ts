@@ -4,6 +4,7 @@ import {
   parsePeriodAndRoom, 
   detectSubjectType, 
   matchTeacherByName,
+  matchTeacherByEmail,
   parseTeacherLoadReport,
   generateScheduleDocuments,
   isTeacherLoadReportFormat
@@ -117,10 +118,19 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
     });
   });
 
-  describe('TASK 8: Teacher Linkage & Unlinked Names', () => {
-    it('matches teacher by normalized display name and returns real UID', () => {
+  describe('TASK 8 & ISSUE 1: Teacher Linkage & Email Matching', () => {
+    it('matches teacher by exact email or alias', () => {
+      const match1 = matchTeacherByEmail('kiattisak@utd.ac.th', mockStaffList);
+      expect(match1?.id).toBe('teacher-kiattisak-uid');
+
+      const match2 = matchTeacherByEmail('kiattika@utd.ac.th', mockStaffList);
+      expect(match2?.id).toBe('teacher-kiattisak-uid');
+    });
+
+    it('matches teacher by normalized display name and returns real UID and email', () => {
       const matched = matchTeacherByName('Mr.Kiattisak', mockStaffList);
-      expect(matched).toBe('teacher-kiattisak-uid');
+      expect(matched?.id).toBe('teacher-kiattisak-uid');
+      expect(matched?.email).toBe('kiattisak@utd.ac.th');
     });
 
     it('returns undefined when teacher is not found in the system (no fabricated IDs)', () => {
@@ -131,11 +141,12 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
 
   describe('Ground Truth Teacher Load Report Integration', () => {
     const rawReportRows = [
-      // Row 1: Header Teacher row
+      // Row 1: Header Teacher row with explicit 'อีเมล์' column
       {
         'กลุ่มสาระ': 'คณิตศาสตร์',
         'ที่': '1',
         'ชื่อ-สกุล': 'Mr.Kiattisak',
+        'อีเมล์': 'kiattika@utd.ac.th',
         'ประจำชั้น': 'M.5/8',
         'ลำดับวิชา': '1',
         'รหัสวิชา': 'ค32201',
@@ -150,6 +161,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
         'กลุ่มสาระ': '',
         'ที่': '',
         'ชื่อ-สกุล': '',
+        'อีเมล์': '',
         'ประจำชั้น': '',
         'ลำดับวิชา': '2',
         'รหัสวิชา': 'ค32101',
@@ -164,6 +176,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
         'กลุ่มสาระ': '',
         'ที่': '',
         'ชื่อ-สกุล': '',
+        'อีเมล์': '',
         'ประจำชั้น': '',
         'ลำดับวิชา': '6',
         'รหัสวิชา': 'PLC',
@@ -178,6 +191,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
         'กลุ่มสาระ': '',
         'ที่': '',
         'ชื่อ-สกุล': '',
+        'อีเมล์': '',
         'ประจำชั้น': '',
         'ลำดับวิชา': '9',
         'รหัสวิชา': 'HR',
@@ -192,6 +206,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
         'กลุ่มสาระ': '',
         'ที่': '',
         'ชื่อ-สกุล': '',
+        'อีเมล์': '',
         'ประจำชั้น': '',
         'ลำดับวิชา': 'รวม',
         'รหัสวิชา': 'รวมคาบสอน',
@@ -206,6 +221,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
         'กลุ่มสาระ': 'วิทยาศาสตร์และเทคโนโลยี',
         'ที่': '4',
         'ชื่อ-สกุล': 'Mr. Ball',
+        'อีเมล์': 'ball@utd.ac.th',
         'ประจำชั้น': 'M.5/6',
         'ลำดับวิชา': '1',
         'รหัสวิชา': '-',
@@ -215,11 +231,12 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
         'ระดับ': '-',
         'สรุปคาบ': '0'
       },
-      // Row 7: Unmatched teacher with mismatch period count
+      // Row 7: Unmatched teacher with email and mismatch period count
       {
         'กลุ่มสาระ': 'ภาษาต่างประเทศ',
         'ที่': '5',
         'ชื่อ-สกุล': 'Mr. Unknown Foreigner',
+        'อีเมล์': 'foreigner@utd.ac.th',
         'ประจำชั้น': 'M.5/7',
         'ลำดับวิชา': '1',
         'รหัสวิชา': 'EN32101',
@@ -236,7 +253,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
       expect(isTeacherLoadReportFormat([{ 'Course Code': 'TH101', 'Course Name': 'Thai' }])).toBe(false);
     });
 
-    it('TASK 2 & TASK 3: forward-fills teacher identity and skips subtotal/empty-load rows', () => {
+    it('TASK 2 & TASK 3 & ISSUE 1: forward-fills teacher identity, uses email for matching, and skips subtotal/empty-load rows', () => {
       const { courseRows } = parseTeacherLoadReport(rawReportRows, mockStaffList);
       
       // Should have 5 valid course rows (Row 1, Row 2, Row 3, Row 4, Row 7). Subtotal (Row 5) and Empty load (Row 6) are skipped.
@@ -244,12 +261,16 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
 
       // Row 1
       expect(courseRows[0].teacherName).toBe('Mr.Kiattisak');
+      expect(courseRows[0].teacherEmail).toBe('kiattika@utd.ac.th');
+      expect(courseRows[0].matchedTeacherId).toBe('teacher-kiattisak-uid');
       expect(courseRows[0].department).toBe('คณิตศาสตร์');
       expect(courseRows[0].homeroom).toBe('M.5/8');
       expect(courseRows[0].subjectCode).toBe('ค32201');
 
-      // Row 2 (Forward-filled teacher info)
+      // Row 2 (Forward-filled teacher info and email)
       expect(courseRows[1].teacherName).toBe('Mr.Kiattisak');
+      expect(courseRows[1].teacherEmail).toBe('kiattika@utd.ac.th');
+      expect(courseRows[1].matchedTeacherId).toBe('teacher-kiattisak-uid');
       expect(courseRows[1].department).toBe('คณิตศาสตร์');
       expect(courseRows[1].homeroom).toBe('M.5/8');
       expect(courseRows[1].subjectCode).toBe('ค32101');
@@ -264,12 +285,14 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
       expect(courseRows[3].subjectType).toBe('ACTIVITY');
       expect(courseRows[3].slots[0]).toEqual({ dayOfWeek: 'monday', periodNumber: 0 });
 
-      // Row 7 (Unmatched teacher with mismatch warning)
+      // Row 7 (Unmatched teacher with email and mismatch warning)
       expect(courseRows[4].teacherName).toBe('Mr. Unknown Foreigner');
+      expect(courseRows[4].teacherEmail).toBe('foreigner@utd.ac.th');
       expect(courseRows[4].matchedTeacherId).toBeUndefined();
       expect(courseRows[4].unlinkedTeacherName).toBe('Mr. Unknown Foreigner');
+      expect(courseRows[4].unlinkedTeacherEmail).toBe('foreigner@utd.ac.th');
       expect(courseRows[4].warnings.some(w => w.includes('ไม่ตรงกับวัน-คาบที่สอน'))).toBe(true);
-      expect(courseRows[4].warnings.some(w => w.includes('ไม่พบครูชื่อ'))).toBe(true);
+      expect(courseRows[4].warnings.some(w => w.includes('foreigner@utd.ac.th'))).toBe(true);
     });
 
     it('TASK 7: generates multi-slot Firestore schedule documents for Mr.Kiattisak ค32201 (4 slots expanded)', () => {
@@ -288,7 +311,10 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
         level: 'M.5/8',
         credits: 1.5,
         teacherIds: ['teacher-kiattisak-uid'],
+        teacherId: 'teacher-kiattisak-uid',
+        teacherEmail: 'kiattisak@utd.ac.th',
         unlinkedTeacherName: null,
+        unlinkedTeacherEmail: null,
         subjectType: 'MAIN',
         dayOfWeek: 'tuesday',
         periodNumber: 2,
@@ -301,7 +327,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
       expect(math201Docs[3].id).toBe('sch_ค32201_943_friday_p3');
     });
 
-    it('TASK 8: ensures unmatched teacher generates documents with teacherIds: [] and unlinkedTeacherName populated (NO fabricated IDs)', () => {
+    it('TASK 8: ensures unmatched teacher generates documents with teacherIds: [] and unlinkedTeacherName & unlinkedTeacherEmail populated (NO fabricated IDs)', () => {
       const { courseRows } = parseTeacherLoadReport(rawReportRows, mockStaffList);
       const generatedDocs = generateScheduleDocuments(courseRows);
 
@@ -309,7 +335,9 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
       expect(foreignDocs.length).toBeGreaterThan(0);
       for (const doc of foreignDocs) {
         expect(doc.teacherIds).toEqual([]);
+        expect(doc.teacherId).toBeNull();
         expect(doc.unlinkedTeacherName).toBe('Mr. Unknown Foreigner');
+        expect(doc.unlinkedTeacherEmail).toBe('foreigner@utd.ac.th');
       }
     });
   });

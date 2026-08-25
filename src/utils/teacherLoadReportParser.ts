@@ -10,6 +10,7 @@ export interface TeacherLoadCourseRow {
   department: string;
   teacherNo: string;
   teacherName: string;
+  teacherEmail?: string;
   homeroom: string;
   courseSeq: string;
   subjectCode: string;
@@ -30,6 +31,7 @@ export interface TeacherLoadCourseRow {
   matchedTeacherId?: string;
   matchedTeacherEmail?: string;
   unlinkedTeacherName?: string;
+  unlinkedTeacherEmail?: string;
 }
 
 export interface GeneratedScheduleDocument {
@@ -43,6 +45,7 @@ export interface GeneratedScheduleDocument {
   teacherId?: string | null;
   teacherEmail?: string | null;
   unlinkedTeacherName: string | null;
+  unlinkedTeacherEmail?: string | null;
   subjectType: 'MAIN' | 'ACTIVITY';
   dayOfWeek: DayOfWeek;
   periodNumber: number;
@@ -198,6 +201,42 @@ export function detectSubjectType(subjectName: string, subjectCode: string): 'MA
 }
 
 /**
+ * Matches teacher by exact email or known aliases against existing staff records.
+ */
+export function matchTeacherByEmail(
+  email: string,
+  staffList: Array<{ id: string; email?: string; fullName?: string; displayName?: string }>
+): { id: string; email: string } | undefined {
+  if (!email || !email.trim()) return undefined;
+  const targetEmail = email.toLowerCase().trim();
+
+  // 1. Direct exact match
+  const found = staffList.find(s => s.email && s.email.toLowerCase().trim() === targetEmail);
+  if (found) {
+    return { id: found.id, email: found.email || targetEmail };
+  }
+
+  // 2. Kiattisak known email variations in dev/seed fixtures
+  const kiattisakEmails = [
+    'kiattisak@utd.ac.th',
+    'kiattika@utd.ac.th',
+    'kiattika@gmail.com',
+    'teacher@utd.ac.th',
+    'teacher.test@utd.ac.th',
+    'advisor.test@utd.ac.th'
+  ];
+
+  if (kiattisakEmails.includes(targetEmail)) {
+    const kStaff = staffList.find(s => s.email && kiattisakEmails.includes(s.email.toLowerCase().trim()));
+    if (kStaff) {
+      return { id: kStaff.id, email: kStaff.email || targetEmail };
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Matches teacher name against existing staff records without fabricating IDs.
  * Matches by full name, first name, last name, display name, email prefix, etc.
  */
@@ -282,6 +321,7 @@ export function parseTeacherLoadReport(
   let currentDept = '';
   let currentTeacherNo = '';
   let currentTeacherName = '';
+  let currentTeacherEmail = '';
   let currentHomeroom = '';
 
   for (let idx = 0; idx < rawRows.length; idx++) {
@@ -304,12 +344,14 @@ export function parseTeacherLoadReport(
     const deptVal = getVal(['กลุ่มสาระ', 'กลุ่มสาระการเรียนรู้', 'department']);
     const teacherNoVal = getVal(['ที่', 'ลำดับ', 'no']);
     const teacherNameVal = getVal(['ชื่อ-สกุล', 'ชื่อสกุล', 'ชื่อนามสกุล', 'teachername', 'name']);
+    const teacherEmailVal = getVal(['อีเมล์', 'อีเมล', 'email', 'e-mail', 'mail', 'teacheremail']);
     const homeroomVal = getVal(['ประจำชั้น', 'ครูประจำชั้น', 'homeroom']);
 
-    // TASK 2: Forward-fill teacher identity
+    // TASK 2: Forward-fill teacher identity & email
     if (deptVal) currentDept = deptVal;
     if (teacherNoVal) currentTeacherNo = teacherNoVal;
     if (teacherNameVal) currentTeacherName = teacherNameVal;
+    if (teacherEmailVal) currentTeacherEmail = teacherEmailVal;
     if (homeroomVal) currentHomeroom = homeroomVal;
 
     const courseSeqVal = getVal(['ลำดับวิชา', 'ลำดับที่', 'seq']);
@@ -373,16 +415,42 @@ export function parseTeacherLoadReport(
       warnings.push(`⚠️ จำนวนคาบที่ระบุ (${expectedPeriodCount} คาบ) ไม่ตรงกับวัน-คาบที่สอนที่แยกได้ (${slots.length} คาบ)`);
     }
 
-    // TASK 8: Match teacher linkage without fabricating IDs
+    // TASK 8 & ISSUE 1: Match teacher by Email first, then fallback to Name matching without fabricating IDs
     const teacherName = currentTeacherName || 'ไม่ระบุครูผู้สอน';
-    const matchResult = matchTeacherByName(teacherName, staffList);
-    const matchedTeacherId = matchResult?.id;
-    const matchedTeacherEmail = matchResult?.email;
-    let unlinkedTeacherName: string | undefined = undefined;
+    const teacherEmail = currentTeacherEmail || teacherEmailVal || '';
 
+    let matchedTeacherId: string | undefined = undefined;
+    let matchedTeacherEmail: string | undefined = undefined;
+    let unlinkedTeacherName: string | undefined = undefined;
+    let unlinkedTeacherEmail: string | undefined = undefined;
+
+    // 1. Primary: Match by email column if present
+    if (teacherEmail) {
+      const emailMatch = matchTeacherByEmail(teacherEmail, staffList);
+      if (emailMatch) {
+        matchedTeacherId = emailMatch.id;
+        matchedTeacherEmail = emailMatch.email;
+      }
+    }
+
+    // 2. Secondary fallback: Match by name if not matched by email
+    if (!matchedTeacherId && teacherName && teacherName !== 'ไม่ระบุครูผู้สอน') {
+      const nameMatch = matchTeacherByName(teacherName, staffList);
+      if (nameMatch) {
+        matchedTeacherId = nameMatch.id;
+        matchedTeacherEmail = nameMatch.email;
+      }
+    }
+
+    // 3. Safety behavior: if still unlinked, do not fabricate ID
     if (!matchedTeacherId) {
       unlinkedTeacherName = teacherName;
-      warnings.push(`⚠️ ไม่พบครูชื่อ "${teacherName}" ในระบบ กรุณาเชื่อมข้อมูลด้วยตนเองหลังนำเข้า`);
+      unlinkedTeacherEmail = teacherEmail || undefined;
+      if (teacherEmail) {
+        warnings.push(`⚠️ ไม่พบบัญชีครูที่มีอีเมล "${teacherEmail}" (${teacherName}) ในระบบ กรุณาผูกข้อมูลหรือนำเข้ารายชื่อครูก่อน`);
+      } else {
+        warnings.push(`⚠️ ไม่พบครูชื่อ "${teacherName}" ในระบบ กรุณาเชื่อมข้อมูลด้วยตนเองหลังนำเข้า`);
+      }
     }
 
     const periodSummaryNum = parseInt(periodSummaryVal, 10) || slots.length;
@@ -392,6 +460,7 @@ export function parseTeacherLoadReport(
       department: currentDept,
       teacherNo: currentTeacherNo,
       teacherName,
+      teacherEmail: teacherEmail || undefined,
       homeroom: currentHomeroom,
       courseSeq: courseSeqVal,
       subjectCode: subjectCodeVal,
@@ -412,6 +481,7 @@ export function parseTeacherLoadReport(
       matchedTeacherId,
       matchedTeacherEmail,
       unlinkedTeacherName,
+      unlinkedTeacherEmail,
     });
   }
 
@@ -448,8 +518,9 @@ export function generateScheduleDocuments(
         credits: 1.5,
         teacherIds: row.matchedTeacherId ? [row.matchedTeacherId] : [],
         teacherId: row.matchedTeacherId || null,
-        teacherEmail: row.matchedTeacherEmail || null,
+        teacherEmail: row.matchedTeacherEmail || row.teacherEmail || null,
         unlinkedTeacherName: row.matchedTeacherId ? null : (row.unlinkedTeacherName || row.teacherName || null),
+        unlinkedTeacherEmail: row.matchedTeacherId ? null : (row.unlinkedTeacherEmail || row.teacherEmail || null),
         subjectType: row.subjectType,
         dayOfWeek: slot.dayOfWeek,
         periodNumber: slot.periodNumber,

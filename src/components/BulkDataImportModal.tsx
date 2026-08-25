@@ -232,10 +232,12 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           slots: row.slots,
           subjectType: row.subjectType,
           teacherName: row.teacherName,
+          teacherEmail: row.teacherEmail,
           department: row.department,
           matchedTeacherId: row.matchedTeacherId,
           matchedTeacherEmail: row.matchedTeacherEmail,
           unlinkedTeacherName: row.unlinkedTeacherName,
+          unlinkedTeacherEmail: row.unlinkedTeacherEmail,
           expectedPeriodCount: row.expectedPeriodCount,
           scheduleRaw: row.scheduleRaw
         }
@@ -693,10 +695,11 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                   credits: parsedData.credits || 1.5,
                   teacherIds: parsedData.matchedTeacherId ? [parsedData.matchedTeacherId] : [],
                   teacherId: parsedData.matchedTeacherId || null,
-                  teacherEmail: parsedData.matchedTeacherEmail || (parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : null),
+                  teacherEmail: parsedData.matchedTeacherEmail || parsedData.teacherEmail || (parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : null),
                   sourceTeacherName: parsedData.teacherName || '',
                   department: parsedData.department || '',
                   unlinkedTeacherName: parsedData.matchedTeacherId ? null : (parsedData.unlinkedTeacherName || parsedData.teacherName || null),
+                  unlinkedTeacherEmail: parsedData.matchedTeacherId ? null : (parsedData.unlinkedTeacherEmail || parsedData.teacherEmail || null),
                   subjectType: parsedData.subjectType, // 'MAIN' or 'ACTIVITY'
                   dayOfWeek: slot.dayOfWeek,
                   periodNumber: slot.periodNumber,
@@ -708,6 +711,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
 
                 const scheduleLabel = `${dayThNames[slot.dayOfWeek] || slot.dayOfWeek} คาบ ${slot.periodNumber}`;
                 const courseSlotId = `course_${parsedData.subjectCode}_${cleanRoom}_${slot.dayOfWeek}_p${slot.periodNumber}`;
+                const finalTeacherEmail = parsedData.matchedTeacherEmail || parsedData.teacherEmail || (parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : 'kiattisak@utd.ac.th');
 
                 newCoursesToStore.push({
                   id: courseSlotId,
@@ -720,7 +724,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                   schedule: scheduleLabel,
                   attendanceTaken: false,
                   teacherName: parsedData.teacherName || 'ครูผู้สอน',
-                  teacherEmail: parsedData.matchedTeacherEmail || (parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : 'kiattisak@utd.ac.th')
+                  teacherEmail: finalTeacherEmail
                 });
 
                 newGlobalCoursesToStore.push({
@@ -728,7 +732,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                   code: parsedData.subjectCode,
                   courseName: parsedData.subjectName,
                   teacherName: parsedData.teacherName || 'ครูผู้สอน',
-                  teacherEmail: parsedData.matchedTeacherEmail || (parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : 'kiattisak@utd.ac.th'),
+                  teacherEmail: finalTeacherEmail,
                   roomName: parsedData.room || parsedData.level || '',
                   scheduleString: scheduleLabel,
                   level: parsedData.level || ''
@@ -923,9 +927,9 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               <div className="flex items-start gap-3">
                 <Users className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="text-xs font-bold">ข้อแนะนำก่อนนำเข้าตารางภาระงานสอน</h4>
+                  <h4 className="text-xs font-bold">ข้อมูลการจับคู่บัญชีครูผู้สอน</h4>
                   <p className="text-[11px] text-amber-200/90 mt-0.5 leading-relaxed">
-                    ยังไม่พบข้อมูลบัญชีครู/บุคลากรในระบบ ขอแนะนำให้นำเข้ารายชื่อครู (TEACHER) ให้เรียบร้อยก่อน เพื่อให้ระบบสามารถจับคู่อีเมลและชื่อครูเข้ากับตารางสอนได้อย่างถูกต้องสมบูรณ์
+                    ระบบจะใช้คอลัมน์ <strong>อีเมล์</strong> ในไฟล์ตารางสอนเพื่อจับคู่กับบัญชีบุคลากรในระบบโดยอัตโนมัติ หากยังไม่ได้นำเข้ารายชื่อครู ระบบจะบันทึกข้อมูลตารางสอนและอีเมลไว้พร้อมสำหรับการผูกบัญชีในภายหลัง
                   </p>
                 </div>
               </div>

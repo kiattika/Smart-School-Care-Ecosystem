@@ -61,8 +61,8 @@ export function LoginPage() {
       const appUser = await signInWithEmailPassword(email, pass);
       setUser(appUser);
     } catch (err: any) {
-      console.error('Emulator Sign-In Error:', err);
-      setErrorMessage(`เข้าสู่ระบบไม่สำเร็จ (${err.message}). หากใช้ Emulator ตรวจสอบว่ารัน 'npm run seed:emulator' แล้ว`);
+      console.warn('Sign-In Notice:', err);
+      setErrorMessage(`เข้าสู่ระบบไม่สำเร็จ (${err.message || 'กรุณาลองใหม่อีกครั้ง'})`);
     } finally {
       setLoading(false);
     }
