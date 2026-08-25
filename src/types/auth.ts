@@ -119,19 +119,6 @@ export function hasPermission(
 // 5. Mock Data ของครูที่มีบทบาทแบบ Multi-role สำหรับการทดสอบระบบ
 export const MOCK_MULTI_ROLE_USERS: UserProfile[] = [
   {
-    id: 'test_admin_kiattika_001',
-    email: 'kiattika@utd.ac.th',
-    prefix: 'นาย',
-    firstName: 'เกียรติศักดิ์',
-    lastName: 'แก้วหล้า',
-    position: 'ผู้ดูแลระบบสารสนเทศ (SUPER_ADMIN)',
-    roles: ['SUPER_ADMIN', 'EXECUTIVE', 'HOMEROOM_TEACHER', 'SUBJECT_TEACHER'],
-    assignments: {
-      departmentId: 'admin-dept',
-      homeroomClass: 'ม.5/8'
-    }
-  },
-  {
     id: 'teacher-kiattisak',
     email: 'kiattisak@utd.ac.th',
     prefix: 'นาย',
