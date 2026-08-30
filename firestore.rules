@@ -153,7 +153,7 @@ service cloud.firestore {
       allow write: if hasRole('SUPER_ADMIN') || 
                       hasRole('HOMEROOM_TEACHER') || 
                       hasRole('SUBJECT_TEACHER') || 
-                      isSignedIn();
+                      (isSignedIn() && (request.resource.data.studentId == request.auth.uid || request.resource.data.userId == request.auth.uid));
     }
 
     // 16. Detailed Leave Requests
@@ -164,7 +164,7 @@ service cloud.firestore {
                      (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid));
       allow write: if hasRole('SUPER_ADMIN') || 
                       hasRole('HOMEROOM_TEACHER') || 
-                      isSignedIn();
+                      (isSignedIn() && (request.resource.data.studentId == request.auth.uid || request.resource.data.parentUid == request.auth.uid || request.resource.data.parentId == request.auth.uid));
     }
 
     // 17. GPS Check-in Logs
@@ -173,8 +173,11 @@ service cloud.firestore {
                      hasRole('EXECUTIVE') || 
                      hasRole('HOMEROOM_TEACHER') || 
                      hasRole('SUBJECT_TEACHER') || 
-                     (isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.studentId == request.auth.uid));
-      allow write: if isSignedIn();
+                     (isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid));
+      allow write: if hasRole('SUPER_ADMIN') || 
+                      hasRole('HOMEROOM_TEACHER') || 
+                      hasRole('SUBJECT_TEACHER') || 
+                      (isSignedIn() && (request.resource.data.userId == request.auth.uid || request.resource.data.studentId == request.auth.uid));
     }
 
     // 18. Substitute Teaching Assignments & Post Teaching Records
@@ -200,24 +203,45 @@ service cloud.firestore {
     }
 
     match /student_assessments_sdq/{sdqId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSignedIn();
-      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSignedIn();
+      allow read: if hasRole('SUPER_ADMIN') || 
+                     hasRole('GUIDANCE_COUNSELOR') || 
+                     hasRole('HOMEROOM_TEACHER') || 
+                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.studentUid == request.auth.uid || resource.data.evaluatorId == request.auth.uid));
+      allow write: if hasRole('SUPER_ADMIN') || 
+                      hasRole('GUIDANCE_COUNSELOR') || 
+                      hasRole('HOMEROOM_TEACHER') || 
+                      (isSignedIn() && (request.resource.data.studentId == request.auth.uid || request.resource.data.studentUid == request.auth.uid || request.resource.data.evaluatorId == request.auth.uid));
     }
 
     // 20. Billing Invoices, Messages, and Appointments
     match /billing_invoices/{invoiceId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('EXECUTIVE') || isSignedIn();
-      allow write: if hasRole('SUPER_ADMIN') || isSignedIn();
+      allow read: if hasRole('SUPER_ADMIN') || 
+                     hasRole('EXECUTIVE') || 
+                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid));
+      allow write: if hasRole('SUPER_ADMIN') || 
+                      (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid || resource.data.studentId == request.auth.uid));
     }
 
     match /parent_teacher_messages/{msgId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER') || isSignedIn();
-      allow write: if isSignedIn();
+      allow read: if hasRole('SUPER_ADMIN') || 
+                     hasRole('HOMEROOM_TEACHER') || 
+                     hasRole('SUBJECT_TEACHER') || 
+                     (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid || resource.data.studentId == request.auth.uid || resource.data.senderId == request.auth.uid || resource.data.receiverId == request.auth.uid));
+      allow write: if hasRole('SUPER_ADMIN') || 
+                      hasRole('HOMEROOM_TEACHER') || 
+                      hasRole('SUBJECT_TEACHER') || 
+                      (isSignedIn() && (request.resource.data.parentUid == request.auth.uid || request.resource.data.parentId == request.auth.uid || request.resource.data.senderId == request.auth.uid || request.resource.data.studentId == request.auth.uid));
     }
 
     match /parent_appointments/{appointmentId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER') || isSignedIn();
-      allow write: if isSignedIn();
+      allow read: if hasRole('SUPER_ADMIN') || 
+                     hasRole('HOMEROOM_TEACHER') || 
+                     hasRole('SUBJECT_TEACHER') || 
+                     (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid || resource.data.studentId == request.auth.uid || resource.data.teacherId == request.auth.uid || resource.data.teacherEmail == request.auth.token.email));
+      allow write: if hasRole('SUPER_ADMIN') || 
+                      hasRole('HOMEROOM_TEACHER') || 
+                      hasRole('SUBJECT_TEACHER') || 
+                      (isSignedIn() && (request.resource.data.parentUid == request.auth.uid || request.resource.data.parentId == request.auth.uid || request.resource.data.studentId == request.auth.uid));
     }
 
     // 21. Active Learning Records
