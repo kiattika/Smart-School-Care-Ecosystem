@@ -25,7 +25,6 @@ import { motion, AnimatePresence } from 'motion/react';
 export function AdvisorPortal() {
   const { 
     user, 
-    homeroomAssignments, 
     students, 
     analytics, 
     leaveRequests, 
@@ -41,18 +40,12 @@ export function AdvisorPortal() {
   const [assessmentSearch, setAssessmentSearch] = useState('');
   const [assessmentFilter, setAssessmentFilter] = useState<'ALL' | 'COMPLETED' | 'PENDING'>('ALL');
   
-  const myRoom = user?.email ? (homeroomAssignments[user.email] || (user.profile?.assignments?.homeroomClass)) : 'M.5/8';
+  const myRoom = user?.profile?.assignments?.homeroomClass;
   const myStudents = useMemo(() => {
-    const target = myRoom || 'ม.5/8';
-    let matched = (students || []).filter(s => isSameRoom(s.room, target) || isSameRoom((s as any).className, target));
+    if (!myRoom) return [];
+    let matched = (students || []).filter(s => isSameRoom(s.room, myRoom) || isSameRoom((s as any).className, myRoom));
     if (matched.length === 0) {
-      matched = (students || []).filter(s => isSameRoom(s.room, 'ม.5/8') || isSameRoom(s.room, '5/8'));
-    }
-    if (matched.length === 0) {
-      matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, target));
-      if (matched.length === 0) {
-        matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, 'ม.5/8'));
-      }
+      matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, myRoom) || isSameRoom((s as any).className, myRoom));
     }
     return matched;
   }, [myRoom, students]);
