@@ -164,12 +164,33 @@ export interface PeriodSwap {
   status: 'PENDING_TEACHER' | 'PENDING_ADMIN' | 'APPROVED' | 'REJECTED';
 }
 
-export type SubstituteApprovalStage = 
+export type SubstituteApprovalStage =
   | 'STAGE_1_HEAD_OF_DEPARTMENT'
   | 'STAGE_2_ACADEMIC_HEAD'
   | 'STAGE_3_DEPUTY_DIRECTOR_ACADEMIC'
   | 'STAGE_4_DIRECTOR'
   | 'COMPLETED';
+
+// ประเภทของการลาที่ทำให้ต้องจัดครูสอนแทน
+// - SICK_LEAVE (ลาป่วย): หัวหน้ากลุ่มสาระฯ จัดครูเข้าสอนแทนโดยตรง ไม่ผ่านคำร้องล่วงหน้า
+// - PERSONAL_LEAVE (ลากิจ) / OFFICIAL_DUTY (ไปราชการ): ครูแจ้งเหตุผลล่วงหน้า cross-reference กับตารางสอนจริง
+export type SubstituteTriggerType = 'SICK_LEAVE' | 'PERSONAL_LEAVE' | 'OFFICIAL_DUTY';
+
+// ลำดับขั้นอนุมัติ 4 ขั้น (sequential) → role ที่มีสิทธิ์อนุมัติแต่ละขั้น
+export const SUBSTITUTE_STAGE_ROLE: Record<Exclude<SubstituteApprovalStage, 'COMPLETED'>, string> = {
+  STAGE_1_HEAD_OF_DEPARTMENT: 'HEAD_OF_DEPARTMENT',
+  STAGE_2_ACADEMIC_HEAD: 'ACADEMIC_HEAD',
+  STAGE_3_DEPUTY_DIRECTOR_ACADEMIC: 'DEPUTY_DIRECTOR_ACADEMIC',
+  STAGE_4_DIRECTOR: 'DIRECTOR',
+};
+
+export const SUBSTITUTE_STAGE_ORDER: SubstituteApprovalStage[] = [
+  'STAGE_1_HEAD_OF_DEPARTMENT',
+  'STAGE_2_ACADEMIC_HEAD',
+  'STAGE_3_DEPUTY_DIRECTOR_ACADEMIC',
+  'STAGE_4_DIRECTOR',
+  'COMPLETED',
+];
 
 export interface SubstituteApprovalStep {
   stage: SubstituteApprovalStage;
@@ -203,14 +224,24 @@ export interface SubstituteAssignment {
   rejectedAt?: string;
   rejectedByRole?: string;
   rejectedByName?: string;
+  // ประเภทการลา + เหตุผล เก็บเป็น field ในเอกสารนี้เอง (ยังไม่แยก collection teacher-leave)
+  triggerType?: SubstituteTriggerType;
+  leaveReason?: string;
   triggerSource?: 'SICK_LEAVE' | 'LEAVE_REQUEST' | 'DIRECT_ASSIGNMENT';
   leaveRequestId?: string;
+  // ผู้เสนอจัดครู (หัวหน้ากลุ่มสาระฯ) — ขั้นที่ 1 ถือว่าอนุมัติโดยผู้เสนอ
+  proposedByEmail?: string;
+  proposedByName?: string;
+  proposedByRole?: string;
   notes?: string;
+  // เส้นตายบันทึกหลังสอน = 24:00 น. ของวันที่สอนแทน
+  postTeachingDueAt?: string;
   isCompleted?: boolean;
   completedAt?: string;
   completionSummary?: string;
   completionProblems?: string;
   completionSolutions?: string;
+  completionAttendance?: Record<string, 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE'>;
   isLate?: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -755,6 +786,7 @@ export interface StoreState {
   postTeachingRecords: PostTeachingRecord[];
   periodSwaps: PeriodSwap[];
   substituteAssignments: SubstituteAssignment[];
+  staffDirectory: UserProfile[]; // รายชื่อบุคลากรจริงจาก Firestore 'staff' collection (real-time)
 
   homeVisits: HomeVisit[];
   schoolDuties: SchoolDuty[];
@@ -840,6 +872,34 @@ export interface StoreState {
   updatePeriodSwapStatus: (id: string, status: PeriodSwap['status']) => void;
   assignSubstituteTeacher: (assignment: Omit<SubstituteAssignment, 'id'>) => void;
   removeSubstituteAssignment: (id: string) => void;
+
+  // Real-time Firestore sync setters
+  setStaffDirectory: (staff: UserProfile[]) => void;
+  setSubstituteAssignments: (list: SubstituteAssignment[]) => void;
+  setPostTeachingRecords: (list: PostTeachingRecord[]) => void;
+
+  // Substitute Teaching workflow (เขียน Firestore จริง)
+  proposeSubstituteAssignment: (
+    payload: { id?: string } & Omit<
+      SubstituteAssignment,
+      'id' | 'status' | 'currentApprovalStage' | 'approvalChain' | 'createdAt' | 'updatedAt' | 'postTeachingDueAt'
+    >
+  ) => Promise<SubstituteAssignment>;
+  decideSubstituteApproval: (
+    id: string,
+    decision: 'APPROVE' | 'REJECT',
+    approver: { email: string; name: string; role: string },
+    comment?: string
+  ) => Promise<void>;
+  completeSubstituteAssignment: (
+    id: string,
+    completion: {
+      summary: string;
+      problems?: string;
+      solutions?: string;
+      attendance?: Record<string, 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE'>;
+    }
+  ) => Promise<void>;
 
   submitHomeVisit: (visit: HomeVisit) => void;
   updateSchoolDutyStatus: (dutyId: string, status: 'CHECKED_IN' | 'ABSENT') => void;
