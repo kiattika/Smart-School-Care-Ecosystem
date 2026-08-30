@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
-import { writeBatch, doc, serverTimestamp, collection, getDocs } from 'firebase/firestore';
+import { writeBatch, doc, serverTimestamp, collection, getDocs, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useStore } from '../store';
 import { Student, Course, GlobalCourse, UserRole } from '../types';
@@ -101,6 +101,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   const [importType, setImportType] = useState<ImportType>(initialImportType || 'STUDENT');
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [rawParsedRows, setRawParsedRows] = useState<Record<string, any>[] | null>(null);
   const [previewData, setPreviewData] = useState<ValidatedRow[]>([]);
   const [isValidated, setIsValidated] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -120,13 +121,14 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
     }
   }, [isOpen, initialImportType]);
 
-  // Load real staff from Firestore for teacher matching
+  // Load real staff from Firestore for teacher matching — LIVE listener (onSnapshot)
+  // so การจับคู่ครูตอน import COURSE ไม่พึ่งจังหวะ fetch ครั้งเดียวอีกต่อไป
   useEffect(() => {
     if (!isOpen) return;
-    const fetchStaff = async () => {
-      setIsStaffLoading(true);
-      try {
-        const snap = await getDocs(collection(db, 'staff'));
+    setIsStaffLoading(true);
+    const unsubscribe = onSnapshot(
+      collection(db, 'staff'),
+      (snap) => {
         const staff = snap.docs.map(d => {
           const data = d.data();
           return {
@@ -140,13 +142,14 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           };
         });
         setRealStaffList(staff);
-      } catch (err) {
+        setIsStaffLoading(false);
+      },
+      (err) => {
         console.error('[BulkDataImportModal] Error loading staff roster:', err);
-      } finally {
         setIsStaffLoading(false);
       }
-    };
-    fetchStaff();
+    );
+    return () => unsubscribe();
   }, [isOpen]);
 
   // Load real student IDs from Firestore for PARENT import validation
@@ -232,8 +235,6 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
     return false;
   }, [importType, userRoles]);
 
-  if (!isOpen) return null;
-
   const templateFilename = (t: ImportType): string =>
     t === 'STUDENT' ? 'Student_Template.csv'
     : t === 'TEACHER' ? 'Teacher_Template.csv'
@@ -244,7 +245,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   const handleDownloadTemplate = () => {
     const templates: Record<ImportType, string> = {
       STUDENT: 'Student ID,Prefix,FirstName,LastName,Room,StudentNo,ParentMobile\n38501,นาย,กฤตยชญ์,บุญช่วย,ม.5/8,1,0812345678\n38502,นาย,ณัฐพล,สุขสบาย,ม.5/8,2,0898765432\n38503,นางสาว,สมศรี,ใจดี,ม.5/8,3,0861112233',
-      TEACHER: 'Teacher ID,Prefix,FirstName,LastName,Position,Email,Roles,Department\nteacher-01,นาย,ทวี,รักเรียน,ครู คศ.1,tawee@utd.ac.th,"SUBJECT_TEACHER,HOMEROOM_TEACHER",math-dept\nteacher-02,นางสาว,สมจิต,แข็งขัน,ครู คศ.2,somjit@utd.ac.th,SUBJECT_TEACHER,sci-dept\nteacher-03,นางสาว,พิมลวรรณ,ศรีงาม,ครูผู้ช่วย,pimonwan@utd.ac.th,SUBJECT_TEACHER,thai-dept',
+      // หมายเหตุ: teacher-04 เว้นคอลัมน์ Roles และ Department ว่าง → ระบบตั้งเป็น SUBJECT_TEACHER อัตโนมัติ
+      TEACHER: 'Teacher ID,Prefix,FirstName,LastName,Position,Email,Roles,Department\nteacher-01,นาย,ทวี,รักเรียน,ครู คศ.1,tawee@utd.ac.th,"SUBJECT_TEACHER,HOMEROOM_TEACHER",math-dept\nteacher-02,นางสาว,สมจิต,แข็งขัน,ครู คศ.2,somjit@utd.ac.th,SUBJECT_TEACHER,sci-dept\nteacher-03,นางสาว,พิมลวรรณ,ศรีงาม,ครูผู้ช่วย,pimonwan@utd.ac.th,GUIDANCE_COUNSELOR,thai-dept\nteacher-04,นาย,ประสงค์,ตั้งใจสอน,ครูผู้ช่วย,prasong@utd.ac.th,,',
       COURSE: 'Course Code,Course Name,Level,Room,Credits,Instructor ID\nTH32101,ภาษาไทย 3,ม.5,ม.5/8,1.5,teacher-somchai\nMA32101,คณิตศาสตร์พื้นฐาน 3,ม.5,ม.5/8,1.5,teacher-kiattisak\nSCI32201,ฟิสิกส์เพิ่มเติม 1,ม.5,ม.5/8,2.0,teacher-somjai\nEN32101,ภาษาอังกฤษ 3,ม.5,ม.5/8,1.0,teacher-weena',
       PARENT: 'Student ID,ParentPrefix,ParentFirstName,ParentLastName,ParentNationalId,ParentMobile,Relationship\n38501,นาย,สมชาย,บุญช่วย,1101700207269,0812345678,บิดา\n38502,นาง,มาลี,สุขสบาย,3100600258967,0898765432,มารดา\n38503,นาย,วิรัตน์,ใจดี,1409901259376,0861112233,ผู้ปกครอง',
     };
@@ -438,9 +440,22 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           errors.push('รูปแบบอีเมลไม่ถูกต้อง');
         }
 
-        const rolesArray: UserRole[] = rolesStr
+        // บทบาท: ถ้า admin กรอกคอลัมน์ Roles มา → ใช้ตามนั้น
+        // ถ้าเว้นว่าง (หรือกรอกแล้วเหลือ 0 หลัง trim) → ตั้งเป็นครูผู้สอนอัตโนมัติ
+        // (นำเข้ารายชื่อก่อน แล้วค่อยกำหนดบทบาทพิเศษทีหลังที่หน้า "จัดการสิทธิ์บุคลากร")
+        const parsedRoles = rolesStr
           ? (rolesStr.split(/[,;|]/).map(r => r.trim()).filter(Boolean) as UserRole[])
-          : ['SUBJECT_TEACHER'];
+          : [];
+        const rolesArray: UserRole[] = parsedRoles.length > 0 ? parsedRoles : ['SUBJECT_TEACHER'];
+        const usedRoleDefault = parsedRoles.length === 0;
+
+        const teacherWarnings: string[] = [];
+        if (usedRoleDefault) {
+          teacherWarnings.push('ℹ️ ไม่ได้ระบุบทบาท — ตั้งเป็นครูผู้สอน (SUBJECT_TEACHER) อัตโนมัติ');
+        }
+        if (!department) {
+          teacherWarnings.push('ℹ️ ไม่ได้ระบุกลุ่มสาระฯ — กำหนดภายหลังได้ที่หน้า "จัดการสิทธิ์บุคลากร"');
+        }
 
         return {
           id: rowId,
@@ -450,6 +465,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           col4: position || 'ครูผู้สอน',
           isValid,
           errorMessage: errors.length > 0 ? `⚠️ ${errors.join(', ')}` : undefined,
+          warnings: teacherWarnings.length > 0 ? teacherWarnings : undefined,
           parsedData: {
             teacherId,
             prefix: prefix || 'ครู',
@@ -459,6 +475,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             position: position || 'ครูผู้สอน',
             email,
             roles: rolesArray,
+            // กลุ่มสาระฯ เว้นว่างได้ ('' = ยังไม่ระบุ ไม่ถือเป็น error) — กำหนดทีหลังที่หน้าจัดการสิทธิ์
             departmentId: department || ''
           }
         };
@@ -639,9 +656,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               setImportError(`เกิดข้อผิดพลาดในการอ่านไฟล์ CSV: ${results.errors[0].message}`);
               return;
             }
-            const validated = validateRows(results.data, importType);
-            setPreviewData(validated);
-            setIsValidated(true);
+            // เก็บ raw rows ไว้ — การ validate จะทำผ่าน useEffect ที่ re-run เมื่อ staff/student list เปลี่ยน
+            setRawParsedRows(results.data);
           },
           error: (error) => {
             setImportError(`ไม่สามารถอ่านไฟล์ CSV ได้: ${error.message}`);
@@ -666,9 +682,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           return;
         }
 
-        const validated = validateRows(rawJson, importType);
-        setPreviewData(validated);
-        setIsValidated(true);
+        // เก็บ raw rows ไว้ — การ validate จะทำผ่าน useEffect ที่ re-run เมื่อ staff/student list เปลี่ยน
+        setRawParsedRows(rawJson);
       }
     } catch (err: any) {
       console.error('[BulkDataImportModal] Parsing Error:', err);
@@ -678,6 +693,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
 
   const handleRemoveFile = () => {
     setFile(null);
+    setRawParsedRows(null);
     setPreviewData([]);
     setIsValidated(false);
     setImportError(null);
@@ -687,6 +703,16 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   // Real batched Firestore writes (chunked <= 500)
   const handleConfirmImport = async () => {
     if (previewData.length === 0) return;
+
+    // กันไม่ให้ import ก่อนข้อมูลอ้างอิงโหลดเสร็จ (COURSE→staff, PARENT→students)
+    if (importType === 'COURSE' && isStaffLoading) {
+      alert('⏳ กำลังโหลดรายชื่อครูจากฐานข้อมูล กรุณารอสักครู่แล้วลองใหม่');
+      return;
+    }
+    if (importType === 'PARENT' && isStudentIdsLoading) {
+      alert('⏳ กำลังโหลดรายชื่อนักเรียนจากฐานข้อมูล กรุณารอสักครู่แล้วลองใหม่');
+      return;
+    }
 
     if (!hasPermissionForCurrentType) {
       alert(`❌ คุณไม่มีสิทธิ์ในการนำเข้าข้อมูลประเภท ${importType}`);
@@ -973,6 +999,22 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
     }
   };
 
+  // (Re)validate the preview whenever raw rows OR the roster data they are matched
+  // against change. This is the core fix: if staff/students finish loading AFTER the
+  // file was parsed, the preview is recomputed instead of showing a stale "ไม่พบบัญชีครู".
+  useEffect(() => {
+    if (!rawParsedRows) {
+      setPreviewData([]);
+      setIsValidated(false);
+      return;
+    }
+    setPreviewData(validateRows(rawParsedRows, importType));
+    setIsValidated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawParsedRows, importType, realStaffList, realStudentIds]);
+
+  if (!isOpen) return null;
+
   const validCount = previewData.filter(r => r.isValid).length;
   const invalidCount = previewData.filter(r => !r.isValid).length;
 
@@ -1133,6 +1175,15 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 ดาวน์โหลดไฟล์เทมเพลตตัวอย่าง ({templateFilename(importType)})
               </button>
             </div>
+
+            {importType === 'TEACHER' && (
+              <p className="text-[10px] text-slate-400 flex items-start gap-1.5">
+                <Info className="w-3 h-3 text-indigo-400 shrink-0 mt-0.5" />
+                คอลัมน์ <strong className="text-slate-300">Roles</strong> และ <strong className="text-slate-300">Department</strong> เว้นว่างได้ —
+                ระบบจะตั้งเป็น <strong className="text-slate-300">ครูผู้สอน (SUBJECT_TEACHER)</strong> ให้อัตโนมัติ
+                แล้วค่อยกำหนดบทบาทพิเศษ/กลุ่มสาระฯ ทีหลังที่หน้า "จัดการสิทธิ์บุคลากร"
+              </p>
+            )}
 
             {!file ? (
               <div
@@ -1346,19 +1397,31 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               </button>
             )}
 
-            <button
-              type="button"
-              onClick={handleConfirmImport}
-              disabled={isImporting || !file || validCount === 0 || !hasPermissionForCurrentType}
-              className={`px-5 py-2 text-xs font-bold rounded-xl transition-all shadow-md flex items-center gap-1.5 ${
-                !file || validCount === 0 || !hasPermissionForCurrentType
-                  ? 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
-                  : 'bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shadow-[0_4px_15px_rgba(99,102,241,0.25)] active:scale-[0.98]'
-              }`}
-            >
-              <Database className="w-4 h-4" />
-              ยืนยันการนำเข้าข้อมูล ({validCount} แถว)
-            </button>
+            {(() => {
+              // COURSE ต้องรอ staff list โหลดเสร็จก่อน (ไม่งั้นจับคู่ครูพลาด);
+              // PARENT ต้องรอ student IDs โหลดเสร็จก่อน (ไม่งั้น validate นักเรียนพลาด)
+              const rosterLoading =
+                (importType === 'COURSE' && isStaffLoading) ||
+                (importType === 'PARENT' && isStudentIdsLoading);
+              const disabled = isImporting || rosterLoading || !file || validCount === 0 || !hasPermissionForCurrentType;
+              return (
+                <button
+                  type="button"
+                  onClick={handleConfirmImport}
+                  disabled={disabled}
+                  className={`px-5 py-2 text-xs font-bold rounded-xl transition-all shadow-md flex items-center gap-1.5 ${
+                    disabled
+                      ? 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
+                      : 'bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shadow-[0_4px_15px_rgba(99,102,241,0.25)] active:scale-[0.98]'
+                  }`}
+                >
+                  <Database className="w-4 h-4" />
+                  {rosterLoading
+                    ? (importType === 'COURSE' ? 'กำลังโหลดรายชื่อครู...' : 'กำลังโหลดรายชื่อนักเรียน...')
+                    : `ยืนยันการนำเข้าข้อมูล (${validCount} แถว)`}
+                </button>
+              );
+            })()}
           </div>
         </div>
 

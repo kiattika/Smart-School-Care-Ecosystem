@@ -119,12 +119,19 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
   });
 
   describe('TASK 8 & ISSUE 1: Teacher Linkage & Email Matching', () => {
-    it('matches teacher by exact email or alias', () => {
+    it('matches teacher by exact email only (no per-person alias/hack)', () => {
       const match1 = matchTeacherByEmail('kiattisak@utd.ac.th', mockStaffList);
       expect(match1?.id).toBe('teacher-kiattisak-uid');
+      expect(match1?.email).toBe('kiattisak@utd.ac.th');
 
-      const match2 = matchTeacherByEmail('kiattika@utd.ac.th', mockStaffList);
+      // case-insensitive exact match is fine
+      const match2 = matchTeacherByEmail('  KIATTISAK@UTD.AC.TH ', mockStaffList);
       expect(match2?.id).toBe('teacher-kiattisak-uid');
+    });
+
+    it('returns undefined for an email not present in staff (no alias, no fabricated ID)', () => {
+      expect(matchTeacherByEmail('kiattika@utd.ac.th', mockStaffList)).toBeUndefined();
+      expect(matchTeacherByEmail('someone.else@utd.ac.th', mockStaffList)).toBeUndefined();
     });
 
     it('matches teacher by normalized display name and returns real UID and email', () => {
@@ -146,7 +153,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
         'กลุ่มสาระ': 'คณิตศาสตร์',
         'ที่': '1',
         'ชื่อ-สกุล': 'Mr.Kiattisak',
-        'อีเมล์': 'kiattika@utd.ac.th',
+        'อีเมล์': 'kiattisak@utd.ac.th',
         'ประจำชั้น': 'M.5/8',
         'ลำดับวิชา': '1',
         'รหัสวิชา': 'ค32201',
@@ -261,7 +268,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
 
       // Row 1
       expect(courseRows[0].teacherName).toBe('Mr.Kiattisak');
-      expect(courseRows[0].teacherEmail).toBe('kiattika@utd.ac.th');
+      expect(courseRows[0].teacherEmail).toBe('kiattisak@utd.ac.th');
       expect(courseRows[0].matchedTeacherId).toBe('teacher-kiattisak-uid');
       expect(courseRows[0].department).toBe('คณิตศาสตร์');
       expect(courseRows[0].homeroom).toBe('M.5/8');
@@ -269,7 +276,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
 
       // Row 2 (Forward-filled teacher info and email)
       expect(courseRows[1].teacherName).toBe('Mr.Kiattisak');
-      expect(courseRows[1].teacherEmail).toBe('kiattika@utd.ac.th');
+      expect(courseRows[1].teacherEmail).toBe('kiattisak@utd.ac.th');
       expect(courseRows[1].matchedTeacherId).toBe('teacher-kiattisak-uid');
       expect(courseRows[1].department).toBe('คณิตศาสตร์');
       expect(courseRows[1].homeroom).toBe('M.5/8');
