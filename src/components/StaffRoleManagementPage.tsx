@@ -78,11 +78,12 @@ export const DEPARTMENTS = [
   { id: 'foreign-dept', name: 'กลุ่มสาระฯ ภาษาต่างประเทศ' },
   { id: 'soc-dept', name: 'กลุ่มสาระฯ สังคมศึกษา ศาสนา และวัฒนธรรม' },
   { id: 'health-dept', name: 'กลุ่มสาระฯ สุขศึกษาและพลศึกษา' },
+  { id: 'career-dept', name: 'กลุ่มสาระฯ การงานอาชีพ' },
   { id: 'administration', name: 'ฝ่ายบริหารงานบุคคล' },
 ];
 
 const ROOM_OPTIONS = [
-  'ม.1/1', 'ม.1/2', 'ม.2/3', 'ม.4/1', 'ม.4/2', 'ม.5/1', 'ม.5/2', 'ม.5/8', 'ม.5/9'
+  'ม.1/1', 'ม.1/2', 'ม.2/3', 'ม.4/1', 'ม.4/2', 'ม.5/1', 'ม.5/2', 'ม.5/8', 'ม.5/9', 'ม.5/11'
 ];
 
 export function StaffRoleManagementPage() {
@@ -936,6 +937,7 @@ export function StaffRoleManagementPage() {
           let typeLabel = '';
           if (type === 'STUDENT') typeLabel = 'รายชื่อนักเรียน';
           else if (type === 'TEACHER') typeLabel = 'รายชื่อครูผู้สอน/สิทธิ์ประจำตัว';
+          else if (type === 'PARENT') typeLabel = 'ข้อมูลยืนยันตัวตนผู้ปกครอง (สำหรับเชื่อมบัญชี LINE)';
           else typeLabel = 'รายวิชาและตารางเรียน';
 
           triggerSweetAlert(

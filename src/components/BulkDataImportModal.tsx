@@ -28,7 +28,34 @@ import {
   THAI_DAY_MAP 
 } from '../utils/teacherLoadReportParser';
 
-export type ImportType = 'STUDENT' | 'TEACHER' | 'COURSE';
+export type ImportType = 'STUDENT' | 'TEACHER' | 'COURSE' | 'PARENT';
+
+// ค่าความสัมพันธ์ที่ยอมรับสำหรับการนำเข้าผู้ปกครอง
+const PARENT_RELATIONSHIPS = ['บิดา', 'มารดา', 'ผู้ปกครอง'] as const;
+
+/**
+ * ตรวจสอบเลขบัตรประชาชนไทย 13 หลักด้วย checksum มาตรฐาน
+ * (หลักที่ 13 = (11 - (Σ(digit[i] * (13 - i)) mod 11)) mod 10)
+ */
+function isValidThaiNationalId(raw: string): boolean {
+  const id = (raw || '').replace(/[\s-]/g, '');
+  if (!/^\d{13}$/.test(id)) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(id.charAt(i), 10) * (13 - i);
+  }
+  const check = (11 - (sum % 11)) % 10;
+  return check === parseInt(id.charAt(12), 10);
+}
+
+/** SHA-256 → hex (Web Crypto API, ฝั่ง client — เลขบัตรดิบไม่ถูกส่ง/เก็บที่ใดนอกจาก hash) */
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(digest))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
 
 export interface BulkDataImportModalProps {
   isOpen: boolean;
@@ -81,6 +108,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   const [importError, setImportError] = useState<string | null>(null);
   const [realStaffList, setRealStaffList] = useState<Array<{ id: string; fullName?: string; firstName?: string; lastName?: string; displayName?: string; email?: string; prefix?: string }>>([]);
   const [isStaffLoading, setIsStaffLoading] = useState(false);
+  const [realStudentIds, setRealStudentIds] = useState<Set<string>>(new Set());
+  const [isStudentIdsLoading, setIsStudentIdsLoading] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -118,6 +147,29 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
       }
     };
     fetchStaff();
+  }, [isOpen]);
+
+  // Load real student IDs from Firestore for PARENT import validation
+  useEffect(() => {
+    if (!isOpen) return;
+    const fetchStudentIds = async () => {
+      setIsStudentIdsLoading(true);
+      try {
+        const snap = await getDocs(collection(db, 'students'));
+        const ids = new Set<string>();
+        snap.docs.forEach(d => {
+          ids.add(d.id);
+          const sid = d.data().studentId;
+          if (sid) ids.add(String(sid));
+        });
+        setRealStudentIds(ids);
+      } catch (err) {
+        console.error('[BulkDataImportModal] Error loading student roster:', err);
+      } finally {
+        setIsStudentIdsLoading(false);
+      }
+    };
+    fetchStudentIds();
   }, [isOpen]);
 
   // Access current user role from store
@@ -168,6 +220,9 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
     if (importType === 'TEACHER') {
       return isSuperAdmin;
     }
+    if (importType === 'PARENT') {
+      return isSuperAdmin;
+    }
     if (importType === 'STUDENT') {
       return isSuperAdmin || isHomeroom;
     }
@@ -179,21 +234,22 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
 
   if (!isOpen) return null;
 
-  // Download template CSV file
+  const templateFilename = (t: ImportType): string =>
+    t === 'STUDENT' ? 'Student_Template.csv'
+    : t === 'TEACHER' ? 'Teacher_Template.csv'
+    : t === 'PARENT' ? 'Parent_Template.csv'
+    : 'Course_Template.csv';
+
+  // Download template CSV file — header row ต้องตรงกับที่ validateRows()/parser คาดหวัง
   const handleDownloadTemplate = () => {
-    let headers = '';
-    let filename = '';
-    
-    if (importType === 'STUDENT') {
-      headers = 'Student ID,Prefix,FirstName,LastName,Room,StudentNo,ParentMobile\n38501,นาย,กฤตยชญ์,บุญช่วย,ม.5/8,1,0812345678\n38502,นาย,ณัฐพล,สุขสบาย,ม.5/8,2,0898765432\n38503,นางสาว,สมศรี,ใจดี,ม.5/8,3,0861112233';
-      filename = 'Student_Template.csv';
-    } else if (importType === 'TEACHER') {
-      headers = 'Teacher ID,Prefix,FirstName,LastName,Position,Email,Roles,Department\nteacher-01,นาย,ทวี,รักเรียน,ครู คศ.1,tawee@utd.ac.th,"SUBJECT_TEACHER,HOMEROOM_TEACHER",math-dept\nteacher-02,นางสาว,สมจิต,แข็งขัน,ครู คศ.2,somjit@utd.ac.th,SUBJECT_TEACHER,sci-dept\nteacher-03,นางสาว,พิมลวรรณ,ศรีงาม,ครูผู้ช่วย,pimonwan@utd.ac.th,SUBJECT_TEACHER,thai-dept';
-      filename = 'Teacher_Template.csv';
-    } else {
-      headers = 'Course Code,Course Name,Level,Room,Credits,Instructor ID\nTH32101,ภาษาไทย 3,ม.5,ม.5/8,1.5,teacher-somchai\nMA32101,คณิตศาสตร์พื้นฐาน 3,ม.5,ม.5/8,1.5,teacher-kiattisak\nSCI32201,ฟิสิกส์เพิ่มเติม 1,ม.5,ม.5/8,2.0,teacher-somjai\nEN32101,ภาษาอังกฤษ 3,ม.5,ม.5/8,1.0,teacher-weena';
-      filename = 'Course_Template.csv';
-    }
+    const templates: Record<ImportType, string> = {
+      STUDENT: 'Student ID,Prefix,FirstName,LastName,Room,StudentNo,ParentMobile\n38501,นาย,กฤตยชญ์,บุญช่วย,ม.5/8,1,0812345678\n38502,นาย,ณัฐพล,สุขสบาย,ม.5/8,2,0898765432\n38503,นางสาว,สมศรี,ใจดี,ม.5/8,3,0861112233',
+      TEACHER: 'Teacher ID,Prefix,FirstName,LastName,Position,Email,Roles,Department\nteacher-01,นาย,ทวี,รักเรียน,ครู คศ.1,tawee@utd.ac.th,"SUBJECT_TEACHER,HOMEROOM_TEACHER",math-dept\nteacher-02,นางสาว,สมจิต,แข็งขัน,ครู คศ.2,somjit@utd.ac.th,SUBJECT_TEACHER,sci-dept\nteacher-03,นางสาว,พิมลวรรณ,ศรีงาม,ครูผู้ช่วย,pimonwan@utd.ac.th,SUBJECT_TEACHER,thai-dept',
+      COURSE: 'Course Code,Course Name,Level,Room,Credits,Instructor ID\nTH32101,ภาษาไทย 3,ม.5,ม.5/8,1.5,teacher-somchai\nMA32101,คณิตศาสตร์พื้นฐาน 3,ม.5,ม.5/8,1.5,teacher-kiattisak\nSCI32201,ฟิสิกส์เพิ่มเติม 1,ม.5,ม.5/8,2.0,teacher-somjai\nEN32101,ภาษาอังกฤษ 3,ม.5,ม.5/8,1.0,teacher-weena',
+      PARENT: 'Student ID,ParentPrefix,ParentFirstName,ParentLastName,ParentNationalId,ParentMobile,Relationship\n38501,นาย,สมชาย,บุญช่วย,1101700207269,0812345678,บิดา\n38502,นาง,มาลี,สุขสบาย,3100600258967,0898765432,มารดา\n38503,นาย,วิรัตน์,ใจดี,1409901259376,0861112233,ผู้ปกครอง',
+    };
+    const headers = templates[importType];
+    const filename = templateFilename(importType);
 
     const bom = '\uFEFF';
     const blob = new Blob([bom + headers], { type: 'text/csv;charset=utf-8;' });
@@ -405,6 +461,79 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             roles: rolesArray,
             departmentId: department || ''
           }
+        };
+      } else if (type === 'PARENT') {
+        // PARENT — ข้อมูลยืนยันตัวตนผู้ปกครองสำหรับเทียบตอนเชื่อมบัญชี LINE (LIFF) ครั้งแรก
+        const studentId = getFieldValue(normalized, ['studentid', 'id', 'studentcode', 'code', 'รหัสนักเรียน', 'รหัสประจำตัว', 'เลขประจำตัว']);
+        const parentPrefix = getFieldValue(normalized, ['parentprefix', 'prefix', 'คำนำหน้า', 'คำนำหน้าผู้ปกครอง']);
+        const parentFirstName = getFieldValue(normalized, ['parentfirstname', 'firstname', 'ชื่อผู้ปกครอง', 'ชื่อ']);
+        const parentLastName = getFieldValue(normalized, ['parentlastname', 'lastname', 'นามสกุลผู้ปกครอง', 'นามสกุล']);
+        const parentNationalIdRaw = getFieldValue(normalized, ['parentnationalid', 'nationalid', 'idcard', 'citizenid', 'เลขบัตรประชาชน', 'เลขประจำตัวประชาชน']);
+        const parentMobile = getFieldValue(normalized, ['parentmobile', 'parentphone', 'mobile', 'phone', 'เบอร์โทรผู้ปกครอง', 'เบอร์ผู้ปกครอง', 'เบอร์โทร']);
+        const relationship = getFieldValue(normalized, ['relationship', 'relation', 'ความสัมพันธ์', 'เกี่ยวข้องเป็น']);
+
+        const parentNationalId = parentNationalIdRaw.replace(/[\s-]/g, '');
+        const fullName = `${parentPrefix}${parentFirstName} ${parentLastName}`.trim();
+
+        let isValid = true;
+        const errors: string[] = [];
+
+        if (!studentId) {
+          isValid = false;
+          errors.push('ขาดรหัสประจำตัวนักเรียน (Student ID)');
+        } else if (realStudentIds.size > 0 && !realStudentIds.has(studentId)) {
+          isValid = false;
+          errors.push(`ไม่พบรหัสนักเรียน ${studentId} ในระบบ (students collection)`);
+        } else if (seenIds.has(studentId)) {
+          isValid = false;
+          errors.push(`มีข้อมูลผู้ปกครองของนักเรียน ${studentId} ซ้ำในไฟล์ (1 นักเรียนต่อ 1 แถว)`);
+        } else {
+          seenIds.add(studentId);
+        }
+
+        if (!parentFirstName || !parentLastName) {
+          isValid = false;
+          errors.push('ขาดชื่อ-นามสกุลผู้ปกครอง');
+        }
+
+        if (!parentNationalId) {
+          isValid = false;
+          errors.push('ขาดเลขบัตรประชาชนผู้ปกครอง');
+        } else if (!isValidThaiNationalId(parentNationalId)) {
+          isValid = false;
+          errors.push('เลขบัตรประชาชนไม่ถูกต้อง (checksum หลักที่ 13 ไม่ผ่าน)');
+        }
+
+        if (parentMobile && !phoneRegex.test(parentMobile.replace(/[-\s]/g, ''))) {
+          isValid = false;
+          errors.push('เบอร์โทรผู้ปกครองไม่ถูกต้อง (ตัวเลข 9-10 หลักขึ้นต้นด้วย 0)');
+        }
+
+        if (!relationship) {
+          isValid = false;
+          errors.push('ขาดการระบุความสัมพันธ์');
+        } else if (!PARENT_RELATIONSHIPS.includes(relationship as any)) {
+          isValid = false;
+          errors.push(`ความสัมพันธ์ต้องเป็น ${PARENT_RELATIONSHIPS.join(' / ')} เท่านั้น`);
+        }
+
+        return {
+          id: rowId,
+          col1: studentId || 'ไม่มีข้อมูล',
+          col2: fullName || 'ไม่มีข้อมูล',
+          col3: relationship || 'ไม่ระบุ',
+          col4: parentMobile ? parentMobile.replace(/[-\s]/g, '') : 'ไม่ระบุเบอร์',
+          isValid,
+          errorMessage: errors.length > 0 ? `⚠️ ${errors.join(', ')}` : undefined,
+          parsedData: {
+            studentId,
+            parentPrefix: parentPrefix || '',
+            parentFirstName,
+            parentLastName,
+            parentNationalId, // ดิบ — อยู่ใน state ชั่วคราวเท่านั้น, จะถูก hash ก่อนเขียน Firestore
+            parentMobile: parentMobile ? parentMobile.replace(/[-\s]/g, '') : '',
+            relationship,
+          },
         };
       } else {
         // COURSE
@@ -667,6 +796,27 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             batch.set(teacherRef, teacherPayload, { merge: true });
             batch.set(staffRef, teacherPayload, { merge: true });
 
+          } else if (importType === 'PARENT') {
+            // PARENT — เขียนเป็น parent_verification_records/{studentId}_verify
+            // เลขบัตรประชาชนถูก hash (SHA-256) ฝั่ง client ก่อนเสมอ — ไม่เก็บค่าดิบใน Firestore
+            const verifyRef = doc(db, 'parent_verification_records', `${parsedData.studentId}_verify`);
+            const parentNationalIdHash = await sha256Hex(parsedData.parentNationalId);
+
+            batch.set(verifyRef, {
+              id: `${parsedData.studentId}_verify`,
+              studentId: parsedData.studentId,
+              parentPrefix: parsedData.parentPrefix || '',
+              parentFirstName: parsedData.parentFirstName,
+              parentLastName: parsedData.parentLastName,
+              parentNationalIdHash,
+              parentMobile: parsedData.parentMobile || '',
+              relationship: parsedData.relationship,
+              linkedParentUid: null,   // null จนกว่าผู้ปกครองจะเชื่อมบัญชี LINE สำเร็จจริง
+              linkedAt: null,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+
           } else {
             // COURSE Import
             if (parsedData.isTeacherLoadReport) {
@@ -862,7 +1012,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               <div>
                 <h4 className="text-xs font-bold">แจ้งเตือนสิทธิ์การเข้าถึงข้อมูล</h4>
                 <p className="text-[11px] text-amber-200/90 mt-0.5">
-                  บทบาทปัจจุบันของคุณ ({userRoles.map(r => ROLE_NAMES_TH[r] || r).join(', ') || 'ไม่มีบทบาท'}) ไม่มีสิทธิ์ในการนำเข้าข้อมูลประเภท <strong>{importType === 'TEACHER' ? 'บุคลากร (ต้องเป็น Super Admin)' : importType === 'STUDENT' ? 'นักเรียน (ต้องเป็น Super Admin หรือ ครูประจำชั้น)' : 'ตารางสอน (ต้องเป็น Super Admin หรือ ครู)'}</strong>
+                  บทบาทปัจจุบันของคุณ ({userRoles.map(r => ROLE_NAMES_TH[r] || r).join(', ') || 'ไม่มีบทบาท'}) ไม่มีสิทธิ์ในการนำเข้าข้อมูลประเภท <strong>{importType === 'TEACHER' ? 'บุคลากร (ต้องเป็น Super Admin)' : importType === 'PARENT' ? 'ข้อมูลยืนยันตัวตนผู้ปกครอง (ต้องเป็น Super Admin)' : importType === 'STUDENT' ? 'นักเรียน (ต้องเป็น Super Admin หรือ ครูประจำชั้น)' : 'ตารางสอน (ต้องเป็น Super Admin หรือ ครู)'}</strong>
                 </p>
               </div>
             </div>
@@ -890,11 +1040,12 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
               ขั้นตอนที่ 1: เลือกประเภทข้อมูลที่ต้องการนำเข้า
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {[
                 { type: 'STUDENT', label: 'รายชื่อนักเรียนในสังกัด', desc: 'ข้อมูลรหัสประจำตัว, ชื่อ-นามสกุล, ห้องประจำชั้น, เลขที่' },
                 { type: 'TEACHER', label: 'รายชื่อครูและบุคลากร', desc: 'ข้อมูลรหัสบุคลากร, ชื่อ, อีเมล, สิทธิบทบาทเบื้องต้น' },
-                { type: 'COURSE', label: 'ตารางสอนและวิชาเรียน', desc: 'ข้อมูลรหัสวิชา, ชื่อวิชา, หน่วยกิต, ห้องเรียนที่เปิดสอน' }
+                { type: 'COURSE', label: 'ตารางสอนและวิชาเรียน', desc: 'ข้อมูลรหัสวิชา, ชื่อวิชา, หน่วยกิต, ห้องเรียนที่เปิดสอน' },
+                { type: 'PARENT', label: 'ข้อมูลยืนยันตัวตนผู้ปกครอง', desc: 'Student ID, ชื่อผู้ปกครอง, เลขบัตร ปชช. (hash), เบอร์, ความสัมพันธ์ — สำหรับเชื่อมบัญชี LINE' }
               ].map(item => {
                 const isSelected = importType === item.type;
                 return (
@@ -947,6 +1098,24 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             </div>
           )}
 
+          {/* PARENT import — คำอธิบายสถาปัตยกรรมและ PDPA */}
+          {importType === 'PARENT' && (
+            <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-4 flex items-start gap-3 text-indigo-200 animate-in fade-in">
+              <ShieldAlert className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <h4 className="text-xs font-bold text-indigo-300">ข้อมูลยืนยันตัวตนผู้ปกครอง (ยังไม่ใช่บัญชี login)</h4>
+                <p className="text-[11px] leading-relaxed">
+                  ผู้ปกครองจะล็อกอินผ่าน LINE (LIFF) ในอนาคต — ตอนนี้จึงยังไม่มี Firebase Auth UID จริง
+                  ข้อมูลนี้เขียนลง collection <strong>parent_verification_records</strong> (1 เอกสารต่อ 1 นักเรียน)
+                  เพื่อให้ระบบเทียบยืนยันตอนผู้ปกครองเชื่อมบัญชี LINE ครั้งแรก แล้วจึงเติม <code>linkedParentUid</code>
+                </p>
+                <p className="text-[11px] leading-relaxed text-amber-300/90">
+                  🔒 เลขบัตรประชาชนจะถูกทำ hash (SHA-256) ในเบราว์เซอร์ก่อนส่งเสมอ — <strong>ไม่มีการเก็บเลขบัตรแบบข้อความธรรมดาใน Firestore</strong> ตาม PDPA
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* 2. Drag & Drop Upload Zone + Download Template */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -961,7 +1130,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
-                ดาวน์โหลดไฟล์เทมเพลตตัวอย่าง ({importType === 'STUDENT' ? 'Student_Template.csv' : importType === 'TEACHER' ? 'Teacher_Template.csv' : 'Course_Template.csv'})
+                ดาวน์โหลดไฟล์เทมเพลตตัวอย่าง ({templateFilename(importType)})
               </button>
             </div>
 
@@ -1050,16 +1219,16 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                       <tr className="bg-slate-900/50 border-b border-white/5 text-slate-400 text-[11px] font-semibold sticky top-0 z-10 backdrop-blur-md">
                         <th className="px-4 py-3 text-center w-12">แถวที่</th>
                         <th className="px-4 py-3">
-                          {importType === 'STUDENT' ? 'รหัสนักเรียน' : importType === 'TEACHER' ? 'รหัสประจำตัวครู' : 'รหัสวิชา'}
+                          {importType === 'STUDENT' ? 'รหัสนักเรียน' : importType === 'TEACHER' ? 'รหัสประจำตัวครู' : importType === 'PARENT' ? 'รหัสนักเรียน (ของบุตร)' : 'รหัสวิชา'}
                         </th>
                         <th className="px-4 py-3">
-                          {importType === 'STUDENT' ? 'ชื่อ-นามสกุลนักเรียน' : importType === 'TEACHER' ? 'ชื่อ-นามสกุลบุคลากร' : 'ชื่อวิชาเรียน'}
+                          {importType === 'STUDENT' ? 'ชื่อ-นามสกุลนักเรียน' : importType === 'TEACHER' ? 'ชื่อ-นามสกุลบุคลากร' : importType === 'PARENT' ? 'ชื่อ-นามสกุลผู้ปกครอง' : 'ชื่อวิชาเรียน'}
                         </th>
                         <th className="px-4 py-3">
-                          {importType === 'STUDENT' ? 'ห้องเรียน' : importType === 'TEACHER' ? 'อีเมลโรงเรียน' : 'ระดับชั้น / หน่วยกิต'}
+                          {importType === 'STUDENT' ? 'ห้องเรียน' : importType === 'TEACHER' ? 'อีเมลโรงเรียน' : importType === 'PARENT' ? 'ความสัมพันธ์' : 'ระดับชั้น / หน่วยกิต'}
                         </th>
                         <th className="px-4 py-3">
-                          {importType === 'STUDENT' ? 'เลขที่' : importType === 'TEACHER' ? 'ตำแหน่งหลัก' : 'ห้องประจำวิชา'}
+                          {importType === 'STUDENT' ? 'เลขที่' : importType === 'TEACHER' ? 'ตำแหน่งหลัก' : importType === 'PARENT' ? 'เบอร์โทร' : 'ห้องประจำวิชา'}
                         </th>
                         <th className="px-4 py-3">สถานะตรวจสอบ</th>
                       </tr>
