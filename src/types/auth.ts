@@ -2,7 +2,10 @@
 export type UserRole = 
   | 'SUPER_ADMIN'          // แอดมินดูแลระบบ
   | 'EXECUTIVE'            // ผู้อำนวยการ / รองผู้อำนวยการ
-  | 'HEAD_OF_DEPARTMENT'   // หัวหน้ากลุ่มสาระการเรียนรู้
+  | 'HEAD_OF_DEPARTMENT'   // หัวหน้ากลุ่มสาระการเรียนรู้ (Stage 1)
+  | 'ACADEMIC_HEAD'        // หัวหน้าฝ่ายวิชาการและหลักสูตร (Stage 2)
+  | 'DEPUTY_DIRECTOR_ACADEMIC' // รองผู้อำนวยการฝ่ายวิชาการ (Stage 3)
+  | 'DIRECTOR'             // ผู้อำนวยการโรงเรียน (Stage 4)
   | 'HOMEROOM_TEACHER'     // ครูประจำชั้น
   | 'SUBJECT_TEACHER'      // ครูผู้สอน / ครูประจำวิชา
   | 'SUPERVISORY_TEACHER'  // ครูนิเทศ
@@ -69,6 +72,24 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'APPROVE_GRADES',
     'EDIT_GRADES',
     'VIEW_DEPT_REPORTS',
+    'EVALUATE_TEACHERS'
+  ],
+  ACADEMIC_HEAD: [
+    'MANAGE_SUPERVISION',
+    'APPROVE_GRADES',
+    'VIEW_ALL_REPORTS',
+    'EVALUATE_TEACHERS'
+  ],
+  DEPUTY_DIRECTOR_ACADEMIC: [
+    'APPROVE_GRADES',
+    'VIEW_ALL_REPORTS',
+    'EVALUATE_TEACHERS',
+    'MANAGE_SUPERVISION'
+  ],
+  DIRECTOR: [
+    'MANAGE_SYSTEM',
+    'APPROVE_GRADES',
+    'VIEW_ALL_REPORTS',
     'EVALUATE_TEACHERS'
   ],
   HOMEROOM_TEACHER: [

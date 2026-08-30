@@ -164,12 +164,56 @@ export interface PeriodSwap {
   status: 'PENDING_TEACHER' | 'PENDING_ADMIN' | 'APPROVED' | 'REJECTED';
 }
 
+export type SubstituteApprovalStage = 
+  | 'STAGE_1_HEAD_OF_DEPARTMENT'
+  | 'STAGE_2_ACADEMIC_HEAD'
+  | 'STAGE_3_DEPUTY_DIRECTOR_ACADEMIC'
+  | 'STAGE_4_DIRECTOR'
+  | 'COMPLETED';
+
+export interface SubstituteApprovalStep {
+  stage: SubstituteApprovalStage;
+  approverRole: string;
+  approverName: string;
+  approverEmail: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  approvedAt?: string;
+  comment?: string;
+}
+
 export interface SubstituteAssignment {
   id: string;
   originalTeacherEmail: string;
+  originalTeacherName?: string;
   substituteTeacherEmail: string;
+  substituteTeacherName?: string;
   courseId: string;
+  courseCode?: string;
+  courseName?: string;
+  room?: string;
+  periodName?: string;
+  schedule?: string;
   date: string;
+  departmentName?: string;
+  departmentId?: string;
+  status?: 'PENDING_ASSIGNMENT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
+  currentApprovalStage?: SubstituteApprovalStage;
+  approvalChain?: SubstituteApprovalStep[];
+  rejectionReason?: string;
+  rejectedAt?: string;
+  rejectedByRole?: string;
+  rejectedByName?: string;
+  triggerSource?: 'SICK_LEAVE' | 'LEAVE_REQUEST' | 'DIRECT_ASSIGNMENT';
+  leaveRequestId?: string;
+  notes?: string;
+  isCompleted?: boolean;
+  completedAt?: string;
+  completionSummary?: string;
+  completionProblems?: string;
+  completionSolutions?: string;
+  isLate?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface HomeVisit {

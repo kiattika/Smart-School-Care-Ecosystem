@@ -8,9 +8,11 @@ import {
   updateDoc, 
   setDoc, 
   addDoc, 
+  deleteDoc,
   runTransaction, 
   serverTimestamp,
-  orderBy
+  orderBy,
+  onSnapshot
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { 
@@ -22,11 +24,14 @@ import {
   PHQ9Screening,
   SDQAssessment,
   SubstituteAssignment,
+  SubstituteApprovalStage,
+  SubstituteApprovalStep,
   PostTeachingRecord,
   ParentTeacherMessage,
   ParentAppointment,
   BillingInvoice,
-  ActiveLearningRecord
+  ActiveLearningRecord,
+  UserProfile
 } from '../types';
 import { SchoolGeofenceConfig } from '../utils/geoUtils';
 
@@ -741,6 +746,63 @@ export async function saveSubstituteAssignmentFirestore(assignment: SubstituteAs
     }, { merge: true });
   } catch (error) {
     console.warn('[saveSubstituteAssignmentFirestore] Firestore notice:', error);
+  }
+}
+
+export function subscribeSubstituteAssignments(onUpdate: (assignments: SubstituteAssignment[]) => void): () => void {
+  const collectionPath = 'substitute_assignments';
+  try {
+    const ref = collection(db, collectionPath);
+    return onSnapshot(ref, (snapshot) => {
+      const list: SubstituteAssignment[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as SubstituteAssignment);
+      });
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeSubstituteAssignments] Listener error:', error);
+    });
+  } catch (error) {
+    console.warn('[subscribeSubstituteAssignments] Setup error:', error);
+    return () => {};
+  }
+}
+
+export function subscribePostTeachingRecords(onUpdate: (records: PostTeachingRecord[]) => void): () => void {
+  const collectionPath = 'post_teaching_records';
+  try {
+    const ref = collection(db, collectionPath);
+    return onSnapshot(ref, (snapshot) => {
+      const list: PostTeachingRecord[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as PostTeachingRecord);
+      });
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribePostTeachingRecords] Listener error:', error);
+    });
+  } catch (error) {
+    console.warn('[subscribePostTeachingRecords] Setup error:', error);
+    return () => {};
+  }
+}
+
+export function subscribeStaffList(onUpdate: (staff: UserProfile[]) => void): () => void {
+  const collectionPath = 'staff';
+  try {
+    const ref = collection(db, collectionPath);
+    return onSnapshot(ref, (snapshot) => {
+      const list: UserProfile[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push(docSnap.data() as UserProfile);
+      });
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeStaffList] Listener error:', error);
+    });
+  } catch (error) {
+    console.warn('[subscribeStaffList] Setup error:', error);
+    return () => {};
   }
 }
 

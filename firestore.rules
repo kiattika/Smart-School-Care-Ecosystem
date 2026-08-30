@@ -183,12 +183,24 @@ service cloud.firestore {
     // 18. Substitute Teaching Assignments & Post Teaching Records
     match /substitute_assignments/{assignmentId} {
       allow read: if isSignedIn();
-      allow write: if hasRole('SUPER_ADMIN') || hasRole('HEAD_OF_DEPARTMENT') || hasRole('EXECUTIVE') || hasRole('SUBJECT_TEACHER');
+      allow write: if hasRole('SUPER_ADMIN') || 
+                      hasRole('HEAD_OF_DEPARTMENT') || 
+                      hasRole('ACADEMIC_HEAD') || 
+                      hasRole('DEPUTY_DIRECTOR_ACADEMIC') || 
+                      hasRole('DIRECTOR') || 
+                      hasRole('EXECUTIVE') || 
+                      hasRole('SUBJECT_TEACHER');
     }
 
     match /post_teaching_records/{recordId} {
       allow read: if isSignedIn();
-      allow write: if hasRole('SUPER_ADMIN') || hasRole('HEAD_OF_DEPARTMENT') || hasRole('SUBJECT_TEACHER');
+      allow write: if hasRole('SUPER_ADMIN') || 
+                      hasRole('HEAD_OF_DEPARTMENT') || 
+                      hasRole('ACADEMIC_HEAD') || 
+                      hasRole('DEPUTY_DIRECTOR_ACADEMIC') || 
+                      hasRole('DIRECTOR') || 
+                      hasRole('EXECUTIVE') || 
+                      hasRole('SUBJECT_TEACHER');
     }
 
     // 19. Student Health & Mental Screenings (2Q, PHQ-9, SDQ)
