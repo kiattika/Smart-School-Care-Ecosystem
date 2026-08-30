@@ -105,6 +105,42 @@ allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') ||
 - ผังที่นั่งต้องเป็นกลุ่ม (group) ที่มี capacity อิสระต่อกลุ่ม ไม่ใช่ template แบบตายตัว (`'2-2-2-2'` เป็น string enum) — ต้องรองรับรูปแบบกลุ่มขนาดต่างกันได้อิสระ
 - Seat assignment ต้องเก็บประวัติ (`effectiveFrom`/`effectiveTo`) ไม่ overwrite ทับตอนมีคนย้ายที่นั่ง/กลับมาเรียน
 
+### ข้อมูลผู้ปกครอง (Parent Verification)
+- ผู้ปกครอง login ผ่าน LINE ไม่ใช่ email/password — ข้อมูลที่ import ล่วงหน้าคือ "ข้อมูลยืนยันตัวตน" (`parent_verification_records`) ไม่ใช่บัญชี login โดยตรง
+- ผูกกับนักเรียนด้วย Student ID (5 หลัก) + เลขบัตรประชาชนผู้ปกครอง (13 หลัก, ต้อง validate checksum จริง) เป็น 2 ปัจจัยยืนยัน
+- **ห้ามเก็บเลขบัตรประชาชนแบบ plaintext ใน Firestore เด็ดขาด** ต้อง hash (SHA-256) ก่อนเก็บเสมอ — เป็นข้อมูลอ่อนไหวตาม PDPA
+- `linkedParentUid` ต้องเป็น `null` จนกว่าผู้ปกครองจะเชื่อมบัญชี LINE จริงสำเร็จ ห้าม fabricate
+
+### บทบาทเริ่มต้นของครู/บุคลากรที่ import
+- ถ้าคอลัมน์ Roles ในไฟล์ import ว่างเปล่า ให้ default เป็น `['SUBJECT_TEACHER']` เสมอ (ตาม workflow จริง: import ตัวบุคคลก่อน ค่อยไปกำหนดบทบาทพิเศษทีหลังที่หน้า "จัดการสิทธิ์บุคลากร")
+- ถ้าไฟล์ระบุ Roles มาแล้ว ห้าม override ทับด้วย default
+
+---
+
+## บทเรียนจากการ debug จริง (Environment & Process)
+
+### Windows Firewall บล็อก Firestore Emulator (Java) แบบเงียบๆ
+- Auth Emulator รันด้วย Node.js (มักผ่าน firewall เพราะมักมี rule "Node.js JavaScript Runtime" อยู่แล้ว) แต่ **Firestore Emulator รันด้วย Java** ซึ่งอาจไม่มี firewall rule อนุญาตไว้เลย
+- อาการ: log ขึ้นว่า "Firestore Emulator was started" สำเร็จปกติ, `netstat` ไม่เจอ port listen, `Test-NetConnection` port 8080 fail แต่ port 9099 (Auth) ผ่าน, `firestore-debug.log` มี `SocketException: Connection reset`
+- วิธีเช็ค: `Test-NetConnection -ComputerName 127.0.0.1 -Port 8080` แล้วดู `TcpTestSucceeded`
+- วิธีแก้: เปิด PowerShell แบบ Administrator แล้ว `New-NetFirewallRule -DisplayName "Firestore Emulator Port 8080" -Direction Inbound -LocalPort 8080 -Protocol TCP -Action Allow`
+
+### ห้ามสร้าง fallback ที่ปลอมตัวเป็น "login/connection สำเร็จ" เพื่อบัง error จริง
+- เคยเจอโค้ด `buildDevUserFromEmail`/`createDevMockUser` ที่ปลอม session เมื่อ Firebase Auth เชื่อมต่อไม่ได้ (gate ด้วย `import.meta.env.DEV` ก็ยังห้าม) — ทำให้ debug ปัญหาจริง (เช่น emulator ไม่รัน, firewall บล็อก) สับสนมาก เพราะดูเหมือน login ผ่านทั้งที่ backend ไม่เชื่อมเลย
+- ถ้า auth/connection ล้มเหลว ให้ throw error ตรงๆ แสดงข้อความชัดเจนเสมอ ห้าม fallback แบบเงียบๆ
+
+### ห้าม hardcode รายชื่อ/อีเมลเฉพาะบุคคลเป็น special-case ในโค้ด matching
+- เคยเจอ `matchTeacherByEmail()` มี hardcoded `kiattisakEmails` array (รวมอีเมลของคนคนเดียวหลายแบบ) เป็นทางลัดกรณีจับคู่ไม่เจอ — เป็น hack ที่ไม่แก้ปัญหาจริง (root cause มักเป็นเรื่อง stale data) แถมไม่ scale เมื่อมีครูคนอื่นที่ชื่อ/อีเมลไม่ตรงแบบเดียวกัน
+- ถ้าจับคู่ไม่เจอ ให้หา root cause จริง (ข้อมูลใน Firestore ยังไม่มี, fetch ยังไม่เสร็จ/เป็นข้อมูลเก่า ฯลฯ) ไม่ใช่เพิ่ม exception list เฉพาะราย
+
+### Fetch ข้อมูลอ้างอิง (เช่น staff list สำหรับจับคู่) ต้องเป็นข้อมูลสดเสมอ
+- เคยเจอบั๊ก: `realStaffList` (ใช้จับคู่ครูตอน import ตารางสอน) ดึงด้วย `getDocs()` แค่ครั้งเดียวตอน modal เปิด (`useEffect` ผูกกับ `isOpen`) — ถ้า import ครูสำเร็จแล้วสลับมา import ตารางสอนต่อในหน้าเดียวกันโดยไม่ปิด-เปิด modal ใหม่ จะใช้ข้อมูลเก่าที่ไม่มีครูที่เพิ่ง import
+- ข้อมูลอ้างอิงที่ใช้ cross-reference ระหว่างการ import ควรใช้ `onSnapshot` (live listener) แทน `getDocs` ครั้งเดียว หรืออย่างน้อย refetch ทุกครั้งที่เปลี่ยนประเภทข้อมูลที่กำลัง import
+
+### ปิด Firebase Emulator ด้วย `Ctrl+C` เท่านั้น ห้าม force-kill ระหว่างมีข้อมูลสำคัญ
+- `npx kill-port` ข้ามขั้นตอน `--export-on-exit` ทำให้ข้อมูล seed/import ที่ยังไม่ได้ export หายทั้งหมด — เคยเป็นสาเหตุที่ทำให้ seed accounts (เช่น `kiattika@utd.ac.th`) หายไปกลางคันระหว่าง debug ปัญหาอื่น
+- ใช้ `npx kill-port` เฉพาะตอนหาหน้าต่างเดิมไม่เจอจริงๆ เท่านั้น
+
 ---
 
 ## เมื่อไม่แน่ใจ
