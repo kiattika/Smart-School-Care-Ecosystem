@@ -482,9 +482,27 @@ export function parseTeacherLoadReport(
       unlinkedTeacherName,
       unlinkedTeacherEmail,
     });
+
+    // [DEBUG-PERIODS] ต่อแถว — ดูว่าแถวกิจกรรม (HR คาบ0 / PLC คาบ10) หลุด validation หรือไม่
+    console.log('[DEBUG-PERIODS] row', idx,
+      '| code=', JSON.stringify(subjectCodeVal),
+      '| name=', JSON.stringify(subjectNameVal),
+      '| schedRaw=', JSON.stringify(scheduleVal),
+      '| slots=', slots.length,
+      '| type=', subjectType,
+      '| isValid=', errors.length === 0,
+      '| errors=', JSON.stringify(errors));
   }
 
   const totalSlots = result.reduce((sum, r) => sum + r.slots.length, 0);
+  const validSlots = result.filter(r => r.isValid).reduce((s, r) => s + r.slots.length, 0);
+  const activitySlots = result.filter(r => r.subjectType === 'ACTIVITY').reduce((s, r) => s + r.slots.length, 0);
+  const droppedRows = result.filter(r => !r.isValid);
+  console.log('[DEBUG-PERIODS] SUMMARY: rows=', result.length,
+    '| totalSlots=', totalSlots, '| validSlots=', validSlots,
+    '| activitySlots=', activitySlots,
+    '| droppedRows(isValid=false)=', droppedRows.length,
+    droppedRows.map(r => ({ code: r.subjectCode, name: r.subjectName, slots: r.slots.length, errors: r.errors })));
 
   return {
     courseRows: result,

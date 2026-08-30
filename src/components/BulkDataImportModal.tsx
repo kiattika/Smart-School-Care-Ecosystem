@@ -753,6 +753,10 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
       const newStudentsToStore: Student[] = [];
       const newCoursesToStore: Course[] = [];
       const newGlobalCoursesToStore: GlobalCourse[] = [];
+      const writtenScheduleIds = new Set<string>(); // [DEBUG-PERIODS] ตรวจ doc id ชนกัน
+
+      console.log('[DEBUG-PERIODS] CONFIRM: validRows=', validRows.length, 'of previewData=', previewData.length,
+        '| droppedByIsValid=', previewData.length - validRows.length);
 
       for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
         const chunk = validRows.slice(i, i + BATCH_SIZE);
@@ -873,9 +877,19 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 sunday: 'อาทิตย์'
               };
 
+              console.log('[DEBUG-PERIODS] WRITE row: code=', JSON.stringify(parsedData.subjectCode),
+                '| name=', JSON.stringify(parsedData.subjectName),
+                '| type=', parsedData.subjectType,
+                '| slots=', (parsedData.slots || []).length,
+                '| cleanRoom=', cleanRoom);
               for (const slot of (parsedData.slots || [])) {
                 const scheduleDocId = `sch_${parsedData.subjectCode}_${cleanRoom}_${slot.dayOfWeek}_p${slot.periodNumber}`;
                 const scheduleRef = doc(db, 'schedules', scheduleDocId);
+                if (writtenScheduleIds.has(scheduleDocId)) {
+                  console.warn('[DEBUG-PERIODS] ⚠️ DOC ID COLLISION — overwriting', scheduleDocId,
+                    '(different row, same id → count จะหาย)');
+                }
+                writtenScheduleIds.add(scheduleDocId);
 
                 const schedulePayload = {
                   id: scheduleDocId,
@@ -986,6 +1000,11 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         await batch.commit();
         processedCount += chunk.length;
         setImportProgress(Math.min(95, Math.round((processedCount / totalValid) * 90) + 10));
+      }
+
+      if (importType === 'COURSE') {
+        console.log('[DEBUG-PERIODS] DONE. unique schedule doc ids written =', writtenScheduleIds.size,
+          '| courseSlots pushed to store =', newCoursesToStore.length);
       }
 
       // Update local Zustand store
