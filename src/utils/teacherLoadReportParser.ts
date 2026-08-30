@@ -201,7 +201,9 @@ export function detectSubjectType(subjectName: string, subjectCode: string): 'MA
 }
 
 /**
- * Matches teacher by exact email or known aliases against existing staff records.
+ * Matches a teacher by exact email against existing staff records.
+ * ผูกด้วยอีเมลจริงเท่านั้น — ไม่มี special-case/alias ของบุคคลใดบุคคลหนึ่ง
+ * (ถ้าอีเมลในไฟล์ไม่ตรงกับ staff ให้ปล่อยเป็น unlinked แล้วให้ admin ผูกเอง)
  */
 export function matchTeacherByEmail(
   email: string,
@@ -210,27 +212,9 @@ export function matchTeacherByEmail(
   if (!email || !email.trim()) return undefined;
   const targetEmail = email.toLowerCase().trim();
 
-  // 1. Direct exact match
   const found = staffList.find(s => s.email && s.email.toLowerCase().trim() === targetEmail);
   if (found) {
     return { id: found.id, email: found.email || targetEmail };
-  }
-
-  // 2. Kiattisak known email variations in dev/seed fixtures
-  const kiattisakEmails = [
-    'kiattisak@utd.ac.th',
-    'kiattika@utd.ac.th',
-    'kiattika@gmail.com',
-    'teacher@utd.ac.th',
-    'teacher.test@utd.ac.th',
-    'advisor.test@utd.ac.th'
-  ];
-
-  if (kiattisakEmails.includes(targetEmail)) {
-    const kStaff = staffList.find(s => s.email && kiattisakEmails.includes(s.email.toLowerCase().trim()));
-    if (kStaff) {
-      return { id: kStaff.id, email: kStaff.email || targetEmail };
-    }
   }
 
   return undefined;

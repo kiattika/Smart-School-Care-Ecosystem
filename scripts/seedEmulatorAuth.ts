@@ -18,9 +18,15 @@ if (!getApps().length) {
 }
 
 const auth = getAuth();
-const db = getFirestore();
+
+// CRITICAL: client ใช้ named database (firebaseConfig.firestoreDatabaseId) ไม่ใช่ (default)
+// ถ้า seed เขียนลง (default) ตามค่า default ของ getFirestore() → client อ่านคนละ namespace
+// → staff/students ที่ seed มา "หายไป" ในหน้าเว็บ (เป็นสาเหตุจริงของบั๊ก import ตารางสอน)
+const firestoreDatabaseId: string | undefined = (firebaseConfig as any).firestoreDatabaseId || undefined;
+const db = firestoreDatabaseId ? getFirestore(firestoreDatabaseId) : getFirestore();
 
 console.log(`✅ Connected to Firebase Emulator (Auth: 127.0.0.1:9099, Firestore: 127.0.0.1:8080)`);
+console.log(`   Firestore database: ${firestoreDatabaseId || '(default)'}`);
 
 export interface TestUserDef {
   uid: string;
