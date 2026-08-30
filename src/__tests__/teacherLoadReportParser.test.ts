@@ -5,6 +5,7 @@ import {
   detectSubjectType, 
   matchTeacherByName,
   matchTeacherByEmail,
+  normalizeEmail,
   parseTeacherLoadReport,
   generateScheduleDocuments,
   isTeacherLoadReportFormat
@@ -143,6 +144,48 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
     it('returns undefined when teacher is not found in the system (no fabricated IDs)', () => {
       const matched = matchTeacherByName('Mr. NonExistentTeacher', mockStaffList);
       expect(matched).toBeUndefined();
+    });
+
+    // REPRO: email cells exported from school HR/registrar Excel often carry hidden
+    // characters (zero-width space, BOM, no-break space, directional marks). String.trim()
+    // does not strip the zero-width ones, so === fails though the text looks identical
+    // -> "not found" badge. matchTeacherByEmail() now normalizes both sides.
+    it('REPRO+FIX: matches even when the file email carries hidden characters', () => {
+      const ZWSP = String.fromCharCode(0x200B);
+      const BOM = String.fromCharCode(0xFEFF);
+      const NBSP = String.fromCharCode(0x00A0);
+      const LRM = String.fromCharCode(0x200E);
+      const clean = 'kiattika@utd.ac.th';
+      const staff = [{ id: 'uid-kiattika', email: clean, fullName: 'teacher' }];
+
+      const cases: Array<{ raw: string; naiveFails: boolean }> = [
+        // zero-width space -> NOT stripped by String.trim(): naive equality fails
+        { raw: clean + ZWSP, naiveFails: true },
+        // directional / zero-width chars in the MIDDLE of the string: naive fails
+        { raw: 'kiattika' + LRM + '@utd.ac.th', naiveFails: true },
+        { raw: 'kiattika@utd' + BOM + '.ac.th', naiveFails: true },
+        { raw: 'kiattika@utd' + NBSP + '.ac.th', naiveFails: true },
+        // BOM / NBSP only at the EDGES: String.trim() already removes these (WhiteSpace set)
+        { raw: BOM + clean, naiveFails: false },
+        { raw: clean + NBSP, naiveFails: false },
+        { raw: '  KIATTIKA@UTD.AC.TH  ', naiveFails: false },
+      ];
+
+      for (const { raw, naiveFails } of cases) {
+        const naive = staff.find(s => s.email.toLowerCase().trim() === raw.toLowerCase().trim());
+        if (naiveFails) expect(naive).toBeUndefined();
+        const fixed = matchTeacherByEmail(raw, staff);
+        expect(fixed?.id).toBe('uid-kiattika');
+        expect(fixed?.email).toBe(clean);
+      }
+    });
+
+    it('normalizeEmail strips invisible chars, lowercases and trims; empty for null/undefined', () => {
+      const ZWSP = String.fromCharCode(0x200B);
+      expect(normalizeEmail('  KIATTIKA@UTD.AC.TH' + ZWSP + ' ')).toBe('kiattika@utd.ac.th');
+      expect(normalizeEmail(undefined)).toBe('');
+      expect(normalizeEmail(null)).toBe('');
+      expect(normalizeEmail('')).toBe('');
     });
   });
 

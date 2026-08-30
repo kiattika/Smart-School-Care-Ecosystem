@@ -1,5 +1,19 @@
 export type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 
+/**
+ * normalizeEmail: ทำให้อีเมลเทียบกันได้จริง โดยลบอักขระที่มองไม่เห็นซึ่ง String.trim() ไม่ลบให้
+ * (zero-width U+200B-200D, word joiner U+2060, BOM U+FEFF, no-break space U+00A0,
+ *  U+180E, U+061C, directional marks U+200E/200F/202A-202E)
+ * ไฟล์ Excel ที่ export จากระบบทะเบียน/HR มักมีอักขระพวกนี้แฝงในเซลล์อีเมล
+ * ทำให้อีเมลจากไฟล์ไม่ === อีเมลจาก Firestore ทั้งที่ตาเห็นเหมือนกันทุกตัว
+ */
+export const INVISIBLE_CHARS_RE = new RegExp('[' + [0x200B,0x200C,0x200D,0x2060,0xFEFF,0x00A0,0x180E,0x061C,0x200E,0x200F,0x202A,0x202B,0x202C,0x202D,0x202E].map(c => String.fromCodePoint(c)).join('') + ']', 'g');
+
+export function normalizeEmail(raw: string | undefined | null): string {
+  if (raw === undefined || raw === null) return '';
+  return String(raw).replace(INVISIBLE_CHARS_RE, '').trim().toLowerCase();
+}
+
 export interface ScheduleSlot {
   dayOfWeek: DayOfWeek;
   periodNumber: number;
@@ -209,14 +223,14 @@ export function matchTeacherByEmail(
   email: string,
   staffList: Array<{ id: string; email?: string; fullName?: string; displayName?: string }>
 ): { id: string; email: string } | undefined {
-  if (!email || !email.trim()) return undefined;
-  const targetEmail = email.toLowerCase().trim();
+  const targetEmail = normalizeEmail(email);
+  if (!targetEmail) return undefined;
 
-  const found = staffList.find(s => s.email && s.email.toLowerCase().trim() === targetEmail);
+  // normalize ทั้งสองฝั่ง — อีเมลจากไฟล์ Excel มักมีอักขระที่มองไม่เห็นแฝง (ดู normalizeEmail)
+  const found = staffList.find(s => normalizeEmail(s.email) === targetEmail);
   if (found) {
-    return { id: found.id, email: found.email || targetEmail };
+    return { id: found.id, email: normalizeEmail(found.email) || targetEmail };
   }
-
   return undefined;
 }
 
@@ -401,7 +415,8 @@ export function parseTeacherLoadReport(
 
     // TASK 8 & ISSUE 1: Match teacher by Email first, then fallback to Name matching without fabricating IDs
     const teacherName = currentTeacherName || 'ไม่ระบุครูผู้สอน';
-    const teacherEmail = currentTeacherEmail || teacherEmailVal || '';
+    // normalize ตั้งแต่ต้นทาง — กันอักขระที่มองไม่เห็นจากไฟล์ Excel ไหลเข้า Firestore ต่อ
+    const teacherEmail = normalizeEmail(currentTeacherEmail || teacherEmailVal || '');
 
     let matchedTeacherId: string | undefined = undefined;
     let matchedTeacherEmail: string | undefined = undefined;
