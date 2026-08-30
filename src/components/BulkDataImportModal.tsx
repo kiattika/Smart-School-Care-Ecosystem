@@ -102,8 +102,6 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [rawParsedRows, setRawParsedRows] = useState<Record<string, any>[] | null>(null);
-  const [previewData, setPreviewData] = useState<ValidatedRow[]>([]);
-  const [isValidated, setIsValidated] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importError, setImportError] = useState<string | null>(null);
@@ -113,6 +111,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   const [isStudentIdsLoading, setIsStudentIdsLoading] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const staffSigRef = useRef<string>('');
 
   // Sync initialImportType when modal opens
   useEffect(() => {
@@ -141,8 +140,14 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             displayName: data.displayName || '',
           };
         });
-        setRealStaffList(staff);
         setIsStaffLoading(false);
+        // long-poll listener ยิง snapshot ซ้ำเป็นระยะแม้ข้อมูลไม่เปลี่ยน — เทียบเนื้อหาก่อน
+        // ถ้าเหมือนเดิม อย่า setRealStaffList (ไม่งั้น previewData useMemo re-compute + re-render รัว ๆ
+        // จนเกิดจังหวะที่กดปุ่มยืนยันไม่ติด)
+        const sig = staff.map(s => `${s.id}${s.email}${s.fullName}${s.displayName}`).join('');
+        if (sig === staffSigRef.current) return;
+        staffSigRef.current = sig;
+        setRealStaffList(staff);
       },
       (err) => {
         console.error('[BulkDataImportModal] Error loading staff roster:', err);
@@ -693,24 +698,34 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
 
   const handleRemoveFile = () => {
     setFile(null);
-    setRawParsedRows(null);
-    setPreviewData([]);
-    setIsValidated(false);
+    setRawParsedRows(null); // previewData (useMemo) จะกลายเป็น [] เอง
     setImportError(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   // Real batched Firestore writes (chunked <= 500)
   const handleConfirmImport = async () => {
-    if (previewData.length === 0) return;
+    // ห้าม early-return เงียบ ๆ (CLAUDE.md) — ต้องมี feedback ที่ผู้ใช้เห็นได้เสมอ
+    if (!file) {
+      setImportError('กรุณาเลือกไฟล์ก่อนกดยืนยันการนำเข้าข้อมูล');
+      return;
+    }
+    if (!isValidated) {
+      setImportError('ระบบกำลังอ่านและตรวจสอบไฟล์อยู่ กรุณารอสักครู่แล้วลองใหม่');
+      return;
+    }
+    if (previewData.length === 0) {
+      setImportError('ไม่พบแถวข้อมูลในไฟล์ที่ตรวจสอบได้ กรุณาตรวจไฟล์ต้นฉบับหรืออัปโหลดไฟล์ใหม่');
+      return;
+    }
 
     // กันไม่ให้ import ก่อนข้อมูลอ้างอิงโหลดเสร็จ (COURSE→staff, PARENT→students)
     if (importType === 'COURSE' && isStaffLoading) {
-      alert('⏳ กำลังโหลดรายชื่อครูจากฐานข้อมูล กรุณารอสักครู่แล้วลองใหม่');
+      setImportError('กำลังโหลดรายชื่อครูจากฐานข้อมูล กรุณารอสักครู่แล้วลองใหม่');
       return;
     }
     if (importType === 'PARENT' && isStudentIdsLoading) {
-      alert('⏳ กำลังโหลดรายชื่อนักเรียนจากฐานข้อมูล กรุณารอสักครู่แล้วลองใหม่');
+      setImportError('กำลังโหลดรายชื่อนักเรียนจากฐานข้อมูล กรุณารอสักครู่แล้วลองใหม่');
       return;
     }
 
@@ -999,19 +1014,16 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
     }
   };
 
-  // (Re)validate the preview whenever raw rows OR the roster data they are matched
-  // against change. This is the core fix: if staff/students finish loading AFTER the
-  // file was parsed, the preview is recomputed instead of showing a stale "ไม่พบบัญชีครู".
-  useEffect(() => {
-    if (!rawParsedRows) {
-      setPreviewData([]);
-      setIsValidated(false);
-      return;
-    }
-    setPreviewData(validateRows(rawParsedRows, importType));
-    setIsValidated(true);
+  // previewData เป็น derived value (useMemo) ไม่ใช่ state — จึงไม่มีจังหวะที่มันเป็น []
+  // ชั่วคราวระหว่าง re-render (เดิมเป็น state ที่ถูก effect เคลียร์ ทำให้กดปุ่มยืนยันแล้ว
+  // handleConfirmImport เห็น previewData.length === 0 แล้ว early-return เงียบ ๆ)
+  // re-compute เมื่อ rawParsedRows / importType / roster (staff, students) เปลี่ยนเนื้อหาจริง
+  const previewData: ValidatedRow[] = useMemo(
+    () => (rawParsedRows ? validateRows(rawParsedRows, importType) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawParsedRows, importType, realStaffList, realStudentIds]);
+    [rawParsedRows, importType, realStaffList, realStudentIds]
+  );
+  const isValidated = rawParsedRows !== null;
 
   if (!isOpen) return null;
 
@@ -1403,7 +1415,14 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               const rosterLoading =
                 (importType === 'COURSE' && isStaffLoading) ||
                 (importType === 'PARENT' && isStudentIdsLoading);
-              const disabled = isImporting || rosterLoading || !file || validCount === 0 || !hasPermissionForCurrentType;
+              const parsing = !!file && !isValidated; // เลือกไฟล์แล้ว แต่ยังอ่าน/ตรวจไม่เสร็จ
+              const disabled =
+                isImporting || rosterLoading || parsing || !file || validCount === 0 || !hasPermissionForCurrentType;
+              const label = rosterLoading
+                ? (importType === 'COURSE' ? 'กำลังโหลดรายชื่อครู...' : 'กำลังโหลดรายชื่อนักเรียน...')
+                : parsing
+                  ? 'กำลังอ่านและตรวจสอบไฟล์...'
+                  : `ยืนยันการนำเข้าข้อมูล (${validCount} แถว)`;
               return (
                 <button
                   type="button"
@@ -1415,10 +1434,10 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                       : 'bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shadow-[0_4px_15px_rgba(99,102,241,0.25)] active:scale-[0.98]'
                   }`}
                 >
-                  <Database className="w-4 h-4" />
-                  {rosterLoading
-                    ? (importType === 'COURSE' ? 'กำลังโหลดรายชื่อครู...' : 'กำลังโหลดรายชื่อนักเรียน...')
-                    : `ยืนยันการนำเข้าข้อมูล (${validCount} แถว)`}
+                  {(rosterLoading || parsing || isImporting)
+                    ? <RefreshCw className="w-4 h-4 animate-spin" />
+                    : <Database className="w-4 h-4" />}
+                  {label}
                 </button>
               );
             })()}
