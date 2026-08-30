@@ -1,7 +1,6 @@
 import { cn, isSameRoom } from "./lib/utils";
 import { Student } from "./types";
 import { MOCK_VISIT_DATA } from "./data/mockData";
-import { REAL_STUDENTS } from "./data/realStudents";
 import React, { useState, useMemo } from 'react';
 import { useStore } from './store';
 import { useHomeroomAttendance } from "./hooks/useHomeroomAttendance";
@@ -43,11 +42,7 @@ export function AdvisorPortal() {
   const myRoom = user?.profile?.assignments?.homeroomClass;
   const myStudents = useMemo(() => {
     if (!myRoom) return [];
-    let matched = (students || []).filter(s => isSameRoom(s.room, myRoom) || isSameRoom((s as any).className, myRoom));
-    if (matched.length === 0) {
-      matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, myRoom) || isSameRoom((s as any).className, myRoom));
-    }
-    return matched;
+    return (students || []).filter(s => isSameRoom(s.room, myRoom) || isSameRoom((s as any).className, myRoom));
   }, [myRoom, students]);
 
   const todayStr = format(new Date(), 'yyyy-MM-dd');
@@ -371,7 +366,14 @@ export function AdvisorPortal() {
                   <div className="text-xs text-slate-400">สมาชิกทั้งหมด {myStudents.length} คน</div>
                 </div>
                 <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto content-start">
-                  {myStudents.map(student => {
+                  {myStudents.length === 0 ? (
+                    <div className="col-span-full py-12 text-center text-slate-500 text-xs flex flex-col items-center justify-center gap-2">
+                      <Users className="w-8 h-8 text-slate-600" />
+                      <span>ยังไม่มีนักเรียนในห้องนี้</span>
+                      <span className="text-[10px] text-slate-600">กรุณานำเข้าข้อมูลนักเรียนผ่านระบบจัดการนักเรียนใน Admin Portal</span>
+                    </div>
+                  ) : (
+                    myStudents.map(student => {
                     const studentAnalytics = analytics.find(a => a.studentId === student.studentId);
                     const bScore = studentAnalytics?.behaviorScore ?? 100;
                     
@@ -433,8 +435,8 @@ export function AdvisorPortal() {
                           </div>
                         </div>
                       </div>
-                    )
-                  })}
+                    );
+                  }))}
                 </div>
               </div>
               

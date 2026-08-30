@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { 
   Calendar, 
   Clock, 
@@ -130,35 +132,93 @@ export function SystemSettingsAndLocksPage() {
     }, 3000);
   };
 
+  // Sync settings with Firestore on mount
+  useEffect(() => {
+    // 1. System Locks
+    const unsubscribeLocks = onSnapshot(doc(db, 'school_settings', 'system_locks'), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data && Array.isArray(data.lockConfigs)) {
+          setLockConfigs(data.lockConfigs);
+        }
+      }
+    }, (err) => console.warn('Firestore system_locks subscription notice:', err));
+
+    // 2. Academic Year
+    const unsubscribeYear = onSnapshot(doc(db, 'school_settings', 'academic_year'), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data?.academicYear) setAcademicYear(data.academicYear);
+        if (data?.semester) setSemester(data.semester);
+      }
+    }, (err) => console.warn('Firestore academic_year subscription notice:', err));
+
+    // 3. Exception Requests
+    const unsubscribeReqs = onSnapshot(doc(db, 'school_settings', 'grade_exceptions'), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data && Array.isArray(data.requests)) {
+          setRequests(data.requests);
+        }
+      }
+    }, (err) => console.warn('Firestore grade_exceptions subscription notice:', err));
+
+    return () => {
+      unsubscribeLocks();
+      unsubscribeYear();
+      unsubscribeReqs();
+    };
+  }, []);
+
   // จัดการ Toggle เปลี่ยนแปลงสถานะเปิดปิดทันที
-  const handleToggleLock = (id: string) => {
-    setLockConfigs(prev => prev.map(config => {
+  const handleToggleLock = async (id: string) => {
+    const updatedConfigs = lockConfigs.map(config => {
       if (config.id === id) {
-        const nextState = !config.isOpen;
-        triggerToast(`🔓 ปรับปรุงเป็น "${nextState ? 'เปิดระบบชั่วคราว' : 'ล็อกระบบเรียบร้อย'}" ทันที`);
-        return { ...config, isOpen: nextState };
+        return { ...config, isOpen: !config.isOpen };
       }
       return config;
-    }));
+    });
+
+    setLockConfigs(updatedConfigs);
+    const target = updatedConfigs.find(c => c.id === id);
+    triggerToast(`🔓 ปรับปรุงเป็น "${target?.isOpen ? 'เปิดระบบชั่วคราว' : 'ล็อกระบบเรียบร้อย'}" ทันที`);
+
+    try {
+      await setDoc(doc(db, 'school_settings', 'system_locks'), {
+        lockConfigs: updatedConfigs,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (err) {
+      console.warn('Notice: Firestore save handled locally/optimistically:', err);
+    }
   };
 
   // จัดการบันทึกวันเวลาในฟอร์มกำหนดวันเวลาล็อก
   const handleConfigChange = (id: string, field: keyof GradeLockConfig, value: string | boolean) => {
-    setLockConfigs(prev => prev.map(config => {
+    const updated = lockConfigs.map(config => {
       if (config.id === id) {
         return { ...config, [field]: value };
       }
       return config;
-    }));
+    });
+    setLockConfigs(updated);
+
+    // Save debounced/on change to firestore
+    setDoc(doc(db, 'school_settings', 'system_locks'), {
+      lockConfigs: updated,
+      updatedAt: serverTimestamp()
+    }, { merge: true }).catch(err => {
+      console.warn('Notice: Firestore save handled:', err);
+    });
   };
 
   // จัดการอนุมัติขอยื่นแก้ไขเกรดรายตัวครู
-  const handleApproveRequest = (reqId: string, teacherName: string) => {
+  const handleApproveRequest = async (reqId: string, teacherName: string) => {
     // คำนวณวันหมดอายุอนุมัติ (24 ชั่วโมงถัดไป)
     const expirationTime = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const dateString = expirationTime.toISOString().replace('T', ' ').substring(0, 16);
 
-    setRequests(prev => prev.map(req => {
+    const updatedRequests: ExceptionRequest[] = requests.map(req => {
       if (req.id === reqId) {
         return {
           ...req,
@@ -167,14 +227,24 @@ export function SystemSettingsAndLocksPage() {
         };
       }
       return req;
-    }));
+    });
 
+    setRequests(updatedRequests);
     triggerToast(`✅ อนุมัติสิทธิ์ให้ครู ${teacherName} แก้ไขเกรดชั่วคราว (หมดอายุ: ${dateString})`);
+
+    try {
+      await setDoc(doc(db, 'school_settings', 'grade_exceptions'), {
+        requests: updatedRequests,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (err) {
+      console.warn('Notice: Firestore save handled:', err);
+    }
   };
 
   // จัดการปฏิเสธคำร้อง
-  const handleRejectRequest = (reqId: string, teacherName: string) => {
-    setRequests(prev => prev.map(req => {
+  const handleRejectRequest = async (reqId: string, teacherName: string) => {
+    const updatedRequests: ExceptionRequest[] = requests.map(req => {
       if (req.id === reqId) {
         return {
           ...req,
@@ -182,14 +252,33 @@ export function SystemSettingsAndLocksPage() {
         };
       }
       return req;
-    }));
+    });
 
+    setRequests(updatedRequests);
     triggerToast(`❌ ปฏิเสธคำขอของครู ${teacherName} เรียบร้อย`);
+
+    try {
+      await setDoc(doc(db, 'school_settings', 'grade_exceptions'), {
+        requests: updatedRequests,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (err) {
+      console.warn('Notice: Firestore save handled:', err);
+    }
   };
 
   // บันทึกการตั้งค่าปีการศึกษา
-  const handleSaveAcademicYear = () => {
+  const handleSaveAcademicYear = async () => {
     triggerToast(`💾 บันทึกปีการศึกษาปัจจุบันเป็น ${academicYear} ภาคเรียนที่ ${semester} สำเร็จ`);
+    try {
+      await setDoc(doc(db, 'school_settings', 'academic_year'), {
+        academicYear,
+        semester,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (err) {
+      console.warn('Notice: Firestore save handled:', err);
+    }
   };
 
   return (

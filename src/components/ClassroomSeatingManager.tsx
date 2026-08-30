@@ -38,7 +38,6 @@ import { Student, Course, AttendanceStatus } from '../types';
 import { SeatingLayout, SeatingGroup, SeatingSeat, SeatingAssignment } from '../types/seating';
 import { cn, isSameRoom, formatRoomName } from '../lib/utils';
 import { useStore } from '../store';
-import { REAL_STUDENTS } from '../data/realStudents';
 import { RandomStudentPickerModal, ClassroomDeskGroup } from './RandomStudentPickerModal';
 import { SeatHistoryModal } from './seating/SeatHistoryModal';
 import { TemplatePickerModal } from './seating/TemplatePickerModal';
@@ -98,23 +97,12 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
 
   // Filter students for this course/room
   const courseStudents = useMemo(() => {
-    const targetRoom = course?.room || 'ม.5/8';
-    let matched = (students || []).filter(s => 
+    const targetRoom = course?.room;
+    if (!targetRoom) return [];
+    return (students || []).filter(s => 
       isSameRoom(s.room, targetRoom) || 
       isSameRoom((s as any).className, targetRoom)
     );
-    if (matched.length === 0) {
-      matched = (students || []).filter(s => 
-        isSameRoom(s.room, 'ม.5/8') || isSameRoom(s.room, '5/8')
-      );
-    }
-    if (matched.length === 0) {
-      matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, targetRoom));
-      if (matched.length === 0) {
-        matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, 'ม.5/8'));
-      }
-    }
-    return matched;
   }, [course?.room, students]);
 
   // 1. Dynamic Layout State
@@ -985,7 +973,13 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
           </div>
 
           <div className="p-3 overflow-y-auto space-y-2 flex-1">
-            {unassignedStudents.length === 0 ? (
+            {courseStudents.length === 0 ? (
+              <div className="py-12 text-center text-slate-500 text-xs flex flex-col items-center justify-center gap-2">
+                <Users className="w-8 h-8 text-slate-600" />
+                <span>ยังไม่มีรายชื่อนักเรียนในห้องนี้</span>
+                <span className="text-[10px] text-slate-600">กรุณานำเข้าข้อมูลนักเรียนผ่านระบบจัดการ</span>
+              </div>
+            ) : unassignedStudents.length === 0 ? (
               <div className="py-12 text-center text-slate-500 text-xs flex flex-col items-center justify-center gap-2">
                 <CheckCircle2 className="w-8 h-8 text-emerald-500/40" />
                 <span>นักเรียนทุกคนมีที่นั่งครบแล้ว</span>

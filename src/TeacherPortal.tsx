@@ -9,7 +9,6 @@ import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } fro
 import { th } from 'date-fns/locale';
 import { useStore } from './store';
 import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, PeriodSwap, SubstituteAssignment, Student } from './types';
-import { REAL_STUDENTS } from './data/realStudents';
 import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Edit3, Sparkles, Shuffle, Calendar, ArrowUpRight, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -303,31 +302,13 @@ export function TeacherPortal() {
 
   // Dynamic classroom layout configuration
   const courseStudents = useMemo(() => {
-    const targetRoom = activeCourse?.room || 'ม.5/8';
+    const targetRoom = activeCourse?.room;
+    if (!targetRoom) return [];
 
-    // 1. Try exact/normalized room match from store students
-    let matched = (students || []).filter(s => 
+    return (students || []).filter(s => 
       isSameRoom(s.room, targetRoom) || 
       isSameRoom((s as any).className, targetRoom)
     );
-
-    // 2. Fallback to 5/8 in store students
-    if (matched.length === 0) {
-      matched = (students || []).filter(s => 
-        isSameRoom(s.room, 'ม.5/8') || 
-        isSameRoom(s.room, '5/8')
-      );
-    }
-
-    // 3. Fallback to REAL_STUDENTS dataset
-    if (matched.length === 0) {
-      matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, targetRoom));
-      if (matched.length === 0) {
-        matched = REAL_STUDENTS.filter(s => isSameRoom(s.room, 'ม.5/8'));
-      }
-    }
-
-    return matched;
   }, [activeCourse?.room, students]);
 
   const isM58 = isSameRoom(activeCourse?.room, 'ม.5/8');

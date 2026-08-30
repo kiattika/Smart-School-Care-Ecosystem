@@ -267,17 +267,18 @@ export function NavbarWithRoleSwitcher({
 
   // ค้นหารายละเอียดบทบาทเพื่อจัดแสดงข้อมูลบริบทเพิ่มเติม
   const getRoleContextDetails = (role: UserRole): string => {
-    if (!user.assignments) return '';
+    const assignments = user?.assignments || (user as any)?.profile?.assignments;
+    if (!assignments) return '';
     switch (role) {
       case 'HOMEROOM_TEACHER':
-        return user.assignments.homeroomClass ? `ห้อง ${user.assignments.homeroomClass}` : '';
+        return assignments.homeroomClass ? `ห้อง ${assignments.homeroomClass}` : '';
       case 'HEAD_OF_DEPARTMENT':
-        return user.assignments.departmentId === 'sci-dept' ? 'กลุ่มสาระฯ วิทยาศาสตร์' : 'หัวหน้าส่วนงาน';
+        return assignments.departmentId === 'sci-dept' ? 'กลุ่มสาระฯ วิทยาศาสตร์' : 'หัวหน้าส่วนงาน';
       case 'SUBJECT_TEACHER':
-        const count = user.assignments.teachingSubjects?.length || 0;
+        const count = assignments.teachingSubjects?.length || 0;
         return count > 0 ? `สอน ${count} รายวิชา` : '';
       case 'SUPERVISORY_TEACHER':
-        const menteesCount = user.assignments.supervisoryMentees?.length || 0;
+        const menteesCount = assignments.supervisoryMentees?.length || 0;
         return menteesCount > 0 ? `นิเทศครู ${menteesCount} ท่าน` : '';
       case 'INFIRMARY_STAFF':
         return 'งานพยาบาลและอนามัย';

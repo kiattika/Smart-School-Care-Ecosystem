@@ -24,6 +24,7 @@ import clsx from 'clsx';
 // Mock Students for Home Visit
 
 export function HomeVisitPortal() {
+  const { homeVisits, submitHomeVisit, user, students } = useStore();
   const [activeTab, setActiveTab] = useState<'pending' | 'visited'>('pending');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
@@ -36,10 +37,27 @@ export function HomeVisitPortal() {
   const [needScholarship, setNeedScholarship] = useState(false);
   const [photos, setPhotos] = useState<string[]>([]);
 
-  const filteredStudents = MOCK_VISIT_STUDENTS.filter(s => 
-    s.status === activeTab && 
-    (s.name.includes(searchQuery) || s.studentId.includes(searchQuery))
-  );
+  // Merge store students or fallback list with actual visit statuses from homeVisits
+  const baseStudents = students && students.length > 0 ? students.map(s => {
+    const isVisited = homeVisits.some(v => v.studentId === s.studentId);
+    return {
+      id: s.id,
+      studentId: s.studentId,
+      name: s.name,
+      class: s.room || 'ม.5/8',
+      address: 'ต.ท่าเสา อ.เมือง จ.อุตรดิตถ์',
+      phone: '081-234-5678',
+      status: isVisited ? 'visited' as const : 'pending' as const,
+      avatar: s.avatar || `https://api.dicebear.com/9.x/avataaars/svg?seed=${s.studentId}`,
+      riskLevel: 'low'
+    };
+  }) : MOCK_VISIT_STUDENTS;
+
+  const filteredStudents = baseStudents.filter(s => {
+    const matchesTab = s.status === activeTab;
+    const matchesQuery = s.name.includes(searchQuery) || s.studentId.includes(searchQuery);
+    return matchesTab && matchesQuery;
+  });
 
   const handleCheckIn = () => {
     setIsLocating(true);
@@ -62,6 +80,17 @@ export function HomeVisitPortal() {
   };
 
   const handleSubmit = () => {
+    if (selectedStudent) {
+      submitHomeVisit({
+        studentId: selectedStudent.studentId,
+        advisorEmail: user?.email || 'advisor@utd.ac.th',
+        visitedAt: new Date().toISOString(),
+        geoVerified: !!location,
+        riskLevel: risks.length > 2 ? 'HIGH' : risks.length > 0 ? 'MEDIUM' : 'LOW',
+        photoUploaded: photos.length > 0
+      });
+    }
+
     // Reset and go back
     setLocation(null);
     setHousingQuality('');
@@ -69,7 +98,7 @@ export function HomeVisitPortal() {
     setNeedScholarship(false);
     setPhotos([]);
     setSelectedStudent(null);
-    setActiveTab('visited'); // switch tab to see the change conceptually
+    setActiveTab('visited');
   };
 
   if (selectedStudent) {

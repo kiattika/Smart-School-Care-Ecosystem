@@ -1,10 +1,11 @@
 import { cn } from "./lib/utils";
 import React, { useState } from 'react';
-import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, Mailbox, Edit3, Check, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, PanelLeft, PanelLeftClose, PanelLeftOpen, Menu, X, ChevronLeft, ChevronRight, FileSpreadsheet, ArrowRight } from 'lucide-react';
+import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, Mailbox, Edit3, Check, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, PanelLeft, PanelLeftClose, PanelLeftOpen, Menu, X, ChevronLeft, ChevronRight, FileSpreadsheet, ArrowRight, GraduationCap } from 'lucide-react';
 import clsx, { ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useStore } from './store';
 import { StaffRoleManagementPage } from './components/StaffRoleManagementPage';
+import { StudentManagementPage } from './components/StudentManagementPage';
 import { SystemSettingsAndLocksPage } from './components/SystemSettingsAndLocksPage';
 import { PeriodManagementPage } from './components/PeriodManagementPage';
 import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
@@ -15,7 +16,7 @@ import { BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export function AdminPortal() {
-  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'requests' | 'absence-sub' | 'sub-analytics' | 'users' | 'settings' | 'periods'>('teaching-load');
+  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'requests' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods'>('teaching-load');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
@@ -50,7 +51,7 @@ export function AdminPortal() {
   const pendingAbsenceCount = periodSwaps.filter(ps => ps.status === 'PENDING_ADMIN').length;
 
   interface AdminNavItem {
-    id: 'teaching-load' | 'import' | 'requests' | 'absence-sub' | 'sub-analytics' | 'users' | 'settings' | 'periods';
+    id: 'teaching-load' | 'import' | 'requests' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods';
     label: string;
     fullLabel: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -67,6 +68,7 @@ export function AdminPortal() {
     { id: 'absence-sub', label: 'ลาสอน & ครูสอนแทน', fullLabel: 'ลาสอน & จัดครูสอนแทน (Substitute)', icon: Clock, badge: pendingAbsenceCount > 0 ? pendingAbsenceCount : null, color: 'text-amber-400', badgeColor: 'bg-amber-500', activeStyle: 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-[inset_4px_0_0_rgba(245,158,11,1)]' },
     { id: 'sub-analytics', label: 'วิเคราะห์สอนแทน & PA', fullLabel: 'วิเคราะห์งานสอนแทน & PA', icon: BarChart3, badge: null, color: 'text-indigo-400', activeStyle: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-[inset_4px_0_0_rgba(99,102,241,1)]' },
     { id: 'users', label: 'จัดการสิทธิ์บุคลากร', fullLabel: 'จัดการสิทธิ์บุคลากร (User RBAC)', icon: Users, badge: null, color: 'text-blue-400', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
+    { id: 'students', label: 'จัดการนักเรียน', fullLabel: 'จัดการข้อมูลนักเรียน (Student Roster)', icon: GraduationCap, badge: null, color: 'text-purple-400', activeStyle: 'bg-purple-500/10 text-purple-400 border-purple-500/20 shadow-[inset_4px_0_0_rgba(168,85,247,1)]' },
     { id: 'periods', label: 'ตารางเวลา & กระดิ่ง', fullLabel: 'จัดการตารางเวลา & กระดิ่งคาบเรียน', icon: Bell, badge: null, color: 'text-indigo-400', activeStyle: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-[inset_4px_0_0_rgba(99,102,241,1)]' },
     { id: 'settings', label: 'ปีการศึกษา & ล็อกระบบ', fullLabel: 'ตั้งค่าปีการศึกษา & ล็อกระบบ (System Lock)', icon: Settings, badge: null, color: 'text-pink-400', activeStyle: 'bg-[#ec4899]/10 text-[#ec4899] border-[#ec4899]/20 shadow-[inset_4px_0_0_rgba(236,72,153,1)]' },
   ];
@@ -547,6 +549,12 @@ export function AdminPortal() {
           {activeTab === 'users' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
               <StaffRoleManagementPage />
+            </div>
+          )}
+
+          {activeTab === 'students' && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <StudentManagementPage />
             </div>
           )}
 
