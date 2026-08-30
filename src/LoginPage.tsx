@@ -12,6 +12,9 @@ const EMULATOR_TEST_USERS = [
   { email: 'guidance.test@utd.ac.th', label: 'ครูแนะแนว / จิตวิทยา', roleTag: 'GUIDANCE_COUNSELOR', desc: 'ดร.สุดา (สิทธิ์เข้าถึง PHQ-9)' },
   { email: 'finance.test@utd.ac.th', label: 'ฝ่ายการเงิน', roleTag: 'FINANCE_STAFF', desc: 'นางศิริพร การเงินพัสดุ' },
   { email: 'infirmary.test@utd.ac.th', label: 'ห้องพยาบาล', roleTag: 'INFIRMARY_STAFF', desc: 'น.ส.กนกวรรณ พยาบาล' },
+  { email: 'academic.test@utd.ac.th', label: 'หัวหน้าฝ่ายวิชาการและหลักสูตร', roleTag: 'ACADEMIC_HEAD', desc: 'ดร.วิชาญ (อนุมัติสอนแทน ขั้น 2)' },
+  { email: 'deputy.test@utd.ac.th', label: 'รองผู้อำนวยการฝ่ายวิชาการ', roleTag: 'DEPUTY_DIRECTOR_ACADEMIC', desc: 'ดร.สุนทร (อนุมัติสอนแทน ขั้น 3)' },
+  { email: 'director.test@utd.ac.th', label: 'ผู้อำนวยการโรงเรียน', roleTag: 'DIRECTOR', desc: 'ดร.อำนวย (อนุมัติสอนแทน ขั้น 4)' },
   { email: 'parent.test@gmail.com', label: 'ผู้ปกครอง (นายกิตติคุณ)', roleTag: 'PARENT', desc: 'คุณพ่อมนตรี มงคลศิลป์' },
   { email: 'student.test@utd.ac.th', label: 'นักเรียน (ม.5/8)', roleTag: 'STUDENT', desc: 'นายกิตติคุณ มงคลศิลป์' },
 ];

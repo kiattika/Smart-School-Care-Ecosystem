@@ -80,6 +80,18 @@ export function buildDevUserFromEmail(email: string): User {
   } else if (lower.includes('kiattika') || lower.startsWith('admin.') || lower.includes('super_admin')) {
     roles = ['SUPER_ADMIN', 'SUBJECT_TEACHER'];
     displayName = lower.includes('kiattika') ? 'นายเกียรติศักดิ์ แก้วหล้า' : 'ผู้ดูแลระบบ (Admin)';
+  } else if (lower.startsWith('academic.')) {
+    // ลำดับอนุมัติสอนแทน ขั้นที่ 2 — role เดียว ห้ามข้ามขั้น
+    roles = ['ACADEMIC_HEAD'];
+    displayName = 'ดร.วิชาญ หัวหน้าฝ่ายวิชาการ';
+  } else if (lower.startsWith('deputy.')) {
+    // ลำดับอนุมัติสอนแทน ขั้นที่ 3 — role เดียว ห้ามข้ามขั้น
+    roles = ['DEPUTY_DIRECTOR_ACADEMIC'];
+    displayName = 'ดร.สุนทร รองผู้อำนวยการฝ่ายวิชาการ';
+  } else if (lower.startsWith('director.')) {
+    // ลำดับอนุมัติสอนแทน ขั้นที่ 4 — role เดียว ห้ามข้ามขั้น (ต้องมาก่อน exec/director substring check)
+    roles = ['DIRECTOR'];
+    displayName = 'ดร.อำนวย ผู้อำนวยการโรงเรียน';
   } else if (lower.startsWith('exec.') || lower.includes('executive') || lower.includes('director')) {
     roles = ['EXECUTIVE', 'SUPER_ADMIN'];
     displayName = 'ดร.สมเกียรติ บริหารวิชาการ (ผู้อำนวยการโรงเรียน)';

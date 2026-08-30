@@ -147,6 +147,40 @@ export const SEEDED_TEST_USERS: TestUserDef[] = [
     position: 'ศึกษานิเทศก์ชำนาญการพิเศษ',
     roles: ['INSTRUCTIONAL_SUPERVISOR']
   },
+  // --- ลำดับอนุมัติสอนแทน 4 ขั้น: แต่ละบัญชีมี role เดียวชัดเจน ห้ามข้ามขั้น ---
+  {
+    uid: 'test_academic_head_001',
+    email: 'academic.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'ดร.วิชาญ หัวหน้าฝ่ายวิชาการ',
+    prefix: 'ดร.',
+    firstName: 'วิชาญ',
+    lastName: 'หัวหน้าฝ่ายวิชาการ',
+    position: 'หัวหน้าฝ่ายวิชาการและหลักสูตร (อนุมัติสอนแทน ขั้นที่ 2)',
+    roles: ['ACADEMIC_HEAD']
+  },
+  {
+    uid: 'test_deputy_director_001',
+    email: 'deputy.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'ดร.สุนทร รองผู้อำนวยการฝ่ายวิชาการ',
+    prefix: 'ดร.',
+    firstName: 'สุนทร',
+    lastName: 'รองผู้อำนวยการฝ่ายวิชาการ',
+    position: 'รองผู้อำนวยการฝ่ายวิชาการ (อนุมัติสอนแทน ขั้นที่ 3)',
+    roles: ['DEPUTY_DIRECTOR_ACADEMIC']
+  },
+  {
+    uid: 'test_director_001',
+    email: 'director.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'ดร.อำนวย ผู้อำนวยการโรงเรียน',
+    prefix: 'ดร.',
+    firstName: 'อำนวย',
+    lastName: 'ผู้อำนวยการโรงเรียน',
+    position: 'ผู้อำนวยการโรงเรียน (อนุมัติสอนแทน ขั้นที่ 4)',
+    roles: ['DIRECTOR']
+  },
   {
     uid: 'test_parent_001',
     email: 'parent.test@gmail.com',
