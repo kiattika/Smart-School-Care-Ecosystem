@@ -181,14 +181,20 @@ service cloud.firestore {
     }
 
     // 18. Substitute Teaching Assignments & Post Teaching Records
+    // TODO(security): ตอนนี้ write เป็น role-based ล้วน (ยังบังคับลำดับ 4 ขั้นที่ layer นี้ไม่ได้).
+    //   หลัง workflow ฝั่ง client verify ผ่าน emulator แล้ว ให้เพิ่มการตรวจ:
+    //   - อนุมัติได้เฉพาะเมื่อ request.resource.data.currentApprovalStage ตรงกับ role ผู้เขียน
+    //     (STAGE_1→HEAD_OF_DEPARTMENT, STAGE_2→ACADEMIC_HEAD, STAGE_3→DEPUTY_DIRECTOR_ACADEMIC, STAGE_4→DIRECTOR)
+    //   - currentApprovalStage เดินหน้าได้ทีละขั้น (ห้ามข้าม), ห้าม downgrade
+    //   - SUBJECT_TEACHER แก้ได้เฉพาะ field ชุด completion* / isCompleted / completedAt เท่านั้น
     match /substitute_assignments/{assignmentId} {
       allow read: if isSignedIn();
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('HEAD_OF_DEPARTMENT') || 
-                      hasRole('ACADEMIC_HEAD') || 
-                      hasRole('DEPUTY_DIRECTOR_ACADEMIC') || 
-                      hasRole('DIRECTOR') || 
-                      hasRole('EXECUTIVE') || 
+      allow write: if hasRole('SUPER_ADMIN') ||
+                      hasRole('HEAD_OF_DEPARTMENT') ||
+                      hasRole('ACADEMIC_HEAD') ||
+                      hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
+                      hasRole('DIRECTOR') ||
+                      hasRole('EXECUTIVE') ||
                       hasRole('SUBJECT_TEACHER');
     }
 

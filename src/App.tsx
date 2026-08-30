@@ -18,10 +18,14 @@ import { NavbarWithRoleSwitcher } from './components/NavbarWithRoleSwitcher';
 import { QuickActionHub } from './components/QuickActionHub';
 import { UserRole, Role } from './types';
 import { setupAuthListener, signOutUser } from './lib/auth';
+import { useSubstituteSync } from './hooks/useSubstituteSync';
 
 export default function App() {
   const { user, setUser } = useStore();
   const [authInitializing, setAuthInitializing] = useState(true);
+
+  // เชื่อม Firestore real-time (staff / substitute_assignments / post_teaching_records) เข้ากับ store
+  useSubstituteSync(!!user);
 
   useEffect(() => {
     const unsubscribe = setupAuthListener((firebaseAppUser) => {
