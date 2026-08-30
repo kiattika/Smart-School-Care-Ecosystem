@@ -13,7 +13,22 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
-import { StudentSelfAssessment } from '../types';
+import { 
+  StudentSelfAssessment,
+  GateAttendanceRecord,
+  DetailedLeaveRequest,
+  GPSCheckInLog,
+  TwoQuestionScreening,
+  PHQ9Screening,
+  SDQAssessment,
+  SubstituteAssignment,
+  PostTeachingRecord,
+  ParentTeacherMessage,
+  ParentAppointment,
+  BillingInvoice,
+  ActiveLearningRecord
+} from '../types';
+import { SchoolGeofenceConfig } from '../utils/geoUtils';
 
 export enum OperationType {
   CREATE = 'create',
@@ -637,4 +652,212 @@ export async function updateStudentProfileFirestore(
     console.warn(`[updateStudentProfileFirestore] Notice: Firestore update handled:`, error);
   }
 }
+
+/**
+ * Gate Attendance Persistence
+ */
+export async function saveGateAttendanceRecordFirestore(record: GateAttendanceRecord): Promise<void> {
+  const collectionPath = 'gate_attendance_logs';
+  try {
+    const ref = doc(db, collectionPath, record.id);
+    await setDoc(ref, {
+      ...record,
+      createdAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[saveGateAttendanceRecordFirestore] Firestore notice:', error);
+  }
+}
+
+/**
+ * Detailed Leave Requests Persistence
+ */
+export async function saveDetailedLeaveRequestFirestore(request: DetailedLeaveRequest): Promise<void> {
+  const collectionPath = 'detailed_leave_requests';
+  try {
+    const ref = doc(db, collectionPath, request.id);
+    await setDoc(ref, {
+      ...request,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[saveDetailedLeaveRequestFirestore] Firestore notice:', error);
+  }
+}
+
+export async function updateDetailedLeaveStatusFirestore(id: string, status: 'APPROVED' | 'REJECTED', remarks?: string): Promise<void> {
+  const collectionPath = 'detailed_leave_requests';
+  try {
+    const ref = doc(db, collectionPath, id);
+    await updateDoc(ref, {
+      status,
+      teacherRemarks: remarks || '',
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.warn('[updateDetailedLeaveStatusFirestore] Firestore notice:', error);
+  }
+}
+
+/**
+ * GPS Check-in Logs & Geofence Config Persistence
+ */
+export async function saveGPSCheckInLogFirestore(log: GPSCheckInLog): Promise<void> {
+  const collectionPath = 'gps_check_in_logs';
+  try {
+    const ref = doc(db, collectionPath, log.id);
+    await setDoc(ref, {
+      ...log,
+      createdAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[saveGPSCheckInLogFirestore] Firestore notice:', error);
+  }
+}
+
+export async function saveSchoolGeofenceConfigFirestore(config: SchoolGeofenceConfig): Promise<void> {
+  const collectionPath = 'school_settings';
+  try {
+    const ref = doc(db, collectionPath, 'geofence_config');
+    await setDoc(ref, {
+      ...config,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[saveSchoolGeofenceConfigFirestore] Firestore notice:', error);
+  }
+}
+
+/**
+ * Substitute Teaching & Post-Teaching Persistence
+ */
+export async function saveSubstituteAssignmentFirestore(assignment: SubstituteAssignment): Promise<void> {
+  const collectionPath = 'substitute_assignments';
+  try {
+    const ref = doc(db, collectionPath, assignment.id);
+    await setDoc(ref, {
+      ...assignment,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[saveSubstituteAssignmentFirestore] Firestore notice:', error);
+  }
+}
+
+export async function savePostTeachingRecordFirestore(record: PostTeachingRecord): Promise<void> {
+  const collectionPath = 'post_teaching_records';
+  const docId = `${record.courseId}_${record.date}`;
+  try {
+    const ref = doc(db, collectionPath, docId);
+    await setDoc(ref, {
+      ...record,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[savePostTeachingRecordFirestore] Firestore notice:', error);
+  }
+}
+
+/**
+ * Mental Health Screenings & SDQ Persistence
+ */
+export async function save2QScreeningFirestore(studentId: string, screening: TwoQuestionScreening): Promise<void> {
+  const collectionPath = 'student_screenings_2q';
+  try {
+    const ref = doc(db, collectionPath, studentId);
+    await setDoc(ref, {
+      ...screening,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[save2QScreeningFirestore] Firestore notice:', error);
+  }
+}
+
+export async function savePHQ9ScreeningFirestore(studentId: string, screening: PHQ9Screening): Promise<void> {
+  const collectionPath = 'student_screenings_phq9';
+  try {
+    const ref = doc(db, collectionPath, studentId);
+    await setDoc(ref, {
+      ...screening,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[savePHQ9ScreeningFirestore] Firestore notice:', error);
+  }
+}
+
+export async function saveSDQAssessmentFirestore(sdq: SDQAssessment): Promise<void> {
+  const collectionPath = 'student_assessments_sdq';
+  try {
+    const ref = doc(db, collectionPath, sdq.id);
+    await setDoc(ref, {
+      ...sdq,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[saveSDQAssessmentFirestore] Firestore notice:', error);
+  }
+}
+
+/**
+ * Parent Engagement Persistence (Billing, Messages, Appointments)
+ */
+export async function payBillingInvoiceFirestore(invoiceId: string, receiptNo: string): Promise<void> {
+  const collectionPath = 'billing_invoices';
+  try {
+    const ref = doc(db, collectionPath, invoiceId);
+    await setDoc(ref, {
+      status: 'PAID',
+      receiptNo,
+      paidAt: new Date().toISOString(),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[payBillingInvoiceFirestore] Firestore notice:', error);
+  }
+}
+
+export async function sendParentTeacherMessageFirestore(msg: ParentTeacherMessage): Promise<void> {
+  const collectionPath = 'parent_teacher_messages';
+  try {
+    const ref = doc(db, collectionPath, msg.id);
+    await setDoc(ref, {
+      ...msg,
+      createdAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[sendParentTeacherMessageFirestore] Firestore notice:', error);
+  }
+}
+
+export async function bookParentAppointmentFirestore(appointment: ParentAppointment): Promise<void> {
+  const collectionPath = 'parent_appointments';
+  try {
+    const ref = doc(db, collectionPath, appointment.id);
+    await setDoc(ref, {
+      ...appointment,
+      createdAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[bookParentAppointmentFirestore] Firestore notice:', error);
+  }
+}
+
+/**
+ * Active Learning Points & Logs Persistence
+ */
+export async function saveActiveLearningLogFirestore(record: ActiveLearningRecord): Promise<void> {
+  const collectionPath = 'active_learning_logs';
+  try {
+    const ref = doc(db, collectionPath, record.id);
+    await setDoc(ref, {
+      ...record,
+      createdAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn('[saveActiveLearningLogFirestore] Firestore notice:', error);
+  }
+}
+
 

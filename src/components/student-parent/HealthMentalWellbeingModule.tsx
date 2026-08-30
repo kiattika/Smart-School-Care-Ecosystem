@@ -26,7 +26,8 @@ import {
   InfirmaryVisit, 
   TwoQuestionScreening, 
   PHQ9Screening, 
-  SDQAssessment 
+  SDQAssessment,
+  Student 
 } from '../../types';
 
 export function HealthMentalWellbeingModule({ studentId, isParentView = false }: { studentId: string; isParentView?: boolean }) {
@@ -46,7 +47,27 @@ export function HealthMentalWellbeingModule({ studentId, isParentView = false }:
     students
   } = useStore();
 
-  const student = students.find(s => s.studentId === studentId) || students[0];
+  const defaultStudent: Student = {
+    id: studentId || 'default-student',
+    studentId: studentId || '69501',
+    name: 'นักเรียน (กำลังโหลดข้อมูล)',
+    fullName: 'นักเรียน (กำลังโหลดข้อมูล)',
+    nickname: '',
+    photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    studentNo: 1,
+    number: 1,
+    grade: 'ม.5',
+    room: '1',
+    seatIndex: null,
+    homeLocation: {
+      address: 'อุตรดิตถ์',
+      coordinates: [17.6201, 100.0993],
+      routeImage: ''
+    },
+    attendance: { morningStatus: 'PRESENT', checkInMethod: 'SCAN', checkInTime: '07:45 น.' }
+  };
+  const student = students.find(s => s.studentId === studentId) || students[0] || defaultStudent;
   const healthLogs = semesterHealthLogs[student.studentId] || [];
   const studentIllnesses = chronicIllnesses[student.studentId] || [];
   const studentAllergies = allergies[student.studentId] || [];

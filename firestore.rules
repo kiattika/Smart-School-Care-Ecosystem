@@ -143,6 +143,89 @@ service cloud.firestore {
                       hasRole('HOMEROOM_TEACHER');
     }
 
+    // 15. Gate Attendance Logs
+    match /gate_attendance_logs/{logId} {
+      allow read: if hasRole('SUPER_ADMIN') || 
+                     hasRole('EXECUTIVE') || 
+                     hasRole('HOMEROOM_TEACHER') || 
+                     hasRole('SUBJECT_TEACHER') || 
+                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid));
+      allow write: if hasRole('SUPER_ADMIN') || 
+                      hasRole('HOMEROOM_TEACHER') || 
+                      hasRole('SUBJECT_TEACHER') || 
+                      isSignedIn();
+    }
+
+    // 16. Detailed Leave Requests
+    match /detailed_leave_requests/{leaveId} {
+      allow read: if hasRole('SUPER_ADMIN') || 
+                     hasRole('HOMEROOM_TEACHER') || 
+                     hasRole('EXECUTIVE') || 
+                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid));
+      allow write: if hasRole('SUPER_ADMIN') || 
+                      hasRole('HOMEROOM_TEACHER') || 
+                      isSignedIn();
+    }
+
+    // 17. GPS Check-in Logs
+    match /gps_check_in_logs/{logId} {
+      allow read: if hasRole('SUPER_ADMIN') || 
+                     hasRole('EXECUTIVE') || 
+                     hasRole('HOMEROOM_TEACHER') || 
+                     hasRole('SUBJECT_TEACHER') || 
+                     (isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.studentId == request.auth.uid));
+      allow write: if isSignedIn();
+    }
+
+    // 18. Substitute Teaching Assignments & Post Teaching Records
+    match /substitute_assignments/{assignmentId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('HEAD_OF_DEPARTMENT') || hasRole('EXECUTIVE') || hasRole('SUBJECT_TEACHER');
+    }
+
+    match /post_teaching_records/{recordId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('HEAD_OF_DEPARTMENT') || hasRole('SUBJECT_TEACHER');
+    }
+
+    // 19. Student Health & Mental Screenings (2Q, PHQ-9, SDQ)
+    match /student_screenings_2q/{studentId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelf(studentId);
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelf(studentId);
+    }
+
+    match /student_screenings_phq9/{studentId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelf(studentId);
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelf(studentId);
+    }
+
+    match /student_assessments_sdq/{sdqId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSignedIn();
+    }
+
+    // 20. Billing Invoices, Messages, and Appointments
+    match /billing_invoices/{invoiceId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('EXECUTIVE') || isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || isSignedIn();
+    }
+
+    match /parent_teacher_messages/{msgId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER') || isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /parent_appointments/{appointmentId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER') || isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // 21. Active Learning Records
+    match /active_learning_logs/{logId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER');
+    }
+
     // Default Deny All Catch-All for unknown paths
     match /{document=**} {
       allow read, write: if false;

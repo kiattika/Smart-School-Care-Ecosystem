@@ -21,7 +21,7 @@ import {
   Satellite
 } from 'lucide-react';
 import { useStore } from '../../store';
-import { GateAttendanceRecord, DetailedLeaveRequest, AttendanceStatus } from '../../types';
+import { GateAttendanceRecord, DetailedLeaveRequest, AttendanceStatus, Student } from '../../types';
 import { GPSGeofenceCheckinModal } from '../GPSGeofenceCheckinModal';
 
 export function GateAttendanceTracker({ studentId, isParentView = false }: { studentId: string; isParentView?: boolean }) {
@@ -36,7 +36,27 @@ export function GateAttendanceTracker({ studentId, isParentView = false }: { stu
     user
   } = useStore();
 
-  const student = students.find(s => s.studentId === studentId) || students[0];
+  const defaultStudent: Student = {
+    id: studentId || 'default-student',
+    studentId: studentId || '69501',
+    name: 'นักเรียน (กำลังโหลดข้อมูล)',
+    fullName: 'นักเรียน (กำลังโหลดข้อมูล)',
+    nickname: '',
+    photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    studentNo: 1,
+    number: 1,
+    grade: 'ม.5',
+    room: '1',
+    seatIndex: null,
+    homeLocation: {
+      address: 'อุตรดิตถ์',
+      coordinates: [17.6201, 100.0993],
+      routeImage: ''
+    },
+    attendance: { morningStatus: 'PRESENT', checkInMethod: 'SCAN', checkInTime: '07:45 น.' }
+  };
+  const student = students.find(s => s.studentId === studentId) || students[0] || defaultStudent;
   const logs = gateAttendanceLogs.filter(l => l.studentId === student.studentId);
   const leaves = detailedLeaveRequests.filter(l => l.studentId === student.studentId);
 
