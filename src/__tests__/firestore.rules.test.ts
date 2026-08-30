@@ -555,6 +555,54 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
+  // 16. parent_verification_records — SUPER_ADMIN only (PDPA-sensitive identity data)
+  describe('parent_verification_records collection', () => {
+    it('allows SUPER_ADMIN to read and write parent verification records', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('parent_verification_records/38501_verify').set({
+          studentId: '38501',
+          parentNationalIdHash: 'abc123',
+          relationship: 'บิดา',
+          linkedParentUid: null,
+        });
+      });
+
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('parent_verification_records/38501_verify').get());
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('parent_verification_records/38502_verify').set({
+          studentId: '38502', parentNationalIdHash: 'def456', relationship: 'มารดา', linkedParentUid: null,
+        })
+      );
+    });
+
+    it('REGRESSION: denies HOMEROOM_TEACHER, EXECUTIVE, and PARENT from reading parent verification records', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('parent_verification_records/38501_verify').set({
+          studentId: '38501', parentNationalIdHash: 'abc123', linkedParentUid: null,
+        });
+      });
+
+      await assertFails(asRole('HOMEROOM_TEACHER').firestore().doc('parent_verification_records/38501_verify').get());
+      await assertFails(asRole('EXECUTIVE').firestore().doc('parent_verification_records/38501_verify').get());
+      await assertFails(asUser('parent-alice', ['PARENT']).firestore().doc('parent_verification_records/38501_verify').get());
+    });
+
+    it('REGRESSION: denies non-admin roles and the parent themself from writing parent verification records', async () => {
+      await assertFails(
+        asRole('HOMEROOM_TEACHER').firestore().doc('parent_verification_records/pv-bad').set({ studentId: '38501' })
+      );
+      await assertFails(
+        asRole('SUBJECT_TEACHER').firestore().doc('parent_verification_records/pv-bad-2').set({ studentId: '38501' })
+      );
+      await assertFails(
+        asUser('parent-alice', ['PARENT']).firestore().doc('parent_verification_records/pv-bad-3').set({ studentId: '38501', linkedParentUid: 'parent-alice' })
+      );
+      await assertFails(
+        asAnonymous().firestore().doc('parent_verification_records/pv-bad-4').set({ studentId: '38501' })
+      );
+    });
+  });
+
   // 15. Default Deny Catch-All (Regression Test 5)
   describe('Default Deny Catch-All (Undeclared paths)', () => {
     it('REGRESSION: denies authenticated user with no matching role from reading or writing undeclared collections', async () => {

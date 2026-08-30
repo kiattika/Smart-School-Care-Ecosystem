@@ -262,6 +262,13 @@ service cloud.firestore {
       allow write: if hasRole('SUPER_ADMIN') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER');
     }
 
+    // 22. Parent Verification Records (identity matching for LINE/LIFF account linking)
+    // ข้อมูลอ่อนไหวตาม PDPA (hash เลขบัตร ปชช. + เบอร์โทร) — ใช้เทียบยืนยันฝั่ง backend เท่านั้น
+    // SUPER_ADMIN เท่านั้นที่อ่าน/เขียนได้ (แม้แต่ผู้ปกครองเจ้าของข้อมูลก็ไม่ควรอ่านได้จาก client)
+    match /parent_verification_records/{recordId} {
+      allow read, write: if hasRole('SUPER_ADMIN');
+    }
+
     // Default Deny All Catch-All for unknown paths
     match /{document=**} {
       allow read, write: if false;
