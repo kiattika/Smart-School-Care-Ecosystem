@@ -736,16 +736,40 @@ export async function saveSchoolGeofenceConfigFirestore(config: SchoolGeofenceCo
 /**
  * Substitute Teaching & Post-Teaching Persistence
  */
+/** ลบ key ที่มีค่า undefined ออก (Firestore ไม่รับ undefined) */
+function stripUndefined<T extends Record<string, any>>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, v]) => v !== undefined)
+  ) as Partial<T>;
+}
+
 export async function saveSubstituteAssignmentFirestore(assignment: SubstituteAssignment): Promise<void> {
   const collectionPath = 'substitute_assignments';
   try {
     const ref = doc(db, collectionPath, assignment.id);
     await setDoc(ref, {
-      ...assignment,
+      ...stripUndefined(assignment),
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.warn('[saveSubstituteAssignmentFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${assignment.id}`);
+  }
+}
+
+/** อัปเดตเฉพาะบาง field ของเอกสารสอนแทน (ใช้ตอนอนุมัติ/ปฏิเสธ/บันทึกหลังสอน) */
+export async function updateSubstituteAssignmentFirestore(
+  id: string,
+  patch: Partial<SubstituteAssignment>
+): Promise<void> {
+  const collectionPath = 'substitute_assignments';
+  try {
+    const ref = doc(db, collectionPath, id);
+    await setDoc(ref, {
+      ...stripUndefined(patch as Record<string, any>),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${id}`);
   }
 }
 

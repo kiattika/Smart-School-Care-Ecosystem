@@ -31,8 +31,11 @@ import {
   ParentAppointment,
   GPSCheckInLog,
   SubstituteAssignment,
+  SubstituteApprovalStep,
+  SubstituteApprovalStage,
   PostTeachingRecord
 } from './types';
+import { SUBSTITUTE_STAGE_ROLE, SUBSTITUTE_STAGE_ORDER } from './types';
 import { DEFAULT_SCHOOL_GEOFENCE } from './utils/geoUtils';
 import { 
   saveSelfAssessmentRecord, 
@@ -43,6 +46,7 @@ import {
   saveGPSCheckInLogFirestore,
   saveSchoolGeofenceConfigFirestore,
   saveSubstituteAssignmentFirestore,
+  updateSubstituteAssignmentFirestore,
   savePostTeachingRecordFirestore,
   save2QScreeningFirestore,
   savePHQ9ScreeningFirestore,
@@ -110,6 +114,7 @@ export const useStore = create<StoreState>((set, get) => ({
   studentScores: [],
   substituteAssignments: [],
   postTeachingRecords: [],
+  staffDirectory: [],
   periodSwaps: [],
   homeVisits: [],
 
@@ -495,6 +500,200 @@ export const useStore = create<StoreState>((set, get) => ({
   removeSubstituteAssignment: (id) => set((state) => ({
     substituteAssignments: state.substituteAssignments.filter(sa => sa.id !== id)
   })),
+
+  setStaffDirectory: (staff) => set({ staffDirectory: staff }),
+  setSubstituteAssignments: (list) => set({ substituteAssignments: list }),
+  setPostTeachingRecords: (list) => set({ postTeachingRecords: list }),
+
+  // เสนอจัดครูสอนแทน — สร้าง approval chain 4 ขั้น (ขั้นที่ 1 = หัวหน้ากลุ่มสาระฯ ผู้เสนอ ถือว่าอนุมัติแล้ว)
+  proposeSubstituteAssignment: async (payload) => {
+    const now = new Date().toISOString();
+    const existing = payload.id
+      ? get().substituteAssignments.find(s => s.id === payload.id)
+      : undefined;
+    const id =
+      payload.id ||
+      (payload.leaveRequestId
+        ? `sub_${payload.leaveRequestId}_${payload.courseId}`
+        : `sub_${payload.courseId}_${payload.date}_${Date.now()}`);
+
+    const proposerEmail = payload.proposedByEmail || '';
+    const proposerName = payload.proposedByName || '';
+
+    const chain: SubstituteApprovalStep[] = SUBSTITUTE_STAGE_ORDER
+      .filter((s): s is Exclude<SubstituteApprovalStage, 'COMPLETED'> => s !== 'COMPLETED')
+      .map((stage, idx) => {
+        if (idx === 0) {
+          return {
+            stage,
+            approverRole: SUBSTITUTE_STAGE_ROLE[stage],
+            approverName: proposerName,
+            approverEmail: proposerEmail,
+            status: 'APPROVED' as const,
+            approvedAt: now,
+            comment: 'เสนอจัดครูสอนแทนโดยหัวหน้ากลุ่มสาระฯ',
+          };
+        }
+        return {
+          stage,
+          approverRole: SUBSTITUTE_STAGE_ROLE[stage],
+          approverName: '',
+          approverEmail: '',
+          status: 'PENDING' as const,
+        };
+      });
+
+    const { id: _ignored, ...rest } = payload;
+    const assignment: SubstituteAssignment = {
+      ...rest,
+      id,
+      status: 'PENDING_APPROVAL',
+      currentApprovalStage: 'STAGE_2_ACADEMIC_HEAD',
+      approvalChain: chain,
+      postTeachingDueAt: `${payload.date}T23:59:59`,
+      isCompleted: false,
+      rejectionReason: undefined,
+      rejectedAt: undefined,
+      rejectedByName: undefined,
+      rejectedByRole: undefined,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+
+    await saveSubstituteAssignmentFirestore(assignment);
+
+    set((state) => ({
+      substituteAssignments: [
+        ...state.substituteAssignments.filter(s => s.id !== id),
+        assignment,
+      ],
+    }));
+
+    return assignment;
+  },
+
+  // อนุมัติ/ปฏิเสธ ตามลำดับขั้น — sequential, ห้ามบุคคลเดียวข้ามหลายขั้น
+  decideSubstituteApproval: async (id, decision, approver, comment) => {
+    const target = get().substituteAssignments.find(s => s.id === id);
+    if (!target) throw new Error('ไม่พบรายการจัดครูสอนแทน');
+
+    const stage = target.currentApprovalStage;
+    if (!stage || stage === 'COMPLETED') {
+      throw new Error('รายการนี้ผ่านการอนุมัติครบทุกขั้นแล้ว');
+    }
+
+    const chain = (target.approvalChain || []).map(s => ({ ...s }));
+    const stepIdx = chain.findIndex(s => s.stage === stage);
+    if (stepIdx === -1) throw new Error('ไม่พบข้อมูลขั้นอนุมัติปัจจุบัน');
+
+    const requiredRole = SUBSTITUTE_STAGE_ROLE[stage as Exclude<SubstituteApprovalStage, 'COMPLETED'>];
+    if (approver.role !== requiredRole) {
+      throw new Error(`ขั้นอนุมัตินี้สงวนสิทธิ์เฉพาะบทบาท ${requiredRole} เท่านั้น`);
+    }
+
+    // ห้ามบุคคลเดียวปรากฏซ้ำในหลายขั้น (รวมถึงผู้เสนอขั้นที่ 1)
+    const priorApprovers = chain
+      .slice(0, stepIdx)
+      .map(s => s.approverEmail?.toLowerCase())
+      .filter(Boolean);
+    if (priorApprovers.includes(approver.email.toLowerCase())) {
+      throw new Error('บุคคลนี้ได้อนุมัติในขั้นก่อนหน้าแล้ว — ต้องแยกผู้อนุมัติตามลำดับ 4 ขั้น');
+    }
+
+    if (chain.slice(0, stepIdx).some(s => s.status !== 'APPROVED')) {
+      throw new Error('ยังมีขั้นอนุมัติก่อนหน้าที่ยังไม่เสร็จสิ้น');
+    }
+
+    const decidedAt = new Date().toISOString();
+    let patch: Partial<SubstituteAssignment>;
+
+    if (decision === 'REJECT') {
+      chain[stepIdx] = {
+        ...chain[stepIdx],
+        status: 'REJECTED',
+        approverName: approver.name,
+        approverEmail: approver.email,
+        approvedAt: decidedAt,
+        comment: comment || '',
+      };
+      patch = {
+        approvalChain: chain,
+        status: 'REJECTED',
+        rejectionReason: comment || '',
+        rejectedAt: decidedAt,
+        rejectedByName: approver.name,
+        rejectedByRole: approver.role,
+      };
+    } else {
+      chain[stepIdx] = {
+        ...chain[stepIdx],
+        status: 'APPROVED',
+        approverName: approver.name,
+        approverEmail: approver.email,
+        approvedAt: decidedAt,
+        comment: comment || '',
+      };
+      const nextStage =
+        SUBSTITUTE_STAGE_ORDER[SUBSTITUTE_STAGE_ORDER.indexOf(stage) + 1] || 'COMPLETED';
+      patch = {
+        approvalChain: chain,
+        currentApprovalStage: nextStage,
+        status: nextStage === 'COMPLETED' ? 'APPROVED' : 'PENDING_APPROVAL',
+      };
+    }
+
+    await updateSubstituteAssignmentFirestore(id, patch);
+    set((state) => ({
+      substituteAssignments: state.substituteAssignments.map(a =>
+        a.id === id ? { ...a, ...patch } : a
+      ),
+    }));
+  },
+
+  // บันทึกหลังสอนแทน — flag overdue ถ้าเลย 24:00 น. ของวันที่สอน + เขียน post_teaching_records จริง
+  completeSubstituteAssignment: async (id, completion) => {
+    const target = get().substituteAssignments.find(s => s.id === id);
+    if (!target) throw new Error('ไม่พบรายการจัดครูสอนแทน');
+    if (target.status !== 'APPROVED') {
+      throw new Error('รายการนี้ยังอนุมัติไม่ครบ 4 ขั้น จึงยังบันทึกหลังสอนไม่ได้');
+    }
+
+    const nowIso = new Date().toISOString();
+    const dueAt = target.postTeachingDueAt || `${target.date}T23:59:59`;
+    const isLate = Date.now() > new Date(dueAt).getTime();
+
+    const patch: Partial<SubstituteAssignment> = {
+      isCompleted: true,
+      completedAt: nowIso,
+      completionSummary: completion.summary,
+      completionProblems: completion.problems || '',
+      completionSolutions: completion.solutions || '',
+      completionAttendance: completion.attendance || {},
+      isLate,
+    };
+    await updateSubstituteAssignmentFirestore(id, patch);
+
+    const record: PostTeachingRecord = {
+      courseId: target.courseId,
+      date: target.date,
+      summary: `[ปฏิบัติหน้าที่สอนแทน ${target.originalTeacherName || target.originalTeacherEmail} โดย ${target.substituteTeacherName || target.substituteTeacherEmail}] ${completion.summary}`,
+      problems: completion.problems || 'ไม่มี',
+      solutions: completion.solutions || 'ไม่มี',
+      submittedAt: nowIso,
+      isLate,
+    };
+    await savePostTeachingRecordFirestore(record);
+
+    set((state) => ({
+      substituteAssignments: state.substituteAssignments.map(a =>
+        a.id === id ? { ...a, ...patch } : a
+      ),
+      postTeachingRecords: [
+        ...state.postTeachingRecords.filter(r => !(r.courseId === record.courseId && r.date === record.date)),
+        record,
+      ],
+    }));
+  },
   submitHomeVisit: (visit) => set((state) => ({
     homeVisits: [
       ...state.homeVisits.filter(v => v.studentId !== visit.studentId),

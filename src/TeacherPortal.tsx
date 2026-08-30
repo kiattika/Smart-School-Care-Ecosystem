@@ -19,6 +19,7 @@ import { TeachingLoadTable } from './components/TeachingLoadTable';
 import { ClassroomSeatingManager } from './components/ClassroomSeatingManager';
 import { ClassroomLeaderboard } from './components/ClassroomLeaderboard';
 import { GPSGeofenceCheckinModal } from './components/GPSGeofenceCheckinModal';
+import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
 
 // Helper for tailwind classes
 
@@ -56,8 +57,40 @@ export function TeacherPortal() {
     submitPeriodSwap,
     updatePeriodSwapStatus,
     updateStudentScore,
-    updateCourseScoreSetting
+    updateCourseScoreSetting,
+    completeSubstituteAssignment
   } = useStore();
+
+  // --- บันทึกหลังสอนแทน (deadline ก่อน 24:00 น. ของวันที่สอน) ---
+  const [subCompleteTarget, setSubCompleteTarget] = useState<SubstituteAssignment | null>(null);
+  const [subCSummary, setSubCSummary] = useState('');
+  const [subCProblems, setSubCProblems] = useState('');
+  const [subCSolutions, setSubCSolutions] = useState('');
+  const [subCSubmitting, setSubCSubmitting] = useState(false);
+
+  const handleSubmitSubCompletion = async () => {
+    if (!subCompleteTarget || !subCSummary.trim()) return;
+    setSubCSubmitting(true);
+    try {
+      await completeSubstituteAssignment(subCompleteTarget.id, {
+        summary: subCSummary.trim(),
+        problems: subCProblems.trim(),
+        solutions: subCSolutions.trim(),
+      });
+      const late = subCompleteTarget.postTeachingDueAt
+        ? Date.now() > new Date(subCompleteTarget.postTeachingDueAt).getTime()
+        : false;
+      setSubCompleteTarget(null);
+      setSubCSummary(''); setSubCProblems(''); setSubCSolutions('');
+      setToast(late ? '⚠️ บันทึกหลังสอนแทนแล้ว (เลยกำหนด 24:00 น. — flag overdue)' : 'บันทึกหลังสอนแทนเรียบร้อยภายในกำหนด');
+      setTimeout(() => setToast(null), 4000);
+    } catch (err) {
+      setToast('บันทึกไม่สำเร็จ: ' + (err instanceof Error ? err.message : String(err)));
+      setTimeout(() => setToast(null), 4000);
+    } finally {
+      setSubCSubmitting(false);
+    }
+  };
 
   const { periods: dbPeriods, error: periodsError } = usePeriodsConfig();
   const { 
@@ -930,7 +963,13 @@ export function TeacherPortal() {
               );
             })()}
 
-            {dashboardTab === 'substitutions' && (
+            {dashboardTab === 'substitutions' && ['HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'].includes(user?.activeRole || '') && (
+              <div className="-mx-4 sm:-mx-6 lg:-mx-8 animate-in fade-in duration-300">
+                <SubstituteTeachingModule />
+              </div>
+            )}
+
+            {dashboardTab === 'substitutions' && !['HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'].includes(user?.activeRole || '') && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in duration-300">
                 {/* Form to submit request */}
                 <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4">
@@ -1083,27 +1122,63 @@ export function TeacherPortal() {
                   {/* Substitute assignments */}
                   <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4">
                     <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-3">
-                      <Calendar className="w-5 h-5 text-emerald-400" /> งานสอนแทนที่ท่านได้รับมอบหมายวันนี้
+                      <Calendar className="w-5 h-5 text-emerald-400" /> งานสอนแทนที่ท่านได้รับมอบหมาย (อนุมัติครบ 4 ขั้นแล้ว)
                     </h3>
-                    
+
                     <div className="space-y-3">
-                      {substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.date === todayStr).length === 0 ? (
-                        <div className="text-center py-6 text-xs text-slate-500">ไม่มีภาระงานสอนแทนสำหรับท่านในวันนี้</div>
-                      ) : (
-                        substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.date === todayStr).map(sa => {
-                          const course = globalCourses.find(c => c.courseId === sa.courseId);
-                          return (
-                            <div key={sa.id} className="bg-emerald-950/20 p-4 border border-emerald-800/40 rounded-xl space-y-1">
-                              <div className="flex justify-between text-xs text-emerald-400 font-bold">
-                                <span>วิชา: {course?.code} {course?.courseName}</span>
-                                <span>{course?.scheduleString}</span>
+                      {(() => {
+                        const myApproved = substituteAssignments.filter(
+                          sa => isTeacherEmailMatch(sa.substituteTeacherEmail, user?.email) && sa.status === 'APPROVED'
+                        );
+                        if (myApproved.length === 0) {
+                          return <div className="text-center py-6 text-xs text-slate-500">ไม่มีภาระงานสอนแทนที่ผ่านการอนุมัติสำหรับท่าน</div>;
+                        }
+                        return myApproved
+                          .slice()
+                          .sort((a, b) => a.date.localeCompare(b.date))
+                          .map(sa => {
+                            const course = globalCourses.find(c => c.courseId === sa.courseId);
+                            const code = sa.courseCode || course?.code || '';
+                            const name = sa.courseName || course?.courseName || 'รายวิชา';
+                            const room = sa.room || course?.roomName || '';
+                            const overdue = !sa.isCompleted && sa.postTeachingDueAt
+                              ? Date.now() > new Date(sa.postTeachingDueAt).getTime()
+                              : false;
+                            return (
+                              <div key={sa.id} className={cn(
+                                'p-4 border rounded-xl space-y-2',
+                                overdue ? 'bg-red-950/20 border-red-800/40' : 'bg-emerald-950/20 border-emerald-800/40'
+                              )}>
+                                <div className="flex justify-between text-xs text-emerald-400 font-bold">
+                                  <span>วิชา: {code} {name}</span>
+                                  <span>{sa.periodName || sa.schedule} · {sa.date}</span>
+                                </div>
+                                <p className="text-xs text-slate-300">ห้องเรียน: <span className="font-bold text-white">{room}</span></p>
+                                <p className="text-[10px] text-slate-400">
+                                  แทนคุณครู: {sa.originalTeacherName || sa.originalTeacherEmail}
+                                  {sa.notes ? <> · งานมอบหมาย: {sa.notes}</> : null}
+                                </p>
+                                {sa.isCompleted ? (
+                                  <div className="text-[10px] text-emerald-400 flex items-center gap-1">
+                                    <CheckCircle className="w-3.5 h-3.5" /> บันทึกหลังสอนแล้ว {sa.isLate ? '· ⚠️ ส่งช้ากว่ากำหนด' : '· ตรงเวลา'}
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className={cn('text-[10px] font-bold', overdue ? 'text-red-400' : 'text-amber-400')}>
+                                      {overdue ? '⚠️ เลยเส้นตายบันทึก 24:00 น.' : 'บันทึกหลังสอนก่อน 24:00 น. ของวันสอน'}
+                                    </span>
+                                    <button
+                                      onClick={() => { setSubCompleteTarget(sa); setSubCSummary(''); setSubCProblems(''); setSubCSolutions(''); }}
+                                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-lg flex items-center gap-1 shrink-0"
+                                    >
+                                      <FileText className="w-3 h-3" /> บันทึกหลังสอนแทน
+                                    </button>
+                                  </div>
+                                )}
                               </div>
-                              <p className="text-xs text-slate-300">ห้องเรียน: <span className="font-bold text-white">{course?.roomName}</span></p>
-                              <p className="text-[10px] text-slate-400">แทนคุณครู: {course?.teacherName}</p>
-                            </div>
-                          );
-                        })
-                      )}
+                            );
+                          });
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -2423,6 +2498,60 @@ export function TeacherPortal() {
         isOpen={isTeacherGPSModalOpen}
         onClose={() => setIsTeacherGPSModalOpen(false)}
       />
+
+      {/* บันทึกหลังสอนแทน (deadline ก่อน 24:00 น. ของวันที่สอน) */}
+      <AnimatePresence>
+        {subCompleteTarget && (
+          <div className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#111622] border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 my-8"
+            >
+              <div className="flex justify-between items-start border-b border-slate-800 pb-3">
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-emerald-400" /> บันทึกหลังสอนแทน
+                </h3>
+                <button onClick={() => setSubCompleteTarget(null)} className="p-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-400 hover:text-white">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="text-xs text-slate-300 bg-slate-950/40 rounded-xl p-3 border border-slate-800/80">
+                {subCompleteTarget.courseCode} {subCompleteTarget.courseName} · {subCompleteTarget.room} · {subCompleteTarget.date}<br />
+                แทนคุณครู {subCompleteTarget.originalTeacherName || subCompleteTarget.originalTeacherEmail}
+                {subCompleteTarget.postTeachingDueAt && Date.now() > new Date(subCompleteTarget.postTeachingDueAt).getTime() && (
+                  <span className="block mt-1 text-red-400 font-bold">⚠️ เลยเส้นตาย 24:00 น. ของวันที่สอน — จะถูก flag เป็น overdue</span>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">สรุปเนื้อหาที่สอนแทน <span className="text-red-500">*</span></label>
+                <textarea rows={3} value={subCSummary} onChange={e => setSubCSummary(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-emerald-500 font-semibold" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5">ปัญหา/อุปสรรค</label>
+                  <textarea rows={2} value={subCProblems} onChange={e => setSubCProblems(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-emerald-500 font-semibold" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5">แนวทางแก้ไข/ข้อแนะนำ</label>
+                  <textarea rows={2} value={subCSolutions} onChange={e => setSubCSolutions(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-emerald-500 font-semibold" />
+                </div>
+              </div>
+              <div className="flex gap-2.5 justify-end pt-3 border-t border-slate-800/50">
+                <button onClick={() => setSubCompleteTarget(null)} className="px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400">ยกเลิก</button>
+                <button
+                  onClick={handleSubmitSubCompletion} disabled={subCSubmitting || !subCSummary.trim()}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-black flex items-center gap-1.5"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" /> {subCSubmitting ? 'กำลังบันทึก...' : 'ส่งบันทึกหลังสอนแทน'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

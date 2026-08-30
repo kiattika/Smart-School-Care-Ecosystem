@@ -1,1257 +1,938 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Users, 
-  UserCheck, 
-  CheckCircle, 
-  XCircle, 
-  AlertCircle, 
-  Calendar, 
-  FileText, 
-  PlusCircle, 
-  Send, 
-  ShieldAlert, 
-  Sparkles, 
-  Trash2, 
-  ChevronRight, 
-  Award, 
-  Search, 
-  BookOpen, 
-  Clock, 
-  Check, 
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  UserCheck,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  Calendar,
+  FileText,
+  PlusCircle,
+  Send,
+  ShieldAlert,
+  Clock,
+  Check,
   Info,
   Layers,
-  ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { useStore } from '../store';
 import { cn, isSameRoom } from '../lib/utils';
+import { UserRole, SubstituteAssignment, SubstituteApprovalStage, SUBSTITUTE_STAGE_ROLE } from '../types';
+import { DEPARTMENTS, ROLE_NAMES_TH } from './StaffRoleManagementPage';
 
-// --- Types & Schema ---
-export type SubstituteStatus = 'PENDING_ASSIGNMENT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-export interface SubstituteTask {
-  id: string;
-  originalTeacherName: string;
-  originalTeacherEmail: string;
-  departmentName: string;
-  courseId: string;
-  courseCode: string;
-  courseName: string;
-  room: string;
-  schedule: string;       // e.g., "จ2", "อ4", "พุ1"
-  periodName: string;     // e.g., "คาบ 2 (09:10 - 10:00 น.)"
-  date: string;           // e.g., "2026-07-21"
-  status: SubstituteStatus;
-  substituteTeacherEmail?: string;
-  substituteTeacherName?: string;
-  notes?: string;
-  rejectionReason?: string;
-  isCompleted?: boolean;
-  completionSummary?: string;
-  completionProblems?: string;
-  completionSolutions?: string;
-  completionAttendance?: Record<string, 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE'>;
-  completedAt?: string;
-}
-
-// All teachers metadata for department mappings
-const ALL_TEACHERS = [
-  { name: 'นาย เกียรติศักดิ์ ศรีวิไล', email: 'kiattisak@utd.ac.th', dept: 'กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี', position: 'ครู คศ.3 (วิทยฐานะชำนาญการพิเศษ)' },
-  { name: 'คุณครู วิภาดา รักเรียน', email: 'wipada.r@school.ac.th', dept: 'กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี', position: 'ครู คศ.2 (วิทยฐานะชำนาญการ)' },
-  { name: 'คุณครู สมใจ รักสอน', email: 'somjai@utd.ac.th', dept: 'กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี', position: 'ครู คศ.1' },
-  { name: 'คุณครู มานะ บากบั่น', email: 'mana@utd.ac.th', dept: 'กลุ่มสาระการเรียนรู้คณิตศาสตร์', position: 'ครู คศ.2' },
-  { name: 'นาย ก (ครูภาษาไทย)', email: 'teacher@utd.ac.th', dept: 'กลุ่มสาระการเรียนรู้ภาษาไทย', position: 'ครู คศ.1' },
-  { name: 'คุณครู วีณา รื่นรมย์', email: 'weena@utd.ac.th', dept: 'กลุ่มสาระการเรียนรู้ศิลปะ', position: 'ครู คศ.2' }
-];
-
-const getTeacherDepartment = (email: string) => {
-  const t = ALL_TEACHERS.find(x => x.email === email);
-  return t ? t.dept : 'กลุ่มสาระการเรียนรู้ทั่วไป';
+const THAI_DAY_ABBREV: Record<number, string> = { 1: 'จ', 2: 'อ', 3: 'พ', 4: 'ฤ', 5: 'ศ', 6: 'ส', 7: 'อา' };
+const DAY_WORD_TO_NUM: Record<string, number> = {
+  monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 7,
 };
 
-export function SubstituteTeachingModule() {
-  const { 
-    globalCourses, 
-    courses, 
-    students, 
-    currentDate,
-    assignSubstituteTeacher, 
-    substituteAssignments,
-    submitPostTeachingRecord
-  } = useStore();
+/** JS getDay() (0=Sun..6=Sat) → เลขวันแบบไทย 1=จันทร์..7=อาทิตย์ */
+function jsDateToThaiDayNum(dateStr: string): number {
+  const d = new Date(dateStr + 'T00:00:00');
+  const js = d.getDay();
+  return js === 0 ? 7 : js;
+}
 
-  // Active Role Simulator State
-  // HEAD_OF_DEPARTMENT: organizes/proposes within their dept.
-  // ACADEMIC_ASSISTANT_DIRECTOR: approves proposed substitions.
-  // SUBSTITUTE_TEACHER: views assigned substitution classes & marks attendance / teaching logs.
-  const [simulatorRole, setSimulatorRole] = useState<'HEAD_OF_DEPARTMENT' | 'ACADEMIC_ASSISTANT_DIRECTOR' | 'SUBSTITUTE_TEACHER'>('HEAD_OF_DEPARTMENT');
-  const [selectedDeptTeacherEmail, setSelectedDeptTeacherEmail] = useState<string>('wipada.r@school.ac.th'); // simulator active user for HOD
-  const [selectedSubTeacherEmail, setSelectedSubTeacherEmail] = useState<string>('kiattisak@utd.ac.th'); // simulator active user for Teacher
+interface NormalizedSchedule {
+  id: string;
+  emails: string[];       // อีเมลครูผู้สอนคาบนี้ (รองรับทั้ง teacherEmail และ teacherIds)
+  day: number;            // 1=จันทร์..7
+  period: number;         // คาบ 0 = โฮมรูม (เป็นคาบจริง — ห้าม falsy check)
+  code: string;
+  name: string;
+  room: string;
+  targetClass: string;
+}
 
-  // Core substitute tasks list
-  const [tasks, setTasks] = useState<SubstituteTask[]>([]);
-  
-  // Modals / Selection states
-  const [activeTaskForAssign, setActiveTaskForAssign] = useState<SubstituteTask | null>(null);
-  const [substituteTeacherEmail, setSubstituteTeacherEmail] = useState<string>('');
-  const [notes, setNotes] = useState<string>('');
-  
-  // Custom Absences form states
-  const [showAddAbsenceModal, setShowAddAbsenceModal] = useState(false);
-  const [absenceTeacherEmail, setAbsenceTeacherEmail] = useState<string>('somjai@utd.ac.th');
-  const [absenceCourseId, setAbsenceCourseId] = useState<string>('');
-  const [absenceDate, setAbsenceDate] = useState<string>(new Date().toISOString().split('T')[0]);
+const STAGE_LABEL_TH: Record<SubstituteApprovalStage, string> = {
+  STAGE_1_HEAD_OF_DEPARTMENT: 'ขั้น 1 · หัวหน้ากลุ่มสาระฯ',
+  STAGE_2_ACADEMIC_HEAD: 'ขั้น 2 · หัวหน้าฝ่ายวิชาการและหลักสูตร',
+  STAGE_3_DEPUTY_DIRECTOR_ACADEMIC: 'ขั้น 3 · รองผู้อำนวยการฝ่ายวิชาการ',
+  STAGE_4_DIRECTOR: 'ขั้น 4 · ผู้อำนวยการ',
+  COMPLETED: 'อนุมัติครบทุกขั้น',
+};
 
-  // Reject dialog states
-  const [taskToReject, setTaskToReject] = useState<SubstituteTask | null>(null);
-  const [rejectionReason, setRejectionReason] = useState<string>('');
+const TRIGGER_LABEL_TH: Record<string, string> = {
+  SICK_LEAVE: 'ลาป่วย (หัวหน้ากลุ่มสาระฯ จัดครูโดยตรง)',
+  PERSONAL_LEAVE: 'ลากิจ (แจ้งเหตุผลล่วงหน้า)',
+  OFFICIAL_DUTY: 'ไปราชการ (แจ้งเหตุผลล่วงหน้า)',
+};
 
-  // Complete substitution task states
-  const [taskToComplete, setTaskToComplete] = useState<SubstituteTask | null>(null);
-  const [completionSummary, setCompletionSummary] = useState<string>('');
-  const [completionProblems, setCompletionProblems] = useState<string>('');
-  const [completionSolutions, setCompletionSolutions] = useState<string>('');
-  const [completionAttendance, setCompletionAttendance] = useState<Record<string, 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE'>>({});
+const SIM_ROLES: { role: UserRole; label: string }[] = [
+  { role: 'HEAD_OF_DEPARTMENT', label: 'หัวหน้ากลุ่มสาระฯ — เสนอจัดครูสอนแทน' },
+  { role: 'ACADEMIC_HEAD', label: 'หัวหน้าฝ่ายวิชาการฯ — อนุมัติขั้น 2' },
+  { role: 'DEPUTY_DIRECTOR_ACADEMIC', label: 'รองผู้อำนวยการฝ่ายวิชาการ — อนุมัติขั้น 3' },
+  { role: 'DIRECTOR', label: 'ผู้อำนวยการ — อนุมัติขั้น 4' },
+  { role: 'SUBJECT_TEACHER', label: 'ครูผู้รับมอบหมายสอนแทน — บันทึกหลังสอน' },
+];
 
-  // Success Notification banner
-  const [successToast, setSuccessToast] = useState<{title: string; message: string} | null>(null);
+const APPROVAL_ROLES: UserRole[] = ['ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'];
 
-  // Initialize Default Tasks
+// ---------------------------------------------------------------------------
+// Live schedules subscription (read-only)
+// ---------------------------------------------------------------------------
+
+function useSchedulesCollection(staffById: Map<string, string>) {
+  const [raw, setRaw] = useState<any[]>([]);
+
   useEffect(() => {
-    setTasks([
-      {
-        id: 'task-1',
-        originalTeacherName: 'คุณครู สมใจ รักสอน',
-        originalTeacherEmail: 'somjai@utd.ac.th',
-        departmentName: 'กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี',
-        courseId: '1',
-        courseCode: 'ว30101',
-        courseName: 'วิทยาศาสตร์กายภาพ 1',
-        room: 'ม.4/1',
-        schedule: 'จ2',
-        periodName: 'คาบ 2 (09:10 - 10:00 น.)',
-        date: new Date().toISOString().split('T')[0],
-        status: 'PENDING_ASSIGNMENT'
-      },
-      {
-        id: 'task-2',
-        originalTeacherName: 'คุณครู สมใจ รักสอน',
-        originalTeacherEmail: 'somjai@utd.ac.th',
-        departmentName: 'กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี',
-        courseId: '2',
-        courseCode: 'ว30101',
-        courseName: 'วิทยาศาสตร์กายภาพ 1',
-        room: 'ม.4/2',
-        schedule: 'อ4',
-        periodName: 'คาบ 4 (11:00 - 11:50 น.)',
-        date: new Date().toISOString().split('T')[0],
-        status: 'PENDING_ASSIGNMENT'
-      },
-      {
-        id: 'task-3',
-        originalTeacherName: 'คุณครู มานะ บากบั่น',
-        originalTeacherEmail: 'mana@utd.ac.th',
-        departmentName: 'กลุ่มสาระการเรียนรู้คณิตศาสตร์',
-        courseId: '3',
-        courseCode: 'ค31101',
-        courseName: 'คณิตศาสตร์พื้นฐาน',
-        room: 'ม.1/1',
-        schedule: 'พุ1',
-        periodName: 'คาบ 1 (08:20 - 09:10 น.)',
-        date: new Date().toISOString().split('T')[0],
-        status: 'PENDING_APPROVAL',
-        substituteTeacherEmail: 'wipada.r@school.ac.th',
-        substituteTeacherName: 'คุณครู วิภาดา รักเรียน',
-        notes: 'ฝากสอนเนื้อหาเรื่อง สมการเชิงเส้นสองตัวแปร และให้นักเรียนทำแบบฝึกหัดหน้า 45 ในหนังสือเรียน'
-      },
-      {
-        id: 'task-4',
-        originalTeacherName: 'คุณครู วีณา รื่นรมย์',
-        originalTeacherEmail: 'weena@utd.ac.th',
-        departmentName: 'กลุ่มสาระการเรียนรู้ศิลปะ',
-        courseId: '5',
-        courseCode: 'ศ32101',
-        courseName: 'ศิลปะ 2',
-        room: 'ม.2/3',
-        schedule: 'ศ5',
-        periodName: 'คาบ 5 (12:40 - 13:30 น.)',
-        date: new Date().toISOString().split('T')[0],
-        status: 'APPROVED',
-        substituteTeacherEmail: 'kiattisak@utd.ac.th',
-        substituteTeacherName: 'นาย เกียรติศักดิ์ ศรีวิไล',
-        notes: 'ให้นักเรียนทำใบงานระบายสีทัศนศิลป์ตามใบงานที่ครูเตรียมวางไว้บนโต๊ะคอมพิวเตอร์'
-      }
-    ]);
+    const unsub = onSnapshot(
+      collection(db, 'schedules'),
+      (snap) => setRaw(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      (err) => console.warn('[SubstituteTeachingModule] schedules listener notice:', err.message)
+    );
+    return () => unsub();
   }, []);
 
-  const triggerToast = (title: string, message: string) => {
-    setSuccessToast({ title, message });
-    setTimeout(() => {
-      setSuccessToast(null);
-    }, 5000);
+  return useMemo<NormalizedSchedule[]>(() => {
+    return raw.map((s: any) => {
+      const emails: string[] = [];
+      if (typeof s.teacherEmail === 'string' && s.teacherEmail) emails.push(s.teacherEmail.toLowerCase());
+      if (Array.isArray(s.teacherIds)) {
+        s.teacherIds.forEach((uid: string) => {
+          const email = staffById.get(uid);
+          if (email) emails.push(email.toLowerCase());
+        });
+      }
+      if (typeof s.teachingPartner === 'string' && s.teachingPartner) emails.push(s.teachingPartner.toLowerCase());
+
+      let day = 0;
+      if (typeof s.scheduleDay === 'number') day = s.scheduleDay;
+      else if (typeof s.dayOfWeek === 'string') day = DAY_WORD_TO_NUM[s.dayOfWeek.toLowerCase()] || 0;
+      else if (typeof s.day === 'number') day = s.day;
+
+      const period =
+        typeof s.periodNumber === 'number' ? s.periodNumber :
+        typeof s.period === 'number' ? s.period : -1;
+
+      return {
+        id: s.id,
+        emails: Array.from(new Set(emails)),
+        day,
+        period,
+        code: s.courseCode || s.subjectCode || '',
+        name: s.courseName || s.subjectName || s.courseCode || s.subjectCode || 'รายวิชา',
+        room: s.room || s.targetClass || '',
+        targetClass: s.targetClass || s.room || '',
+      };
+    });
+  }, [raw, staffById]);
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export function SubstituteTeachingModule() {
+  const user = useStore(s => s.user);
+  const staffDirectory = useStore(s => s.staffDirectory);
+  const substituteAssignments = useStore(s => s.substituteAssignments);
+  const students = useStore(s => s.students);
+  const proposeSubstituteAssignment = useStore(s => s.proposeSubstituteAssignment);
+  const decideSubstituteApproval = useStore(s => s.decideSubstituteApproval);
+  const completeSubstituteAssignment = useStore(s => s.completeSubstituteAssignment);
+
+  const isDev = import.meta.env.DEV;
+
+  // --- persona (DEV = simulator, PROD = ผู้ใช้จริง) ---
+  const [simRole, setSimRole] = useState<UserRole>('HEAD_OF_DEPARTMENT');
+  const [simEmail, setSimEmail] = useState<string>('');
+
+  const staffById = useMemo(() => {
+    const m = new Map<string, string>();
+    staffDirectory.forEach(s => { if (s.email) m.set(s.id, s.email); });
+    return m;
+  }, [staffDirectory]);
+
+  const schedules = useSchedulesCollection(staffById);
+
+  const effectiveRole: UserRole = isDev ? simRole : (user?.activeRole || 'SUBJECT_TEACHER');
+  const effectiveEmail = (isDev && simEmail ? simEmail : user?.email || '').toLowerCase();
+  const effectiveProfile = useMemo(
+    () => staffDirectory.find(s => s.email?.toLowerCase() === effectiveEmail),
+    [staffDirectory, effectiveEmail]
+  );
+  const effectiveName =
+    effectiveProfile
+      ? `${effectiveProfile.prefix || ''}${effectiveProfile.firstName} ${effectiveProfile.lastName}`.trim()
+      : (user?.displayName || effectiveEmail || 'ผู้ใช้ระบบ');
+  const effectiveDeptId = effectiveProfile?.assignments?.departmentId || '';
+
+  const deptName = (id?: string) => DEPARTMENTS.find(d => d.id === id)?.name || 'ไม่ได้ระบุกลุ่มสาระฯ';
+
+  // --- toast ---
+  const [toast, setToast] = useState<{ title: string; message: string; error?: boolean } | null>(null);
+  const showToast = (title: string, message: string, error = false) => {
+    setToast({ title, message, error });
+    setTimeout(() => setToast(null), 5000);
   };
 
-  // Conflict Checking Engine
-  // Checks if a candidate teacher is currently teaching during the same schedule/period of any course
-  const checkTeacherConflict = (candidateEmail: string, targetSchedule: string, targetDate: string) => {
-    // 1. Check if the candidate teaches any original courses on this exact schedule
-    const conflictCourse = courses.find(c => c.teacherEmail === candidateEmail && c.schedule === targetSchedule);
-    if (conflictCourse) {
-      return `ติดสอนวิชา ${conflictCourse.code} (${conflictCourse.room})`;
-    }
+  // --- propose modal ---
+  const [proposeOpen, setProposeOpen] = useState(false);
+  const [absentEmail, setAbsentEmail] = useState('');
+  const [triggerType, setTriggerType] = useState<'SICK_LEAVE' | 'PERSONAL_LEAVE' | 'OFFICIAL_DUTY'>('SICK_LEAVE');
+  const [leaveReason, setLeaveReason] = useState('');
+  const [absenceDate, setAbsenceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedScheduleId, setSelectedScheduleId] = useState('');
+  const [subEmail, setSubEmail] = useState('');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-    // 2. Check if the candidate is already approved as substitute for another class on this exact schedule/date
-    const conflictSub = tasks.find(t => 
-      t.substituteTeacherEmail === candidateEmail && 
-      t.schedule === targetSchedule && 
-      t.date === targetDate && 
-      t.status === 'APPROVED'
+  // --- decide modal ---
+  const [decideTarget, setDecideTarget] = useState<SubstituteAssignment | null>(null);
+  const [decideMode, setDecideMode] = useState<'APPROVE' | 'REJECT'>('APPROVE');
+  const [decideComment, setDecideComment] = useState('');
+
+  // --- complete modal ---
+  const [completeTarget, setCompleteTarget] = useState<SubstituteAssignment | null>(null);
+  const [cSummary, setCSummary] = useState('');
+  const [cProblems, setCProblems] = useState('');
+  const [cSolutions, setCSolutions] = useState('');
+  const [cAttendance, setCAttendance] = useState<Record<string, 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE'>>({});
+
+  // -----------------------------------------------------------------------
+  // Derived
+  // -----------------------------------------------------------------------
+  const deptTeachers = useMemo(() => {
+    const deptId = isDev ? (effectiveDeptId || DEPARTMENTS[0]?.id) : effectiveDeptId;
+    return staffDirectory.filter(s => s.assignments?.departmentId === deptId);
+  }, [staffDirectory, effectiveDeptId, isDev]);
+
+  const absentTeacherSchedules = useMemo(() => {
+    if (!absentEmail) return [];
+    const dayNum = jsDateToThaiDayNum(absenceDate);
+    return schedules
+      .filter(s => s.emails.includes(absentEmail.toLowerCase()) && s.day === dayNum && s.period >= 0)
+      .sort((a, b) => a.period - b.period);
+  }, [schedules, absentEmail, absenceDate]);
+
+  const checkCandidateConflict = (candidateEmail: string, sched: NormalizedSchedule | undefined, date: string): string | null => {
+    if (!sched) return null;
+    const email = candidateEmail.toLowerCase();
+    const clash = schedules.find(s => s.emails.includes(email) && s.day === sched.day && s.period === sched.period);
+    if (clash) return `ติดสอน ${clash.code || clash.name} (${clash.room})`;
+    const scheduleStr = `${THAI_DAY_ABBREV[sched.day] || ''}${sched.period}`;
+    const subClash = substituteAssignments.find(sa =>
+      sa.substituteTeacherEmail?.toLowerCase() === email &&
+      sa.date === date &&
+      sa.schedule === scheduleStr &&
+      (sa.status === 'APPROVED' || sa.status === 'PENDING_APPROVAL')
     );
-    if (conflictSub) {
-      return `ได้รับอนุมัติสอนแทนห้อง ${conflictSub.room} แล้ว`;
-    }
-
+    if (subClash) return `ถูกจัดสอนแทนห้อง ${subClash.room} คาบนี้แล้ว`;
     return null;
   };
 
-  // Add a brand new sick leave absence to test the workflow dynamically
-  const handleCreateAbsence = (e: React.FormEvent) => {
-    e.preventDefault();
-    const origTeacher = ALL_TEACHERS.find(t => t.email === absenceTeacherEmail);
-    if (!origTeacher) return;
+  // งานในกลุ่มสาระฯ ของ HOD (ดูจากกลุ่มสาระของครูที่ขาด หรือ departmentId ที่บันทึกไว้)
+  const deptAssignments = useMemo(() => {
+    const deptId = isDev ? (effectiveDeptId || DEPARTMENTS[0]?.id) : effectiveDeptId;
+    return substituteAssignments
+      .filter(sa => sa.departmentId === deptId || sa.proposedByEmail?.toLowerCase() === effectiveEmail)
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }, [substituteAssignments, effectiveDeptId, effectiveEmail, isDev]);
 
-    // Find the course details
-    const selectedCourse = courses.find(c => c.id === absenceCourseId) || 
-                           courses.find(c => c.teacherEmail === absenceTeacherEmail);
+  // คิวอนุมัติของ role ปัจจุบัน
+  const myApprovalStage = useMemo(() => {
+    const entry = Object.entries(SUBSTITUTE_STAGE_ROLE).find(([, role]) => role === effectiveRole);
+    return entry ? (entry[0] as SubstituteApprovalStage) : null;
+  }, [effectiveRole]);
 
-    if (!selectedCourse) {
-      alert('คุณครูท่านนี้ยังไม่มีรายวิชาที่กำหนดในระบบ กรุณาเลือกครูท่านอื่นที่มีรายวิชาสอน');
+  const approvalQueue = useMemo(() => {
+    if (!myApprovalStage) return [];
+    return substituteAssignments
+      .filter(sa => sa.status === 'PENDING_APPROVAL' && sa.currentApprovalStage === myApprovalStage)
+      .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+  }, [substituteAssignments, myApprovalStage]);
+
+  // ภาระสอนแทนของครูผู้รับมอบหมาย
+  const mySubTasks = useMemo(() => {
+    return substituteAssignments
+      .filter(sa => sa.substituteTeacherEmail?.toLowerCase() === effectiveEmail && sa.status === 'APPROVED')
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [substituteAssignments, effectiveEmail]);
+
+  const isOverdue = (sa: SubstituteAssignment) =>
+    !sa.isCompleted && sa.postTeachingDueAt ? Date.now() > new Date(sa.postTeachingDueAt).getTime() : false;
+
+  // -----------------------------------------------------------------------
+  // Actions
+  // -----------------------------------------------------------------------
+  const resetProposeForm = () => {
+    setAbsentEmail(''); setTriggerType('SICK_LEAVE'); setLeaveReason('');
+    setAbsenceDate(new Date().toISOString().split('T')[0]);
+    setSelectedScheduleId(''); setSubEmail(''); setNotes('');
+  };
+
+  const handlePropose = async () => {
+    const sched = absentTeacherSchedules.find(s => s.id === selectedScheduleId);
+    const absent = staffDirectory.find(s => s.email?.toLowerCase() === absentEmail.toLowerCase());
+    const sub = staffDirectory.find(s => s.email?.toLowerCase() === subEmail.toLowerCase());
+    if (!sched || !absent || !sub) {
+      showToast('ข้อมูลไม่ครบ', 'กรุณาเลือกครูที่ลา คาบสอน และครูผู้สอนแทนให้ครบถ้วน', true);
       return;
     }
-
-    // Map time period based on schedule
-    let periodStr = 'คาบ 1 (08:20 - 09:10 น.)';
-    if (selectedCourse.schedule?.includes('2')) periodStr = 'คาบ 2 (09:10 - 10:00 น.)';
-    else if (selectedCourse.schedule?.includes('3')) periodStr = 'คาบ 3 (10:00 - 10:50 น.)';
-    else if (selectedCourse.schedule?.includes('4')) periodStr = 'คาบ 4 (11:00 - 11:50 น.)';
-    else if (selectedCourse.schedule?.includes('5')) periodStr = 'คาบ 5 (12:40 - 13:30 น.)';
-    else if (selectedCourse.schedule?.includes('6')) periodStr = 'คาบ 6 (13:30 - 14:20 น.)';
-    else if (selectedCourse.schedule?.includes('7')) periodStr = 'คาบ 7 (14:20 - 15:10 น.)';
-    else if (selectedCourse.schedule?.includes('8')) periodStr = 'คาบ 8 (15:10 - 16:00 น.)';
-
-    const newTask: SubstituteTask = {
-      id: 'task-' + Date.now(),
-      originalTeacherName: origTeacher.name,
-      originalTeacherEmail: origTeacher.email,
-      departmentName: getTeacherDepartment(origTeacher.email),
-      courseId: selectedCourse.id,
-      courseCode: selectedCourse.code,
-      courseName: selectedCourse.name,
-      room: selectedCourse.room,
-      schedule: selectedCourse.schedule || 'จ1',
-      periodName: periodStr,
-      date: absenceDate,
-      status: 'PENDING_ASSIGNMENT'
-    };
-
-    setTasks(prev => [newTask, ...prev]);
-    setShowAddAbsenceModal(false);
-    triggerToast(
-      "แจ้งการลาสำเร็จ", 
-      `ระบบได้นำรายวิชา ${newTask.courseCode} ของ ${newTask.originalTeacherName} เข้าสู่กระดานรอจัดครูสอนแทนชั่วคราวแล้ว`
-    );
-  };
-
-  // Submit substitution assignment for approval
-  const handleProposeSubstitute = () => {
-    if (!activeTaskForAssign || !substituteTeacherEmail) return;
-
-    const subTeacher = ALL_TEACHERS.find(t => t.email === substituteTeacherEmail);
-    if (!subTeacher) return;
-
-    setTasks(prev => prev.map(t => {
-      if (t.id === activeTaskForAssign.id) {
-        return {
-          ...t,
-          status: 'PENDING_APPROVAL',
-          substituteTeacherEmail: subTeacher.email,
-          substituteTeacherName: subTeacher.name,
-          notes: notes,
-          rejectionReason: undefined // Clear past rejection reasons
-        };
-      }
-      return t;
-    }));
-
-    setActiveTaskForAssign(null);
-    setSubstituteTeacherEmail('');
-    setNotes('');
-
-    triggerToast(
-      "เสนอความเห็นสำเร็จ",
-      "ส่งรายการจัดครูสอนแทนชั่วคราวให้ผู้ช่วย ผอ. กลุ่มบริหารวิชาการ เพื่อตรวจสอบและลงนามอนุมัติเรียบร้อยแล้ว"
-    );
-  };
-
-  // Approve substitute teaching request
-  const handleApproveTask = (taskId: string) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-
-    setTasks(prev => prev.map(t => {
-      if (t.id === taskId) {
-        return { ...t, status: 'APPROVED' };
-      }
-      return t;
-    }));
-
-    // Trigger store assignment sync
-    if (task.substituteTeacherEmail) {
-      assignSubstituteTeacher({
-        originalTeacherEmail: task.originalTeacherEmail,
-        substituteTeacherEmail: task.substituteTeacherEmail,
-        courseId: task.courseId,
-        date: task.date
-      });
+    if ((triggerType === 'PERSONAL_LEAVE' || triggerType === 'OFFICIAL_DUTY') && !leaveReason.trim()) {
+      showToast('ต้องระบุเหตุผล', 'การลากิจ/ไปราชการ ต้องแจ้งเหตุผลประกอบ', true);
+      return;
     }
+    const scheduleStr = `${THAI_DAY_ABBREV[sched.day] || ''}${sched.period}`;
 
-    triggerToast(
-      "อนุมัติคำขอสำเร็จ",
-      `ออกคำสั่งมอบหมายวิชา ${task.courseCode} ให้แก่ ${task.substituteTeacherName} เพื่อเข้าปฏิบัติการสอนแทนอย่างเป็นทางการแล้ว`
+    setSubmitting(true);
+    try {
+      await proposeSubstituteAssignment({
+        originalTeacherEmail: absent.email,
+        originalTeacherName: `${absent.prefix || ''}${absent.firstName} ${absent.lastName}`.trim(),
+        substituteTeacherEmail: sub.email,
+        substituteTeacherName: `${sub.prefix || ''}${sub.firstName} ${sub.lastName}`.trim(),
+        courseId: sched.id,
+        courseCode: sched.code,
+        courseName: sched.name,
+        room: sched.room || sched.targetClass,
+        periodName: sched.period === 0 ? 'คาบ 0 (โฮมรูม)' : `คาบ ${sched.period}`,
+        schedule: scheduleStr,
+        date: absenceDate,
+        departmentName: deptName(effectiveDeptId || absent.assignments?.departmentId),
+        departmentId: effectiveDeptId || absent.assignments?.departmentId || '',
+        triggerType,
+        leaveReason: leaveReason.trim() || (triggerType === 'SICK_LEAVE' ? 'ลาป่วย' : ''),
+        proposedByEmail: effectiveEmail,
+        proposedByName: effectiveName,
+        proposedByRole: 'HEAD_OF_DEPARTMENT',
+        notes: notes.trim(),
+      });
+      setProposeOpen(false);
+      resetProposeForm();
+      showToast('เสนอจัดครูสอนแทนสำเร็จ', 'ส่งเข้าลำดับอนุมัติ ขั้นที่ 2 (หัวหน้าฝ่ายวิชาการและหลักสูตร) แล้ว');
+    } catch (err) {
+      showToast('บันทึกไม่สำเร็จ', err instanceof Error ? err.message : String(err), true);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleRepropose = async (sa: SubstituteAssignment) => {
+    setSubmitting(true);
+    try {
+      await proposeSubstituteAssignment({
+        id: sa.id,
+        originalTeacherEmail: sa.originalTeacherEmail,
+        originalTeacherName: sa.originalTeacherName,
+        substituteTeacherEmail: sa.substituteTeacherEmail,
+        substituteTeacherName: sa.substituteTeacherName,
+        courseId: sa.courseId,
+        courseCode: sa.courseCode,
+        courseName: sa.courseName,
+        room: sa.room,
+        periodName: sa.periodName,
+        schedule: sa.schedule,
+        date: sa.date,
+        departmentName: sa.departmentName,
+        departmentId: sa.departmentId,
+        triggerType: sa.triggerType,
+        leaveReason: sa.leaveReason,
+        proposedByEmail: effectiveEmail,
+        proposedByName: effectiveName,
+        proposedByRole: 'HEAD_OF_DEPARTMENT',
+        notes: sa.notes,
+      });
+      showToast('ส่งอนุมัติใหม่แล้ว', 'รายการถูกส่งกลับเข้าลำดับอนุมัติขั้นที่ 2 อีกครั้ง');
+    } catch (err) {
+      showToast('ไม่สำเร็จ', err instanceof Error ? err.message : String(err), true);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDecide = async () => {
+    if (!decideTarget) return;
+    if (decideMode === 'REJECT' && !decideComment.trim()) {
+      showToast('ต้องระบุเหตุผล', 'การส่งกลับแก้ไขต้องมีข้อเสนอแนะ', true);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await decideSubstituteApproval(
+        decideTarget.id,
+        decideMode,
+        { email: effectiveEmail, name: effectiveName, role: effectiveRole },
+        decideComment.trim()
+      );
+      setDecideTarget(null);
+      setDecideComment('');
+      showToast(
+        decideMode === 'APPROVE' ? 'อนุมัติสำเร็จ' : 'ส่งกลับแก้ไขแล้ว',
+        decideMode === 'APPROVE'
+          ? 'รายการเดินหน้าไปยังขั้นอนุมัติถัดไป (หรืออนุมัติครบแล้ว)'
+          : 'ส่งกลับไปยังหัวหน้ากลุ่มสาระฯ พร้อมข้อเสนอแนะ'
+      );
+    } catch (err) {
+      showToast('ดำเนินการไม่สำเร็จ', err instanceof Error ? err.message : String(err), true);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const openComplete = (sa: SubstituteAssignment) => {
+    setCompleteTarget(sa);
+    setCSummary(''); setCProblems(''); setCSolutions('');
+    const init: Record<string, 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE'> = {};
+    students.filter(s => isSameRoom(s.room, sa.room)).forEach(s => { init[s.studentId] = 'PRESENT'; });
+    setCAttendance(init);
+  };
+
+  const handleComplete = async () => {
+    if (!completeTarget || !cSummary.trim()) {
+      showToast('ต้องกรอกสรุปการสอน', 'กรุณากรอกสรุปเนื้อหาที่สอนแทนก่อนบันทึก', true);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await completeSubstituteAssignment(completeTarget.id, {
+        summary: cSummary.trim(),
+        problems: cProblems.trim(),
+        solutions: cSolutions.trim(),
+        attendance: cAttendance,
+      });
+      const late = completeTarget.postTeachingDueAt
+        ? Date.now() > new Date(completeTarget.postTeachingDueAt).getTime()
+        : false;
+      setCompleteTarget(null);
+      showToast(
+        'บันทึกหลังสอนแทนเรียบร้อย',
+        late
+          ? '⚠️ บันทึกหลังเวลา 24:00 น. ของวันที่สอน — ระบบ flag เป็น overdue'
+          : 'บันทึกภายในกำหนด และส่งเข้ารายงานหลังสอนส่วนกลางแล้ว',
+        late
+      );
+    } catch (err) {
+      showToast('บันทึกไม่สำเร็จ', err instanceof Error ? err.message : String(err), true);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // -----------------------------------------------------------------------
+  // Render helpers
+  // -----------------------------------------------------------------------
+  const StatusBadge = ({ sa }: { sa: SubstituteAssignment }) => {
+    const map: Record<string, string> = {
+      PENDING_ASSIGNMENT: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+      PENDING_APPROVAL: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
+      APPROVED: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+      REJECTED: 'bg-red-500/10 text-red-400 border-red-500/20',
+    };
+    const label: Record<string, string> = {
+      PENDING_ASSIGNMENT: 'รอจัดครู',
+      PENDING_APPROVAL: sa.currentApprovalStage ? STAGE_LABEL_TH[sa.currentApprovalStage] : 'รออนุมัติ',
+      APPROVED: sa.isCompleted ? 'บันทึกหลังสอนแล้ว' : 'อนุมัติครบ 4 ขั้น',
+      REJECTED: 'ส่งกลับแก้ไข',
+    };
+    return (
+      <span className={cn('px-2 py-1 rounded-full text-[10px] font-bold border shrink-0', map[sa.status || 'PENDING_APPROVAL'])}>
+        {label[sa.status || 'PENDING_APPROVAL']}
+      </span>
     );
   };
 
-  // Reject and return with comments
-  const handleRejectTask = () => {
-    if (!taskToReject) return;
-
-    setTasks(prev => prev.map(t => {
-      if (t.id === taskToReject.id) {
-        return {
-          ...t,
-          status: 'REJECTED',
-          rejectionReason: rejectionReason
-        };
-      }
-      return t;
-    }));
-
-    const name = taskToReject.originalTeacherName;
-    setTaskToReject(null);
-    setRejectionReason('');
-
-    triggerToast(
-      "ส่งกลับแก้ไขแล้ว",
-      `ส่งรายการสอนแทนของ ${name} กลับไปยังหัวหน้ากลุ่มสาระฯ เรียบร้อยพร้อมข้อเสนอแนะเพิ่มเติม`
-    );
-  };
-
-  // Init attendance map with defaults when completing a task
-  const initCompletionForm = (task: SubstituteTask) => {
-    setTaskToComplete(task);
-    setCompletionSummary('');
-    setCompletionProblems('');
-    setCompletionSolutions('');
-
-    // Prepopulate attendance
-    const filteredStudents = students.filter(s => isSameRoom(s.room, task.room));
-    const initialAttendance: Record<string, 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE'> = {};
-    filteredStudents.forEach(s => {
-      initialAttendance[s.studentId] = 'PRESENT';
-    });
-    setCompletionAttendance(initialAttendance);
-  };
-
-  // Save the attendance and teaching log
-  const handleSaveCompletion = () => {
-    if (!taskToComplete) return;
-
-    setTasks(prev => prev.map(t => {
-      if (t.id === taskToComplete.id) {
-        return {
-          ...t,
-          isCompleted: true,
-          completionSummary,
-          completionProblems,
-          completionSolutions,
-          completionAttendance,
-          completedAt: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.'
-        };
-      }
-      return t;
-    }));
-
-    // Submit teaching log to standard store so it displays in global post-teaching reports
-    submitPostTeachingRecord({
-      courseId: taskToComplete.courseId,
-      date: taskToComplete.date,
-      summary: `[ปฏิบัติหน้าที่สอนแทนครูที่ลาป่วย - บันทึกโดย ${taskToComplete.substituteTeacherName}] ${completionSummary}`,
-      problems: completionProblems || 'ไม่มี',
-      solutions: completionSolutions || 'ไม่มี',
-      submittedAt: new Date().toISOString(),
-      isLate: false
-    });
-
-    const room = taskToComplete.room;
-    setTaskToComplete(null);
-
-    triggerToast(
-      "บันทึกข้อมูลการสอนแทนแล้ว",
-      `บันทึกผลการเข้าเรียนและข้อสรุปการสอนห้อง ${room} เข้าสู่ระบบสารสนเทศส่วนกลางเรียบร้อย`
-    );
-  };
-
-  // Delete an unassigned task
-  const handleDeleteTask = (taskId: string) => {
-    setTasks(prev => prev.filter(t => t.id !== taskId));
-    triggerToast("ลบข้อมูลสำเร็จ", "ลบคำสั่งดังกล่าวออกจากรายการประวัติแล้ว");
-  };
-
-  // Filters for role views
-  const filteredTasksForHOD = tasks.filter(t => {
-    const hodDept = getTeacherDepartment(selectedDeptTeacherEmail);
-    return t.departmentName === hodDept;
-  });
-
-  const filteredTasksForApprover = tasks.filter(t => t.status === 'PENDING_APPROVAL');
-
-  const filteredTasksForSubTeacher = tasks.filter(t => 
-    t.substituteTeacherEmail === selectedSubTeacherEmail && 
-    t.status === 'APPROVED'
+  const ApprovalChain = ({ sa }: { sa: SubstituteAssignment }) => (
+    <div className="flex flex-wrap gap-1.5">
+      {(sa.approvalChain || []).map((step) => (
+        <span
+          key={step.stage}
+          title={step.comment || step.approverName || ''}
+          className={cn(
+            'px-2 py-0.5 rounded text-[9px] font-bold border flex items-center gap-1',
+            step.status === 'APPROVED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+            step.status === 'REJECTED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+            'bg-slate-800/60 text-slate-400 border-slate-700'
+          )}
+        >
+          {step.status === 'APPROVED' ? <Check className="w-2.5 h-2.5" /> :
+           step.status === 'REJECTED' ? <XCircle className="w-2.5 h-2.5" /> :
+           <Clock className="w-2.5 h-2.5" />}
+          {STAGE_LABEL_TH[step.stage].replace(' · ', ' ')}
+        </span>
+      ))}
+    </div>
   );
 
+  const CourseInfo = ({ sa }: { sa: SubstituteAssignment }) => (
+    <div className="bg-slate-950/40 rounded-xl p-3.5 border border-slate-800/80 space-y-2">
+      <div className="flex justify-between items-center text-xs">
+        <span className="text-white font-black">{sa.courseCode} {sa.courseName}</span>
+        <span className="bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded font-mono text-[10px]">{sa.room}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
+        <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-slate-500" /> {sa.periodName} ({sa.schedule})</span>
+        <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-slate-500" /> {sa.date}</span>
+      </div>
+      <div className="text-[11px] text-slate-400">
+        <span className="text-slate-500">ครูที่ลา:</span> {sa.originalTeacherName} ·{' '}
+        <span className="text-slate-500">ประเภท:</span> {TRIGGER_LABEL_TH[sa.triggerType || ''] || '-'}
+        {sa.leaveReason ? <> · <span className="text-slate-500">เหตุผล:</span> {sa.leaveReason}</> : null}
+      </div>
+      <div className="text-[11px] text-slate-300">
+        <span className="text-slate-500">ครูสอนแทน:</span> <span className="font-bold text-white underline">{sa.substituteTeacherName}</span>
+      </div>
+      {sa.notes ? (
+        <div className="text-[11px] text-slate-400"><span className="text-slate-500 font-bold">งานมอบหมาย:</span> {sa.notes}</div>
+      ) : null}
+    </div>
+  );
+
+  const roleLabel = ROLE_NAMES_TH[effectiveRole] || effectiveRole;
+  const canPropose = effectiveRole === 'HEAD_OF_DEPARTMENT';
+  const isApprover = APPROVAL_ROLES.includes(effectiveRole);
+  const isSubTeacher = effectiveRole === 'SUBJECT_TEACHER' || effectiveRole === 'HOMEROOM_TEACHER';
+  const isOversight = effectiveRole === 'SUPER_ADMIN' || effectiveRole === 'EXECUTIVE';
+
+  // -----------------------------------------------------------------------
   return (
     <div className="w-full bg-[#0a0f18] min-h-screen text-slate-100 pb-12 font-sans">
-      
-      {/* SUCCESS TOAST NOTIFICATION */}
+      {/* TOAST */}
       <AnimatePresence>
-        {successToast && (
-          <motion.div 
+        {toast && (
+          <motion.div
             initial={{ opacity: 0, y: -50, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className="fixed top-24 right-6 z-50 max-w-md bg-emerald-950/95 border-2 border-emerald-500/30 text-emerald-100 p-4 rounded-xl shadow-2xl backdrop-blur-md flex gap-3 items-start"
+            className={cn(
+              'fixed top-24 right-6 z-50 max-w-md border-2 p-4 rounded-xl shadow-2xl backdrop-blur-md flex gap-3 items-start',
+              toast.error ? 'bg-red-950/95 border-red-500/30 text-red-100' : 'bg-emerald-950/95 border-emerald-500/30 text-emerald-100'
+            )}
           >
-            <div className="p-1 bg-emerald-500/20 text-emerald-400 rounded-lg shrink-0">
-              <CheckCircle className="w-5 h-5" />
+            <div className={cn('p-1 rounded-lg shrink-0', toast.error ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400')}>
+              {toast.error ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
             </div>
             <div>
-              <h4 className="text-sm font-bold">{successToast.title}</h4>
-              <p className="text-xs text-emerald-300/85 mt-1 leading-relaxed">{successToast.message}</p>
+              <h4 className="text-sm font-bold">{toast.title}</h4>
+              <p className="text-xs opacity-85 mt-1 leading-relaxed">{toast.message}</p>
             </div>
-            <button 
-              onClick={() => setSuccessToast(null)}
-              className="text-emerald-400 hover:text-emerald-200 transition-colors shrink-0 ml-auto"
-            >
-              <XCircle className="w-4 h-4" />
-            </button>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* COMPACT DASHBOARD BANNER */}
+      {/* HEADER */}
       <div className="bg-slate-950/60 border-b border-slate-800 py-6 px-8 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none"></div>
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className="bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2.5 py-0.5 rounded-full text-xs font-bold tracking-wider flex items-center gap-1">
-                <Layers className="w-3 h-3" /> RESTRICTED RBAC
+                <Layers className="w-3 h-3" /> SEQUENTIAL 4-STAGE APPROVAL
               </span>
-              <span className="text-xs text-slate-500 font-mono">Module V2.4</span>
             </div>
-            <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
-              Substitute Teaching Management <span className="text-indigo-400 font-medium text-lg font-mono">| ระบบจัดครูสอนแทนชั่วคราว</span>
+            <h1 className="text-2xl font-black text-white tracking-tight">
+              ระบบจัดครูสอนแทน <span className="text-indigo-400 font-medium text-lg">| Substitute Teaching</span>
             </h1>
             <p className="text-xs text-slate-400">
-              อำนวยความสะดวกในการจัดครูสอนแทน คัดกรองครูว่างที่ตรงตามกลุ่มสาระวิชาโดยตรง และระบบตรวจสอบเวลาเรียนชน (Conflict Check)
+              ลำดับอนุมัติ 4 ขั้น: หัวหน้ากลุ่มสาระฯ → หัวหน้าฝ่ายวิชาการและหลักสูตร → รองผู้อำนวยการฝ่ายวิชาการ → ผู้อำนวยการ
+              · เชื่อม Firestore <span className="font-mono text-slate-500">substitute_assignments</span> แบบเรียลไทม์
             </p>
           </div>
 
-          <button
-            onClick={() => {
-              // Reset to target course
-              setAbsenceCourseId(courses[0]?.id || '');
-              setShowAddAbsenceModal(true);
-            }}
-            className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center gap-1.5 shrink-0 self-start md:self-center border border-indigo-500/30"
-          >
-            <PlusCircle className="w-4 h-4" /> แจ้งครูลาป่วย / ตารางว่าง
-          </button>
+          {canPropose && (
+            <button
+              onClick={() => { resetProposeForm(); setProposeOpen(true); }}
+              className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 shrink-0 border border-indigo-500/30"
+            >
+              <PlusCircle className="w-4 h-4" /> แจ้งครูลา / จัดครูสอนแทน
+            </button>
+          )}
         </div>
       </div>
 
-      {/* IN-SITE WORKFLOW IDENTITY SWITCHER */}
+      {/* DEV SIMULATOR — gate ด้วย import.meta.env.DEV เท่านั้น */}
+      {isDev && (
+        <div className="max-w-7xl mx-auto px-6 mt-6">
+          <div className="bg-amber-500/5 border border-amber-500/20 p-4 rounded-2xl space-y-3">
+            <div className="flex items-center gap-2 text-amber-400 text-xs font-extrabold uppercase tracking-wider">
+              <ShieldAlert className="w-4 h-4" /> DEV SIMULATOR — ทดสอบ workflow (ไม่แสดงใน production)
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {SIM_ROLES.map(r => (
+                <button
+                  key={r.role}
+                  onClick={() => setSimRole(r.role)}
+                  className={cn(
+                    'px-3 py-2 rounded-xl text-[11px] font-bold transition-all border',
+                    simRole === r.role
+                      ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                      : 'bg-slate-950/40 text-slate-400 border-slate-800 hover:text-slate-200'
+                  )}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-slate-400">
+              <span>สวมบทบาทเป็น (staff จริงจาก Firestore):</span>
+              <select
+                value={simEmail}
+                onChange={e => setSimEmail(e.target.value)}
+                className="bg-slate-950 text-slate-200 border border-amber-500/20 rounded-lg p-1 px-2 text-[11px] font-semibold outline-none max-w-xs"
+              >
+                <option value="">— ใช้บัญชีที่ล็อกอิน ({user?.email || 'ไม่ทราบ'}) —</option>
+                {staffDirectory.map(s => (
+                  <option key={s.id} value={s.email}>
+                    {s.prefix}{s.firstName} {s.lastName} · {s.roles.join(',')} · {deptName(s.assignments?.departmentId)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ROLE BANNER */}
       <div className="max-w-7xl mx-auto px-6 mt-6">
-        <div className="bg-slate-900/60 border border-slate-800/80 p-4 rounded-2xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 shadow-xl">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center border border-slate-700">
-              <ShieldAlert className="w-4 h-4 text-indigo-400" />
-            </div>
-            <div>
-              <h3 className="text-xs font-extrabold text-indigo-400 tracking-wider uppercase">สลับสิทธิ์การทดสอบระบบ (Simulator Settings)</h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">เปลี่ยนผู้ใช้สมมติเพื่อทดสอบกระบวนการตั้งแต่ เสนอจัดครู -&gt; อนุมัติ -&gt; บันทึกคาบสอน</p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setSimulatorRole('HEAD_OF_DEPARTMENT')}
-              className={cn(
-                "px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5",
-                simulatorRole === 'HEAD_OF_DEPARTMENT'
-                  ? "bg-amber-500/10 text-amber-400 border-amber-500/30 shadow-lg"
-                  : "bg-slate-950/40 text-slate-400 border-slate-800 hover:text-slate-300"
-              )}
-            >
-              <Users className="w-3.5 h-3.5" /> หัวหน้ากลุ่มสาระวิชา
-            </button>
-            <button
-              onClick={() => setSimulatorRole('ACADEMIC_ASSISTANT_DIRECTOR')}
-              className={cn(
-                "px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5",
-                simulatorRole === 'ACADEMIC_ASSISTANT_DIRECTOR'
-                  ? "bg-blue-500/10 text-blue-400 border-blue-500/30 shadow-lg"
-                  : "bg-slate-950/40 text-slate-400 border-slate-800 hover:text-slate-300"
-              )}
-            >
-              <UserCheck className="w-3.5 h-3.5" /> ผู้ช่วย ผอ. วิชาการ (ผู้อนุมัติ)
-            </button>
-            <button
-              onClick={() => setSimulatorRole('SUBSTITUTE_TEACHER')}
-              className={cn(
-                "px-3 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5",
-                simulatorRole === 'SUBSTITUTE_TEACHER'
-                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 shadow-lg"
-                  : "bg-slate-950/40 text-slate-400 border-slate-800 hover:text-slate-300"
-              )}
-            >
-              <Award className="w-3.5 h-3.5" /> ครูผู้รับปฏิบัติหน้าที่สอนแทน
-            </button>
-          </div>
+        <div className="bg-slate-900/60 border border-slate-800/80 p-3 px-4 rounded-xl flex items-center gap-2 text-xs text-indigo-300">
+          <Info className="w-4 h-4 text-indigo-400 shrink-0" />
+          <span className="font-bold">บทบาทที่ใช้งาน: {roleLabel}</span>
+          <span className="text-slate-500">· {effectiveName}</span>
+          {effectiveDeptId && <span className="text-slate-500">· สังกัด {deptName(effectiveDeptId)}</span>}
         </div>
-
-        {/* ROLE SIMULATOR SUB BAR (Identity selector) */}
-        {simulatorRole === 'HEAD_OF_DEPARTMENT' && (
-          <div className="mt-3 bg-amber-500/5 border border-amber-500/10 px-4 py-3 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-amber-300">
-            <span className="font-bold flex items-center gap-1.5">
-              <Info className="w-4 h-4 shrink-0 text-amber-400" />
-              บทบาทที่ใช้งาน: หัวหน้ากลุ่มสาระวิชา (จัดและเสนอความเห็นผู้สอนแทน)
-            </span>
-            <div className="flex items-center gap-2">
-              <span>เลือกหัวหน้ากลุ่มสาระฯ:</span>
-              <select
-                value={selectedDeptTeacherEmail}
-                onChange={e => setSelectedDeptTeacherEmail(e.target.value)}
-                className="bg-slate-950 text-slate-200 border border-amber-500/20 rounded-lg p-1 px-2 text-[11px] font-semibold outline-none"
-              >
-                <option value="wipada.r@school.ac.th">คุณครู วิภาดา (วิทยาศาสตร์ฯ)</option>
-                <option value="mana@utd.ac.th">คุณครู มานะ (คณิตศาสตร์)</option>
-              </select>
-              <span className="text-slate-400 italic">
-                สังกัด: {getTeacherDepartment(selectedDeptTeacherEmail).replace("กลุ่มสาระการเรียนรู้", "")}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {simulatorRole === 'ACADEMIC_ASSISTANT_DIRECTOR' && (
-          <div className="mt-3 bg-blue-500/5 border border-blue-500/10 px-4 py-3 rounded-xl flex items-center gap-1.5 text-xs text-blue-300">
-            <UserCheck className="w-4 h-4 text-blue-400" />
-            <span className="font-bold">
-              บทบาทที่ใช้งาน: ดร. สมเกียรติ ยอดเยี่ยม (ผู้ช่วย ผอ. กลุ่มงานวิชาการ) — สิทธิ์อนุมัติรายการแบบจำลอง
-            </span>
-          </div>
-        )}
-
-        {simulatorRole === 'SUBSTITUTE_TEACHER' && (
-          <div className="mt-3 bg-emerald-500/5 border border-emerald-500/10 px-4 py-3 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-emerald-300">
-            <span className="font-bold flex items-center gap-1.5">
-              <CheckCircle className="w-4 h-4 text-emerald-400" />
-              บทบาทที่ใช้งาน: ครูผู้สอนที่ได้รับมอบหมายแทน (ลงชื่อเช็กชื่อชั้นเรียน / ทำบันทึกส่งรายงานสรุป)
-            </span>
-            <div className="flex items-center gap-2">
-              <span>เลือกครูผู้สอนแทนชั่วคราว:</span>
-              <select
-                value={selectedSubTeacherEmail}
-                onChange={e => setSelectedSubTeacherEmail(e.target.value)}
-                className="bg-slate-950 text-slate-200 border border-emerald-500/20 rounded-lg p-1 px-2 text-[11px] font-semibold outline-none"
-              >
-                <option value="kiattisak@utd.ac.th">นาย เกียรติศักดิ์ ศรีวิไล</option>
-                <option value="wipada.r@school.ac.th">คุณครู วิภาดา รักเรียน</option>
-                <option value="teacher@utd.ac.th">นาย ก (ภาษาไทย)</option>
-              </select>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* MAIN VIEWGRID */}
-      <div className="max-w-7xl mx-auto px-6 mt-8 grid grid-cols-1 xl:grid-cols-3 gap-8">
-        
-        {/* LEFT & CENTER COLUMNS: DYNAMIC BOARDS DEPENDING ON ROLE */}
-        <div className="xl:col-span-2 space-y-8">
-          
-          {/* TAB-STYLE VIEW */}
-          {simulatorRole === 'HEAD_OF_DEPARTMENT' && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Layers className="w-5 h-5 text-amber-400" />
-                    กระดานติดตามงานและเสนอครูสอนแทน (Department Board)
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    แสดงตารางสอนที่ว่างของกลุ่มสาระการเรียนรู้ <span className="text-amber-300 underline font-semibold">{getTeacherDepartment(selectedDeptTeacherEmail)}</span>
-                  </p>
-                </div>
-                
-                <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] font-mono">
-                  พบ {filteredTasksForHOD.length} รายการ
-                </span>
-              </div>
+      {staffDirectory.length === 0 && (
+        <div className="max-w-7xl mx-auto px-6 mt-6">
+          <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-8 text-center text-slate-400 text-sm">
+            ยังไม่มีข้อมูลบุคลากรใน Firestore — กรุณานำเข้ารายชื่อครูที่หน้า "จัดการสิทธิ์และบทบาทหน้าที่บุคลากร" ก่อน
+          </div>
+        </div>
+      )}
 
-              {filteredTasksForHOD.length === 0 ? (
+      {/* MAIN */}
+      <div className="max-w-7xl mx-auto px-6 mt-8 grid grid-cols-1 xl:grid-cols-3 gap-8">
+        <div className="xl:col-span-2 space-y-8">
+
+          {/* HOD BOARD */}
+          {canPropose && (
+            <section className="space-y-4">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Layers className="w-5 h-5 text-amber-400" /> กระดานจัดครูสอนแทน — {deptName(effectiveDeptId || DEPARTMENTS[0]?.id)}
+              </h2>
+              {deptAssignments.length === 0 ? (
                 <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-12 text-center text-slate-500">
                   <AlertCircle className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-                  <p className="text-sm font-semibold">ไม่มีรายการครูลาพักการสอนในกลุ่มสาระวิชานี้ขณะนี้</p>
-                  <p className="text-xs text-slate-600 mt-1">ท่านสามารถแจ้งครูลาเพิ่มจำลองที่ปุ่ม "แจ้งครูลาป่วย" มุมบนขวา</p>
+                  <p className="text-sm font-semibold">ยังไม่มีรายการจัดครูสอนแทนในกลุ่มสาระฯ นี้</p>
+                  <p className="text-xs text-slate-600 mt-1">กดปุ่ม "แจ้งครูลา / จัดครูสอนแทน" มุมบนขวาเพื่อเริ่ม</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {filteredTasksForHOD.map(task => (
-                    <div 
-                      key={task.id}
-                      className={cn(
-                        "bg-[#111622] border rounded-2xl p-5 flex flex-col justify-between transition-all relative overflow-hidden",
-                        task.status === 'PENDING_ASSIGNMENT' ? "border-amber-500/20 hover:border-amber-500/40" :
-                        task.status === 'PENDING_APPROVAL' ? "border-sky-500/20 hover:border-sky-500/40" :
-                        task.status === 'APPROVED' ? "border-emerald-500/20 hover:border-emerald-500/40" :
-                        "border-red-500/20 hover:border-red-500/40"
-                      )}
-                    >
-                      {/* Left accent color */}
-                      <div className={cn(
-                        "absolute top-0 left-0 w-1 h-full",
-                        task.status === 'PENDING_ASSIGNMENT' ? "bg-amber-500" :
-                        task.status === 'PENDING_APPROVAL' ? "bg-sky-500" :
-                        task.status === 'APPROVED' ? "bg-emerald-500" :
-                        "bg-red-500"
-                      )} />
-
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-start pl-2">
-                          <div>
-                            <span className="text-[10px] text-slate-400 uppercase tracking-widest block font-bold">{task.departmentName}</span>
-                            <span className="text-slate-400 font-bold text-xs mt-1 block">ครูผู้สอนเดิม: {task.originalTeacherName}</span>
-                          </div>
-                          
-                          <span className={cn(
-                            "px-2 py-1 rounded-full text-[10px] font-bold border shrink-0",
-                            task.status === 'PENDING_ASSIGNMENT' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                            task.status === 'PENDING_APPROVAL' ? "bg-sky-500/10 text-sky-400 border-sky-500/20" :
-                            task.status === 'APPROVED' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                            "bg-red-500/10 text-red-400 border-red-500/20"
-                          )}>
-                            {task.status === 'PENDING_ASSIGNMENT' ? 'รอจัดครูสอนแทน' :
-                             task.status === 'PENDING_APPROVAL' ? 'รออนุมัติ' :
-                             task.status === 'APPROVED' ? 'อนุมัติแล้ว' : 'ส่งกลับแก้ไข'}
-                          </span>
-                        </div>
-
-                        {/* Subject info box */}
-                        <div className="bg-slate-950/40 rounded-xl p-3.5 border border-slate-800/80 space-y-2">
-                          <div className="flex justify-between items-center text-xs">
-                            <span className="text-white font-black">{task.courseCode} {task.courseName}</span>
-                            <span className="bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded font-mono text-[10px]">{task.room}</span>
-                          </div>
-                          
-                          <div className="flex items-center gap-4 text-xs text-slate-400">
-                            <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-slate-500" /> {task.periodName}</span>
-                            <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-slate-500" /> {task.date}</span>
-                          </div>
-                        </div>
-
-                        {/* Substitution Assign Details */}
-                        {task.substituteTeacherEmail && (
-                          <div className="bg-slate-950/20 border border-slate-800/60 rounded-xl p-3 space-y-1 pl-3 text-xs text-slate-300">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-slate-500">ครูที่เสนอสอนแทน:</span>
-                              <span className="font-bold text-white underline">{task.substituteTeacherName}</span>
-                            </div>
-                            {task.notes && (
-                              <div className="text-slate-400 text-[11px] leading-relaxed mt-1">
-                                <span className="font-bold text-slate-500">งานมอบหมาย:</span> {task.notes}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Rejection comments warning */}
-                        {task.status === 'REJECTED' && task.rejectionReason && (
-                          <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-3 text-xs text-red-400 space-y-1">
-                            <div className="font-bold flex items-center gap-1">
-                              <AlertCircle className="w-3.5 h-3.5" /> ความเห็นผู้ช่วย ผอ. (ข้อความส่งกลับแก้ไข)
-                            </div>
-                            <p className="italic text-[11px]">{task.rejectionReason}</p>
-                          </div>
-                        )}
-
-                        {/* Completed summaries */}
-                        {task.isCompleted && (
-                          <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3 text-xs text-emerald-400 space-y-1">
-                            <div className="font-bold flex items-center gap-1">
-                              <CheckCircle className="w-3.5 h-3.5" /> เสร็จสิ้นการปฏิบัติการสอนแทน ({task.completedAt})
-                            </div>
-                            <p className="text-[11px] text-slate-300 line-clamp-2"><span className="text-slate-500 font-bold">บันทึก:</span> {task.completionSummary}</p>
-                          </div>
-                        )}
+                <div className="space-y-4">
+                  {deptAssignments.map(sa => (
+                    <div key={sa.id} className="bg-[#111622] border border-slate-800 rounded-2xl p-5 space-y-3">
+                      <div className="flex justify-between items-start">
+                        <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">{sa.departmentName}</span>
+                        <StatusBadge sa={sa} />
                       </div>
-
-                      {/* Control buttons */}
-                      <div className="flex gap-2 mt-4 pt-3 border-t border-slate-800/50">
-                        {task.status === 'PENDING_ASSIGNMENT' || task.status === 'REJECTED' ? (
+                      <CourseInfo sa={sa} />
+                      <ApprovalChain sa={sa} />
+                      {sa.status === 'REJECTED' && sa.rejectionReason && (
+                        <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-3 text-xs text-red-400">
+                          <div className="font-bold flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> ส่งกลับโดย {sa.rejectedByName} ({sa.rejectedByRole})</div>
+                          <p className="italic text-[11px] mt-1">{sa.rejectionReason}</p>
                           <button
-                            onClick={() => {
-                              setActiveTaskForAssign(task);
-                              setSubstituteTeacherEmail('');
-                              setNotes('');
-                            }}
-                            className="flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs transition-colors shadow-md shadow-amber-500/5 flex items-center justify-center gap-1"
+                            onClick={() => handleRepropose(sa)}
+                            disabled={submitting}
+                            className="mt-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg flex items-center gap-1"
                           >
-                            <UserCheck className="w-3.5 h-3.5" /> จัดครูสอนแทน
+                            <Send className="w-3 h-3" /> แก้ไขและเสนออนุมัติใหม่
                           </button>
-                        ) : (
-                          <div className="flex-1 text-center py-2 text-slate-500 text-xs italic bg-slate-950/20 border border-slate-900 rounded-xl select-none">
-                            {task.status === 'PENDING_APPROVAL' ? 'อยู่ระหว่างรออนุมัติ...' : 'อนุมัติเสร็จสิ้น'}
+                        </div>
+                      )}
+                      {sa.isCompleted && (
+                        <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3 text-xs text-emerald-400">
+                          <div className="font-bold flex items-center gap-1">
+                            <CheckCircle className="w-3.5 h-3.5" /> บันทึกหลังสอนแล้ว {sa.isLate ? '· ⚠️ overdue' : '· ตรงเวลา'}
                           </div>
-                        )}
+                          <p className="text-[11px] text-slate-300 mt-1">{sa.completionSummary}</p>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
+          {/* APPROVAL QUEUE */}
+          {isApprover && (
+            <section className="space-y-4">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <UserCheck className="w-5 h-5 text-sky-400" /> คิวรออนุมัติของท่าน — {myApprovalStage ? STAGE_LABEL_TH[myApprovalStage] : ''}
+                <span className="bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2 py-0.5 rounded text-[10px] font-mono">{approvalQueue.length}</span>
+              </h2>
+              {approvalQueue.length === 0 ? (
+                <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-12 text-center text-slate-500">
+                  <CheckCircle className="w-10 h-10 text-emerald-500/50 mx-auto mb-3" />
+                  <p className="text-sm font-semibold">ไม่มีรายการรออนุมัติในขั้นของท่าน</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {approvalQueue.map(sa => (
+                    <div key={sa.id} className="bg-[#111622] border border-sky-500/20 rounded-2xl p-5 space-y-3">
+                      <div className="flex justify-between items-start">
+                        <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">{sa.departmentName}</span>
+                        <StatusBadge sa={sa} />
+                      </div>
+                      <CourseInfo sa={sa} />
+                      <ApprovalChain sa={sa} />
+                      <div className="flex gap-2 justify-end pt-2 border-t border-slate-800/50">
                         <button
-                          onClick={() => handleDeleteTask(task.id)}
-                          className="p-2 bg-slate-900 hover:bg-red-500/10 text-slate-400 hover:text-red-400 border border-slate-800 rounded-xl transition-colors"
-                          title="ลบคำร้อง"
+                          onClick={() => { setDecideTarget(sa); setDecideMode('REJECT'); setDecideComment(''); }}
+                          className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-[11px] font-bold rounded-lg"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          ส่งกลับแก้ไข
+                        </button>
+                        <button
+                          onClick={() => { setDecideTarget(sa); setDecideMode('APPROVE'); setDecideComment(''); }}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black rounded-lg flex items-center gap-1"
+                        >
+                          <Check className="w-3.5 h-3.5" /> อนุมัติขั้นนี้
                         </button>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
-            </div>
+            </section>
           )}
 
-          {simulatorRole === 'ACADEMIC_ASSISTANT_DIRECTOR' && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <UserCheck className="w-5 h-5 text-blue-400" />
-                    แท็บรายการรออนุมัติการสอนแทน (Academic Approvals)
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">ระบบลงนามคำสั่งราชการมอบหมายหน้าที่ครูสอนแทนรายคาบ</p>
-                </div>
-
-                <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[10px] font-mono">
-                  รออนุมัติ {filteredTasksForApprover.length} รายการ
-                </span>
-              </div>
-
-              {filteredTasksForApprover.length === 0 ? (
+          {/* SUBSTITUTE TEACHER */}
+          {isSubTeacher && (
+            <section className="space-y-4">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <FileText className="w-5 h-5 text-emerald-400" /> ภาระสอนแทนของท่าน (อนุมัติครบแล้ว)
+              </h2>
+              {mySubTasks.length === 0 ? (
                 <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-12 text-center text-slate-500">
-                  <CheckCircle className="w-10 h-10 text-emerald-500/60 mx-auto mb-3" />
-                  <p className="text-sm font-semibold">เรียบร้อย! ไม่มีคำสั่งแต่งตั้งค้างเสนออนุมัติในเวลานี้</p>
-                  <p className="text-xs text-slate-600 mt-1">สลับสิทธิ์เป็น "หัวหน้ากลุ่มสาระฯ" เพื่อทดสอบเสนอจัดครูได้เพิ่มเติม</p>
+                  <CheckCircle className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                  <p className="text-sm font-semibold">ยังไม่มีคาบสอนแทนที่อนุมัติครบ 4 ขั้นสำหรับท่าน</p>
                 </div>
               ) : (
-                <div className="bg-[#111622] border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead className="bg-slate-950/80 border-b border-slate-800 text-slate-300 font-bold">
-                        <tr>
-                          <th className="px-5 py-4">ครูที่ลางาน (สาระฯ)</th>
-                          <th className="px-5 py-4">วิชาที่สอน / ห้องเรียน</th>
-                          <th className="px-5 py-4">คาบที่ลา</th>
-                          <th className="px-5 py-4 text-sky-400">ผู้ได้รับจัดสอนแทน (ครูว่าง)</th>
-                          <th className="px-5 py-4 text-right">ดำเนินการ</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60 text-slate-300">
-                        {filteredTasksForApprover.map(task => (
-                          <tr key={task.id} className="hover:bg-slate-900/40 transition-colors">
-                            <td className="px-5 py-4">
-                              <div className="font-bold text-white">{task.originalTeacherName}</div>
-                              <div className="text-[10px] text-slate-500 mt-0.5">{task.departmentName.replace("กลุ่มสาระการเรียนรู้", "")}</div>
-                            </td>
-                            <td className="px-5 py-4">
-                              <div className="font-semibold text-slate-200">{task.courseCode} - {task.courseName}</div>
-                              <div className="text-[10px] text-indigo-400 mt-0.5 font-mono">{task.room} | ประจำวันที่ {task.date}</div>
-                            </td>
-                            <td className="px-5 py-4 text-slate-400 font-medium">
-                              {task.periodName.split(" ")[0]} 
-                              <span className="text-[10px] text-slate-500 block">{task.periodName.substring(task.periodName.indexOf("("))}</span>
-                            </td>
-                            <td className="px-5 py-4">
-                              <div className="font-bold text-sky-400 underline">{task.substituteTeacherName}</div>
-                              {task.notes && (
-                                <p className="text-[10px] text-slate-400 truncate max-w-[200px] mt-0.5" title={task.notes}>
-                                  <span className="font-bold text-slate-500">หมายเหตุ:</span> {task.notes}
-                                </p>
-                              )}
-                            </td>
-                            <td className="px-5 py-4 text-right">
-                              <div className="flex gap-2 justify-end">
-                                <button
-                                  onClick={() => {
-                                    setTaskToReject(task);
-                                    setRejectionReason('');
-                                  }}
-                                  className="px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-[11px] font-bold rounded-lg transition-colors"
-                                >
-                                  ปฏิเสธ/แก้ไข
-                                </button>
-                                <button
-                                  onClick={() => handleApproveTask(task.id)}
-                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black rounded-lg transition-colors flex items-center gap-1 shadow-lg shadow-emerald-500/10"
-                                >
-                                  <Check className="w-3.5 h-3.5" /> อนุมัติคำสั่ง
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {simulatorRole === 'SUBSTITUTE_TEACHER' && (
-            <div className="space-y-6">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Award className="w-5 h-5 text-emerald-400" />
-                    ภาระสอนแทนชั่วคราววันนี้ ({filteredTasksForSubTeacher.length})
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">แสดงรายชื่อคาบสอนแทนของท่านที่ผ่านการอนุมัติแต่งตั้งอย่างเป็นทางการแล้ว</p>
-                </div>
-
-                <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[10px] font-mono">
-                  อนุมัติแล้ว {filteredTasksForSubTeacher.filter(t => !t.isCompleted).length} ค้างปฏิบัติ
-                </span>
-              </div>
-
-              {filteredTasksForSubTeacher.length === 0 ? (
-                <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-12 text-center text-slate-500">
-                  <CheckCircle className="w-10 h-10 text-emerald-500/30 mx-auto mb-3" />
-                  <p className="text-sm font-semibold">ไม่มีคาบสอนแทนของท่านในระบบจำลองขณะนี้</p>
-                  <p className="text-xs text-slate-600 mt-1">ท่านสามารถสลับสิทธิ์ไปเป็น "หัวหน้ากลุ่มสาระฯ" เพื่อทำการเสนอจัดครูสอนแทนเพิ่มได้</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {filteredTasksForSubTeacher.map(task => (
-                    <div 
-                      key={task.id}
-                      className={cn(
-                        "bg-[#111622] border rounded-2xl p-5 flex flex-col justify-between transition-all",
-                        task.isCompleted ? "border-slate-800 opacity-75" : "border-emerald-500/25 hover:border-emerald-500/40"
-                      )}
-                    >
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-bold">
-                              คำสั่งผ่านการอนุมัติ
-                            </span>
-                            <h3 className="text-slate-400 font-bold text-xs mt-2">ครูที่ขาดสอน: {task.originalTeacherName}</h3>
-                          </div>
-                          
-                          <div className="text-right">
-                            <span className="text-[10px] text-slate-500 block font-mono">ID: {task.id}</span>
-                            {task.isCompleted && (
-                              <span className="text-emerald-400 font-bold text-[10px] mt-1 inline-block">✓ บันทึกสอนแทนแล้ว</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Subject header */}
-                        <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800/80 space-y-2">
-                          <div className="flex justify-between items-center text-xs font-bold">
-                            <span className="text-white text-sm">{task.courseCode} {task.courseName}</span>
-                            <span className="bg-indigo-500/15 text-indigo-400 px-2 py-0.5 rounded font-mono text-[10px]">{task.room}</span>
-                          </div>
-                          <div className="text-xs text-slate-400 flex flex-wrap gap-4 pt-1">
-                            <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-slate-500" /> {task.periodName}</span>
-                            <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-slate-500" /> {task.date}</span>
-                          </div>
-                        </div>
-
-                        {task.notes && (
-                          <div className="bg-slate-950/20 border border-slate-800/50 rounded-xl p-3 text-xs text-slate-400 leading-relaxed">
-                            <span className="font-extrabold text-slate-500">โน้ตมอบหมายงาน:</span> {task.notes}
-                          </div>
-                        )}
-
-                        {task.isCompleted && (
-                          <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-3 text-xs text-slate-300 leading-relaxed space-y-1">
-                            <div className="font-bold text-emerald-400">บันทึกผลการเข้าเรียน & สรุปสาระความรู้:</div>
-                            <p className="text-[11px] italic">{task.completionSummary}</p>
-                            <p className="text-[11px] text-slate-400 mt-1"><span className="text-slate-500 font-bold">บันทึกเมื่อ:</span> วันนี้ เวลา {task.completedAt}</p>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="mt-4 pt-3 border-t border-slate-800/50 flex">
-                        {!task.isCompleted ? (
-                          <button
-                            onClick={() => initCompletionForm(task)}
-                            className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs transition-colors flex items-center justify-center gap-1 shadow-lg shadow-emerald-500/10"
-                          >
-                            <FileText className="w-4 h-4" /> เช็กชื่อและบันทึกการสอนแทน
-                          </button>
+                <div className="space-y-4">
+                  {mySubTasks.map(sa => (
+                    <div key={sa.id} className={cn('bg-[#111622] border rounded-2xl p-5 space-y-3', isOverdue(sa) ? 'border-red-500/40' : 'border-emerald-500/25')}>
+                      <div className="flex justify-between items-start">
+                        <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-bold">คำสั่งผ่านการอนุมัติ 4 ขั้น</span>
+                        {sa.isCompleted ? (
+                          <span className="text-emerald-400 text-[10px] font-bold">✓ บันทึกแล้ว {sa.isLate ? '(overdue)' : ''}</span>
                         ) : (
-                          <button
-                            disabled
-                            className="flex-1 py-2 text-slate-500 text-xs italic bg-slate-950/40 border border-slate-900 rounded-xl select-none flex items-center justify-center gap-1"
-                          >
-                            <CheckCircle className="w-4 h-4 text-slate-600" /> บันทึกและส่งรายงานแล้ว
-                          </button>
+                          <span className={cn('text-[10px] font-bold', isOverdue(sa) ? 'text-red-400' : 'text-amber-400')}>
+                            {isOverdue(sa) ? '⚠️ เลยกำหนดบันทึก' : 'เส้นตาย 24:00 น.'} · {sa.date}
+                          </span>
                         )}
                       </div>
+                      <CourseInfo sa={sa} />
+                      {sa.isCompleted ? (
+                        <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-3 text-[11px] text-slate-300">
+                          <div className="font-bold text-emerald-400">บันทึกหลังสอน:</div>
+                          <p className="italic mt-1">{sa.completionSummary}</p>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => openComplete(sa)}
+                          className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl text-xs flex items-center justify-center gap-1"
+                        >
+                          <FileText className="w-4 h-4" /> เช็กชื่อ & บันทึกหลังสอนแทน
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
               )}
-            </div>
+            </section>
           )}
 
+          {/* OVERSIGHT */}
+          {isOversight && (
+            <section className="space-y-4">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Layers className="w-5 h-5 text-indigo-400" /> ภาพรวมการจัดครูสอนแทนทั้งโรงเรียน (อ่านอย่างเดียว)
+              </h2>
+              {substituteAssignments.length === 0 ? (
+                <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-12 text-center text-slate-500 text-sm">ยังไม่มีรายการจัดครูสอนแทนในระบบ</div>
+              ) : (
+                <div className="space-y-3">
+                  {substituteAssignments.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).map(sa => (
+                    <div key={sa.id} className="bg-[#111622] border border-slate-800 rounded-2xl p-4 space-y-2">
+                      <div className="flex justify-between items-start">
+                        <span className="text-[11px] text-slate-300 font-bold">{sa.courseCode} {sa.courseName} · {sa.room} · {sa.date}</span>
+                        <StatusBadge sa={sa} />
+                      </div>
+                      <ApprovalChain sa={sa} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
         </div>
 
-        {/* RIGHT COLUMN: WORKFLOW VISUALIZATION & METRICS */}
-        <div className="space-y-6">
-          
-          {/* STATS OVERVIEW CARD */}
-          <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-5 shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl"></div>
-            
-            <div className="border-b border-slate-800 pb-3">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Layers className="w-4.5 h-4.5 text-indigo-400" /> ภาพรวมสถิติการสอนแทน
-              </h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">สถานะใบมอบหมายวิชาเรียนทับซ้อนและจัดสรรครู</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3.5">
-              <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3.5 space-y-1">
-                <span className="text-[10px] font-bold text-slate-500 block uppercase tracking-wider">กำลังลาค้างจัดสรร</span>
-                <span className="text-2xl font-extrabold text-amber-500 font-mono">
-                  {tasks.filter(t => t.status === 'PENDING_ASSIGNMENT').length}
-                </span>
-                <span className="text-[9px] text-slate-400 block">รอส่งหัวหน้าสาระฯ</span>
-              </div>
-              <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3.5 space-y-1">
-                <span className="text-[10px] font-bold text-slate-500 block uppercase tracking-wider">ค้างลงนามอนุมัติ</span>
-                <span className="text-2xl font-extrabold text-sky-400 font-mono">
-                  {tasks.filter(t => t.status === 'PENDING_APPROVAL').length}
-                </span>
-                <span className="text-[9px] text-slate-400 block">รอผู้ช่วย ผอ. ลงนาม</span>
-              </div>
-              <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3.5 space-y-1">
-                <span className="text-[10px] font-bold text-slate-500 block uppercase tracking-wider">อนุมัติเรียบร้อย</span>
-                <span className="text-2xl font-extrabold text-emerald-400 font-mono">
-                  {tasks.filter(t => t.status === 'APPROVED').length}
-                </span>
-                <span className="text-[9px] text-slate-400 block">ปฏิบัติหน้าที่แทน</span>
-              </div>
-              <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3.5 space-y-1">
-                <span className="text-[10px] font-bold text-slate-500 block uppercase tracking-wider">ดำเนินการเสร็จสิ้น</span>
-                <span className="text-2xl font-extrabold text-white font-mono">
-                  {tasks.filter(t => t.isCompleted).length}
-                </span>
-                <span className="text-[9px] text-slate-400 block">บันทึกเช็กชื่อแล้ว</span>
-              </div>
+        {/* RIGHT COLUMN */}
+        <aside className="space-y-6">
+          <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4">
+            <h3 className="text-sm font-bold text-white border-b border-slate-800 pb-3">ภาพรวมสถิติ</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: 'รออนุมัติ', value: substituteAssignments.filter(s => s.status === 'PENDING_APPROVAL').length, color: 'text-sky-400' },
+                { label: 'อนุมัติครบ', value: substituteAssignments.filter(s => s.status === 'APPROVED').length, color: 'text-emerald-400' },
+                { label: 'ส่งกลับแก้ไข', value: substituteAssignments.filter(s => s.status === 'REJECTED').length, color: 'text-red-400' },
+                { label: 'บันทึกหลังสอนแล้ว', value: substituteAssignments.filter(s => s.isCompleted).length, color: 'text-white' },
+              ].map(k => (
+                <div key={k.label} className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-3.5">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase block">{k.label}</span>
+                  <span className={cn('text-2xl font-extrabold font-mono', k.color)}>{k.value}</span>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* SICK LEAVE FLOW INFO */}
-          <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
-            <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-800 pb-3">
-              <Info className="w-4 h-4 text-indigo-400" /> ขั้นตอนดำเนินงานอย่างเป็นทางการ (Workflow Guide)
+          <div className="bg-[#111622] border border-slate-800 rounded-2xl p-6 space-y-3 text-xs text-slate-400">
+            <h4 className="text-xs font-bold text-white uppercase tracking-wider border-b border-slate-800 pb-3 flex items-center gap-1.5">
+              <Info className="w-4 h-4 text-indigo-400" /> ลำดับอนุมัติ (sequential)
             </h4>
-            
-            <div className="space-y-4 text-xs text-slate-400">
-              <div className="flex gap-2.5 items-start">
-                <div className="w-5 h-5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center font-bold font-mono text-[10px] shrink-0">1</div>
-                <div>
-                  <h5 className="font-bold text-slate-300">แจ้งครูลาป่วยเละตารางว่าง</h5>
-                  <p className="text-[11px] mt-0.5">เมื่อครูลาป่วย สารสนเทศวิชาการจะดึงรายวิชาที่ต้องได้รับการสอนแทนเข้ามาค้างจัดบนกระดาน</p>
-                </div>
+            {(['STAGE_1_HEAD_OF_DEPARTMENT', 'STAGE_2_ACADEMIC_HEAD', 'STAGE_3_DEPUTY_DIRECTOR_ACADEMIC', 'STAGE_4_DIRECTOR'] as SubstituteApprovalStage[]).map((st, i) => (
+              <div key={st} className="flex gap-2 items-start">
+                <span className="w-5 h-5 rounded bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold font-mono text-[10px] shrink-0">{i + 1}</span>
+                <span className="text-[11px]">{STAGE_LABEL_TH[st].split(' · ')[1]}</span>
               </div>
-
-              <div className="flex gap-2.5 items-start">
-                <div className="w-5 h-5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center font-bold font-mono text-[10px] shrink-0">2</div>
-                <div>
-                  <h5 className="font-bold text-slate-300">หัวหน้ากลุ่มสาระวิชา เสนอครู</h5>
-                  <p className="text-[11px] mt-0.5">กดปุ่ม "จัดครูสอนแทน" ระบบคัดกรองเฉพาะครูในกลุ่มสาระฯเดียวกันที่ **ตารางว่างไม่ชนคาบ** แล้วเสนอผู้ช่วย ผอ. อนุมัติ</p>
-                </div>
-              </div>
-
-              <div className="flex gap-2.5 items-start">
-                <div className="w-5 h-5 rounded bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center font-bold font-mono text-[10px] shrink-0">3</div>
-                <div>
-                  <h5 className="font-bold text-slate-300">ผู้ช่วย ผอ. วิชาการ อนุมัติ</h5>
-                  <p className="text-[11px] mt-0.5">ตรวจสอบความถูกต้องและความครอบคลุมภาระงาน กดอนุมัติแต่งตั้ง หรือส่งกลับแก้ไขหากครูสอนแทนมีภารกิจด่วนอื่น</p>
-                </div>
-              </div>
-
-              <div className="flex gap-2.5 items-start">
-                <div className="w-5 h-5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold font-mono text-[10px] shrink-0">4</div>
-                <div>
-                  <h5 className="font-bold text-slate-300">ครูสอนแทนเช็กชื่อและส่งบันทึก</h5>
-                  <p className="text-[11px] mt-0.5">ครูผู้สอนแทนเข้าปฏิบัติภารกิจ ทำการเช็กชื่อนักเรียนในห้อง และส่งสรุปผลหลังสอนเพื่อประสานงานครูเจ้าของวิชาต่อไป</p>
-                </div>
-              </div>
-            </div>
+            ))}
+            <p className="text-[10px] text-slate-600 pt-2 border-t border-slate-800">แต่ละขั้นอนุมัติโดยคนละบุคคลตามลำดับ · ห้าม role/บุคคลเดียวข้ามหลายขั้น</p>
           </div>
-
-          {/* CONFLICT CHECK DEMO INFO */}
-          <div className="bg-[#111622] border border-slate-800 rounded-2xl p-5 text-xs text-slate-400 space-y-3.5">
-            <div className="flex items-center gap-2 text-indigo-400 font-bold border-b border-slate-800 pb-2">
-              <ShieldAlert className="w-4 h-4" /> ฟีเจอร์ความปลอดภัยเชิงวิชาการ
-            </div>
-            <p className="text-[11px] leading-relaxed">
-              ระบบตรวจสอบความขัดแย้งของตารางเวลาเรียน (Schedule Conflict Checking Engine) ทำหน้าที่ดึงสถิติตารางสอนจริงของผู้สมัครทุกคนจากฐานข้อมูล 
-              เพื่อป้องกันไม่ให้คุณครูได้รับคำสั่งซ้ำซ้อนในวันและคาบเวลาเรียนเดียวกัน
-            </p>
-            <div className="bg-slate-950/40 p-3 rounded-lg border border-slate-800/80 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0"></span>
-              <p className="text-[10px] text-slate-500 font-mono">Smart Matching Filters: Same Department, Conflict Exempt</p>
-            </div>
-          </div>
-
-        </div>
-
+        </aside>
       </div>
 
-      {/* MODAL 1: SICK LEAVE TRIGGERING (ADD ABSENCE) */}
+      {/* PROPOSE MODAL */}
       <AnimatePresence>
-        {showAddAbsenceModal && (
-          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-[#111622] border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5"
+        {proposeOpen && (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#111622] border border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4 my-8"
             >
               <div className="flex justify-between items-start border-b border-slate-800 pb-3">
-                <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <AlertCircle className="w-5 h-5 text-indigo-400" />
-                    แจ้งคุณครูลาป่วย/สร้างตารางค้างจัดแทน
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">ส่งคาบเรียนเข้ากระดานจัดสอนแทนชั่วคราว</p>
-                </div>
-                <button 
-                  onClick={() => setShowAddAbsenceModal(false)}
-                  className="p-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
-                >
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <UserCheck className="w-5 h-5 text-amber-400" /> แจ้งครูลาและจัดครูสอนแทน
+                </h3>
+                <button onClick={() => setProposeOpen(false)} className="p-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-400 hover:text-white">
                   <XCircle className="w-4 h-4" />
                 </button>
               </div>
 
-              <form onSubmit={handleCreateAbsence} className="space-y-4">
-                {/* Select Teacher */}
+              <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1.5">คุณครูที่ลางาน (Teacher Absent)</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5">ครูที่ลา (ในกลุ่มสาระฯ ของท่าน)</label>
                   <select
-                    value={absenceTeacherEmail}
-                    onChange={e => {
-                      setAbsenceTeacherEmail(e.target.value);
-                      const filtered = courses.filter(c => c.teacherEmail === e.target.value);
-                      if (filtered.length > 0) setAbsenceCourseId(filtered[0].id);
-                    }}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500 transition-all font-semibold"
+                    value={absentEmail}
+                    onChange={e => { setAbsentEmail(e.target.value); setSelectedScheduleId(''); setSubEmail(''); }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold"
                   >
-                    {ALL_TEACHERS.map(t => (
-                      <option key={t.email} value={t.email}>{t.name} ({t.position})</option>
+                    <option value="">-- เลือกครูที่ลา --</option>
+                    {deptTeachers.map(t => (
+                      <option key={t.id} value={t.email}>{t.prefix}{t.firstName} {t.lastName} ({t.position})</option>
                     ))}
                   </select>
                 </div>
 
-                {/* Select Course */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1.5">เลือกวิชาและคาบเรียนที่จะลาป่วย</label>
-                  <select
-                    value={absenceCourseId}
-                    onChange={e => setAbsenceCourseId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500 transition-all font-semibold"
-                  >
-                    <option value="">-- ดึงจากตารางสอนปัจจุบันของครู --</option>
-                    {courses.filter(c => c.teacherEmail === absenceTeacherEmail).map(c => (
-                      <option key={c.id} value={c.id}>{c.code} {c.name} ({c.room}) - {c.schedule}</option>
-                    ))}
-                  </select>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1.5">ประเภทการลา</label>
+                    <select
+                      value={triggerType}
+                      onChange={e => setTriggerType(e.target.value as any)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold"
+                    >
+                      <option value="SICK_LEAVE">ลาป่วย</option>
+                      <option value="PERSONAL_LEAVE">ลากิจ</option>
+                      <option value="OFFICIAL_DUTY">ไปราชการ</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1.5">วันที่ลา</label>
+                    <input
+                      type="date" value={absenceDate}
+                      onChange={e => { setAbsenceDate(e.target.value); setSelectedScheduleId(''); }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-mono"
+                    />
+                  </div>
                 </div>
 
-                {/* Date Selection */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1.5">วันที่ครูลางาน</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5">
+                    เหตุผล {triggerType !== 'SICK_LEAVE' && <span className="text-red-500">*</span>}
+                    {triggerType !== 'SICK_LEAVE' && <span className="text-slate-500 font-normal"> (ลากิจ/ราชการ ต้องแจ้งเหตุผล cross-ref ตารางสอน)</span>}
+                  </label>
                   <input
-                    type="date"
-                    required
-                    value={absenceDate}
-                    onChange={e => setAbsenceDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500 transition-all font-mono"
+                    type="text" value={leaveReason} onChange={e => setLeaveReason(e.target.value)}
+                    placeholder={triggerType === 'SICK_LEAVE' ? 'เช่น ป่วยเป็นไข้หวัด (ไม่บังคับ)' : 'เช่น อบรมหลักสูตร สพฐ. ที่จังหวัด...'}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold placeholder:text-slate-600"
                   />
                 </div>
 
-                <div className="bg-slate-950/60 p-3.5 border border-slate-800/80 rounded-xl flex items-start gap-2.5 text-slate-400">
-                  <Info className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-                  <p className="text-[10px] leading-relaxed">
-                    ระบบวิชาการจะสร้างคำสั่งประเภท **[รอจัดครูสอนแทน]** และคัดกรองเฉพาะครูในกลุ่มสาระการเรียนรู้เดียวกัน เพื่อให้หัวหน้ากลุ่มสาระวิชาทำรายการคัดเลือกครูเข้าสอนแทนในลำดับถัดไป
-                  </p>
-                </div>
-
-                <div className="flex gap-2.5 justify-end pt-3 border-t border-slate-800/50">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddAbsenceModal(false)}
-                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400 transition-all"
-                  >
-                    ยกเลิก
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-extrabold transition-all shadow-md shadow-indigo-600/10 flex items-center gap-1"
-                  >
-                    <PlusCircle className="w-3.5 h-3.5" /> บันทึกการลาของครู
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* MODAL 2: ASSIGN SUBSTITUTE MODAL (WITH SAMEDEPARTMENT & CONFLICT CHECKS) */}
-      <AnimatePresence>
-        {activeTaskForAssign && (
-          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-[#111622] border border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-5"
-            >
-              <div className="flex justify-between items-start border-b border-slate-800 pb-3">
-                <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <UserCheck className="w-5 h-5 text-amber-400" />
-                    มอบหมายการสอนแทน (Substitute Teacher Assignment)
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">วิชา {activeTaskForAssign.courseCode} {activeTaskForAssign.courseName} | ห้อง {activeTaskForAssign.room}</p>
-                </div>
-                <button 
-                  onClick={() => setActiveTaskForAssign(null)}
-                  className="p-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
-                >
-                  <XCircle className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="bg-slate-950/60 p-4 border border-slate-800/80 rounded-xl space-y-1.5 text-xs text-slate-300">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">สังกัดกลุ่มสาระวิชา:</span>
-                  <span className="font-bold text-white">{activeTaskForAssign.departmentName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">คุณครูเจ้าของชั่วโมงเดิม:</span>
-                  <span className="font-bold text-white">{activeTaskForAssign.originalTeacherName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">วัน/เวลาคาบสอนทับซ้อน:</span>
-                  <span className="font-bold text-amber-400 font-mono">{activeTaskForAssign.periodName} ({activeTaskForAssign.schedule})</span>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                {/* Candidate dropdown with SAME DEPARTMENT & CONFLICT check */}
                 <div>
                   <label className="block text-xs font-bold text-slate-400 mb-1.5">
-                    รายชื่อครูในกลุ่มสาระฯ เดียวกัน (คัดกรองความขัดแย้งเวลาตารางสอนแล้ว)
+                    คาบสอนที่ต้องจัดแทน (ดึงจากตารางสอนจริงของครู · {absentEmail ? `${absentTeacherSchedules.length} คาบในวันนี้` : 'เลือกครูก่อน'})
                   </label>
                   <select
-                    required
-                    value={substituteTeacherEmail}
-                    onChange={e => setSubstituteTeacherEmail(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 transition-all font-semibold"
+                    value={selectedScheduleId} onChange={e => { setSelectedScheduleId(e.target.value); setSubEmail(''); }}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold"
                   >
-                    <option value="">-- กรุณาเลือกคุณครูผู้สอนแทน --</option>
-                    {/* Filter to SAME department & check conflicts */}
-                    {ALL_TEACHERS.map(cand => {
-                      const isSameDept = cand.dept === activeTaskForAssign.departmentName;
-                      const isSelf = cand.email === activeTaskForAssign.originalTeacherEmail;
-                      
-                      if (!isSameDept || isSelf) return null;
+                    <option value="">-- เลือกคาบสอน --</option>
+                    {absentTeacherSchedules.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {THAI_DAY_ABBREV[s.day]}{s.period} · {s.code} {s.name} · {s.room || s.targetClass}
+                      </option>
+                    ))}
+                  </select>
+                  {absentEmail && absentTeacherSchedules.length === 0 && (
+                    <p className="text-[10px] text-amber-400 mt-1">ไม่พบคาบสอนของครูท่านนี้ในวันที่เลือก (ตรวจสอบ collection schedules)</p>
+                  )}
+                </div>
 
-                      // Run conflict checker
-                      const conflictMsg = checkTeacherConflict(cand.email, activeTaskForAssign.schedule, activeTaskForAssign.date);
-
-                      return (
-                        <option 
-                          key={cand.email} 
-                          value={cand.email}
-                          disabled={!!conflictMsg}
-                          className={conflictMsg ? 'text-red-500' : 'text-slate-100'}
-                        >
-                          {cand.name} {conflictMsg ? `❌ [ไม่ว่าง - ${conflictMsg}]` : '✓ (ตารางเรียนว่างปฏิบัติหน้าที่แทนได้)'}
-                        </option>
-                      );
-                    })}
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5">ครูผู้สอนแทน (กลุ่มสาระฯ เดียวกัน · ตรวจตารางชนแล้ว)</label>
+                  <select
+                    value={subEmail} onChange={e => setSubEmail(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold"
+                  >
+                    <option value="">-- เลือกครูผู้สอนแทน --</option>
+                    {deptTeachers
+                      .filter(t => t.email?.toLowerCase() !== absentEmail.toLowerCase())
+                      .map(t => {
+                        const sched = absentTeacherSchedules.find(s => s.id === selectedScheduleId);
+                        const conflict = checkCandidateConflict(t.email, sched, absenceDate);
+                        return (
+                          <option key={t.id} value={t.email} disabled={!!conflict}>
+                            {t.prefix}{t.firstName} {t.lastName} {conflict ? `❌ ${conflict}` : '✓ ว่าง'}
+                          </option>
+                        );
+                      })}
                   </select>
                 </div>
 
-                {/* notes/instructions */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1.5">
-                    ข้อกำหนด/หมายเหตุ มอบหมายแผนการสอน (Notes to Teacher)
-                  </label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5">งานมอบหมาย / หมายเหตุถึงครูสอนแทน</label>
                   <textarea
-                    rows={3}
-                    placeholder="ระบุคำอธิบายใบงาน แหล่งค้นคว้า หรือแนวทางควบคุมชั้นเรียนเพื่อแจ้งให้ครูสอนแทนทราบล่วงหน้า..."
-                    value={notes}
-                    onChange={e => setNotes(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 transition-all placeholder:text-slate-600 font-semibold"
+                    rows={2} value={notes} onChange={e => setNotes(e.target.value)}
+                    placeholder="ระบุใบงาน แผนการสอน หรือแนวทางควบคุมชั้นเรียน..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold placeholder:text-slate-600"
                   />
-                </div>
-
-                <div className="bg-amber-500/5 p-3.5 border border-amber-500/15 rounded-xl flex items-start gap-2 text-amber-300">
-                  <Info className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
-                  <p className="text-[10px] leading-relaxed">
-                    เมื่อกดส่งความเห็น ข้อมูลจะถูกจัดเข้าสู่สถานะ **[รออนุมัติ]** เพื่อแจ้งเตือนไปยังห้องปฏิบัติงานผู้ช่วยผู้อำนวยการฝ่ายวิชาการในการอนุมัติใบแต่งตั้ง
-                  </p>
                 </div>
               </div>
 
               <div className="flex gap-2.5 justify-end pt-3 border-t border-slate-800/50">
+                <button onClick={() => setProposeOpen(false)} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400">ยกเลิก</button>
                 <button
-                  type="button"
-                  onClick={() => setActiveTaskForAssign(null)}
-                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400 transition-all"
+                  onClick={handlePropose}
+                  disabled={submitting || !absentEmail || !selectedScheduleId || !subEmail}
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5"
                 >
-                  ยกเลิก
-                </button>
-                <button
-                  type="button"
-                  disabled={!substituteTeacherEmail}
-                  onClick={handleProposeSubstitute}
-                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold transition-all shadow-md shadow-amber-600/10 flex items-center gap-1.5"
-                >
-                  <Send className="w-3.5 h-3.5" /> เสนอผู้ช่วย ผอ. อนุมัติ
+                  <Send className="w-3.5 h-3.5" /> {submitting ? 'กำลังบันทึก...' : 'เสนอเข้าลำดับอนุมัติ'}
                 </button>
               </div>
             </motion.div>
@@ -1259,57 +940,41 @@ export function SubstituteTeachingModule() {
         )}
       </AnimatePresence>
 
-      {/* MODAL 3: REJECT/CORRECTION DIALOG */}
+      {/* DECIDE MODAL */}
       <AnimatePresence>
-        {taskToReject && (
+        {decideTarget && (
           <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
               className="bg-[#111622] border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4"
             >
-              <div className="flex justify-between items-start border-b border-slate-800 pb-3">
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <XCircle className="w-5 h-5 text-red-400" />
-                  ส่งความเห็นกลับไปแก้ไขการสอนแทน
-                </h3>
-                <button onClick={() => setTaskToReject(null)} className="text-slate-400 hover:text-white">
-                  <XCircle className="w-4 h-4" />
-                </button>
+              <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                {decideMode === 'APPROVE' ? <Check className="w-5 h-5 text-emerald-400" /> : <XCircle className="w-5 h-5 text-red-400" />}
+                {decideMode === 'APPROVE' ? 'อนุมัติ' : 'ส่งกลับแก้ไข'} — {decideTarget.currentApprovalStage ? STAGE_LABEL_TH[decideTarget.currentApprovalStage] : ''}
+              </h3>
+              <div className="text-xs text-slate-300 bg-slate-950/40 rounded-xl p-3 border border-slate-800/80">
+                {decideTarget.courseCode} {decideTarget.courseName} · {decideTarget.room} · {decideTarget.date}<br />
+                ครูสอนแทน: <span className="font-bold text-white">{decideTarget.substituteTeacherName}</span> · แทน {decideTarget.originalTeacherName}
               </div>
-
-              <div className="text-xs text-slate-300">
-                ท่านกำลังปฏิเสธคำขอการเสนอคุณครู <span className="font-bold text-red-400">{taskToReject.substituteTeacherName}</span> ให้สอนแทนวิชา {taskToReject.courseCode} ของคุณครู {taskToReject.originalTeacherName}
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-400">เหตุผลส่งกลับแก้ไข/ข้อความเสนอแนะเพิ่มเติม</label>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">
+                  {decideMode === 'APPROVE' ? 'ความเห็นประกอบ (ไม่บังคับ)' : 'เหตุผล / ข้อเสนอแนะ'} {decideMode === 'REJECT' && <span className="text-red-500">*</span>}
+                </label>
                 <textarea
-                  rows={3}
-                  required
-                  placeholder="ระบุข้อแนะนำเพิ่มเติม เช่น ครูผู้สอนแทนมีประชุมงานด่วนคาบนี้ หรือขอให้พิจารณาเลือกครูท่านอื่นที่ตรงสายรายวิชามากขึ้น..."
-                  value={rejectionReason}
-                  onChange={e => setRejectionReason(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-red-500 transition-all font-semibold"
+                  rows={3} value={decideComment} onChange={e => setDecideComment(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500 font-semibold"
                 />
               </div>
-
-              <div className="flex gap-2.5 justify-end pt-2">
+              <div className="flex gap-2.5 justify-end">
+                <button onClick={() => setDecideTarget(null)} className="px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400">ยกเลิก</button>
                 <button
-                  type="button"
-                  onClick={() => setTaskToReject(null)}
-                  className="px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400"
+                  onClick={handleDecide} disabled={submitting}
+                  className={cn(
+                    'px-5 py-2 text-white rounded-xl text-xs font-extrabold disabled:opacity-50 flex items-center gap-1.5',
+                    decideMode === 'APPROVE' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-red-600 hover:bg-red-500'
+                  )}
                 >
-                  ยกเลิก
-                </button>
-                <button
-                  type="button"
-                  disabled={!rejectionReason}
-                  onClick={handleRejectTask}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold transition-all"
-                >
-                  ส่งกลับแก้ไข
+                  {submitting ? 'กำลังบันทึก...' : decideMode === 'APPROVE' ? 'ยืนยันอนุมัติ' : 'ยืนยันส่งกลับ'}
                 </button>
               </div>
             </motion.div>
@@ -1317,168 +982,106 @@ export function SubstituteTeachingModule() {
         )}
       </AnimatePresence>
 
-      {/* MODAL 4: RECORD ATTENDANCE & SUMMARY REPORT DRAWER / MODAL */}
+      {/* COMPLETE MODAL */}
       <AnimatePresence>
-        {taskToComplete && (
+        {completeTarget && (
           <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-[#111622] border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-6 my-8 max-h-[90vh] flex flex-col"
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#111622] border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5 my-8 max-h-[90vh] flex flex-col"
             >
-              {/* Header */}
               <div className="flex justify-between items-start border-b border-slate-800 pb-3 shrink-0">
-                <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <FileText className="w-5 h-5 text-emerald-400" />
-                    เช็กชื่อและส่งรายงานบันทึกผลการสอนแทน
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">วิชา {taskToComplete.courseCode} {taskToComplete.courseName} | ชั้นเรียน {taskToComplete.room}</p>
-                </div>
-                <button 
-                  onClick={() => setTaskToComplete(null)}
-                  className="p-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors"
-                >
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-emerald-400" /> บันทึกหลังสอนแทน · {completeTarget.courseCode} · {completeTarget.room}
+                </h3>
+                <button onClick={() => setCompleteTarget(null)} className="p-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-400 hover:text-white">
                   <XCircle className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Scrollable Form Body */}
-              <div className="flex-1 overflow-y-auto pr-2 space-y-6">
-                
-                {/* SECTION 1: ATTENDANCE CHECKER */}
+              <div className="flex-1 overflow-y-auto pr-2 space-y-5">
+                {completeTarget.postTeachingDueAt && (
+                  <div className={cn(
+                    'text-[11px] rounded-lg p-2.5 border flex items-center gap-2',
+                    Date.now() > new Date(completeTarget.postTeachingDueAt).getTime()
+                      ? 'bg-red-500/10 border-red-500/20 text-red-400'
+                      : 'bg-slate-950/40 border-slate-800 text-slate-400'
+                  )}>
+                    <Clock className="w-3.5 h-3.5" />
+                    เส้นตายบันทึกหลังสอน: ก่อน 24:00 น. ของวันที่ {completeTarget.date}
+                    {Date.now() > new Date(completeTarget.postTeachingDueAt).getTime() && ' — เลยกำหนดแล้ว จะถูก flag เป็น overdue'}
+                  </div>
+                )}
+
+                {students.filter(s => isSameRoom(s.room, completeTarget.room)).length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">เช็กชื่อนักเรียน</h4>
+                    <div className="bg-slate-950/80 border border-slate-800 rounded-xl max-h-[220px] overflow-y-auto divide-y divide-slate-800/40">
+                      {students.filter(s => isSameRoom(s.room, completeTarget.room)).map(st => {
+                        const cur = cAttendance[st.studentId] || 'PRESENT';
+                        return (
+                          <div key={st.id} className="flex items-center justify-between px-3 py-2 text-xs">
+                            <span className="text-white font-semibold">{st.studentNo}. {st.fullName || st.name}</span>
+                            <div className="inline-flex rounded-lg overflow-hidden border border-slate-800">
+                              {(['PRESENT', 'ABSENT', 'LATE', 'LEAVE'] as const).map(v => (
+                                <button
+                                  key={v}
+                                  onClick={() => setCAttendance(p => ({ ...p, [st.studentId]: v }))}
+                                  className={cn(
+                                    'px-2 py-1 text-[10px] font-extrabold',
+                                    cur === v
+                                      ? v === 'PRESENT' ? 'bg-emerald-500 text-white'
+                                        : v === 'ABSENT' ? 'bg-red-500 text-white'
+                                        : v === 'LATE' ? 'bg-amber-500 text-white'
+                                        : 'bg-sky-500 text-white'
+                                      : 'bg-slate-950 text-slate-400'
+                                  )}
+                                >
+                                  {v === 'PRESENT' ? 'มา' : v === 'ABSENT' ? 'ขาด' : v === 'LATE' ? 'สาย' : 'ลา'}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-3">
-                  <div className="flex justify-between items-center">
-                    <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">ส่วนที่ 1: บันทึกข้อมูลการเข้าเรียนของนักเรียน ({students.filter(s => isSameRoom(s.room, taskToComplete.room)).length} คน)</h4>
-                    <span className="text-[10px] text-slate-500">คลิกที่ปุ่มสถานะเพื่อสลับการเช็กชื่อของแต่ละบุคคล</span>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1">สรุปเนื้อหาที่สอนแทน <span className="text-red-500">*</span></label>
+                    <textarea rows={2} value={cSummary} onChange={e => setCSummary(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-emerald-500 font-semibold" />
                   </div>
-
-                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl overflow-hidden max-h-[220px] overflow-y-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-900 border-b border-slate-800 text-slate-400 sticky top-0">
-                        <tr>
-                          <th className="px-4 py-2 font-semibold">เลขที่</th>
-                          <th className="px-4 py-2 font-semibold">รหัสนักเรียน</th>
-                          <th className="px-4 py-2 font-semibold">ชื่อ-นามสกุล</th>
-                          <th className="px-4 py-2 text-right font-semibold">สถานะเช็กชื่อ</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/40 text-slate-300">
-                        {students.filter(s => isSameRoom(s.room, taskToComplete.room)).map(student => {
-                          const currentStat = completionAttendance[student.studentId] || 'PRESENT';
-                          return (
-                            <tr key={student.id} className="hover:bg-slate-900/30">
-                              <td className="px-4 py-2 font-mono text-slate-500">{student.studentNo}</td>
-                              <td className="px-4 py-2 font-mono text-slate-400">{student.studentId}</td>
-                              <td className="px-4 py-2 font-semibold text-white">{student.fullName || student.name}</td>
-                              <td className="px-4 py-2 text-right">
-                                <div className="inline-flex rounded-lg overflow-hidden border border-slate-800">
-                                  {(['PRESENT', 'ABSENT', 'LATE', 'LEAVE'] as const).map(st => (
-                                    <button
-                                      key={st}
-                                      type="button"
-                                      onClick={() => {
-                                        setCompletionAttendance(prev => ({
-                                          ...prev,
-                                          [student.studentId]: st
-                                        }));
-                                      }}
-                                      className={cn(
-                                        "px-2 py-1 text-[10px] font-extrabold transition-all",
-                                        currentStat === st ? (
-                                          st === 'PRESENT' ? "bg-emerald-500 text-white" :
-                                          st === 'ABSENT' ? "bg-red-500 text-white" :
-                                          st === 'LATE' ? "bg-amber-500 text-white" :
-                                          "bg-sky-500 text-white"
-                                        ) : "bg-slate-950 text-slate-400 hover:text-slate-200 hover:bg-slate-900"
-                                      )}
-                                    >
-                                      {st === 'PRESENT' ? 'มา' :
-                                       st === 'ABSENT' ? 'ขาด' :
-                                       st === 'LATE' ? 'สาย' : 'ลา'}
-                                    </button>
-                                  ))}
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* SECTION 2: TEACHING LOG REPORT */}
-                <div className="space-y-4 pt-2 border-t border-slate-800/50">
-                  <h4 className="text-xs font-bold text-indigo-400 uppercase tracking-wider">ส่วนที่ 2: บันทึกหลังสอน & ปัญหาอุปสรรค</h4>
-                  
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-400 mb-1">
-                        สรุปเนื้อหาที่สอนวันนี้ (Summary of Content taught) <span className="text-red-500">*</span>
-                      </label>
-                      <textarea
-                        rows={2}
-                        required
-                        placeholder="สรุปเนื้อหาสำคัญที่ได้ทำการควบคุมห้องเรียน หรือเรื่องราวที่ได้สอนสอนแทนในคาบนี้ให้ครบถ้วน..."
-                        value={completionSummary}
-                        onChange={e => setCompletionSummary(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-emerald-500 transition-all font-semibold"
-                      />
+                      <label className="block text-xs font-semibold text-slate-400 mb-1">ปัญหา/อุปสรรค</label>
+                      <textarea rows={2} value={cProblems} onChange={e => setCProblems(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-emerald-500 font-semibold" />
                     </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-400 mb-1">ปัญหา/อุปสรรคที่พบ (ถ้ามี)</label>
-                        <textarea
-                          rows={2}
-                          placeholder="เช่น นักเรียนบางคนสับสนโจทย์ใบงาน หรือส่งชั่วโมงช้าเนื่องจากลืมสมุดมา..."
-                          value={completionProblems}
-                          onChange={e => setCompletionProblems(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-emerald-500 transition-all placeholder:text-slate-700 font-semibold"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-400 mb-1">แนวทางการแก้ไข/ข้อแนะนำผู้เรียน</label>
-                        <textarea
-                          rows={2}
-                          placeholder="เช่น แนะนำให้ทบทวนสูตรเพิ่มเติมทางคลิปวิดีโอ หรือสั่งงานสรุปแบบย่อพิเศษ..."
-                          value={completionSolutions}
-                          onChange={e => setCompletionSolutions(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-emerald-500 transition-all placeholder:text-slate-700 font-semibold"
-                        />
-                      </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1">แนวทางแก้ไข/ข้อแนะนำ</label>
+                      <textarea rows={2} value={cSolutions} onChange={e => setCSolutions(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-emerald-500 font-semibold" />
                     </div>
                   </div>
                 </div>
-
               </div>
 
-              {/* Action Buttons */}
               <div className="flex gap-2.5 justify-end pt-3 border-t border-slate-800/50 shrink-0">
+                <button onClick={() => setCompleteTarget(null)} className="px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400">ย้อนกลับ</button>
                 <button
-                  type="button"
-                  onClick={() => setTaskToComplete(null)}
-                  className="px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400"
+                  onClick={handleComplete} disabled={submitting || !cSummary.trim()}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-black flex items-center gap-1.5"
                 >
-                  ย้อนกลับ
-                </button>
-                <button
-                  type="button"
-                  disabled={!completionSummary}
-                  onClick={handleSaveCompletion}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 shadow-lg shadow-emerald-500/15"
-                >
-                  <CheckCircle className="w-3.5 h-3.5" /> ส่งรายงานบันทึกการสอนแทน
+                  <CheckCircle className="w-3.5 h-3.5" /> {submitting ? 'กำลังบันทึก...' : 'ส่งรายงานหลังสอนแทน'}
                 </button>
               </div>
-
             </motion.div>
           </div>
         )}
       </AnimatePresence>
-
     </div>
   );
 }

@@ -555,6 +555,89 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
+  // 16. substitute_assignments & post_teaching_records
+  describe('substitute_assignments collection', () => {
+    it('allows any signed-in user to read substitute assignments', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('substitute_assignments/sub-01').set({
+          courseId: 'c1', date: '2026-08-30', status: 'PENDING_APPROVAL',
+        });
+      });
+
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('substitute_assignments/sub-01').get());
+      await assertSucceeds(asUser('student-001', ['STUDENT']).firestore().doc('substitute_assignments/sub-01').get());
+    });
+
+    it('REGRESSION: denies unauthenticated context from reading or writing substitute_assignments', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('substitute_assignments/sub-01').set({ courseId: 'c1' });
+      });
+
+      await assertFails(asAnonymous().firestore().doc('substitute_assignments/sub-01').get());
+      await assertFails(asAnonymous().firestore().doc('substitute_assignments/sub-02').set({ courseId: 'c2' }));
+    });
+
+    it('allows the 4 approval roles + SUPER_ADMIN + proposing HEAD_OF_DEPARTMENT to write', async () => {
+      await assertSucceeds(
+        asRole('HEAD_OF_DEPARTMENT').firestore().doc('substitute_assignments/sub-hod').set({ courseId: 'c1', currentApprovalStage: 'STAGE_2_ACADEMIC_HEAD' })
+      );
+      await assertSucceeds(
+        asRole('ACADEMIC_HEAD').firestore().doc('substitute_assignments/sub-ah').set({ courseId: 'c1' })
+      );
+      await assertSucceeds(
+        asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('substitute_assignments/sub-dd').set({ courseId: 'c1' })
+      );
+      await assertSucceeds(
+        asRole('DIRECTOR').firestore().doc('substitute_assignments/sub-dir').set({ courseId: 'c1' })
+      );
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('substitute_assignments/sub-adm').set({ courseId: 'c1' })
+      );
+    });
+
+    it('allows a SUBJECT_TEACHER (substitute teacher) to write the post-teaching completion', async () => {
+      await assertSucceeds(
+        asRole('SUBJECT_TEACHER').firestore().doc('substitute_assignments/sub-complete').set({
+          courseId: 'c1', isCompleted: true, completionSummary: 'สอนเรื่องสมการ',
+        })
+      );
+    });
+
+    it('REGRESSION: denies PARENT and STUDENT from writing substitute_assignments', async () => {
+      await assertFails(
+        asRole('PARENT').firestore().doc('substitute_assignments/sub-bad').set({ courseId: 'c1', status: 'APPROVED' })
+      );
+      await assertFails(
+        asUser('student-x', ['STUDENT']).firestore().doc('substitute_assignments/sub-bad-2').set({ courseId: 'c1' })
+      );
+    });
+  });
+
+  describe('post_teaching_records collection', () => {
+    it('allows any signed-in user to read and teachers/admins to write', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('post_teaching_records/ptr-01').set({ courseId: 'c1', date: '2026-08-30' });
+      });
+
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('post_teaching_records/ptr-01').get());
+      await assertSucceeds(
+        asRole('SUBJECT_TEACHER').firestore().doc('post_teaching_records/ptr-new').set({ courseId: 'c1', isLate: false })
+      );
+      await assertSucceeds(
+        asRole('HEAD_OF_DEPARTMENT').firestore().doc('post_teaching_records/ptr-new-2').set({ courseId: 'c1' })
+      );
+    });
+
+    it('REGRESSION: denies unauthenticated and PARENT from writing post_teaching_records', async () => {
+      await assertFails(
+        asAnonymous().firestore().doc('post_teaching_records/ptr-bad').set({ courseId: 'c1' })
+      );
+      await assertFails(
+        asRole('PARENT').firestore().doc('post_teaching_records/ptr-bad-2').set({ courseId: 'c1' })
+      );
+    });
+  });
+
   // 15. Default Deny Catch-All (Regression Test 5)
   describe('Default Deny Catch-All (Undeclared paths)', () => {
     it('REGRESSION: denies authenticated user with no matching role from reading or writing undeclared collections', async () => {
