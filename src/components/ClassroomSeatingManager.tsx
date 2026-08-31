@@ -39,6 +39,7 @@ import { SeatingLayout, SeatingGroup, SeatingSeat, SeatingAssignment } from '../
 import { cn, isSameRoom, formatRoomName, formatCourseTitle } from '../lib/utils';
 import { useStore } from '../store';
 import { RandomStudentPickerModal, ClassroomDeskGroup } from './RandomStudentPickerModal';
+import { buildDeskGroupsForPicker } from '../lib/seatingPicker';
 import { SeatHistoryModal } from './seating/SeatHistoryModal';
 import { TemplatePickerModal } from './seating/TemplatePickerModal';
 import { CreateGroupModal } from './seating/CreateGroupModal';
@@ -779,29 +780,12 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
     setTimeout(() => setSaveToast(null), 3000);
   };
 
-  // Convert current dynamic groups to format expected by RandomStudentPickerModal
-  const classroomGroupsForPicker: ClassroomDeskGroup[] = useMemo(() => {
-    return groups.map((g, idx) => {
-      const seatedStudentsInGroup: Student[] = [];
-      g.seats.forEach(s => {
-        const assign = assignments[s.id];
-        if (assign && !assign.effectiveTo) {
-          const student = courseStudents.find(st => st.studentId === assign.studentId);
-          if (student) {
-            seatedStudentsInGroup.push(student);
-          }
-        }
-      });
-
-      return {
-        id: g.id,
-        name: g.name,
-        tableNumber: g.order || idx + 1,
-        icon: g.shape === 'POD' ? '🧪' : '🪑',
-        students: seatedStudentsInGroup
-      };
-    });
-  }, [groups, assignments, courseStudents]);
+  // Convert current dynamic groups to pickable "desk" units for RandomStudentPickerModal.
+  // ROW/GRID ("แถวโต๊ะคู่") ถูกหั่นเป็นโต๊ะละ 2 ที่นั่ง — ไม่งั้น "สุ่มโต๊ะ" จะได้ทั้งแถว ดู buildDeskGroupsForPicker
+  const classroomGroupsForPicker: ClassroomDeskGroup[] = useMemo(
+    () => buildDeskGroupsForPicker(groups, assignments, courseStudents),
+    [groups, assignments, courseStudents]
+  );
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#0b0e14] text-slate-100 overflow-hidden select-none font-sans">
