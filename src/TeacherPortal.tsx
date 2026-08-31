@@ -1,8 +1,9 @@
-import { cn, parseThaiSchedule, isSameRoom } from "./lib/utils";
+import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/utils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { usePeriodsConfig } from './hooks/usePeriodsConfig';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
+import { useRealStudents } from './hooks/useRealStudents';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass } from './services/firestoreService';
 import { TeacherScheduleList, SubjectPeriod } from './components/TeacherScheduleList';
 import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } from 'date-fns';
@@ -25,13 +26,17 @@ import { SubstituteTeachingModule } from './components/SubstituteTeachingModule'
 
 const PERIODS = ['โฮมรูม', 'คาบ 1', 'คาบ 2', 'คาบ 3', 'คาบ 4', 'พักกลางวัน', 'คาบ 5', 'คาบ 6', 'คาบ 7', 'คาบ 8'];
 
+const DAY_TH_NAMES: Record<string, string> = {
+  monday: 'จันทร์', tuesday: 'อังคาร', wednesday: 'พุธ', thursday: 'พฤหัสบดี',
+  friday: 'ศุกร์', saturday: 'เสาร์', sunday: 'อาทิตย์'
+};
+
 export function TeacherPortal() {
   const {
     user,
-    currentDate, 
-    currentPeriod, 
-    students, 
-    analytics, 
+    currentDate,
+    currentPeriod,
+    analytics,
     attendanceRecords,
     scheduleConfig,
     setCurrentPeriod,
@@ -43,7 +48,6 @@ export function TeacherPortal() {
     submitLateAttendanceRequest,
     lateAttendanceRequests,
     courses,
-    globalCourses,
     activeLearningPoints,
     setCourses,
     markAttendanceDone,
@@ -60,6 +64,10 @@ export function TeacherPortal() {
     updateCourseScoreSetting,
     completeSubstituteAssignment
   } = useStore();
+
+  // รายชื่อนักเรียนอ่านจาก Firestore สด (real-time) แทน Zustand store แบบ session-local
+  // ใช้ในผังห้องเรียน (ClassroomSeatingManager), สุ่มนักเรียน, gradebook, Early Warning
+  const { students } = useRealStudents();
 
   // --- บันทึกหลังสอนแทน (deadline ก่อน 24:00 น. ของวันที่สอน) ---
   const [subCompleteTarget, setSubCompleteTarget] = useState<SubstituteAssignment | null>(null);
@@ -109,7 +117,30 @@ export function TeacherPortal() {
 
   const todayStr = format(currentDate, 'yyyy-MM-dd');
 
-
+  // รายวิชาทั้งระบบ (ทุกครู) — derive จาก Firestore `schedules` แบบ real-time
+  // แทนการอ่าน globalCourses จาก Zustand store ซึ่งจะมีค่าเฉพาะเซสชันที่เพิ่ง import เท่านั้น
+  // (พอเปิดหน้าใหม่/ล็อกอินใหม่/คนละเครื่อง store ว่าง → ตารางสอนหายทั้งที่ Firestore มีครบ)
+  const globalCourses: GlobalCourse[] = useMemo(() => {
+    return (fsSchedules as any[]).map(sch => {
+      const rawId = String(sch.id || '');
+      const courseId = rawId.startsWith('sch_') ? `course_${rawId.slice(4)}` : rawId;
+      const dayTh = DAY_TH_NAMES[String(sch.dayOfWeek || '').toLowerCase()] || sch.dayOfWeek || '';
+      const hasPeriod = sch.periodNumber !== undefined && sch.periodNumber !== null;
+      const scheduleString = dayTh
+        ? (hasPeriod ? `${dayTh} คาบ ${sch.periodNumber}` : dayTh)
+        : (sch.scheduleString || sch.schedule || '');
+      return {
+        courseId,
+        code: sch.subjectCode || sch.courseCode || '',
+        courseName: sch.subjectName || sch.courseName || '',
+        teacherName: sch.sourceTeacherName || sch.teacherName || sch.unlinkedTeacherName || 'ครูผู้สอน',
+        teacherEmail: sch.teacherEmail || sch.unlinkedTeacherEmail || '',
+        roomName: sch.room || sch.level || sch.targetClass || '',
+        scheduleString,
+        level: sch.level || '',
+      } as GlobalCourse;
+    });
+  }, [fsSchedules]);
 
   const myCourses: Course[] = useMemo(() => {
     const rawList = globalCourses
@@ -165,11 +196,14 @@ export function TeacherPortal() {
           }
         }
 
+        // level = ระดับชั้น (ม.5/8); ถ้า globalCourse ไม่มี ให้ใช้ roomName ต่อเมื่อ roomName เป็นชื่อชั้นเอง
+        const levelStr = gc.level || (/ม\.\s?\d/.test(gc.roomName) ? gc.roomName : '');
         return {
           id: gc.courseId,
           code: gc.code,
           name: gc.courseName,
           room: gc.roomName,
+          level: levelStr,
           term: '1/2569',
           studentsCount: gc.roomName.includes('5/8') ? 40 : gc.roomName.includes('5/9') ? 38 : gc.roomName.includes('5/11') ? 42 : 35,
           schedule: gc.scheduleString,
@@ -571,10 +605,12 @@ export function TeacherPortal() {
       markAttendanceDone(courseId);
 
       // Update Firestore schedules collection too
-      const matchedSched = fsSchedules.find(s => 
-        s.courseCode === activeCourse?.code && 
-        (s.targetClass.replace(/^M\./i, 'ม.') === activeCourse?.room?.replace(/^M\./i, 'ม.'))
-      );
+      const matchedSched = (fsSchedules as any[]).find(s => {
+        const code = s.courseCode || s.subjectCode || '';
+        const cls = String(s.targetClass || s.room || s.level || '');
+        return code === activeCourse?.code &&
+          cls.replace(/^M\./i, 'ม.') === activeCourse?.room?.replace(/^M\./i, 'ม.');
+      });
       if (matchedSched) {
         await updateScheduleAttendance(matchedSched.id, true);
       }
@@ -735,11 +771,43 @@ export function TeacherPortal() {
               // 2. Map and filter periods specifically for targetDayOfWeek
               const rawMappedPeriods: SubjectPeriod[] = [];
 
+              // schedules docs ที่ import จากไฟล์ภาระงานสอนใช้ field `dayOfWeek` (string) / `subjectCode` ฯลฯ
+              // ส่วน interface เดิมคาดหวัง `scheduleDay` (number) / `courseCode` — normalize ให้รองรับทั้งสองแบบ
+              const DAY_NAME_TO_NUM: Record<string, number> = {
+                sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6
+              };
               const todayFsSchedules = (!fsLoading && fsSchedules.length > 0)
-                ? fsSchedules.filter(item => 
-                    isTeacherEmailMatch(item.teacherEmail, user?.email) && 
-                    item.scheduleDay === targetDayOfWeek
-                  )
+                ? (fsSchedules as any[])
+                    .map(raw => {
+                      const dayNum = typeof raw.scheduleDay === 'number'
+                        ? raw.scheduleDay
+                        : DAY_NAME_TO_NUM[String(raw.dayOfWeek || '').toLowerCase()];
+                      return {
+                        id: raw.id,
+                        teacherEmail: raw.teacherEmail || raw.unlinkedTeacherEmail || '',
+                        teacherIds: raw.teacherIds,
+                        teacherId: raw.teacherId,
+                        scheduleDay: dayNum,
+                        periodNumber: raw.periodNumber,
+                        courseCode: raw.courseCode || raw.subjectCode || '',
+                        courseName: raw.courseName || raw.subjectName || '',
+                        targetClass: raw.targetClass || raw.room || raw.level || '',
+                        // ระดับชั้น (ม.5/8) แยกจากห้องกายภาพ (943) — ไฟล์ import เก็บชั้นไว้ที่ field `level`
+                        classLevel: raw.level || raw.targetClass || raw.room || '',
+                        room: raw.room || raw.level || '',
+                        type: raw.type || raw.subjectType || 'MAIN',
+                        attendanceTaken: raw.attendanceTaken,
+                        studentsCount: raw.studentsCount,
+                        teachingPartner: raw.teachingPartner,
+                        partnerCheckedAttendance: raw.partnerCheckedAttendance,
+                      };
+                    })
+                    .filter(item =>
+                      (isTeacherEmailMatch(item.teacherEmail, user?.email) ||
+                        (user?.uid && (item.teacherId === user.uid ||
+                          (Array.isArray(item.teacherIds) && item.teacherIds.includes(user.uid))))) &&
+                      item.scheduleDay === targetDayOfWeek
+                    )
                 : [];
 
               if (todayFsSchedules.length > 0) {
@@ -750,9 +818,11 @@ export function TeacherPortal() {
                   const endTime = formatTime(end);
 
                   // Find matching course in myCourses to get original id if available, or use a derived id
-                  const matchedCourse = myCourses.find(c => 
-                    c.code === item.courseCode && 
-                    (c.room?.replace(/^M\./i, 'ม.') === item.targetClass.replace(/^M\./i, 'ม.'))
+                  const matchedCourse = myCourses.find(c =>
+                    c.code === item.courseCode &&
+                    (isSameRoom(c.room, item.targetClass) ||
+                      isSameRoom(c.level, item.classLevel) ||
+                      isSameRoom(c.room, item.classLevel))
                   );
 
                   const courseId = matchedCourse ? matchedCourse.id : item.id;
@@ -773,7 +843,7 @@ export function TeacherPortal() {
                     endTime,
                     subjectCode: item.courseCode,
                     subjectName: item.courseName,
-                    className: item.targetClass,
+                    className: item.classLevel || item.targetClass,
                     room: item.room || (item.targetClass.includes('5/8') ? '[943] HR 5/8' : item.targetClass.includes('5/9') ? '[935] HR 5/9' : 'ห้องเรียน ' + item.targetClass),
                     attendanceTaken: isAttendanceTaken,
                     hasPostTeachingRecord: !!existingRecord,
@@ -804,9 +874,10 @@ export function TeacherPortal() {
                 const periodItem = mappedPeriods.find(p => p.id === periodId || p.courseId === periodId);
                 let course = myCourses.find(c => c.id === periodId);
                 if (!course && periodItem) {
-                  course = myCourses.find(c => 
-                    c.id === periodItem.courseId || 
-                    (c.code === periodItem.subjectCode && isSameRoom(c.room, periodItem.className))
+                  course = myCourses.find(c =>
+                    c.id === periodItem.courseId ||
+                    (c.code === periodItem.subjectCode &&
+                      (isSameRoom(c.room, periodItem.className) || isSameRoom(c.level, periodItem.className)))
                   );
                 }
                 if (!course && periodItem) {
@@ -815,6 +886,7 @@ export function TeacherPortal() {
                     code: periodItem.subjectCode,
                     name: periodItem.subjectName,
                     room: periodItem.className,
+                    level: periodItem.className,
                     term: '1/2569',
                     studentsCount: periodItem.studentsCount || 40,
                     attendanceTaken: !!periodItem.attendanceTaken,
@@ -907,7 +979,8 @@ export function TeacherPortal() {
                         setActiveCourse({
                           ...course,
                           periodIndex: pIndex,
-                          room: periodItem?.className || course.room
+                          room: periodItem?.className || course.room,
+                          level: periodItem?.className || course.level
                         });
                         setCurrentPeriod(PERIODS[pIndex] || `คาบ ${pIndex}`);
                         setView('class');
@@ -952,7 +1025,8 @@ export function TeacherPortal() {
                         setActiveCourse({
                           ...course,
                           periodIndex: pIndex,
-                          room: periodItem?.className || course.room
+                          room: periodItem?.className || course.room,
+                          level: periodItem?.className || course.level
                         });
                         setCurrentPeriod(PERIODS[pIndex] || `คาบ ${pIndex}`);
                         setView('class');
@@ -988,7 +1062,7 @@ export function TeacherPortal() {
                       >
                         <option value="">-- เลือกวิชาของท่าน --</option>
                         {globalCourses.filter(gc => gc.teacherEmail === user?.email).map(gc => (
-                          <option key={gc.courseId} value={gc.courseId}>{gc.code} {gc.courseName} ({gc.roomName}) - {gc.scheduleString}</option>
+                          <option key={gc.courseId} value={gc.courseId}>{gc.code} {formatCourseTitle(gc.courseName, gc.level, gc.roomName)} - {gc.scheduleString}</option>
                         ))}
                       </select>
                     </div>
@@ -1022,7 +1096,7 @@ export function TeacherPortal() {
                         >
                           <option value="">-- เลือกวิชาของเพื่อนครู --</option>
                           {globalCourses.filter(gc => gc.teacherEmail === swapTargetEmail).map(gc => (
-                            <option key={gc.courseId} value={gc.courseId}>{gc.code} {gc.courseName} ({gc.roomName}) - {gc.scheduleString}</option>
+                            <option key={gc.courseId} value={gc.courseId}>{gc.code} {formatCourseTitle(gc.courseName, gc.level, gc.roomName)} - {gc.scheduleString}</option>
                           ))}
                         </select>
                       </div>
@@ -1203,7 +1277,7 @@ export function TeacherPortal() {
                           <div key={idx} className="bg-[#0b0f19] p-5 border border-slate-800/80 rounded-xl space-y-3 hover:border-slate-700 transition-colors">
                             <div className="flex flex-wrap justify-between items-start gap-2">
                               <div>
-                                <h4 className="text-sm font-bold text-white">{course?.code} {course?.courseName} ({course?.roomName})</h4>
+                                <h4 className="text-sm font-bold text-white">{course?.code} {formatCourseTitle(course?.courseName, course?.level, course?.roomName)}</h4>
                                 <div className="text-[11px] text-slate-400 mt-0.5">
                                   วันที่สอน: {format(new Date(record.date), 'dd MMMM yyyy', { locale: th })} • ส่งเมื่อ: {new Date(record.submittedAt).toLocaleTimeString('th-TH')} น.
                                 </div>
@@ -1272,7 +1346,7 @@ export function TeacherPortal() {
                     >
                       <option value="">-- เลือกรายวิชา --</option>
                       {myCourses.map(c => (
-                        <option key={c.id} value={c.id}>{c.code} {c.name} ({c.room})</option>
+                        <option key={c.id} value={c.id}>{c.code} {formatCourseTitle(c.name, c.level, c.room)}</option>
                       ))}
                     </select>
                   </div>
@@ -1532,7 +1606,13 @@ export function TeacherPortal() {
               </div>
             )}
 
-            {myCourses.length === 0 && dashboardTab === 'courses' && (
+            {fsLoading && myCourses.length === 0 && dashboardTab === 'courses' && (
+              <div className="text-center py-20 border border-dashed border-white/10 rounded-2xl bg-[#151921]">
+                <span className="animate-spin text-2xl leading-none inline-block mb-3">⟳</span>
+                <p className="text-slate-500">กำลังโหลดตารางสอนจากฐานข้อมูล...</p>
+              </div>
+            )}
+            {!fsLoading && myCourses.length === 0 && dashboardTab === 'courses' && (
               <div className="text-center py-20 border border-dashed border-white/10 rounded-2xl bg-[#151921]">
                 <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-4" />
                 <h3 className="text-lg font-bold text-slate-300 mb-2">ยังไม่มีรายวิชาที่สอน</h3>
@@ -1610,7 +1690,7 @@ export function TeacherPortal() {
                                 else setCopyTargetCourses(copyTargetCourses.filter(id => id !== c.id));
                               }}
                             />
-                            <span className="text-xs text-slate-300">{c.code} {c.name} ({c.room})</span>
+                            <span className="text-xs text-slate-300">{c.code} {formatCourseTitle(c.name, c.level, c.room)}</span>
                           </label>
                         ))}
                         {myCourses.filter(c => c.id !== selectedGradebookCourseId && c.code === myCourses.find(mc => mc.id === selectedGradebookCourseId)?.code).length === 0 && (

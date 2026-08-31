@@ -125,12 +125,13 @@ export interface Course {
   room: string;
   term: string;
   studentsCount: number;
-  periodIndex?: number; 
-  schedule?: string; 
+  periodIndex?: number;
+  schedule?: string;
   attendanceTaken: boolean;
   teacherName?: string;
   teacherEmail?: string;
   roleLabel?: string;
+  level?: string;   // ระดับชั้น เช่น "ม.5/8" (แยกจาก room ที่เป็นห้องกายภาพ เช่น "943")
 }
 
 export interface ScheduleChangeRequest {

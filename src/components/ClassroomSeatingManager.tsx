@@ -36,7 +36,7 @@ import {
 } from 'lucide-react';
 import { Student, Course, AttendanceStatus } from '../types';
 import { SeatingLayout, SeatingGroup, SeatingSeat, SeatingAssignment } from '../types/seating';
-import { cn, isSameRoom, formatRoomName } from '../lib/utils';
+import { cn, isSameRoom, formatRoomName, formatCourseTitle } from '../lib/utils';
 import { useStore } from '../store';
 import { RandomStudentPickerModal, ClassroomDeskGroup } from './RandomStudentPickerModal';
 import { SeatHistoryModal } from './seating/SeatHistoryModal';
@@ -70,13 +70,15 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   onSelectStudentDetail,
   onTakeAttendance
 }) => {
-  const course = propCourse || {
+  const course: Course = propCourse || {
     id: 'course-m58-default',
     code: 'ว32204',
-    name: 'ฟิสิกส์ 4 (ม.5/8)',
+    name: 'ฟิสิกส์ 4',
     room: 'ม.5/8',
+    level: 'ม.5/8',
     term: '1/2569',
     studentsCount: 40,
+    attendanceTaken: false,
     schedule: 'จ1-2, พ3-4'
   };
 
@@ -108,7 +110,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   // 1. Dynamic Layout State
   const [layoutMeta, setLayoutMeta] = useState<SeatingLayout>({
     id: layoutId,
-    name: `ผังห้องเรียน ${course.name} (${course.room})`,
+    name: `ผังห้องเรียน ${formatCourseTitle(course.name, course.level, course.room)}`,
     subjectCode: course.code,
     room: course.room,
     teacherId: user?.uid || 'teacher_001',
@@ -813,7 +815,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
-                {layoutMeta.name}
+                ผังห้องเรียน {formatCourseTitle(course.name, course.level, course.room)}
               </h2>
               {isLayoutLocked ? (
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1">

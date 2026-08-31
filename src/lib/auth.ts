@@ -172,22 +172,21 @@ export async function buildAppUser(fbUser: FirebaseUser): Promise<User> {
     roles = [claims.primaryRole as UserRole];
   }
 
-  // 2. Fetch staff/user record from Firestore if custom claims not set yet
-  if (roles.length === 0) {
-    try {
-      // Try fetching staff document by UID or email
-      const staffDocRef = doc(db, 'staff', fbUser.uid);
-      const staffSnap = await getDoc(staffDocRef);
-      if (staffSnap.exists()) {
-        const staffData = staffSnap.data();
-        if (Array.isArray(staffData.roles)) {
-          roles = staffData.roles as UserRole[];
-        }
-        userProfile = staffData as UserProfile;
+  // 2. Fetch staff/user record from Firestore — ต้องทำเสมอ (ไม่ใช่เฉพาะตอน claims ว่าง)
+  //    เพราะ staff doc คือแหล่งเดียวของ `assignments.homeroomClass` / `departmentId`
+  //    ที่ AdvisorPortal ใช้หาห้องประจำชั้น — ถ้าข้ามขั้นนี้ ครูที่ปรึกษาจะได้ "No Room"
+  try {
+    const staffDocRef = doc(db, 'staff', fbUser.uid);
+    const staffSnap = await getDoc(staffDocRef);
+    if (staffSnap.exists()) {
+      const staffData = staffSnap.data();
+      if (roles.length === 0 && Array.isArray(staffData.roles)) {
+        roles = staffData.roles as UserRole[];
       }
-    } catch {
-      // Ignore if firestore not yet seeded/rules deny
+      userProfile = staffData as UserProfile;
     }
+  } catch {
+    // Ignore if firestore not yet seeded/rules deny
   }
 
   // 3. Fallback matching with predefined staff list if in dev or during initial bootstrap

@@ -137,42 +137,6 @@ export const MOCK_VISIT_DATA = [
   }
 ];
 
-export const MOCK_VISIT_STUDENTS = [
-  {
-    id: '1',
-    studentId: '6950801',
-    name: 'นายกิตติศักดิ์ เจริญสุข',
-    class: 'ม.5/8',
-    address: '12/3 หมู่ 1 ต.ท่าเสา อ.เมือง จ.อุตรดิตถ์',
-    phone: '081-234-5678',
-    status: 'pending',
-    avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950801',
-    riskLevel: 'low'
-  },
-  {
-    id: '2',
-    studentId: '6950802',
-    name: 'นายณัฐวุฒิ สุขประเสริฐ',
-    class: 'ม.5/8',
-    address: '45/1 หมู่ 3 ต.ในเมือง อ.เมือง จ.อุตรดิตถ์',
-    phone: '082-345-6789',
-    status: 'visited',
-    avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950802',
-    riskLevel: 'low'
-  },
-  {
-    id: '3',
-    studentId: '6950803',
-    name: 'นายธีรภัทร มั่นคง',
-    class: 'ม.5/8',
-    address: '88/9 หมู่ 5 ต.บ้านเกาะ อ.เมือง จ.อุตรดิตถ์',
-    phone: '083-456-7890',
-    status: 'pending',
-    avatar: 'https://api.dicebear.com/9.x/avataaars/svg?seed=6950803',
-    riskLevel: 'high'
-  }
-];
-
 export const mockExecutiveData = {
   gisStudents: [
     {
