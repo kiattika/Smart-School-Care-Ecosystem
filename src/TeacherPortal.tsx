@@ -917,13 +917,17 @@ export function TeacherPortal() {
                   const startTime = formatTime(start);
                   const endTime = formatTime(end);
 
-                  // Find matching course in myCourses to get original id if available, or use a derived id
-                  const matchedCourse = myCourses.find(c =>
-                    c.code === item.courseCode &&
-                    (isSameRoom(c.room, item.targetClass) ||
-                      isSameRoom(c.level, item.classLevel) ||
-                      isSameRoom(c.room, item.classLevel))
-                  );
+                  // จับคู่ course ให้ตรงคาบนี้เป๊ะ ๆ ก่อน (id ที่ derive จาก schedule doc id ของคาบนี้เอง)
+                  // แล้วค่อย fallback loose match — กัน stale schedule ที่ code+level ซ้ำกันแย่ง match
+                  const derivedCourseId = `course_${String(item.id).replace(/^sch_/, '')}`;
+                  const matchedCourse =
+                    myCourses.find(c => c.id === derivedCourseId || c.id === item.id) ||
+                    myCourses.find(c =>
+                      c.code === item.courseCode &&
+                      (isSameRoom(c.room, item.targetClass) ||
+                        isSameRoom(c.level, item.classLevel) ||
+                        isSameRoom(c.room, item.classLevel))
+                    );
 
                   const courseId = matchedCourse ? matchedCourse.id : item.id;
                   // เช็คชื่อจริงไปแล้วหรือยัง — อ่านจาก attendance_records ของวันนั้นจริง (Firestore),
@@ -939,11 +943,15 @@ export function TeacherPortal() {
                   const isAttendanceTaken = firestoreChecked || (matchedCourse ? matchedCourse.attendanceTaken : false) || !!item.attendanceTaken || hasRecords;
 
                   const recordDate = format(targetDate, 'yyyy-MM-dd');
+                  // จับคู่ด้วย id ที่ชัดเจนเท่านั้น (courseId ที่ derive จาก schedule / scheduleId)
+                  // ไม่จับคู่หลวมด้วย subjectCode+room — เจอ false positive กับ record เก่าที่ courseId คนละรูปแบบ
                   const existingRecord = postTeachingRecords.find(r =>
-                    (r.courseId === courseId || r.courseId === item.id ||
-                      (r as any).scheduleId === item.id ||
-                      ((r as any).subjectCode === item.courseCode && isSameRoom((r as any).room || (r as any).level, item.classLevel))
-                    ) && r.date === recordDate);
+                    r.date === recordDate && (
+                      r.courseId === courseId ||
+                      r.courseId === item.id ||
+                      r.courseId === `course_${String(item.id).replace(/^sch_/, '')}` ||
+                      r.scheduleId === item.id
+                    ));
                   const lateReq = lateRequestByKey.get(`${item.id}__${recordDate}`);
 
                   rawMappedPeriods.push({
@@ -1142,8 +1150,8 @@ export function TeacherPortal() {
                       const existingRecord = postTeachingRecords.find(r =>
                         r.date === recordDate && (
                           r.courseId === periodId ||
-                          (pItem && (r.courseId === pItem.courseId || r.courseId === pItem.id || r.scheduleId === pItem.id ||
-                            (r.subjectCode === pItem.subjectCode && isSameRoom(r.room || r.level, pItem.className))))
+                          (pItem && (r.courseId === pItem.courseId || r.courseId === pItem.id ||
+                            r.courseId === `course_${String(pItem.id).replace(/^sch_/, '')}` || r.scheduleId === pItem.id))
                         ));
                       if (existingRecord) {
                         setViewingRecord(existingRecord);
