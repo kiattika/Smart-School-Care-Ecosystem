@@ -117,7 +117,7 @@ export function TeacherPortal() {
 
   const todayStr = format(currentDate, 'yyyy-MM-dd');
   const isLateApprover = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN'].includes(user?.activeRole || '');
-  const isTeacherRole = ['SUBJECT_TEACHER', 'HOMEROOM_TEACHER'].includes(user?.activeRole || '') || user?.role === 'teacher' || user?.role === 'advisor';
+  const isTeacherRole = !isLateApprover && (['SUBJECT_TEACHER', 'HOMEROOM_TEACHER'].includes(user?.activeRole || '') || user?.role === 'teacher' || user?.role === 'advisor');
 
   // ── คำขอเช็คชื่อย้อนหลัง (Firestore: late_attendance_requests) ──
   const [myLateRequests, setMyLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
