@@ -43,11 +43,12 @@ describe('BulkDataImportModal staff-list staleness (root cause proof)', () => {
     expect(courseRows[0].warnings.some(w => w.includes('ไม่พบบัญชีครูที่มีอีเมล') && w.includes('kiattika@utd.ac.th'))).toBe(true);
   });
 
-  it('FIXED-STATE: staffList โหลดเสร็จแล้ว (email ตรงเป๊ะ) → exact match Step 1 ทำงาน ไม่มี warning', () => {
+  it('FIXED-STATE: staffList โหลดเสร็จแล้ว → match ได้ + เลือก UID จริง (ไม่ใช่ doc key ที่เป็นอีเมล)', () => {
     const { courseRows } = parseTeacherLoadReport(teacherLoadRows, loadedStaffList);
 
     expect(courseRows).toHaveLength(1);
-    expect(courseRows[0].matchedTeacherId).toBe('kiattika@utd.ac.th');
+    // มี staff 2 doc (key=email alias, key=UID) → ต้องเลือก UID
+    expect(courseRows[0].matchedTeacherId).toBe('test_admin_kiattika_001');
     expect(courseRows[0].matchedTeacherEmail).toBe('kiattika@utd.ac.th');
     expect(courseRows[0].warnings.some(w => w.includes('ไม่พบบัญชีครู'))).toBe(false);
   });

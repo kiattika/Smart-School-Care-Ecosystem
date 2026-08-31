@@ -6,6 +6,7 @@ import {
   matchTeacherByName,
   matchTeacherByEmail,
   normalizeEmail,
+  deriveSubjectCode,
   parseTeacherLoadReport,
   generateScheduleDocuments,
   isTeacherLoadReportFormat
@@ -117,6 +118,21 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
       expect(detectSubjectType('คณิตศาสตร์เพิ่มเติม', 'ค32201')).toBe('MAIN');
       expect(detectSubjectType('คณิตศาสตร์พื้นฐาน', 'ค32101')).toBe('MAIN');
     });
+
+    // รายงานจริง: ชื่อกิจกรรมขึ้นต้นด้วย "กิจกรรม" และไม่มี suffix "(กิจกรรม)"
+    it('identifies real-world activity names (prefixed "กิจกรรม", no suffix) as ACTIVITY', () => {
+      for (const name of [
+        'กิจกรรมโฮมรูม',
+        'กิจกรรมลูกเสือ-เนตรนารี-ยุวกาชาด',
+        'กิจกรรมแนะแนว',
+        'กิจกรรมชุมนุม',
+        'กิจกรรมเพื่อสังคมและสาธารณประโยชน์ (จิตอาสา)',
+        'กิจกรรมลดเวลาเรียน เพิ่มเวลารู้',
+        'PLC',
+      ]) {
+        expect(detectSubjectType(name, '-')).toBe('ACTIVITY');
+      }
+    });
   });
 
   describe('TASK 8 & ISSUE 1: Teacher Linkage & Email Matching', () => {
@@ -186,6 +202,59 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
       expect(normalizeEmail(undefined)).toBe('');
       expect(normalizeEmail(null)).toBe('');
       expect(normalizeEmail('')).toBe('');
+    });
+
+    // seed สร้าง staff ทั้ง doc key = UID และ doc key = email → ต้องเลือก UID
+    it('prefers the UID-keyed staff doc over the email-keyed alias when both match', () => {
+      const staff = [
+        { id: 'kiattika@utd.ac.th', email: 'kiattika@utd.ac.th', fullName: 'K (alias doc)' },
+        { id: 'test_admin_kiattika_001', email: 'kiattika@utd.ac.th', fullName: 'K (uid doc)' },
+      ];
+      expect(matchTeacherByEmail('kiattika@utd.ac.th', staff)?.id).toBe('test_admin_kiattika_001');
+      // สลับลำดับก็ยังเลือก UID
+      expect(matchTeacherByEmail('kiattika@utd.ac.th', staff.slice().reverse())?.id).toBe('test_admin_kiattika_001');
+    });
+  });
+
+  describe('BUG: activity periods dropped (14/29) — รหัสวิชา = "-" ในแถวกิจกรรม', () => {
+    it('deriveSubjectCode is deterministic and filesystem/Firestore-id safe', () => {
+      expect(deriveSubjectCode('กิจกรรมโฮมรูม', 'ACTIVITY')).toBe(deriveSubjectCode('กิจกรรมโฮมรูม', 'ACTIVITY'));
+      expect(deriveSubjectCode('กิจกรรมเพื่อสังคมและสาธารณประโยชน์ (จิตอาสา)', 'ACTIVITY')).not.toContain('(');
+      expect(deriveSubjectCode('กิจกรรมโฮมรูม', 'ACTIVITY')).toMatch(/^ACT_/);
+      expect(deriveSubjectCode('a/b c', 'MAIN')).not.toMatch(/[\/ ]/);
+      // ชื่อต่างกัน → รหัสต่างกัน (กัน doc id ชนกัน)
+      expect(deriveSubjectCode('กิจกรรมแนะแนว', 'ACTIVITY'))
+        .not.toBe(deriveSubjectCode('กิจกรรมชุมนุม', 'ACTIVITY'));
+    });
+
+    it('keeps activity rows (code "-", has name + slots) valid, marks them ACTIVITY, synthesizes a code', () => {
+      const staff = [{ id: 'uid-k', email: 'kiattika@utd.ac.th', fullName: 'K' }];
+      const rows = [
+        { 'ชื่อ-สกุล': 'K', 'อีเมล์': 'kiattika@utd.ac.th', 'ลำดับวิชา': '1',
+          'รหัสวิชา': 'ค32201', 'ชื่อรายวิชา': 'คณิตศาสตร์เพิ่มเติม',
+          'คาบ/ห้อง': '4 / [943] ม.5/8', 'วัน-คาบที่สอน': 'อ2, พ4, ฤ1, ศ3', 'ระดับ': 'ม.5/8', 'สรุปคาบ': '4' },
+        { 'ลำดับวิชา': '2', 'รหัสวิชา': '-', 'ชื่อรายวิชา': 'กิจกรรมโฮมรูม',
+          'คาบ/ห้อง': '5 / [943] ม.5/8', 'วัน-คาบที่สอน': 'จ0, อ0, พ0, ฤ0, ศ0', 'ระดับ': 'ม.5/8', 'สรุปคาบ': '5' },
+        { 'ลำดับวิชา': '3', 'รหัสวิชา': '-', 'ชื่อรายวิชา': 'PLC',
+          'คาบ/ห้อง': '2 / -', 'วัน-คาบที่สอน': 'อ10, พ10', 'ระดับ': '-', 'สรุปคาบ': '2' },
+        { 'ลำดับวิชา': '4', 'รหัสวิชา': '-', 'ชื่อรายวิชา': 'กิจกรรมเพื่อสังคมและสาธารณประโยชน์ (จิตอาสา)',
+          'คาบ/ห้อง': '1 / -', 'วัน-คาบที่สอน': 'ศ10', 'ระดับ': 'ม.5', 'สรุปคาบ': '1' },
+      ];
+      const { courseRows } = parseTeacherLoadReport(rows, staff);
+      expect(courseRows).toHaveLength(4);
+      expect(courseRows.every(r => r.isValid)).toBe(true);
+
+      const totalSlots = courseRows.reduce((s, r) => s + r.slots.length, 0);
+      expect(totalSlots).toBe(12); // 4 + 5 + 2 + 1
+
+      const activity = courseRows.filter(r => r.subjectType === 'ACTIVITY');
+      expect(activity).toHaveLength(3);
+      expect(activity.every(r => r.subjectCode && r.subjectCode !== '-')).toBe(true);
+      expect(courseRows[1].subjectCode).toMatch(/^ACT_/);       // กิจกรรมโฮมรูม
+      expect(courseRows[3].subjectType).toBe('ACTIVITY');       // จิตอาสา — เดิม misclassified เป็น MAIN
+      // period 0 (HR) และ period 10 (PLC) ถูกเก็บครบ
+      expect(courseRows[1].slots.some(s => s.periodNumber === 0)).toBe(true);
+      expect(courseRows[2].slots.every(s => s.periodNumber === 10)).toBe(true);
     });
   });
 

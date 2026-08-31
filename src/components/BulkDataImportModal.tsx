@@ -753,7 +753,6 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
       const newStudentsToStore: Student[] = [];
       const newCoursesToStore: Course[] = [];
       const newGlobalCoursesToStore: GlobalCourse[] = [];
-
       for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
         const chunk = validRows.slice(i, i + BATCH_SIZE);
         const batch = writeBatch(db);
@@ -873,8 +872,10 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 sunday: 'อาทิตย์'
               };
 
+              // sanitize รหัสวิชาก่อนใช้เป็นส่วนของ document id (กัน "/" ช่องว่าง ฯลฯ; \p{M} = สระ/วรรณยุกต์ไทย)
+              const safeCode = String(parsedData.subjectCode || 'X').replace(/[^\p{L}\p{N}\p{M}_-]+/gu, '_');
               for (const slot of (parsedData.slots || [])) {
-                const scheduleDocId = `sch_${parsedData.subjectCode}_${cleanRoom}_${slot.dayOfWeek}_p${slot.periodNumber}`;
+                const scheduleDocId = `sch_${safeCode}_${cleanRoom}_${slot.dayOfWeek}_p${slot.periodNumber}`;
                 const scheduleRef = doc(db, 'schedules', scheduleDocId);
 
                 const schedulePayload = {
@@ -901,7 +902,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 batch.set(scheduleRef, schedulePayload, { merge: true });
 
                 const scheduleLabel = `${dayThNames[slot.dayOfWeek] || slot.dayOfWeek} คาบ ${slot.periodNumber}`;
-                const courseSlotId = `course_${parsedData.subjectCode}_${cleanRoom}_${slot.dayOfWeek}_p${slot.periodNumber}`;
+                const courseSlotId = `course_${safeCode}_${cleanRoom}_${slot.dayOfWeek}_p${slot.periodNumber}`;
                 const finalTeacherEmail = parsedData.matchedTeacherEmail || parsedData.teacherEmail || (parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : 'kiattisak@utd.ac.th');
 
                 newCoursesToStore.push({

@@ -198,20 +198,45 @@ export function detectSubjectType(subjectName: string, subjectCode: string): 'MA
 
   if (
     cleanName.includes('(กิจกรรม)') ||
+    /^กิจกรรม/.test(cleanName) ||          // รายงานจริงขึ้นต้นชื่อกิจกรรมด้วย "กิจกรรม..."
     cleanName.toLowerCase().includes('homeroom') ||
     cleanName.includes('โฮมรูม') ||
     cleanName.includes('PLC') ||
     cleanName.includes('ลูกเสือ') ||
     cleanName.includes('เนตรนารี') ||
+    cleanName.includes('ยุวกาชาด') ||
+    cleanName.includes('ผู้บำเพ็ญประโยชน์') ||
+    cleanName.includes('รักษาดินแดน') ||
     cleanName.includes('แนะแนว') ||
     cleanName.includes('ชุมนุม') ||
+    cleanName.includes('ชมรม') ||
+    cleanName.includes('จิตอาสา') ||
+    cleanName.includes('เพื่อสังคม') ||     // กิจกรรมเพื่อสังคมและสาธารณประโยชน์
+    cleanName.includes('ลดเวลาเรียน') ||
+    cleanName.includes('สาธารณประโยชน์') ||
     cleanCode === 'HR' ||
+    cleanCode === 'CZ' ||
     cleanCode === 'PLC'
   ) {
     return 'ACTIVITY';
   }
 
   return 'MAIN';
+}
+
+/**
+ * สร้างรหัสวิชาสำรองแบบ deterministic จากชื่อรายวิชา
+ * ใช้เมื่อคอลัมน์ "รหัสวิชา" ในไฟล์เป็น "-" หรือว่าง (พบบ่อยในแถวกิจกรรมของรายงานจริง)
+ * — ไม่ใช่การ fabricate identity ของคน แต่เป็น key ของ schedule document ที่ stable + traceable
+ */
+export function deriveSubjectCode(subjectName: string, subjectType: 'MAIN' | 'ACTIVITY'): string {
+  const slug = (subjectName || '')
+    .trim()
+    .replace(/\(.*?\)/g, '')                 // ตัดวงเล็บ เช่น "(จิตอาสา)"
+    .replace(/[^\p{L}\p{N}\p{M}]+/gu, '_')   // \p{M} = combining marks — จำเป็นสำหรับสระ/วรรณยุกต์ไทย
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60);
+  return `${subjectType === 'ACTIVITY' ? 'ACT' : 'GEN'}_${slug || 'UNNAMED'}`;
 }
 
 /**
@@ -227,11 +252,13 @@ export function matchTeacherByEmail(
   if (!targetEmail) return undefined;
 
   // normalize ทั้งสองฝั่ง — อีเมลจากไฟล์ Excel มักมีอักขระที่มองไม่เห็นแฝง (ดู normalizeEmail)
-  const found = staffList.find(s => normalizeEmail(s.email) === targetEmail);
-  if (found) {
-    return { id: found.id, email: normalizeEmail(found.email) || targetEmail };
-  }
-  return undefined;
+  const matches = staffList.filter(s => normalizeEmail(s.email) === targetEmail);
+  if (matches.length === 0) return undefined;
+
+  // seed/import อาจสร้าง staff ทั้ง doc key = UID จริง และ doc key = อีเมล (alias)
+  // ต้องเลือก UID จริงเสมอ — teacherId ใน schedule ต้องเป็น Firebase Auth UID (ดู CLAUDE.md)
+  const found = matches.find(s => !String(s.id).includes('@')) || matches[0];
+  return { id: found.id, email: normalizeEmail(found.email) || targetEmail };
 }
 
 /**
@@ -392,15 +419,25 @@ export function parseTeacherLoadReport(
 
     // TASK 6: Detect activity
     const subjectType = detectSubjectType(subjectNameVal, subjectCodeVal);
+    const hasName = !!subjectNameVal && subjectNameVal !== '-';
+
+    // แถวกิจกรรมในรายงานจริงมักมี "รหัสวิชา" = "-" หรือว่าง แต่มีชื่อรายวิชา + วัน-คาบครบ
+    // → สร้างรหัสสำรองจากชื่อ (deterministic) แทนที่จะทิ้งทั้งแถว
+    const codeMissing = !subjectCodeVal || subjectCodeVal === '-';
+    const subjectCode = (codeMissing && hasName)
+      ? deriveSubjectCode(subjectNameVal, subjectType)
+      : subjectCodeVal;
 
     const errors: string[] = [...slotErrors];
     const warnings: string[] = [];
 
-    if (!subjectCodeVal || subjectCodeVal === '-') {
-      errors.push('ขาดรหัสวิชา');
+    if (!subjectCode || subjectCode === '-') {
+      errors.push('ขาดทั้งรหัสวิชาและชื่อรายวิชา');
+    } else if (codeMissing) {
+      warnings.push(`ℹ️ ไม่มีรหัสวิชาในไฟล์ — ใช้รหัสสำรอง "${subjectCode}" จากชื่อรายวิชา`);
     }
 
-    if (!subjectNameVal || subjectNameVal === '-') {
+    if (!hasName) {
       errors.push('ขาดชื่อรายวิชา');
     }
 
@@ -462,7 +499,7 @@ export function parseTeacherLoadReport(
       teacherEmail: teacherEmail || undefined,
       homeroom: currentHomeroom,
       courseSeq: courseSeqVal,
-      subjectCode: subjectCodeVal,
+      subjectCode,
       subjectName: subjectNameVal,
       periodAndRoomRaw: periodAndRoomVal,
       scheduleRaw: scheduleVal,
