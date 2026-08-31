@@ -17,6 +17,19 @@ service cloud.firestore {
       return isSignedIn() && (request.auth.uid == userId || request.auth.token.email == userId);
     }
 
+    // ครูที่ปรึกษา (HOMEROOM_TEACHER) ของห้องที่ระบุ — เทียบ staff/{uid}.assignments.homeroomClass
+    // (staff อ่านได้โดย signed-in ทุกคนอยู่แล้ว จึง get() ได้; ใช้ .get(k, default) กัน field ไม่มี)
+    function isHomeroomTeacherOf(roomValue) {
+      return hasRole('HOMEROOM_TEACHER')
+        && exists(/databases/$(database)/documents/staff/$(request.auth.uid))
+        && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('assignments', {}).get('homeroomClass', '') == roomValue;
+    }
+
+    // ค่าจาก students/{studentId} จริง — ใช้ตอน create เพื่อกันนักเรียน denormalize ผิด
+    function studentField(sid, key, fallback) {
+      return get(/databases/$(database)/documents/students/$(sid)).data.get(key, fallback);
+    }
+
     // 1. Students Collection
     // อ่านทะเบียนนักเรียนได้: บุคลากรที่ต้องใช้รายชื่อทั้งโรงเรียน (ครู/ผู้บริหาร/แนะแนว/พยาบาล/การเงิน/ศึกษานิเทศก์)
     // + ผู้ปกครองอ่านได้เฉพาะบุตรหลานตัวเอง (ต้อง query where('parentUid','==', uid) เพื่อให้ list ผ่าน)
@@ -304,6 +317,63 @@ service cloud.firestore {
     // SUPER_ADMIN เท่านั้นที่อ่าน/เขียนได้ (แม้แต่ผู้ปกครองเจ้าของข้อมูลก็ไม่ควรอ่านได้จาก client)
     match /parent_verification_records/{recordId} {
       allow read, write: if hasRole('SUPER_ADMIN');
+    }
+
+    // 24. Student Portfolio Entries — นักเรียนบันทึกผลงานเอง (รางวัล/อบรม/ฝึกงาน/จิตอาสา)
+    //     ต้องผ่านการอนุมัติจากครูที่ปรึกษาก่อนแสดงให้ผู้ปกครอง/แดชบอร์ดวิชาการ
+    match /student_portfolio_entries/{entryId} {
+      // นักเรียนเห็นของตัวเองทุกสถานะ; ครูที่ปรึกษาห้องนั้นเห็นทั้งหมด;
+      // ผู้ปกครองเห็นเฉพาะ APPROVED ของบุตรหลาน (query where('parentUid','==',uid) + where('status','==','APPROVED'))
+      allow read: if hasRole('SUPER_ADMIN')
+                     || (isSignedIn() && resource.data.studentUid == request.auth.uid)
+                     || isHomeroomTeacherOf(resource.data.homeroomClass)
+                     || (resource.data.status == 'APPROVED' && isSignedIn() && resource.data.parentUid == request.auth.uid);
+
+      // นักเรียนสร้างได้เฉพาะของตัวเอง + status เริ่มต้น PENDING เท่านั้น + ยังไม่มีผลรีวิว
+      // homeroomClass / parentUid ต้องตรงกับ students/{studentId} จริง (กัน denormalize มั่ว)
+      allow create: if isSignedIn()
+                       && request.resource.data.studentUid == request.auth.uid
+                       && request.resource.data.status == 'PENDING'
+                       && request.resource.data.reviewedBy == null
+                       && request.resource.data.reviewedAt == null
+                       && request.resource.data.rejectReason == null
+                       && request.resource.data.homeroomClass == studentField(request.resource.data.studentId, 'room', '__none__')
+                       && request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__');
+
+      // ครูที่ปรึกษา/SUPER_ADMIN แก้ได้เฉพาะฟิลด์รีวิว — ห้ามแก้เนื้อหาที่นักเรียนกรอก
+      allow update: if (hasRole('SUPER_ADMIN') || isHomeroomTeacherOf(resource.data.homeroomClass))
+                       && request.resource.data.studentUid == resource.data.studentUid
+                       && request.resource.data.studentId == resource.data.studentId
+                       && request.resource.data.homeroomClass == resource.data.homeroomClass
+                       && request.resource.data.parentUid == resource.data.parentUid
+                       && request.resource.data.type == resource.data.type
+                       && request.resource.data.title == resource.data.title
+                       && request.resource.data.description == resource.data.description
+                       && request.resource.data.entryDate == resource.data.entryDate
+                       && request.resource.data.status in ['APPROVED', 'REJECTED'];
+
+      allow delete: if false;
+    }
+
+    // 25. Student Home Locations — พิกัด GPS + ภาพบ้านนักเรียน (วางแผนออกเยี่ยมบ้าน)
+    //     อ่อนไหวเรื่องความปลอดภัยที่อยู่อาศัย: เจ้าของ + ครูที่ปรึกษาห้องนั้น + SUPER_ADMIN เท่านั้น
+    //     **ผู้ปกครองและครูวิชาอื่นเข้าถึงไม่ได้**
+    match /student_home_locations/{studentId} {
+      allow read: if hasRole('SUPER_ADMIN')
+                     || (isSignedIn() && resource.data.studentUid == request.auth.uid)
+                     || isHomeroomTeacherOf(resource.data.homeroomClass);
+
+      // นักเรียนเขียนของตัวเองเท่านั้น; homeroomClass ต้องตรงกับ students/{studentId} จริง
+      allow create, update: if isSignedIn()
+                       && request.resource.data.studentUid == request.auth.uid
+                       && request.resource.data.studentId == studentId
+                       && request.resource.data.homeroomClass == studentField(studentId, 'room', '__none__')
+                       && request.resource.data.studentUid == studentField(studentId, 'studentUid', '__none__')
+                       && request.resource.data.latitude is number
+                       && request.resource.data.longitude is number
+                       && request.resource.data.photoUrls.size() >= 1;
+
+      allow delete: if false;
     }
 
     // Default Deny All Catch-All for unknown paths

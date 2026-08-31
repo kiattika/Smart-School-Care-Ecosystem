@@ -664,6 +664,51 @@ export interface VolunteerHourRecord {
   description?: string;
 }
 
+/**
+ * แฟ้มสะสมผลงานที่นักเรียนบันทึกเองเข้ามา (Firestore: student_portfolio_entries)
+ * ต้องผ่านการอนุมัติจากครูที่ปรึกษาก่อนจึงจะแสดงให้ผู้ปกครอง/แดชบอร์ดวิชาการเห็น
+ */
+export type StudentPortfolioEntryType = 'AWARD' | 'TRAINING' | 'INTERNSHIP' | 'VOLUNTEER';
+export type PortfolioReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface StudentPortfolioEntry {
+  id: string;
+  studentId: string;             // studentId 5 หลัก (= doc id ของ students)
+  studentUid: string;            // Firebase Auth UID ของนักเรียน
+  homeroomClass: string;         // ห้องของนักเรียน (denormalize ตอนสร้าง — ใช้เช็คสิทธิ์ครูที่ปรึกษา)
+  parentUid: string | null;      // parentUid ของนักเรียน (denormalize — ให้ผู้ปกครอง query ได้)
+  type: StudentPortfolioEntryType;
+  title: string;
+  description: string;
+  entryDate: string;             // วันที่เกิดกิจกรรมจริง (YYYY-MM-DD)
+  submittedAt: string;           // ISO string
+  attachmentUrl: string | null;  // ไฟล์แนบ (ยังไม่มี infra อัปโหลด — เว้น null ได้)
+  status: PortfolioReviewStatus;
+  reviewedBy: string | null;     // UID ครูที่อนุมัติ/ปฏิเสธ
+  reviewedByName: string | null;
+  reviewedAt: string | null;     // ISO string
+  rejectReason: string | null;
+}
+
+/**
+ * พิกัด GPS + ภาพถ่ายบ้านนักเรียน สำหรับครูที่ปรึกษาวางแผนออกเยี่ยมบ้าน
+ * (Firestore: student_home_locations/{studentId}) — ข้อมูลอ่อนไหว: ห้ามผู้ปกครอง/ครูวิชาอื่นเข้าถึง
+ * พิกัดต้องมาจาก navigator.geolocation เท่านั้น ห้ามให้กรอกเอง
+ */
+export interface StudentHomeLocation {
+  id: string;                    // = studentId
+  studentId: string;
+  studentUid: string;
+  homeroomClass: string;         // denormalize — ใช้เช็คสิทธิ์ครูที่ปรึกษา
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;       // ความแม่นยำ (เมตร) จาก geolocation
+  capturedAt: string;            // ISO string — เวลาที่อ่านพิกัดจริง
+  photoUrls: string[];           // อย่างน้อย 1 รูป (Firebase Storage download URL)
+  landmarkNotes: string | null;
+  updatedAt: string;
+}
+
 export interface TCASPortfolioConfig {
   studentId: string;
   targetFaculty: string;
