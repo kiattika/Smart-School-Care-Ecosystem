@@ -8,6 +8,7 @@ const EMULATOR_TEST_USERS = [
   { email: 'teacher.test@utd.ac.th', label: 'ครูผู้สอน', roleTag: 'SUBJECT_TEACHER', desc: 'ครูสมปอง สอนดี' },
   { email: 'advisor.test@utd.ac.th', label: 'ครูประจำชั้น ม.5/8', roleTag: 'HOMEROOM_TEACHER', desc: 'ครูเกียรติศักดิ์ สถิตการุณย์' },
   { email: 'exec.test@utd.ac.th', label: 'ผู้บริหารโรงเรียน', roleTag: 'EXECUTIVE', desc: 'ดร.สมเกียรติ บริหารวิชาการ' },
+  { email: 'deputy.test@utd.ac.th', label: 'รองผู้อำนวยการฝ่ายวิชาการ', roleTag: 'DEPUTY_DIRECTOR_ACADEMIC', desc: 'ดร.สุนทร (อนุมัติเช็คชื่อย้อนหลัง)' },
   { email: 'admin.test@utd.ac.th', label: 'ผู้ดูแลระบบ (Admin)', roleTag: 'SUPER_ADMIN', desc: 'แอดมินศูนย์ไอที' },
   { email: 'guidance.test@utd.ac.th', label: 'ครูแนะแนว / จิตวิทยา', roleTag: 'GUIDANCE_COUNSELOR', desc: 'ดร.สุดา (สิทธิ์เข้าถึง PHQ-9)' },
   { email: 'finance.test@utd.ac.th', label: 'ฝ่ายการเงิน', roleTag: 'FINANCE_STAFF', desc: 'นางศิริพร การเงินพัสดุ' },

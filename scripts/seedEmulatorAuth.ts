@@ -154,6 +154,19 @@ export const SEEDED_TEST_USERS: TestUserDef[] = [
     roles: ['INSTRUCTIONAL_SUPERVISOR']
   },
   {
+    // ผู้อนุมัติคำขอเช็คชื่อย้อนหลัง (late_attendance_requests) — ยืนยันจากทางโรงเรียน
+    uid: 'test_deputy_academic_001',
+    email: 'deputy.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'ดร.สุนทร รองผู้อำนวยการฝ่ายวิชาการ',
+    prefix: 'ดร.',
+    firstName: 'สุนทร',
+    lastName: 'วิชาการดี',
+    position: 'รองผู้อำนวยการกลุ่มบริหารวิชาการ',
+    roles: ['DEPUTY_DIRECTOR_ACADEMIC'],
+    assignments: { departmentId: 'academic-affairs' }
+  },
+  {
     uid: 'test_parent_001',
     email: 'parent.test@gmail.com',
     password: 'test1234',
