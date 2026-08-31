@@ -1,7 +1,7 @@
 import { cn } from "./lib/utils";
-import { MOCK_VISIT_STUDENTS } from "./data/mockData";
 import React, { useState } from 'react';
 import { useStore } from './store';
+import { useRealStudents } from './hooks/useRealStudents';
 import { GoogleMapsHomeVisit } from './components/GoogleMapsHomeVisit';
 import { 
   MapPin, 
@@ -24,7 +24,9 @@ import clsx from 'clsx';
 // Mock Students for Home Visit
 
 export function HomeVisitPortal() {
-  const { homeVisits, submitHomeVisit, user, students } = useStore();
+  const { homeVisits, submitHomeVisit, user } = useStore();
+  // รายชื่อนักเรียนจาก Firestore สด — ไม่มี mock fallback (ผิดกฎ CLAUDE.md)
+  const { students, loading: studentsLoading } = useRealStudents();
   const [activeTab, setActiveTab] = useState<'pending' | 'visited'>('pending');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
@@ -37,21 +39,21 @@ export function HomeVisitPortal() {
   const [needScholarship, setNeedScholarship] = useState(false);
   const [photos, setPhotos] = useState<string[]>([]);
 
-  // Merge store students or fallback list with actual visit statuses from homeVisits
-  const baseStudents = students && students.length > 0 ? students.map(s => {
+  // รายชื่อนักเรียนจริง + สถานะเยี่ยมบ้านจาก homeVisits (ไม่มี mock fallback)
+  const baseStudents = (students || []).map(s => {
     const isVisited = homeVisits.some(v => v.studentId === s.studentId);
     return {
       id: s.id,
       studentId: s.studentId,
       name: s.name,
-      class: s.room || 'ม.5/8',
-      address: 'ต.ท่าเสา อ.เมือง จ.อุตรดิตถ์',
-      phone: '081-234-5678',
+      class: s.room || '',
+      address: s.homeLocation?.address || '',
+      phone: (s as any).parentMobile || '',
       status: isVisited ? 'visited' as const : 'pending' as const,
-      avatar: s.avatar || `https://api.dicebear.com/9.x/avataaars/svg?seed=${s.studentId}`,
+      avatar: s.avatar || `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(s.studentId)}`,
       riskLevel: 'low'
     };
-  }) : MOCK_VISIT_STUDENTS;
+  });
 
   const filteredStudents = baseStudents.filter(s => {
     const matchesTab = s.status === activeTab;
@@ -388,7 +390,11 @@ export function HomeVisitPortal() {
           ))}
           {filteredStudents.length === 0 && (
             <div className="text-center py-10 text-slate-500 text-sm">
-              ไม่พบรายชื่อนักเรียน
+              {studentsLoading
+                ? 'กำลังโหลดรายชื่อนักเรียนจากฐานข้อมูล...'
+                : activeTab === 'pending'
+                  ? 'ไม่มีนักเรียนที่รอเยี่ยมบ้าน'
+                  : 'ยังไม่มีบันทึกการเยี่ยมบ้าน'}
             </div>
           )}
         </div>
