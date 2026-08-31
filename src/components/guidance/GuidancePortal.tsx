@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../../store';
+import { useRealStudents } from '../../hooks/useRealStudents';
 import { 
   HeartHandshake, 
   Users, 
@@ -15,7 +16,8 @@ import {
 } from 'lucide-react';
 
 export function GuidancePortal() {
-  const { students, sdqAssessments } = useStore();
+  const { sdqAssessments } = useStore();
+  const { students } = useRealStudents(); // นักเรียนจาก Firestore สด
   const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'tcas'>('cases');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -52,10 +54,11 @@ export function GuidancePortal() {
 
   const handleAddCase = (e: React.FormEvent) => {
     e.preventDefault();
-    const st = students.find(s => s.studentId === newStudentId);
+    const effectiveStudentId = newStudentId || students[0]?.studentId || '';
+    const st = students.find(s => s.studentId === effectiveStudentId);
     const newC = {
       id: `CS-00${cases.length + 1}`,
-      studentId: newStudentId,
+      studentId: effectiveStudentId,
       studentName: st?.fullName || 'ไม่ระบุชื่อ',
       classRoom: st?.room || 'ม.5/8',
       issueType: newIssue,
@@ -254,10 +257,11 @@ export function GuidancePortal() {
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">เลือกนักเรียน</label>
                 <select
-                  value={newStudentId}
+                  value={newStudentId || students[0]?.studentId || ''}
                   onChange={(e) => setNewStudentId(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
                 >
+                  {students.length === 0 && <option value="">— ยังไม่มีข้อมูลนักเรียน —</option>}
                   {students.map(s => (
                     <option key={s.studentId} value={s.studentId}>{s.fullName} ({s.studentId})</option>
                   ))}

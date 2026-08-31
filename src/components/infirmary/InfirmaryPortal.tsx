@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useStore } from '../../store';
+import { useRealStudents } from '../../hooks/useRealStudents';
 import { 
   HeartPulse, 
   Activity, 
@@ -19,7 +19,7 @@ import {
 import { InfirmaryVisit, SemesterHealthRecord } from '../../types';
 
 export function InfirmaryPortal() {
-  const { students } = useStore();
+  const { students } = useRealStudents(); // นักเรียนจาก Firestore สด
   const [infirmaryVisits, setInfirmaryVisits] = useState<InfirmaryVisit[]>([
     {
       id: 'INF-01',

@@ -7,6 +7,7 @@ import {
   assertSucceeds,
   assertFails,
 } from '@firebase/rules-unit-testing';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 
 let testEnv: RulesTestEnvironment;
 
@@ -97,6 +98,34 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertFails(
         asRole('SUBJECT_TEACHER').firestore().doc('students/std-bad-write').set({ name: 'Illegal Write' })
       );
+    });
+
+    // TASK 1: staff roles ที่ต้องใช้ทะเบียนนักเรียนทั้งโรงเรียน (แนะแนว/พยาบาล/การเงิน/ศึกษานิเทศก์)
+    it('allows GUIDANCE_COUNSELOR / INFIRMARY_STAFF / FINANCE_STAFF / INSTRUCTIONAL_SUPERVISOR to LIST students', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/s1').set({ name: 'A', parentUid: 'p1' });
+        await ctx.firestore().doc('students/s2').set({ name: 'B' }); // ไม่มี parentUid — ทดสอบว่า list ไม่ crash
+      });
+      for (const role of ['GUIDANCE_COUNSELOR', 'INFIRMARY_STAFF', 'FINANCE_STAFF', 'INSTRUCTIONAL_SUPERVISOR']) {
+        await assertSucceeds(getDocs(collection(asRole(role).firestore(), 'students')));
+      }
+    });
+
+    it('REGRESSION: a parent can LIST only their own children (query filtered by parentUid); unfiltered list denied', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/s1').set({ name: 'Child A', parentUid: 'parent-alice' });
+        await ctx.firestore().doc('students/s2').set({ name: 'Other', parentUid: 'parent-bob' });
+      });
+      const parentDb = asUser('parent-alice', ['PARENT']).firestore();
+      await assertSucceeds(getDocs(query(collection(parentDb, 'students'), where('parentUid', '==', 'parent-alice'))));
+      await assertFails(getDocs(collection(parentDb, 'students')));
+    });
+
+    it('REGRESSION: a plain signed-in user with no relevant role cannot list students', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/s1').set({ name: 'A', parentUid: 'p1' });
+      });
+      await assertFails(getDocs(collection(asRole('SOME_OTHER_ROLE').firestore(), 'students')));
     });
   });
 

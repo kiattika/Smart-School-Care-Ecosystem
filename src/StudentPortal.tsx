@@ -38,15 +38,17 @@ import { StudentSelfAssessmentForm } from './components/StudentSelfAssessmentFor
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 
 export function StudentPortal() {
-  const { 
-    students, 
-    analytics, 
-    attendanceRecords, 
-    schoolCheckInRecords, 
-    markSchoolCheckIn, 
+  const {
+    students,
+    analytics,
+    attendanceRecords,
+    schoolCheckInRecords,
+    markSchoolCheckIn,
     selfAssessments,
     saveSelfAssessment
   } = useStore();
+  // TODO(follow-up): StudentPortal ควรอ่าน record ของตัวเองจาก Firestore (ต้องเพิ่ม
+  // student self-read ใน firestore.rules ก่อน — L22 ยังไม่มี clause สำหรับ STUDENT)
   
   // 7 Module Tabs + Assessment + Overview
   const [activeTab, setActiveTab] = useState<
@@ -116,21 +118,23 @@ export function StudentPortal() {
           </div>
         </div>
 
-        {/* Student Selector Switcher (for testing multiple student profiles) */}
-        <div className="flex items-center gap-3 self-stretch md:self-auto bg-slate-800/60 p-2 rounded-2xl border border-slate-700/60">
-          <span className="text-xs text-slate-400 pl-2">สลับโปรไฟล์นักเรียน:</span>
-          <select
-            value={student.studentId}
-            onChange={(e) => setSelectedStudentId(e.target.value)}
-            className="bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-1.5 font-bold focus:outline-none focus:border-indigo-500"
-          >
-            {students.map(s => (
-              <option key={s.studentId} value={s.studentId}>
-                {s.name} (ม.{s.room || '5/8'})
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* DEV only: สลับโปรไฟล์นักเรียนเพื่อทดสอบหลายโปรไฟล์ (นักเรียนจริงเห็นแค่ของตัวเอง) */}
+        {import.meta.env.DEV && (
+          <div className="flex items-center gap-3 self-stretch md:self-auto bg-slate-800/60 p-2 rounded-2xl border border-slate-700/60">
+            <span className="text-xs text-slate-400 pl-2">สลับโปรไฟล์นักเรียน (DEV):</span>
+            <select
+              value={student.studentId}
+              onChange={(e) => setSelectedStudentId(e.target.value)}
+              className="bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-1.5 font-bold focus:outline-none focus:border-indigo-500"
+            >
+              {students.map(s => (
+                <option key={s.studentId} value={s.studentId}>
+                  {s.name} (ม.{s.room || '5/8'})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* 7 Core Module Navigation Bar */}

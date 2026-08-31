@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useStore } from '../../store';
 import { 
   BookOpen, 
   CheckCircle, 
@@ -20,7 +19,6 @@ import {
 } from 'lucide-react';
 
 export function SupervisionPortal() {
-  const { students } = useStore();
   const [activeTab, setActiveTab] = useState<'schedule' | 'rubric' | 'lessonPlans' | 'mentoring'>('schedule');
   const [searchTerm, setSearchTerm] = useState('');
 

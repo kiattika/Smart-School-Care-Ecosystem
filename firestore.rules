@@ -18,11 +18,17 @@ service cloud.firestore {
     }
 
     // 1. Students Collection
+    // อ่านทะเบียนนักเรียนได้: บุคลากรที่ต้องใช้รายชื่อทั้งโรงเรียน (ครู/ผู้บริหาร/แนะแนว/พยาบาล/การเงิน/ศึกษานิเทศก์)
+    // + ผู้ปกครองอ่านได้เฉพาะบุตรหลานตัวเอง (ต้อง query where('parentUid','==', uid) เพื่อให้ list ผ่าน)
     match /students/{studentId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('EXECUTIVE') || 
-                     hasRole('SUBJECT_TEACHER') || 
-                     hasRole('HOMEROOM_TEACHER') || 
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('EXECUTIVE') ||
+                     hasRole('SUBJECT_TEACHER') ||
+                     hasRole('HOMEROOM_TEACHER') ||
+                     hasRole('GUIDANCE_COUNSELOR') ||
+                     hasRole('INFIRMARY_STAFF') ||
+                     hasRole('FINANCE_STAFF') ||
+                     hasRole('INSTRUCTIONAL_SUPERVISOR') ||
                      (isSignedIn() && resource.data.parentUid == request.auth.uid);
       allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
     }

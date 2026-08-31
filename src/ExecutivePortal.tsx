@@ -42,6 +42,7 @@ import {
 import { ExecutiveLearnerAnalytics } from './components/ExecutiveLearnerAnalytics';
 import { ExecutiveEngagementDashboard } from './components/ExecutiveEngagementDashboard';
 import { useStore } from './store';
+import { useRealStudents } from './hooks/useRealStudents';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   BarChart, Bar,
@@ -82,11 +83,12 @@ export function ExecutivePortal() {
     schoolDuties, 
     administrativeTasks, 
     postTeachingRecords,
-    students, 
     selfAssessments,
     activeLearningPoints,
     activeLearningLogs
   } = useStore();
+  // นักเรียนจาก Firestore สด — store แบบ session-local ทำให้ผู้บริหารเห็น 0 คนเมื่อไม่ได้ import เอง
+  const { students } = useRealStudents();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'policy' | 'reports' | 'import' | 'approvals' | 'analytics'>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);

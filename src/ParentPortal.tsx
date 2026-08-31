@@ -1,6 +1,7 @@
 import { cn } from "./lib/utils";
 import React, { useState } from 'react';
 import { useStore } from './store';
+import { useRealStudents } from './hooks/useRealStudents';
 import { 
   Calendar, 
   CheckCircle2, 
@@ -32,33 +33,22 @@ import { ParentEngagementServices } from './components/student-parent/ParentEnga
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 
 export function ParentPortal() {
-  const { 
+  const {
     user,
-    students, 
-    analytics, 
-    attendanceRecords, 
+    analytics,
+    attendanceRecords,
     gateAttendanceLogs,
     billingInvoices,
     parentTeacherMessages,
     selfAssessments
   } = useStore();
-  
-  // Filter students linked to this parent (if logged in as parent)
-  const linkedStudents = React.useMemo(() => {
-    if (user?.uid) {
-      const matched = students.filter(s => (s as any).parentUid === user.uid || (s as any).parentId === user.uid);
-      if (matched.length > 0) return matched;
-    }
-    return students;
-  }, [user, students]);
+  // นักเรียนของผู้ปกครองคนนี้จาก Firestore สด — query filter ด้วย parentUid (ผ่าน firestore.rules)
+  const { students: linkedStudents } = useRealStudents({ parentUid: user?.uid });
 
-  // Selected student state
-  const [selectedStudentId, setSelectedStudentId] = useState<string>(() => {
-    const defaultStudent = linkedStudents.find(s => s.studentId === '38501' || s.studentId === '38502') || linkedStudents[0] || students[0];
-    return defaultStudent ? defaultStudent.studentId : '38501';
-  });
+  // Selected student state (ผู้ปกครองมีบุตรหลานได้หลายคน — เริ่มที่คนแรก)
+  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
 
-  const student = linkedStudents.find(s => s.studentId === selectedStudentId) || linkedStudents[0] || students[0];
+  const student = linkedStudents.find(s => s.studentId === selectedStudentId) || linkedStudents[0];
   const studentAnalytics = student ? analytics.find(a => a.studentId === student.studentId) : null;
   const bScore = studentAnalytics?.behaviorScore ?? 98;
   const myAssessment = selfAssessments[student?.studentId || '38502'];
@@ -69,7 +59,16 @@ export function ParentPortal() {
 
   const [viewDetailModal, setViewDetailModal] = useState(false);
 
-  if (!student) return null;
+  if (!student) {
+    return (
+      <div className="w-full max-w-2xl mx-auto p-8 text-center text-slate-300 min-h-[60vh] flex flex-col items-center justify-center gap-3">
+        <div className="text-lg font-bold">ยังไม่มีข้อมูลนักเรียนที่เชื่อมกับบัญชีของท่าน</div>
+        <p className="text-sm text-slate-400">
+          กรุณายืนยันตัวตนผู้ปกครอง (Student ID + เลขบัตรประชาชน) หรือติดต่อครูที่ปรึกษาเพื่อเชื่อมบัญชี
+        </p>
+      </div>
+    );
+  }
 
   // Unpaid invoices count
   const pendingInvoices = billingInvoices.filter(i => i.studentId === student.studentId && i.status === 'UNPAID');

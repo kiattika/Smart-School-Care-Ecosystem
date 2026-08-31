@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, Query, CollectionReference } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Student } from '../types';
 
@@ -80,15 +80,29 @@ function mapDocToStudent(id: string, data: any): Student {
   } as Student;
 }
 
-export function useRealStudents() {
+export interface UseRealStudentsOptions {
+  /**
+   * จำกัดเฉพาะนักเรียนที่ผูกกับ parentUid นี้ (สำหรับ ParentPortal)
+   * — ต้อง filter ฝั่ง query เพื่อให้ผ่าน firestore.rules (rule เช็ค resource.data.parentUid == auth.uid)
+   *   การ list ทั้ง collection แบบไม่ filter จะถูกปฏิเสธสำหรับ role ที่ไม่มีสิทธิ์อ่านทั้งหมด
+   */
+  parentUid?: string | null;
+}
+
+export function useRealStudents(options: UseRealStudentsOptions = {}) {
+  const { parentUid } = options;
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
+    const col = collection(db, 'students') as CollectionReference;
+    const ref: Query = parentUid
+      ? query(col, where('parentUid', '==', parentUid))
+      : col;
     const unsubscribe = onSnapshot(
-      collection(db, 'students'),
+      ref,
       (snapshot) => {
         const list = snapshot.docs.map(docSnap => mapDocToStudent(docSnap.id, docSnap.data()));
         list.sort((a, b) => {
@@ -112,7 +126,7 @@ export function useRealStudents() {
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [parentUid]);
 
   return { students, loading, error };
 }
