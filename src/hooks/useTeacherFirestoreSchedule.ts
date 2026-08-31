@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { normalizeEmail } from '../utils/teacherLoadReportParser';
 
 export interface AdminPeriodConfig {
   id: string;
@@ -40,21 +41,16 @@ const DEFAULT_ADMIN_PERIODS: AdminPeriodConfig[] = [
   { id: 'p8', periodNumber: 8, periodName: 'คาบเรียนวิชาการที่ 7', startTime: '14:20', endTime: '15:10', periodType: 'MAIN' }
 ];
 
+/**
+ * เทียบอีเมลครูสองค่าว่าเป็นคนเดียวกันไหม
+ * ใช้ normalizeEmail() ลบ zero-width/invisible characters ที่ Excel export แฝงมา
+ * (สาเหตุเดียวกับที่เคยต้อง hardcode kiattisakEmails list — แก้ที่ต้นเหตุแล้ว ไม่ special-case รายบุคคล)
+ */
 export const isTeacherEmailMatch = (email1?: string, email2?: string): boolean => {
   if (!email1 || !email2) return false;
-  const e1 = email1.toLowerCase();
-  const e2 = email2.toLowerCase();
-  if (e1 === e2) return true;
-  const kiattisakEmails = [
-    'kiattisak@utd.ac.th', 
-    'kiattika@utd.ac.th', 
-    'kiattika@gmail.com', 
-    'teacher@utd.ac.th',
-    'teacher.test@utd.ac.th',
-    'advisor.test@utd.ac.th'
-  ];
-  if (kiattisakEmails.includes(e1) && kiattisakEmails.includes(e2)) return true;
-  return false;
+  const e1 = normalizeEmail(email1);
+  const e2 = normalizeEmail(email2);
+  return !!e1 && e1 === e2;
 };
 
 // Helper to remove any undefined properties from an object before saving to Firestore
