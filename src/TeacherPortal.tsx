@@ -140,18 +140,20 @@ export function TeacherPortal() {
   }, [myLateRequests]);
 
   // ── บันทึกการเช็คชื่อจริงของวันนี้ (attendance_records) — ใช้คำนวณ attendanceTaken แทน session-local store ──
-  const [todayAttendanceDocs, setTodayAttendanceDocs] = useState<Array<{ periodNumber: number; room: string }>>([]);
+  const [todayAttendanceDocs, setTodayAttendanceDocs] = useState<Array<{ id: string; periodNumber: number | null; room: string }>>([]);
   useEffect(() => {
     if (!isTeacherRole) { setTodayAttendanceDocs([]); return; }
     const dateStr = format(currentDate, 'yyyy-MM-dd');
     const qy = query(collection(db, 'attendance_records'), where('date', '==', dateStr));
     const unsub = onSnapshot(qy, (snap) => {
-      const rows: Array<{ periodNumber: number; room: string }> = [];
+      const rows: Array<{ id: string; periodNumber: number | null; room: string }> = [];
       snap.forEach(d => {
         const data = d.data() as any;
-        if (data.periodNumber !== undefined && data.periodNumber !== null) {
-          rows.push({ periodNumber: Number(data.periodNumber), room: String(data.room || '') });
-        }
+        // เก็บ "ทุก" record ของวันนี้ — รวมคาบที่ไม่มี field periodNumber ด้วย
+        // (โฮมรูมเขียนผ่าน useHomeroomAttendance เป็น id `${date}_${room}` ไม่มี periodNumber
+        //  ถ้า drop ทิ้งตรงนี้ คาบโฮมรูมที่เช็คแล้วจะกลับไปขึ้นปุ่ม "ขอเช็คชื่อย้อนหลัง")
+        const pn = (data.periodNumber !== undefined && data.periodNumber !== null) ? Number(data.periodNumber) : null;
+        rows.push({ id: d.id, periodNumber: pn, room: String(data.room || '') });
       });
       setTodayAttendanceDocs(rows);
     }, (err) => console.warn('[TeacherPortal] today attendance listener:', err.message));
@@ -901,11 +903,26 @@ export function TeacherPortal() {
                     );
 
                   const courseId = matchedCourse ? matchedCourse.id : item.id;
-                  // เช็คชื่อจริงไปแล้วหรือยัง — อ่านจาก attendance_records ของวันนั้นจริง (Firestore),
-                  // ไม่พึ่ง session-local store อีก (เดิมทำให้คาบที่เช็คแล้วขึ้น "ยังไม่บันทึก" หลัง refresh)
+                  // เช็คชื่อจริงไปแล้วหรือยัง — จับคู่กับ attendance_records ของวันนั้นจริง (Firestore)
+                  // วิธีหลัก: เทียบ "doc id" แบบเป๊ะ ๆ ตามสูตรที่ตัวเขียนใช้จริง
+                  //   TakeAttendanceModal/ClassroomSeatingManager: `${date}_${room-แทน / ด้วย -}_p${period}`
+                  //   useHomeroomAttendance (คาบ 0): `${date}_${room-แทน / ด้วย -}` (ไม่มี _p0)
+                  // เดิมเทียบด้วย a.periodNumber === Number(item.periodNumber) อย่างเดียว → พังเมื่อ
+                  //   periodNumber ถูกเก็บเป็น string, เป็น undefined (โฮมรูม), หรือฟอร์แมตห้องไม่ตรง
+                  //   ทำให้คาบที่ "เช็คชื่อจริงแล้ว" กลับไปโชว์ปุ่ม "ขอเช็คชื่อย้อนหลัง" (regression)
+                  const attRoomCandidates = [item.classLevel, item.targetClass, item.room]
+                    .filter(Boolean).map(v => String(v));
+                  const expectedRecordIds = new Set<string>();
+                  attRoomCandidates.forEach(r => {
+                    const rr = r.replace('/', '-');
+                    expectedRecordIds.add(`${todayStr}_${rr}_p${item.periodNumber}`);
+                    if (Number(item.periodNumber) === 0) expectedRecordIds.add(`${todayStr}_${rr}`);
+                  });
                   const firestoreChecked = todayAttendanceDocs.some(a =>
-                    a.periodNumber === Number(item.periodNumber) &&
-                    (isSameRoom(a.room, item.classLevel) || isSameRoom(a.room, item.targetClass) || isSameRoom(a.room, item.room))
+                    expectedRecordIds.has(a.id) ||
+                    (a.periodNumber !== null &&
+                      Number(a.periodNumber) === Number(item.periodNumber) &&
+                      attRoomCandidates.some(r => isSameRoom(a.room, r)))
                   );
                   const hasRecords = firestoreChecked || !!(
                     (attendanceRecords[courseId] && Object.keys(attendanceRecords[courseId]).length > 0) ||
@@ -914,11 +931,14 @@ export function TeacherPortal() {
                   const isAttendanceTaken = firestoreChecked || (matchedCourse ? matchedCourse.attendanceTaken : false) || !!item.attendanceTaken || hasRecords;
 
                   if (import.meta.env.DEV) {
+                    // [DEBUG-ATT] ยังคงไว้ชั่วคราวเพื่อพิสูจน์ regression คาบ 7 หลัง emulator กลับมาใช้งานได้
+                    // (ต้องเช็คชื่อคาบ 7 จริงแล้วดู log ว่า expectedRecordIds ตรงกับ todayDocs id ไหม) — ลบออกเมื่อยืนยันแล้ว
                     // eslint-disable-next-line no-console
                     console.log('[DEBUG-ATT]', {
                       period: item.periodNumber, code: item.courseCode, classLevel: item.classLevel, room: item.room, targetClass: item.targetClass,
                       firestoreChecked, isAttendanceTaken,
-                      todayDocs: todayAttendanceDocs.map(a => `p${a.periodNumber}@${a.room}`),
+                      expectedRecordIds: [...expectedRecordIds],
+                      todayDocs: todayAttendanceDocs.map(a => `${a.id}(p${a.periodNumber}@${a.room})`),
                     });
                   }
 

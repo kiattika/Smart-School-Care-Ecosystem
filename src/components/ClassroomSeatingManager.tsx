@@ -169,7 +169,8 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
         const dateStr = format(currentDate || new Date(), 'yyyy-MM-dd');
         const rawRoom = course?.room || 'ม.5/8';
         const roomStr = rawRoom.replace('/', '-');
-        const periodNum = course?.periodIndex || 1;
+        // คาบ 0 (โฮมรูม) เป็นคาบจริง — ห้าม falsy check (`|| 1`) ให้ตรงกับตัวเขียน (TakeAttendanceModal)
+        const periodNum = (course?.periodIndex !== undefined && course?.periodIndex !== null) ? course.periodIndex : 1;
         const recordId = `${dateStr}_${roomStr}_p${periodNum}`;
 
         const rec = await getAttendanceRecord(recordId);
