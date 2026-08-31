@@ -87,10 +87,16 @@ export interface UseRealStudentsOptions {
    *   การ list ทั้ง collection แบบไม่ filter จะถูกปฏิเสธสำหรับ role ที่ไม่มีสิทธิ์อ่านทั้งหมด
    */
   parentUid?: string | null;
+  /**
+   * จำกัดเฉพาะ record ของนักเรียนคนนี้ (สำหรับ StudentPortal) — filter ฝั่ง query
+   * เพื่อให้ผ่าน firestore.rules (rule เช็ค resource.data.studentUid == auth.uid);
+   * list ทั้ง collection ถูกปฏิเสธสำหรับ role STUDENT
+   */
+  studentUid?: string | null;
 }
 
 export function useRealStudents(options: UseRealStudentsOptions = {}) {
-  const { parentUid } = options;
+  const { parentUid, studentUid } = options;
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +104,9 @@ export function useRealStudents(options: UseRealStudentsOptions = {}) {
   useEffect(() => {
     setLoading(true);
     const col = collection(db, 'students') as CollectionReference;
-    const ref: Query = parentUid
+    const ref: Query = studentUid
+      ? query(col, where('studentUid', '==', studentUid))
+      : parentUid
       ? query(col, where('parentUid', '==', parentUid))
       : col;
     const unsubscribe = onSnapshot(
@@ -126,7 +134,7 @@ export function useRealStudents(options: UseRealStudentsOptions = {}) {
     );
 
     return () => unsubscribe();
-  }, [parentUid]);
+  }, [parentUid, studentUid]);
 
   return { students, loading, error };
 }

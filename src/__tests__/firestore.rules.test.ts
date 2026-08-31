@@ -11,13 +11,17 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 
 let testEnv: RulesTestEnvironment;
 
+// เคารพ FIRESTORE_EMULATOR_HOST ที่ `firebase emulators:exec` ตั้งให้ (เช่นตอนรันบน
+// พอร์ตสำรองเพราะ emulator หลักติดพอร์ต 8080 อยู่) — fallback เป็น 127.0.0.1:8080 ตามเดิม
+const [EMU_HOST, EMU_PORT] = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':');
+
 beforeAll(async () => {
   testEnv = await initializeTestEnvironment({
     projectId: 'kiattisak-project-001',
     firestore: {
       rules: fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8'),
-      host: '127.0.0.1',
-      port: 8080,
+      host: EMU_HOST,
+      port: Number(EMU_PORT),
     },
   });
 });
@@ -126,6 +130,32 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
         await ctx.firestore().doc('students/s1').set({ name: 'A', parentUid: 'p1' });
       });
       await assertFails(getDocs(collection(asRole('SOME_OTHER_ROLE').firestore(), 'students')));
+    });
+
+    it('allows a STUDENT to read their own record (studentUid matching auth.uid)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-self').set({ name: 'Me', studentUid: 'stu-uid-1' });
+      });
+      const studentDb = asUser('stu-uid-1', ['STUDENT']).firestore();
+      await assertSucceeds(studentDb.doc('students/std-self').get());
+    });
+
+    it('denies a STUDENT reading another student record', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-other').set({ name: 'Someone Else', studentUid: 'stu-uid-2' });
+      });
+      const studentDb = asUser('stu-uid-1', ['STUDENT']).firestore();
+      await assertFails(studentDb.doc('students/std-other').get());
+    });
+
+    it('REGRESSION: a STUDENT can LIST only their own record (query filtered by studentUid); unfiltered list denied', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/s1').set({ name: 'Me', studentUid: 'stu-uid-1' });
+        await ctx.firestore().doc('students/s2').set({ name: 'Other', studentUid: 'stu-uid-2' });
+      });
+      const studentDb = asUser('stu-uid-1', ['STUDENT']).firestore();
+      await assertSucceeds(getDocs(query(collection(studentDb, 'students'), where('studentUid', '==', 'stu-uid-1'))));
+      await assertFails(getDocs(collection(studentDb, 'students')));
     });
   });
 
