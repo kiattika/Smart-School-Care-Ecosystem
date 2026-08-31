@@ -274,6 +274,29 @@ service cloud.firestore {
       allow write: if hasRole('SUPER_ADMIN') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER');
     }
 
+    // 23. Late Attendance Requests — ครูผู้สอนขอ "เช็คชื่อย้อนหลัง" เมื่อลืมเช็คในคาบ
+    // ผู้อนุมัติ: DEPUTY_DIRECTOR_ACADEMIC (รองผู้อำนวยการฝ่ายวิชาการ) / SUPER_ADMIN — ยืนยันจากทางโรงเรียน
+    // document ไม่ถูกลบตอนอนุมัติ/ปฏิเสธ (allow delete: if false) — เก็บประวัติ เปลี่ยนแค่ status
+    match /late_attendance_requests/{reqId} {
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
+                     hasRole('EXECUTIVE') ||
+                     (isSignedIn() && resource.data.teacherId == request.auth.uid);
+
+      // ครูสร้างคำขอของตัวเองได้เท่านั้น และต้องเริ่มที่สถานะ PENDING
+      allow create: if (hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER')) &&
+                       request.resource.data.teacherId == request.auth.uid &&
+                       request.resource.data.status == 'PENDING';
+
+      // อนุมัติ/ปฏิเสธ (แก้ status): เฉพาะรองผอ.วิชาการ / SUPER_ADMIN
+      // ห้ามแก้ teacherId / scheduleId (ตรึงไว้ให้ตรงกับของเดิม)
+      allow update: if (hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('SUPER_ADMIN')) &&
+                       request.resource.data.teacherId == resource.data.teacherId &&
+                       request.resource.data.scheduleId == resource.data.scheduleId;
+
+      allow delete: if false;
+    }
+
     // 22. Parent Verification Records (identity matching for LINE/LIFF account linking)
     // ข้อมูลอ่อนไหวตาม PDPA (hash เลขบัตร ปชช. + เบอร์โทร) — ใช้เทียบยืนยันฝั่ง backend เท่านั้น
     // SUPER_ADMIN เท่านั้นที่อ่าน/เขียนได้ (แม้แต่ผู้ปกครองเจ้าของข้อมูลก็ไม่ควรอ่านได้จาก client)

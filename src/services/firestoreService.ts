@@ -31,7 +31,8 @@ import {
   ParentAppointment,
   BillingInvoice,
   ActiveLearningRecord,
-  UserProfile
+  UserProfile,
+  LateAttendanceRequestRecord
 } from '../types';
 import { SchoolGeofenceConfig } from '../utils/geoUtils';
 
@@ -807,6 +808,81 @@ export function subscribePostTeachingRecords(onUpdate: (records: PostTeachingRec
     });
   } catch (error) {
     console.warn('[subscribePostTeachingRecords] Setup error:', error);
+    return () => {};
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Late Attendance Requests — ครูขอเช็คชื่อย้อนหลัง (Firestore: late_attendance_requests)
+ * ผู้อนุมัติ: DEPUTY_DIRECTOR_ACADEMIC / SUPER_ADMIN
+ * ไม่ลบ document ตอนอนุมัติ/ปฏิเสธ — merge เปลี่ยนแค่ status เพื่อเก็บประวัติ
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const LATE_ATTENDANCE_COL = 'late_attendance_requests';
+
+export async function submitLateAttendanceRequestFirestore(
+  req: Omit<LateAttendanceRequestRecord,
+    'id' | 'status' | 'requestedAt' | 'approverUid' | 'approverName' | 'decidedAt' | 'rejectReason'>
+): Promise<string> {
+  // random id → ทุกครั้งที่ยื่นคือ create ใหม่ (rule อนุญาตให้ครู create ของตัวเองเท่านั้น)
+  const id = `lar_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const ref = doc(db, LATE_ATTENDANCE_COL, id);
+  const payload: LateAttendanceRequestRecord = {
+    ...(stripUndefined(req as Record<string, any>) as any),
+    id,
+    status: 'PENDING',
+    requestedAt: new Date().toISOString(),
+    approverUid: null,
+    approverName: null,
+    decidedAt: null,
+    rejectReason: null,
+  };
+  try {
+    await setDoc(ref, payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${LATE_ATTENDANCE_COL}/${id}`);
+  }
+  return id;
+}
+
+export async function decideLateAttendanceRequestFirestore(
+  id: string,
+  decision: 'APPROVED' | 'REJECTED',
+  approver: { uid: string; name: string },
+  rejectReason?: string
+): Promise<void> {
+  const ref = doc(db, LATE_ATTENDANCE_COL, id);
+  try {
+    // merge — เก็บ field เดิม (teacherId/scheduleId/reason ฯลฯ) ไว้ครบ เปลี่ยนแค่สถานะ
+    await setDoc(ref, {
+      status: decision,
+      approverUid: approver.uid,
+      approverName: approver.name,
+      decidedAt: new Date().toISOString(),
+      rejectReason: decision === 'REJECTED' ? (rejectReason || 'ไม่ระบุเหตุผล') : null,
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${LATE_ATTENDANCE_COL}/${id}`);
+  }
+}
+
+/** real-time listener; ส่ง filter.teacherId เพื่อดูเฉพาะคำขอของครูคนนั้น (ผ่าน firestore.rules) */
+export function subscribeLateAttendanceRequests(
+  onUpdate: (reqs: LateAttendanceRequestRecord[]) => void,
+  filter?: { teacherId?: string }
+): () => void {
+  try {
+    const col = collection(db, LATE_ATTENDANCE_COL);
+    const ref = filter?.teacherId ? query(col, where('teacherId', '==', filter.teacherId)) : col;
+    return onSnapshot(ref, (snapshot) => {
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as LateAttendanceRequestRecord));
+      list.sort((a, b) => (b.requestedAt || '').localeCompare(a.requestedAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeLateAttendanceRequests] Listener error:', error.message);
+    });
+  } catch (error) {
+    console.warn('[subscribeLateAttendanceRequests] Setup error:', error);
     return () => {};
   }
 }

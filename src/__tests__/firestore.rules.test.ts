@@ -667,6 +667,60 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
+  // 16b. late_attendance_requests — ครูขอเช็คชื่อย้อนหลัง, อนุมัติโดย DEPUTY_DIRECTOR_ACADEMIC
+  describe('late_attendance_requests collection', () => {
+    const seedReq = (extra: Record<string, any> = {}) =>
+      testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('late_attendance_requests/lar-01').set({
+          id: 'lar-01', teacherId: 'teacher-uid-1', teacherName: 'ครู ก', scheduleId: 'sch_x',
+          subjectCode: 'ค32101', subjectName: 'คณิต', level: 'ม.5/8', periodNumber: 7, room: '943',
+          teachingDate: '2026-08-31', reason: 'ลืมเช็ค', status: 'PENDING',
+          requestedAt: '2026-08-31T14:00:00.000Z', approverUid: null, approverName: null,
+          decidedAt: null, rejectReason: null, ...extra,
+        });
+      });
+
+    it('เจ้าของคำขอ + DEPUTY_DIRECTOR_ACADEMIC + SUPER_ADMIN อ่านได้; คนอื่นอ่านไม่ได้', async () => {
+      await seedReq();
+      await assertSucceeds(asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore().doc('late_attendance_requests/lar-01').get());
+      await assertSucceeds(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('late_attendance_requests/lar-01').get());
+      await assertFails(asUser('teacher-uid-2', ['SUBJECT_TEACHER']).firestore().doc('late_attendance_requests/lar-01').get());
+      await assertFails(asAnonymous().firestore().doc('late_attendance_requests/lar-01').get());
+    });
+
+    it('ครูสร้างคำขอของตัวเอง (status=PENDING) ได้; สร้างในนามคนอื่น หรือ status อื่น ไม่ได้', async () => {
+      const teacherDb = asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore();
+      await assertSucceeds(teacherDb.doc('late_attendance_requests/lar-new').set({
+        teacherId: 'teacher-uid-1', scheduleId: 's1', status: 'PENDING', reason: 'r', periodNumber: 7,
+      }));
+      await assertFails(teacherDb.doc('late_attendance_requests/lar-bad-owner').set({
+        teacherId: 'teacher-uid-2', scheduleId: 's1', status: 'PENDING',
+      }));
+      await assertFails(teacherDb.doc('late_attendance_requests/lar-bad-status').set({
+        teacherId: 'teacher-uid-1', scheduleId: 's1', status: 'APPROVED',
+      }));
+    });
+
+    it('REGRESSION: อนุมัติ/ปฏิเสธได้เฉพาะ DEPUTY_DIRECTOR_ACADEMIC / SUPER_ADMIN — ครูเจ้าของแก้ status เองไม่ได้', async () => {
+      await seedReq();
+      await assertSucceeds(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01')
+        .set({ status: 'APPROVED', approverUid: 'dep-1' }, { merge: true }));
+      await seedReq();
+      await assertFails(asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore().doc('late_attendance_requests/lar-01')
+        .set({ status: 'APPROVED' }, { merge: true }));
+    });
+
+    it('REGRESSION: ผู้อนุมัติแก้ teacherId ของคำขอไม่ได้ (ตรึงเจ้าของ) + ลบ document ไม่ได้', async () => {
+      await seedReq();
+      await assertFails(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01')
+        .set({ status: 'APPROVED', teacherId: 'someone-else' }, { merge: true }));
+      await seedReq();
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc('late_attendance_requests/lar-01').delete());
+      await assertFails(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01').delete());
+    });
+  });
+
   // 17. parent_verification_records - SUPER_ADMIN only (PDPA-sensitive identity data)
   describe('parent_verification_records collection', () => {
     it('allows SUPER_ADMIN to read and write parent verification records', async () => {

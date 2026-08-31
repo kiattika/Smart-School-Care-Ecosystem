@@ -107,6 +107,35 @@ export interface ScheduleConfig {
   shortenMinutes: number; // 0, 5, or 10
 }
 
+export type LateAttendanceStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+/**
+ * คำขอ "เช็คชื่อย้อนหลัง" ของครูผู้สอน (เก็บใน Firestore collection `late_attendance_requests`)
+ * — คนละเรื่องกับ LateAttendanceRequest เดิม (ของนักเรียนมาสาย, session-local, ไม่ใช้แล้วในโฟลว์นี้)
+ * ผู้อนุมัติ: DEPUTY_DIRECTOR_ACADEMIC (รองผู้อำนวยการฝ่ายวิชาการ) — ยืนยันจากทางโรงเรียน
+ * document ไม่ถูกลบตอนอนุมัติ/ปฏิเสธ — เปลี่ยนแค่ status เพื่อเก็บประวัติ
+ */
+export interface LateAttendanceRequestRecord {
+  id: string;
+  teacherId: string;        // Firebase Auth UID จริง (ไม่ใช่อีเมล)
+  teacherName: string;
+  teacherEmail?: string;
+  scheduleId: string;       // อ้างอิง schedules/{id}
+  subjectCode: string;
+  subjectName: string;
+  level: string;            // ระดับชั้น เช่น "ม.5/8"
+  periodNumber: number;     // คาบที่
+  room: string;             // ห้องกายภาพ เช่น "943"
+  teachingDate: string;     // YYYY-MM-DD ของคาบที่ขอเช็คย้อนหลัง
+  reason: string;
+  status: LateAttendanceStatus;
+  requestedAt: string;      // ISO string
+  approverUid: string | null;
+  approverName: string | null;
+  decidedAt: string | null; // ISO string
+  rejectReason: string | null;
+}
+
 export interface GlobalCourse {
   courseId: string;
   code: string;
