@@ -18,6 +18,9 @@ export interface SubjectPeriod {
   type?: 'MAIN' | 'ACTIVITY';
   teachingPartner?: string;
   partnerCheckedAttendance?: boolean;
+  scheduleId?: string;          // schedules/{id} — ใช้ยื่นคำขอเช็คชื่อย้อนหลัง
+  level?: string;               // ระดับชั้น เช่น ม.5/8
+  lateRequestStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | null;  // สถานะคำขอเช็คชื่อย้อนหลังของครูคนนี้
 }
 
 interface TeacherScheduleListProps {
@@ -240,17 +243,33 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                     <div className="flex flex-wrap items-center gap-2 md:self-center">
                       {!period.attendanceTaken ? (
                         <div className="flex items-center gap-2">
-                          <span className="text-red-500 font-medium text-xs flex items-center gap-1">
-                            ● ยังไม่บันทึก
-                          </span>
-                          <button 
-                            id={`btn-retroactive-${period.id}`}
-                            onClick={() => onRequestLateAttendance(period.courseId)}
-                            className="px-4 py-2 text-xs font-bold text-amber-400 bg-[#3b2211] hover:bg-[#4a2b16] border border-amber-800/60 rounded-lg flex items-center gap-1.5 transition active:scale-95 shadow-sm"
-                          >
-                            <History className="w-3.5 h-3.5" />
-                            ขอเช็คชื่อย้อนหลัง
-                          </button>
+                          {period.lateRequestStatus === 'PENDING' ? (
+                            <span className="px-3 py-1.5 text-xs font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 animate-pulse" /> รออนุมัติเช็คชื่อย้อนหลัง
+                            </span>
+                          ) : period.lateRequestStatus === 'APPROVED' ? (
+                            <button
+                              id={`btn-retroactive-approved-${period.id}`}
+                              onClick={() => onRequestLateAttendance(period.courseId)}
+                              className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 border border-emerald-500/50 rounded-lg flex items-center gap-1.5 transition active:scale-95 shadow-md"
+                            >
+                              <CheckCircle className="w-3.5 h-3.5" /> เข้าเช็คชื่อย้อนหลัง (อนุมัติแล้ว)
+                            </button>
+                          ) : (
+                            <>
+                              <span className="text-red-500 font-medium text-xs flex items-center gap-1">
+                                ● ยังไม่บันทึก{period.lateRequestStatus === 'REJECTED' ? ' · คำขอถูกปฏิเสธ' : ''}
+                              </span>
+                              <button
+                                id={`btn-retroactive-${period.id}`}
+                                onClick={() => onRequestLateAttendance(period.courseId)}
+                                className="px-4 py-2 text-xs font-bold text-amber-400 bg-[#3b2211] hover:bg-[#4a2b16] border border-amber-800/60 rounded-lg flex items-center gap-1.5 transition active:scale-95 shadow-sm"
+                              >
+                                <History className="w-3.5 h-3.5" />
+                                {period.lateRequestStatus === 'REJECTED' ? 'ขอเช็คชื่อย้อนหลังอีกครั้ง' : 'ขอเช็คชื่อย้อนหลัง'}
+                              </button>
+                            </>
+                          )}
                         </div>
                       ) : (
                         <div className="flex flex-wrap items-center gap-2">

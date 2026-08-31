@@ -90,18 +90,6 @@ export interface LeaveRequest {
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
-export interface LateAttendanceRequest {
-  id: string;
-  teacherName: string;
-  subjectCode: string;
-  subjectName: string;
-  room: string;
-  period: string;
-  reason: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  createdAt: Date;
-}
-
 export interface ScheduleConfig {
   isActivityDay: boolean;
   shortenMinutes: number; // 0, 5, or 10
@@ -111,7 +99,7 @@ export type LateAttendanceStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 /**
  * คำขอ "เช็คชื่อย้อนหลัง" ของครูผู้สอน (เก็บใน Firestore collection `late_attendance_requests`)
- * — คนละเรื่องกับ LateAttendanceRequest เดิม (ของนักเรียนมาสาย, session-local, ไม่ใช้แล้วในโฟลว์นี้)
+ * (แทน action เดิมใน store ที่เขียนแค่ local state — คำขอหายข้าม session)
  * ผู้อนุมัติ: DEPUTY_DIRECTOR_ACADEMIC (รองผู้อำนวยการฝ่ายวิชาการ) — ยืนยันจากทางโรงเรียน
  * document ไม่ถูกลบตอนอนุมัติ/ปฏิเสธ — เปลี่ยนแค่ status เพื่อเก็บประวัติ
  */
@@ -183,6 +171,11 @@ export interface PostTeachingRecord {
   solutions: string;
   submittedAt: string;
   isLate: boolean;
+  // ตัวช่วยจับคู่ให้แม่นขึ้น เมื่อ courseId ระหว่างเซสชันไม่ตรงกัน (schedule doc id เปลี่ยนรูป ฯลฯ)
+  scheduleId?: string;
+  subjectCode?: string;
+  level?: string;
+  room?: string;
 }
 
 export interface PeriodSwap {
@@ -809,7 +802,6 @@ export interface StoreState {
   analytics: StudentAnalytics[];
   attendanceRecords: Record<string, Record<string, AttendanceStatus>>; // mapped by courseId -> studentId
   leaveRequests: LeaveRequest[];
-  lateAttendanceRequests: LateAttendanceRequest[];
   scheduleConfig: ScheduleConfig;
   schoolCheckInRecords: Record<string, { status: AttendanceStatus, time?: Date }>;
   
@@ -883,8 +875,6 @@ export interface StoreState {
   moveStudentSeat: (studentId: string, newSeatIndex: number | null) => void;
   resetClassroomSeats: (room?: string) => void;
   autoAssignClassroomSeats: (room?: string, capacity?: number) => void;
-  submitLateAttendanceRequest: (req: Omit<LateAttendanceRequest, 'id' | 'status'>) => void;
-  updateLateAttendanceRequestStatus: (id: string, status: 'APPROVED' | 'REJECTED') => void;
   setScheduleConfig: (config: ScheduleConfig) => void;
   setGlobalCourses: (courses: GlobalCourse[]) => void;
   setHomeroomAssignments: (assignments: Record<string, string>) => void;

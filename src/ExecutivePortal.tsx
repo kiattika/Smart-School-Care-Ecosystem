@@ -1,6 +1,8 @@
 import { cn } from "./lib/utils";
 import { mockExecutiveData } from "./data/mockData";
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { subscribeLateAttendanceRequests } from './services/firestoreService';
+import { LateAttendanceRequestRecord } from './types';
 import { 
   LayoutDashboard, 
   FileSpreadsheet, 
@@ -76,12 +78,10 @@ const createCustomIcon = (pin: any) => L.divIcon({
 
 
 export function ExecutivePortal() {
-  const { 
-    lateAttendanceRequests, 
-    updateLateAttendanceRequestStatus, 
-    homeVisits, 
-    schoolDuties, 
-    administrativeTasks, 
+  const {
+    homeVisits,
+    schoolDuties,
+    administrativeTasks,
     postTeachingRecords,
     selfAssessments,
     activeLearningPoints,
@@ -89,6 +89,11 @@ export function ExecutivePortal() {
   } = useStore();
   // นักเรียนจาก Firestore สด — store แบบ session-local ทำให้ผู้บริหารเห็น 0 คนเมื่อไม่ได้ import เอง
   const { students } = useRealStudents();
+
+  // คำขอเช็คชื่อย้อนหลัง — อ่านจาก Firestore สด (อนุมัติจริงทำที่หน้ารองผู้อำนวยการฝ่ายวิชาการ)
+  const [lateAttendanceRequests, setLateAttendanceRequests] = useState<LateAttendanceRequestRecord[]>([]);
+  useEffect(() => subscribeLateAttendanceRequests(setLateAttendanceRequests), []);
+
   const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'policy' | 'reports' | 'import' | 'approvals' | 'analytics'>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -1033,10 +1038,10 @@ export function ExecutivePortal() {
                               {request.status}
                             </span>
                             <span className="text-sm text-slate-400 flex items-center gap-2">
-                              <Clock className="w-4 h-4" /> {request?.createdAt ? new Date(request.createdAt).toLocaleString('th-TH') : '-'}
+                              <Clock className="w-4 h-4" /> {request?.requestedAt ? new Date(request.requestedAt).toLocaleString('th-TH') : '-'}
                             </span>
                           </div>
-                          
+
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <div className="text-xs text-slate-500 mb-1">Teacher</div>
@@ -1044,34 +1049,32 @@ export function ExecutivePortal() {
                             </div>
                             <div>
                               <div className="text-xs text-slate-500 mb-1">Class / Subject</div>
-                              <div className="font-medium text-white">{request.room} - {request.subjectCode} {request.subjectName}</div>
+                              <div className="font-medium text-white">{request.level} · {request.subjectCode} {request.subjectName}{request.room ? ` · ห้อง ${request.room}` : ''}</div>
                             </div>
                             <div className="col-span-2">
-                              <div className="text-xs text-slate-500 mb-1">Period</div>
-                              <div className="font-medium text-amber-400">{request.period}</div>
+                              <div className="text-xs text-slate-500 mb-1">Period · วันสอน</div>
+                              <div className="font-medium text-amber-400">คาบ {request.periodNumber} · {request.teachingDate}</div>
                             </div>
                           </div>
-                          
+
                           <div className="bg-white/5 p-4 rounded-xl border border-white/5">
                             <div className="text-xs text-slate-500 mb-2 font-bold uppercase tracking-wider">Reason provided</div>
                             <p className="text-sm text-slate-300 leading-relaxed">{request.reason}</p>
                           </div>
+                          {request.status !== 'PENDING' && (
+                            <p className="text-xs text-slate-400">
+                              {request.status === 'APPROVED' ? 'อนุมัติโดย' : 'ปฏิเสธโดย'} {request.approverName || '-'}
+                              {request.decidedAt ? ` · ${new Date(request.decidedAt).toLocaleString('th-TH')}` : ''}
+                              {request.status === 'REJECTED' && request.rejectReason ? ` — ${request.rejectReason}` : ''}
+                            </p>
+                          )}
                         </div>
-                        
+
                         {request.status === 'PENDING' && (
-                          <div className="flex md:flex-col gap-3 justify-center shrink-0 w-full md:w-48">
-                            <button 
-                              onClick={() => updateLateAttendanceRequestStatus(request.id, 'APPROVED')}
-                              className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-[0_0_15px_rgba(16,185,129,0.2)] transition-all flex items-center justify-center gap-2"
-                            >
-                              <Check className="w-4 h-4" /> Approve
-                            </button>
-                            <button 
-                              onClick={() => updateLateAttendanceRequestStatus(request.id, 'REJECTED')}
-                              className="flex-1 py-3 bg-white/5 hover:bg-red-500/20 text-slate-300 hover:text-red-400 border border-white/10 hover:border-red-500/30 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2"
-                            >
-                              <X className="w-4 h-4" /> Reject
-                            </button>
+                          <div className="flex md:flex-col gap-2 justify-center shrink-0 w-full md:w-52 text-center">
+                            <span className="px-3 py-2 bg-amber-500/10 border border-amber-500/25 text-amber-300 rounded-xl text-xs font-bold">
+                              รอรองผู้อำนวยการฝ่ายวิชาการอนุมัติ
+                            </span>
                           </div>
                         )}
                       </div>

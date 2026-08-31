@@ -4,12 +4,14 @@ import { usePeriodsConfig } from './hooks/usePeriodsConfig';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
-import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass } from './services/firestoreService';
+import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, decideLateAttendanceRequestFirestore, subscribeLateAttendanceRequests } from './services/firestoreService';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { db } from './lib/firebase';
 import { TeacherScheduleList, SubjectPeriod } from './components/TeacherScheduleList';
 import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { useStore } from './store';
-import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, PeriodSwap, SubstituteAssignment, Student } from './types';
+import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, PeriodSwap, SubstituteAssignment, Student, LateAttendanceRequestRecord } from './types';
 import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Edit3, Sparkles, Shuffle, Calendar, ArrowUpRight, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -45,8 +47,6 @@ export function TeacherPortal() {
     moveStudentSeat,
     setCurrentDate,
     setScheduleConfig,
-    submitLateAttendanceRequest,
-    lateAttendanceRequests,
     courses,
     activeLearningPoints,
     setCourses,
@@ -116,6 +116,53 @@ export function TeacherPortal() {
   } = useTeacherFirestoreSchedule();
 
   const todayStr = format(currentDate, 'yyyy-MM-dd');
+  const isLateApprover = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN'].includes(user?.activeRole || '');
+  const isTeacherRole = ['SUBJECT_TEACHER', 'HOMEROOM_TEACHER'].includes(user?.activeRole || '') || user?.role === 'teacher' || user?.role === 'advisor';
+
+  // ── คำขอเช็คชื่อย้อนหลัง (Firestore: late_attendance_requests) ──
+  const [myLateRequests, setMyLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
+  const [allLateRequests, setAllLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
+  const [lateSubmitting, setLateSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    return subscribeLateAttendanceRequests(setMyLateRequests, { teacherId: user.uid });
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!isLateApprover) { setAllLateRequests([]); return; }
+    return subscribeLateAttendanceRequests(setAllLateRequests);
+  }, [isLateApprover]);
+
+  // สถานะคำขอเช็คชื่อย้อนหลังของครูคนนี้ ต่อ (scheduleId + วันสอน) — ล่าสุดชนะ
+  const lateRequestByKey = useMemo(() => {
+    const m = new Map<string, LateAttendanceRequestRecord>();
+    for (const r of myLateRequests) {
+      const key = `${r.scheduleId}__${r.teachingDate}`;
+      const prev = m.get(key);
+      if (!prev || (r.requestedAt || '') > (prev.requestedAt || '')) m.set(key, r);
+    }
+    return m;
+  }, [myLateRequests]);
+
+  // ── บันทึกการเช็คชื่อจริงของวันนี้ (attendance_records) — ใช้คำนวณ attendanceTaken แทน session-local store ──
+  const [todayAttendanceDocs, setTodayAttendanceDocs] = useState<Array<{ periodNumber: number; room: string }>>([]);
+  useEffect(() => {
+    if (!isTeacherRole) { setTodayAttendanceDocs([]); return; }
+    const dateStr = format(currentDate, 'yyyy-MM-dd');
+    const qy = query(collection(db, 'attendance_records'), where('date', '==', dateStr));
+    const unsub = onSnapshot(qy, (snap) => {
+      const rows: Array<{ periodNumber: number; room: string }> = [];
+      snap.forEach(d => {
+        const data = d.data() as any;
+        if (data.periodNumber !== undefined && data.periodNumber !== null) {
+          rows.push({ periodNumber: Number(data.periodNumber), room: String(data.room || '') });
+        }
+      });
+      setTodayAttendanceDocs(rows);
+    }, (err) => console.warn('[TeacherPortal] today attendance listener:', err.message));
+    return () => unsub();
+  }, [currentDate, isTeacherRole]);
 
   // รายวิชาทั้งระบบ (ทุกครู) — derive จาก Firestore `schedules` แบบ real-time
   // แทนการอ่าน globalCourses จาก Zustand store ซึ่งจะมีค่าเฉพาะเซสชันที่เพิ่ง import เท่านั้น
@@ -229,11 +276,14 @@ export function TeacherPortal() {
 
   const [view, setView] = useState<'dashboard' | 'class' | 'active_learning'>('dashboard');
   const [activeCourse, setActiveCourse] = useState<Course | null>(null);
+  // เข้าห้องเรียนในโหมด "เช็คชื่อย้อนหลัง" (อนุมัติแล้ว) — ล็อกกิจกรรมอื่น ทำได้แค่เช็คชื่อ
+  const [retroactiveAttendanceMode, setRetroactiveAttendanceMode] = useState(false);
 
   const handleGoHome = () => {
     setView('dashboard');
     setActiveCourse(null);
     setViewingRecord(null);
+    setRetroactiveAttendanceMode(false);
   };
 
   const isHrActive = !!(activeCourse && (activeCourse.code === 'HR' || activeCourse.name?.toLowerCase().includes('homeroom')));
@@ -256,6 +306,7 @@ export function TeacherPortal() {
   // New States for Post-Teaching Records
   const [showPostTeachingModal, setShowPostTeachingModal] = useState(false);
   const [postTeachingCourse, setPostTeachingCourse] = useState<Course | null>(null);
+  const [postTeachingPeriod, setPostTeachingPeriod] = useState<SubjectPeriod | null>(null);
   const [ptDate, setPtDate] = useState('');
   const [ptSummary, setPtSummary] = useState('');
   const [ptProblems, setPtProblems] = useState('');
@@ -263,18 +314,22 @@ export function TeacherPortal() {
   const [viewingRecord, setViewingRecord] = useState<PostTeachingRecord | null>(null);
 
   // New States for Dashboard Navigation
-  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence'>('courses');
+  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'late-approvals'>('courses');
   const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
-  
+
+  const pendingLateApprovalsCount = allLateRequests.filter(r => r.status === 'PENDING').length;
+
   // Dynamic Role-Based Access Control (RBAC) Tab Filtering
   const availableDashboardTabs = useMemo(() => {
-    const rawTabs: Array<{ 
-      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence'; 
-      label: string; 
-      count: number; 
-      hideForRoles?: string[] 
+    const rawTabs: Array<{
+      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'late-approvals';
+      label: string;
+      count: number;
+      hideForRoles?: string[];
+      onlyForApprover?: boolean;
     }> = [
       { id: 'courses', label: 'ตารางสอนและการเข้าเรียน', count: myCourses.length },
+      { id: 'late-approvals', label: '📝 อนุมัติคำขอเช็คชื่อย้อนหลัง', count: pendingLateApprovalsCount, onlyForApprover: true },
       { id: 'gps-geofence', label: '📍 พิกัดดาวเทียม & เช็คอิน (GPS Geofence)', count: 0 },
       { id: 'teaching-load', label: 'ตารางภาระงานสอน (Teaching Load)', count: 6, hideForRoles: ['SUBJECT_TEACHER'] },
       { id: 'leaderboard', label: '🏆 กระดานคะแนน Active Learning (Leaderboard)', count: Object.values(activeLearningPoints).filter(p => p > 0).length },
@@ -284,14 +339,12 @@ export function TeacherPortal() {
     ];
 
     return rawTabs.filter(tab => {
-      // Hide teaching load specifically when active role is SUBJECT_TEACHER
       const currentRole = user?.activeRole || 'SUBJECT_TEACHER';
-      if (tab.hideForRoles && tab.hideForRoles.includes(currentRole)) {
-        return false;
-      }
+      if (tab.onlyForApprover && !isLateApprover) return false;
+      if (tab.hideForRoles && tab.hideForRoles.includes(currentRole)) return false;
       return true;
     });
-  }, [user?.activeRole, myCourses.length, activeLearningPoints, substituteAssignments, user?.email, todayStr, periodSwaps, postTeachingRecords]);
+  }, [user?.activeRole, myCourses.length, activeLearningPoints, substituteAssignments, user?.email, todayStr, periodSwaps, postTeachingRecords, isLateApprover, pendingLateApprovalsCount]);
 
   // Seamless fallback when role changes and current tab is restricted
   useEffect(() => {
@@ -394,9 +447,10 @@ export function TeacherPortal() {
   const [toast, setToast] = useState<string | null>(null);
   const [syncingCourseId, setSyncingCourseId] = useState<string | null>(null);
 
-  // Late Attendance Modal
+  // Late Attendance Modal (ขอเช็คชื่อย้อนหลัง)
   const [showLateModal, setShowLateModal] = useState(false);
   const [lateCourse, setLateCourse] = useState<Course | null>(null);
+  const [latePeriod, setLatePeriod] = useState<SubjectPeriod | null>(null);
   const [lateReason, setLateReason] = useState('');
 
   // Schedule Request Modal
@@ -455,23 +509,64 @@ export function TeacherPortal() {
 
   const formatTime = (date: Date) => format(date, 'HH:mm');
 
-  const handleLateSubmit = (e: React.FormEvent) => {
+  const handleLateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!lateCourse || !lateReason) return;
-    
-    submitLateAttendanceRequest({
-      teacherName: user?.displayName || 'Unknown',
-      subjectCode: lateCourse.code,
-      subjectName: lateCourse.name,
-      room: lateCourse.room,
-      period: PERIODS[lateCourse.periodIndex],
-      reason: lateReason,
-      createdAt: new Date()
-    });
-    
-    setShowLateModal(false);
-    setLateReason('');
-    setLateCourse(null);
+    if (!latePeriod || !lateReason.trim() || !user?.uid) return;
+
+    // กันยื่นซ้ำ ถ้ามีคำขอ PENDING/APPROVED สำหรับคาบนี้อยู่แล้ว
+    const key = `${latePeriod.scheduleId || latePeriod.id}__${todayStr}`;
+    const existing = lateRequestByKey.get(key);
+    if (existing && (existing.status === 'PENDING' || existing.status === 'APPROVED')) {
+      setToast(existing.status === 'PENDING' ? 'มีคำขอที่รออนุมัติอยู่แล้วสำหรับคาบนี้' : 'คาบนี้ได้รับอนุมัติแล้ว เข้าเช็คชื่อย้อนหลังได้เลย');
+      setShowLateModal(false);
+      return;
+    }
+
+    setLateSubmitting(true);
+    try {
+      await submitLateAttendanceRequestFirestore({
+        teacherId: user.uid,
+        teacherName: user.displayName || user.email || 'ครูผู้สอน',
+        teacherEmail: user.email || '',
+        scheduleId: latePeriod.scheduleId || latePeriod.id,
+        subjectCode: latePeriod.subjectCode,
+        subjectName: latePeriod.subjectName,
+        level: latePeriod.level || latePeriod.className || '',
+        periodNumber: Number(latePeriod.periodNumber),
+        room: latePeriod.room || '',
+        teachingDate: todayStr,
+        reason: lateReason.trim(),
+      });
+      setToast('ส่งคำขอเช็คชื่อย้อนหลังแล้ว รอรองผู้อำนวยการฝ่ายวิชาการอนุมัติ');
+      setTimeout(() => setToast(null), 4000);
+      setShowLateModal(false);
+      setLateReason('');
+      setLateCourse(null);
+      setLatePeriod(null);
+    } catch (err) {
+      setToast('ส่งคำขอไม่สำเร็จ: ' + (err instanceof Error ? err.message : String(err)));
+      setTimeout(() => setToast(null), 4000);
+    } finally {
+      setLateSubmitting(false);
+    }
+  };
+
+  // อนุมัติ/ปฏิเสธคำขอเช็คชื่อย้อนหลัง (รองผอ.วิชาการ / SUPER_ADMIN)
+  const handleDecideLateRequest = async (req: LateAttendanceRequestRecord, decision: 'APPROVED' | 'REJECTED') => {
+    if (!user?.uid) return;
+    let rejectReason: string | undefined;
+    if (decision === 'REJECTED') {
+      rejectReason = window.prompt('เหตุผลที่ไม่อนุมัติ (จะแสดงให้ครูเห็น):', '') || undefined;
+      if (rejectReason === undefined) return; // กด cancel
+    }
+    try {
+      await decideLateAttendanceRequestFirestore(req.id, decision, { uid: user.uid, name: user.displayName || user.email || 'ผู้อนุมัติ' }, rejectReason);
+      setToast(decision === 'APPROVED' ? 'อนุมัติคำขอแล้ว' : 'ปฏิเสธคำขอแล้ว');
+      setTimeout(() => setToast(null), 3000);
+    } catch (err) {
+      setToast('ดำเนินการไม่สำเร็จ: ' + (err instanceof Error ? err.message : String(err)));
+      setTimeout(() => setToast(null), 4000);
+    }
   };
 
   const handleScheduleReqSubmit = (e: React.FormEvent) => {
@@ -536,7 +631,11 @@ export function TeacherPortal() {
       problems: ptProblems,
       solutions: ptSolutions,
       submittedAt: submittedAtIso,
-      isLate: isLate
+      isLate: isLate,
+      scheduleId: postTeachingPeriod?.scheduleId || postTeachingPeriod?.id,
+      subjectCode: postTeachingPeriod?.subjectCode || postTeachingCourse.code,
+      level: postTeachingPeriod?.level || postTeachingPeriod?.className || (postTeachingCourse as any).level,
+      room: postTeachingPeriod?.room || postTeachingCourse.room,
     });
 
     setToast(`บันทึกหลังสอนวิชา ${postTeachingCourse.name} เรียบร้อยแล้ว! ${isLate ? '⚠️ (ส่งช้ากว่ากำหนด)' : '✅ (ส่งตรงเวลา)'}`);
@@ -615,8 +714,9 @@ export function TeacherPortal() {
         await updateScheduleAttendance(matchedSched.id, true);
       }
 
-      setToast('บันทึกการเช็กชื่อเรียบร้อยแล้ว!');
+      setToast(retroactiveAttendanceMode ? 'บันทึกเช็คชื่อย้อนหลังเรียบร้อยแล้ว!' : 'บันทึกการเช็กชื่อเรียบร้อยแล้ว!');
       setTimeout(() => setToast(null), 3000);
+      setRetroactiveAttendanceMode(false);
       setView('dashboard');
     } catch (err) {
       console.error("Failed to save attendance:", err);
@@ -826,17 +926,29 @@ export function TeacherPortal() {
                   );
 
                   const courseId = matchedCourse ? matchedCourse.id : item.id;
-                  const hasRecords = !!(
+                  // เช็คชื่อจริงไปแล้วหรือยัง — อ่านจาก attendance_records ของวันนั้นจริง (Firestore),
+                  // ไม่พึ่ง session-local store อีก (เดิมทำให้คาบที่เช็คแล้วขึ้น "ยังไม่บันทึก" หลัง refresh)
+                  const firestoreChecked = todayAttendanceDocs.some(a =>
+                    a.periodNumber === Number(item.periodNumber) &&
+                    (isSameRoom(a.room, item.classLevel) || isSameRoom(a.room, item.targetClass) || isSameRoom(a.room, item.room))
+                  );
+                  const hasRecords = firestoreChecked || !!(
                     (attendanceRecords[courseId] && Object.keys(attendanceRecords[courseId]).length > 0) ||
                     (attendanceRecords[item.id] && Object.keys(attendanceRecords[item.id]).length > 0)
                   );
-                  const isAttendanceTaken = (matchedCourse ? matchedCourse.attendanceTaken : false) || !!item.attendanceTaken || hasRecords;
+                  const isAttendanceTaken = firestoreChecked || (matchedCourse ? matchedCourse.attendanceTaken : false) || !!item.attendanceTaken || hasRecords;
 
                   const recordDate = format(targetDate, 'yyyy-MM-dd');
-                  const existingRecord = postTeachingRecords.find(r => (r.courseId === courseId || r.courseId === item.id) && r.date === recordDate);
+                  const existingRecord = postTeachingRecords.find(r =>
+                    (r.courseId === courseId || r.courseId === item.id ||
+                      (r as any).scheduleId === item.id ||
+                      ((r as any).subjectCode === item.courseCode && isSameRoom((r as any).room || (r as any).level, item.classLevel))
+                    ) && r.date === recordDate);
+                  const lateReq = lateRequestByKey.get(`${item.id}__${recordDate}`);
 
                   rawMappedPeriods.push({
                     id: item.id,
+                    scheduleId: item.id,
                     courseId: courseId,
                     periodNumber: item.periodNumber,
                     startTime,
@@ -844,8 +956,10 @@ export function TeacherPortal() {
                     subjectCode: item.courseCode,
                     subjectName: item.courseName,
                     className: item.classLevel || item.targetClass,
+                    level: item.classLevel || item.targetClass,
                     room: item.room || (item.targetClass.includes('5/8') ? '[943] HR 5/8' : item.targetClass.includes('5/9') ? '[935] HR 5/9' : 'ห้องเรียน ' + item.targetClass),
                     attendanceTaken: isAttendanceTaken,
+                    lateRequestStatus: lateReq ? lateReq.status : null,
                     hasPostTeachingRecord: !!existingRecord,
                     roleLabel: item.type === 'ACTIVITY' ? 'กิจกรรม' : matchedCourse?.roleLabel || 'วิชาการ',
                     studentsCount: item.studentsCount || 40,
@@ -976,6 +1090,7 @@ export function TeacherPortal() {
                     onTakeAttendance={(periodId) => {
                       const { course, pIndex, periodItem } = resolveCourseAndPeriod(periodId);
                       if (course) {
+                        setRetroactiveAttendanceMode(false);
                         setActiveCourse({
                           ...course,
                           periodIndex: pIndex,
@@ -987,23 +1102,49 @@ export function TeacherPortal() {
                       }
                     }}
                     onRequestLateAttendance={(periodId) => {
-                      const { course } = resolveCourseAndPeriod(periodId);
-                      if (course) {
-                        setLateCourse(course);
-                        setShowLateModal(true);
+                      const { course, periodItem } = resolveCourseAndPeriod(periodId);
+                      if (!periodItem) return;
+                      const key = `${periodItem.scheduleId || periodItem.id}__${todayStr}`;
+                      const req = lateRequestByKey.get(key);
+                      if (req?.status === 'APPROVED') {
+                        // อนุมัติแล้ว → เข้าเช็คชื่อย้อนหลังได้ (โหมดเช็คชื่ออย่างเดียว)
+                        if (course) {
+                          setActiveCourse({ ...course, periodIndex: periodItem.periodNumber, room: periodItem.className || course.room, level: periodItem.className || course.level });
+                          setCurrentPeriod(PERIODS[periodItem.periodNumber] || `คาบ ${periodItem.periodNumber}`);
+                          setRetroactiveAttendanceMode(true);
+                          setView('class');
+                        }
+                        return;
                       }
+                      if (req?.status === 'PENDING') {
+                        setToast('คำขอเช็คชื่อย้อนหลังของคาบนี้กำลังรอรองผู้อำนวยการฝ่ายวิชาการอนุมัติ');
+                        setTimeout(() => setToast(null), 4000);
+                        return;
+                      }
+                      // ยังไม่เคยขอ หรือถูกปฏิเสธ → เปิดฟอร์มขอ
+                      setLateCourse(course || null);
+                      setLatePeriod(periodItem);
+                      setLateReason('');
+                      setShowLateModal(true);
                     }}
                     onRecordPostTeaching={(periodId) => {
-                      const { course } = resolveCourseAndPeriod(periodId);
+                      const { course, periodItem } = resolveCourseAndPeriod(periodId);
                       if (course) {
                         setPostTeachingCourse(course);
+                        setPostTeachingPeriod(periodItem || null);
                         setPtDate(format(targetDate, 'yyyy-MM-dd'));
                         setShowPostTeachingModal(true);
                       }
                     }}
                     onViewPostTeachingRecord={(periodId) => {
                       const recordDate = format(targetDate, 'yyyy-MM-dd');
-                      const existingRecord = postTeachingRecords.find(r => (r.courseId === periodId || mappedPeriods.some(p => p.id === periodId && p.courseId === r.courseId)) && r.date === recordDate);
+                      const pItem = mappedPeriods.find(p => p.id === periodId || p.courseId === periodId);
+                      const existingRecord = postTeachingRecords.find(r =>
+                        r.date === recordDate && (
+                          r.courseId === periodId ||
+                          (pItem && (r.courseId === pItem.courseId || r.courseId === pItem.id || r.scheduleId === pItem.id ||
+                            (r.subjectCode === pItem.subjectCode && isSameRoom(r.room || r.level, pItem.className))))
+                        ));
                       if (existingRecord) {
                         setViewingRecord(existingRecord);
                       }
@@ -1022,6 +1163,7 @@ export function TeacherPortal() {
                     onEnterClassroom={(periodId) => {
                       const { course, pIndex, periodItem } = resolveCourseAndPeriod(periodId);
                       if (course) {
+                        setRetroactiveAttendanceMode(false);
                         setActiveCourse({
                           ...course,
                           periodIndex: pIndex,
@@ -1256,6 +1398,74 @@ export function TeacherPortal() {
                     </div>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {dashboardTab === 'late-approvals' && isLateApprover && (
+              <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4 animate-in fade-in duration-300">
+                <div className="border-b border-slate-800/80 pb-4">
+                  <h3 className="text-lg font-bold text-white">อนุมัติคำขอเช็คชื่อย้อนหลัง</h3>
+                  <p className="text-xs text-slate-400 mt-1">คำขอจากครูผู้สอนที่ลืมเช็คชื่อในคาบ — อนุมัติแล้วครูจะเข้าเช็คชื่อย้อนหลังได้ (เช็คชื่ออย่างเดียว)</p>
+                </div>
+                {allLateRequests.length === 0 ? (
+                  <div className="text-center py-12 text-slate-500 text-sm">ยังไม่มีคำขอเช็คชื่อย้อนหลัง</div>
+                ) : (
+                  <div className="space-y-3">
+                    {allLateRequests.map(req => (
+                      <div key={req.id} className={cn(
+                        'p-4 rounded-xl border',
+                        req.status === 'PENDING' ? 'bg-amber-950/20 border-amber-800/50' :
+                        req.status === 'APPROVED' ? 'bg-emerald-950/20 border-emerald-800/40' : 'bg-red-950/20 border-red-800/40'
+                      )}>
+                        <div className="flex flex-wrap justify-between items-start gap-3">
+                          <div className="space-y-1">
+                            <div className="text-sm font-bold text-white">
+                              {req.subjectCode} {req.subjectName}
+                              <span className="ml-2 text-xs font-normal text-slate-300">{req.level} · คาบ {req.periodNumber} {req.room ? `· ห้อง ${req.room}` : ''}</span>
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              ครู: <span className="text-slate-200 font-semibold">{req.teacherName}</span> · วันสอน {req.teachingDate}
+                              · ยื่นเมื่อ {req.requestedAt ? new Date(req.requestedAt).toLocaleString('th-TH') : '-'}
+                            </div>
+                            <div className="text-xs text-slate-300 bg-black/20 rounded p-2 mt-1">เหตุผล: {req.reason}</div>
+                            {req.status !== 'PENDING' && (
+                              <div className="text-[11px] text-slate-400 mt-1">
+                                {req.status === 'APPROVED' ? 'อนุมัติโดย' : 'ปฏิเสธโดย'} {req.approverName || '-'}
+                                {req.decidedAt ? ` เมื่อ ${new Date(req.decidedAt).toLocaleString('th-TH')}` : ''}
+                                {req.status === 'REJECTED' && req.rejectReason ? ` — ${req.rejectReason}` : ''}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {req.status === 'PENDING' ? (
+                              <>
+                                <button
+                                  onClick={() => handleDecideLateRequest(req, 'APPROVED')}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg flex items-center gap-1"
+                                >
+                                  <CheckCircle className="w-3.5 h-3.5" /> อนุมัติ
+                                </button>
+                                <button
+                                  onClick={() => handleDecideLateRequest(req, 'REJECTED')}
+                                  className="px-3 py-1.5 bg-red-600/15 hover:bg-red-600/25 text-red-400 border border-red-500/25 text-xs font-bold rounded-lg flex items-center gap-1"
+                                >
+                                  <X className="w-3.5 h-3.5" /> ปฏิเสธ
+                                </button>
+                              </>
+                            ) : (
+                              <span className={cn(
+                                'px-2.5 py-1 rounded text-[11px] font-bold border',
+                                req.status === 'APPROVED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25' : 'bg-red-500/10 text-red-400 border-red-500/25'
+                              )}>
+                                {req.status === 'APPROVED' ? 'อนุมัติแล้ว' : 'ปฏิเสธแล้ว'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -2000,8 +2210,9 @@ export function TeacherPortal() {
             <ClassroomSeatingManager
               course={activeCourse}
               students={students}
-              onBackToDashboard={() => setActiveCourse(null)}
+              onBackToDashboard={() => { setActiveCourse(null); setRetroactiveAttendanceMode(false); }}
               onSelectStudentDetail={(s) => setAssessmentModalStudent(s)}
+              attendanceOnly={retroactiveAttendanceMode}
             />
           </main>
         </div>
@@ -2158,7 +2369,7 @@ export function TeacherPortal() {
       )}
 
       {/* Late Attendance Request Modal */}
-      {showLateModal && lateCourse && (
+      {showLateModal && latePeriod && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
           <div className="bg-[#161f30] border border-amber-500/30 rounded-xl w-full max-w-md shadow-xl overflow-hidden flex flex-col">
             <div className="p-5 border-b border-slate-800/80 flex justify-between items-center bg-amber-500/10">
@@ -2169,26 +2380,30 @@ export function TeacherPortal() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <form onSubmit={handleLateSubmit} className="p-6 space-y-4">
               <div className="bg-[#0b0f19] p-4 rounded-lg border border-slate-800/80 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">วิชา:</span>
-                  <span className="font-bold text-white">{lateCourse.code} {lateCourse.name}</span>
+                  <span className="font-bold text-white">{latePeriod.subjectCode} {latePeriod.subjectName}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">ห้องเรียน:</span>
-                  <span className="font-bold text-white">{lateCourse.room}</span>
+                  <span className="text-slate-400">ระดับชั้น:</span>
+                  <span className="font-bold text-white">{latePeriod.level || latePeriod.className}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">คาบเรียน:</span>
-                  <span className="font-bold text-amber-400">{PERIODS[lateCourse.periodIndex]}</span>
+                  <span className="text-slate-400">คาบที่:</span>
+                  <span className="font-bold text-amber-400">คาบ {latePeriod.periodNumber}{latePeriod.room ? ` · ห้อง ${latePeriod.room}` : ''}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">วันสอน:</span>
+                  <span className="font-bold text-white">{todayStr}</span>
                 </div>
               </div>
 
               <div>
                 <label className="block text-sm font-bold text-slate-300 mb-2">เหตุผลที่ขอเช็คชื่อย้อนหลัง</label>
-                <textarea 
+                <textarea
                   required
                   value={lateReason}
                   onChange={e => setLateReason(e.target.value)}
@@ -2199,12 +2414,12 @@ export function TeacherPortal() {
               </div>
 
               <div className="pt-2">
-                <button 
+                <button
                   type="submit"
-                  disabled={!lateReason}
+                  disabled={!lateReason.trim() || lateSubmitting}
                   className="w-full bg-[#3b2211] border border-amber-800/60 text-amber-400 hover:bg-[#4a2b16] disabled:opacity-50 font-bold py-3 rounded-xl transition-all shadow-[0_4px_15px_rgba(245,158,11,0.2)]"
                 >
-                  ส่งคำขอย้อนหลังให้ผู้บริหาร
+                  {lateSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอให้รองผู้อำนวยการฝ่ายวิชาการ'}
                 </button>
               </div>
             </form>

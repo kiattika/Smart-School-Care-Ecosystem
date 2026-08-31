@@ -70,7 +70,6 @@ export const useStore = create<StoreState>((set, get) => ({
   scheduleChangeRequests: [],
   analytics: [],
   leaveRequests: [],
-  lateAttendanceRequests: [],
   scheduleConfig: {
     isActivityDay: false,
     shortenMinutes: 0
@@ -255,16 +254,8 @@ export const useStore = create<StoreState>((set, get) => ({
     leaveRequests: state.leaveRequests.map(req => req.id === id ? { ...req, status } : req)
   })),
 
-  submitLateAttendanceRequest: (req) => set((state) => ({
-    lateAttendanceRequests: [
-      ...state.lateAttendanceRequests,
-      { ...req, id: Date.now().toString(), status: 'PENDING', createdAt: new Date() }
-    ]
-  })),
-
-  updateLateAttendanceRequestStatus: (id, status) => set((state) => ({
-    lateAttendanceRequests: state.lateAttendanceRequests.map(req => req.id === id ? { ...req, status } : req)
-  })),
+  // NOTE: คำขอเช็คชื่อย้อนหลังย้ายไป Firestore แล้ว (late_attendance_requests + firestoreService)
+  // — เดิม action นี้เขียนแค่ local state ทำให้คำขอหายข้าม session
 
   setScheduleConfig: (config) => set({ scheduleConfig: config }),
   setGlobalCourses: (courses) => set({ globalCourses: courses }),

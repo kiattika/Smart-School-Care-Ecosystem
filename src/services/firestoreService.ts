@@ -912,7 +912,7 @@ export async function savePostTeachingRecordFirestore(record: PostTeachingRecord
   try {
     const ref = doc(db, collectionPath, docId);
     await setDoc(ref, {
-      ...record,
+      ...stripUndefined(record as Record<string, any>),
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
