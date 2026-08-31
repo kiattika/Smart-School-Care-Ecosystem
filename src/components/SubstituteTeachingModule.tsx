@@ -139,9 +139,19 @@ export function SubstituteTeachingModule() {
 
   const isDev = import.meta.env.DEV;
 
-  // --- persona (DEV = simulator, PROD = ผู้ใช้จริง) ---
-  const [simRole, setSimRole] = useState<UserRole>('HEAD_OF_DEPARTMENT');
-  const [simEmail, setSimEmail] = useState<string>('');
+  // บทบาทของผู้ใช้จริงถ้าอยู่ในลำดับ workflow สอนแทน — ใช้เป็นค่าเริ่มต้นของ persona
+  const SUB_WORKFLOW_ROLES: UserRole[] = ['HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR', 'SUBJECT_TEACHER'];
+  const realWorkflowRole = (user?.activeRole && SUB_WORKFLOW_ROLES.includes(user.activeRole)) ? user.activeRole : undefined;
+
+  // --- persona: เริ่มจากบทบาทผู้ใช้จริง (DEV มี dropdown override ให้ทดสอบทุกขั้นได้) ---
+  const [simRole, setSimRole] = useState<UserRole>(realWorkflowRole || 'HEAD_OF_DEPARTMENT');
+  const [simEmail, setSimEmail] = useState<string>(user?.email || '');
+
+  // sync persona เมื่อผู้ใช้จริงเปลี่ยน (สลับบทบาท / ล็อกอินใหม่)
+  useEffect(() => {
+    setSimRole(realWorkflowRole || 'HEAD_OF_DEPARTMENT');
+    setSimEmail(user?.email || '');
+  }, [user?.email, user?.activeRole]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const staffById = useMemo(() => {
     const m = new Map<string, string>();
@@ -151,8 +161,8 @@ export function SubstituteTeachingModule() {
 
   const schedules = useSchedulesCollection(staffById);
 
-  const effectiveRole: UserRole = isDev ? simRole : (user?.activeRole || 'SUBJECT_TEACHER');
-  const effectiveEmail = (isDev && simEmail ? simEmail : user?.email || '').toLowerCase();
+  const effectiveRole: UserRole = simRole;
+  const effectiveEmail = (simEmail || user?.email || '').toLowerCase();
   const effectiveProfile = useMemo(
     () => staffDirectory.find(s => s.email?.toLowerCase() === effectiveEmail),
     [staffDirectory, effectiveEmail]

@@ -4,7 +4,7 @@ import { usePeriodsConfig } from './hooks/usePeriodsConfig';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
-import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, decideLateAttendanceRequestFirestore, subscribeLateAttendanceRequests } from './services/firestoreService';
+import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests } from './services/firestoreService';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { TeacherScheduleList, SubjectPeriod } from './components/TeacherScheduleList';
@@ -22,7 +22,6 @@ import { TeachingLoadTable } from './components/TeachingLoadTable';
 import { ClassroomSeatingManager } from './components/ClassroomSeatingManager';
 import { ClassroomLeaderboard } from './components/ClassroomLeaderboard';
 import { GPSGeofenceCheckinModal } from './components/GPSGeofenceCheckinModal';
-import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
 
 // Helper for tailwind classes
 
@@ -116,23 +115,18 @@ export function TeacherPortal() {
   } = useTeacherFirestoreSchedule();
 
   const todayStr = format(currentDate, 'yyyy-MM-dd');
-  const isLateApprover = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN'].includes(user?.activeRole || '');
-  const isTeacherRole = !isLateApprover && (['SUBJECT_TEACHER', 'HOMEROOM_TEACHER'].includes(user?.activeRole || '') || user?.role === 'teacher' || user?.role === 'advisor');
+  // ครูผู้สอน/ครูประจำชั้นเท่านั้นที่มีตารางสอน + ต้องอ่าน attendance_records
+  // (role อนุมัติ เช่น DEPUTY_DIRECTOR_ACADEMIC ถูก route ไป ApprovalsPortal แล้ว — ไม่ถึงหน้านี้)
+  const isTeacherRole = ['SUBJECT_TEACHER', 'HOMEROOM_TEACHER'].includes(user?.activeRole || '') || user?.role === 'teacher' || user?.role === 'advisor';
 
-  // ── คำขอเช็คชื่อย้อนหลัง (Firestore: late_attendance_requests) ──
+  // ── คำขอเช็คชื่อย้อนหลังของครูคนนี้ (Firestore: late_attendance_requests) ──
   const [myLateRequests, setMyLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
-  const [allLateRequests, setAllLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
   const [lateSubmitting, setLateSubmitting] = useState(false);
 
   useEffect(() => {
     if (!user?.uid) return;
     return subscribeLateAttendanceRequests(setMyLateRequests, { teacherId: user.uid });
   }, [user?.uid]);
-
-  useEffect(() => {
-    if (!isLateApprover) { setAllLateRequests([]); return; }
-    return subscribeLateAttendanceRequests(setAllLateRequests);
-  }, [isLateApprover]);
 
   // สถานะคำขอเช็คชื่อย้อนหลังของครูคนนี้ ต่อ (scheduleId + วันสอน) — ล่าสุดชนะ
   const lateRequestByKey = useMemo(() => {
@@ -314,22 +308,18 @@ export function TeacherPortal() {
   const [viewingRecord, setViewingRecord] = useState<PostTeachingRecord | null>(null);
 
   // New States for Dashboard Navigation
-  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'late-approvals'>('courses');
+  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence'>('courses');
   const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
-
-  const pendingLateApprovalsCount = allLateRequests.filter(r => r.status === 'PENDING').length;
 
   // Dynamic Role-Based Access Control (RBAC) Tab Filtering
   const availableDashboardTabs = useMemo(() => {
     const rawTabs: Array<{
-      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'late-approvals';
+      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence';
       label: string;
       count: number;
       hideForRoles?: string[];
-      onlyForApprover?: boolean;
     }> = [
       { id: 'courses', label: 'ตารางสอนและการเข้าเรียน', count: myCourses.length },
-      { id: 'late-approvals', label: '📝 อนุมัติคำขอเช็คชื่อย้อนหลัง', count: pendingLateApprovalsCount, onlyForApprover: true },
       { id: 'gps-geofence', label: '📍 พิกัดดาวเทียม & เช็คอิน (GPS Geofence)', count: 0 },
       { id: 'teaching-load', label: 'ตารางภาระงานสอน (Teaching Load)', count: 6, hideForRoles: ['SUBJECT_TEACHER'] },
       { id: 'leaderboard', label: '🏆 กระดานคะแนน Active Learning (Leaderboard)', count: Object.values(activeLearningPoints).filter(p => p > 0).length },
@@ -340,11 +330,10 @@ export function TeacherPortal() {
 
     return rawTabs.filter(tab => {
       const currentRole = user?.activeRole || 'SUBJECT_TEACHER';
-      if (tab.onlyForApprover && !isLateApprover) return false;
       if (tab.hideForRoles && tab.hideForRoles.includes(currentRole)) return false;
       return true;
     });
-  }, [user?.activeRole, myCourses.length, activeLearningPoints, substituteAssignments, user?.email, todayStr, periodSwaps, postTeachingRecords, isLateApprover, pendingLateApprovalsCount]);
+  }, [user?.activeRole, myCourses.length, activeLearningPoints, substituteAssignments, user?.email, todayStr, periodSwaps, postTeachingRecords]);
 
   // Seamless fallback when role changes and current tab is restricted
   useEffect(() => {
@@ -548,24 +537,6 @@ export function TeacherPortal() {
       setTimeout(() => setToast(null), 4000);
     } finally {
       setLateSubmitting(false);
-    }
-  };
-
-  // อนุมัติ/ปฏิเสธคำขอเช็คชื่อย้อนหลัง (รองผอ.วิชาการ / SUPER_ADMIN)
-  const handleDecideLateRequest = async (req: LateAttendanceRequestRecord, decision: 'APPROVED' | 'REJECTED') => {
-    if (!user?.uid) return;
-    let rejectReason: string | undefined;
-    if (decision === 'REJECTED') {
-      rejectReason = window.prompt('เหตุผลที่ไม่อนุมัติ (จะแสดงให้ครูเห็น):', '') || undefined;
-      if (rejectReason === undefined) return; // กด cancel
-    }
-    try {
-      await decideLateAttendanceRequestFirestore(req.id, decision, { uid: user.uid, name: user.displayName || user.email || 'ผู้อนุมัติ' }, rejectReason);
-      setToast(decision === 'APPROVED' ? 'อนุมัติคำขอแล้ว' : 'ปฏิเสธคำขอแล้ว');
-      setTimeout(() => setToast(null), 3000);
-    } catch (err) {
-      setToast('ดำเนินการไม่สำเร็จ: ' + (err instanceof Error ? err.message : String(err)));
-      setTimeout(() => setToast(null), 4000);
     }
   };
 
@@ -942,6 +913,15 @@ export function TeacherPortal() {
                   );
                   const isAttendanceTaken = firestoreChecked || (matchedCourse ? matchedCourse.attendanceTaken : false) || !!item.attendanceTaken || hasRecords;
 
+                  if (import.meta.env.DEV) {
+                    // eslint-disable-next-line no-console
+                    console.log('[DEBUG-ATT]', {
+                      period: item.periodNumber, code: item.courseCode, classLevel: item.classLevel, room: item.room, targetClass: item.targetClass,
+                      firestoreChecked, isAttendanceTaken,
+                      todayDocs: todayAttendanceDocs.map(a => `p${a.periodNumber}@${a.room}`),
+                    });
+                  }
+
                   const recordDate = format(targetDate, 'yyyy-MM-dd');
                   // จับคู่ด้วย id ที่ชัดเจนเท่านั้น (courseId ที่ derive จาก schedule / scheduleId)
                   // ไม่จับคู่หลวมด้วย subjectCode+room — เจอ false positive กับ record เก่าที่ courseId คนละรูปแบบ
@@ -1187,13 +1167,9 @@ export function TeacherPortal() {
               );
             })()}
 
-            {dashboardTab === 'substitutions' && ['HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'].includes(user?.activeRole || '') && (
-              <div className="-mx-4 sm:-mx-6 lg:-mx-8 animate-in fade-in duration-300">
-                <SubstituteTeachingModule />
-              </div>
-            )}
-
-            {dashboardTab === 'substitutions' && !['HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'].includes(user?.activeRole || '') && (
+            {/* role อนุมัติสอนแทน (HEAD_OF_DEPARTMENT ฯลฯ) ถูก route ไป ApprovalsPortal แล้ว —
+                หน้านี้เหลือเฉพาะฟอร์มขอสลับคาบของครูผู้สอนทั่วไป */}
+            {dashboardTab === 'substitutions' && (
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in duration-300">
                 {/* Form to submit request */}
                 <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4">
@@ -1406,74 +1382,6 @@ export function TeacherPortal() {
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {dashboardTab === 'late-approvals' && isLateApprover && (
-              <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4 animate-in fade-in duration-300">
-                <div className="border-b border-slate-800/80 pb-4">
-                  <h3 className="text-lg font-bold text-white">อนุมัติคำขอเช็คชื่อย้อนหลัง</h3>
-                  <p className="text-xs text-slate-400 mt-1">คำขอจากครูผู้สอนที่ลืมเช็คชื่อในคาบ — อนุมัติแล้วครูจะเข้าเช็คชื่อย้อนหลังได้ (เช็คชื่ออย่างเดียว)</p>
-                </div>
-                {allLateRequests.length === 0 ? (
-                  <div className="text-center py-12 text-slate-500 text-sm">ยังไม่มีคำขอเช็คชื่อย้อนหลัง</div>
-                ) : (
-                  <div className="space-y-3">
-                    {allLateRequests.map(req => (
-                      <div key={req.id} className={cn(
-                        'p-4 rounded-xl border',
-                        req.status === 'PENDING' ? 'bg-amber-950/20 border-amber-800/50' :
-                        req.status === 'APPROVED' ? 'bg-emerald-950/20 border-emerald-800/40' : 'bg-red-950/20 border-red-800/40'
-                      )}>
-                        <div className="flex flex-wrap justify-between items-start gap-3">
-                          <div className="space-y-1">
-                            <div className="text-sm font-bold text-white">
-                              {req.subjectCode} {req.subjectName}
-                              <span className="ml-2 text-xs font-normal text-slate-300">{req.level} · คาบ {req.periodNumber} {req.room ? `· ห้อง ${req.room}` : ''}</span>
-                            </div>
-                            <div className="text-xs text-slate-400">
-                              ครู: <span className="text-slate-200 font-semibold">{req.teacherName}</span> · วันสอน {req.teachingDate}
-                              · ยื่นเมื่อ {req.requestedAt ? new Date(req.requestedAt).toLocaleString('th-TH') : '-'}
-                            </div>
-                            <div className="text-xs text-slate-300 bg-black/20 rounded p-2 mt-1">เหตุผล: {req.reason}</div>
-                            {req.status !== 'PENDING' && (
-                              <div className="text-[11px] text-slate-400 mt-1">
-                                {req.status === 'APPROVED' ? 'อนุมัติโดย' : 'ปฏิเสธโดย'} {req.approverName || '-'}
-                                {req.decidedAt ? ` เมื่อ ${new Date(req.decidedAt).toLocaleString('th-TH')}` : ''}
-                                {req.status === 'REJECTED' && req.rejectReason ? ` — ${req.rejectReason}` : ''}
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            {req.status === 'PENDING' ? (
-                              <>
-                                <button
-                                  onClick={() => handleDecideLateRequest(req, 'APPROVED')}
-                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg flex items-center gap-1"
-                                >
-                                  <CheckCircle className="w-3.5 h-3.5" /> อนุมัติ
-                                </button>
-                                <button
-                                  onClick={() => handleDecideLateRequest(req, 'REJECTED')}
-                                  className="px-3 py-1.5 bg-red-600/15 hover:bg-red-600/25 text-red-400 border border-red-500/25 text-xs font-bold rounded-lg flex items-center gap-1"
-                                >
-                                  <X className="w-3.5 h-3.5" /> ปฏิเสธ
-                                </button>
-                              </>
-                            ) : (
-                              <span className={cn(
-                                'px-2.5 py-1 rounded text-[11px] font-bold border',
-                                req.status === 'APPROVED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25' : 'bg-red-500/10 text-red-400 border-red-500/25'
-                              )}>
-                                {req.status === 'APPROVED' ? 'อนุมัติแล้ว' : 'ปฏิเสธแล้ว'}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
 

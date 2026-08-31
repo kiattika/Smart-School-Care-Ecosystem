@@ -153,8 +153,35 @@ export const SEEDED_TEST_USERS: TestUserDef[] = [
     position: 'ศึกษานิเทศก์ชำนาญการพิเศษ',
     roles: ['INSTRUCTIONAL_SUPERVISOR']
   },
+  // ── ลำดับอนุมัติงานจัดครูสอนแทน 4 ขั้น (+ เช็คชื่อย้อนหลัง) ──
   {
-    // ผู้อนุมัติคำขอเช็คชื่อย้อนหลัง (late_attendance_requests) — ยืนยันจากทางโรงเรียน
+    // ขั้น 1: หัวหน้ากลุ่มสาระฯ (ผู้เสนอ) — มีสิทธิ์ครูผู้สอนด้วย
+    uid: 'test_hod_math_001',
+    email: 'hod.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'นางสาวมาลี หัวหน้าคณิต',
+    prefix: 'นางสาว',
+    firstName: 'มาลี',
+    lastName: 'หัวหน้าคณิต',
+    position: 'หัวหน้ากลุ่มสาระการเรียนรู้คณิตศาสตร์',
+    roles: ['HEAD_OF_DEPARTMENT', 'SUBJECT_TEACHER'],
+    assignments: { departmentId: 'math-dept' }
+  },
+  {
+    // ขั้น 2: หัวหน้าฝ่ายวิชาการและหลักสูตร
+    uid: 'test_academic_head_001',
+    email: 'academic.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'นายวิชาญ หัวหน้าวิชาการ',
+    prefix: 'นาย',
+    firstName: 'วิชาญ',
+    lastName: 'หลักสูตรดี',
+    position: 'หัวหน้าฝ่ายวิชาการและหลักสูตร',
+    roles: ['ACADEMIC_HEAD'],
+    assignments: { departmentId: 'academic-affairs' }
+  },
+  {
+    // ขั้น 3: รองผู้อำนวยการฝ่ายวิชาการ (+ ผู้อนุมัติคำขอเช็คชื่อย้อนหลัง)
     uid: 'test_deputy_academic_001',
     email: 'deputy.test@utd.ac.th',
     password: 'test1234',
@@ -165,6 +192,19 @@ export const SEEDED_TEST_USERS: TestUserDef[] = [
     position: 'รองผู้อำนวยการกลุ่มบริหารวิชาการ',
     roles: ['DEPUTY_DIRECTOR_ACADEMIC'],
     assignments: { departmentId: 'academic-affairs' }
+  },
+  {
+    // ขั้น 4: ผู้อำนวยการสถานศึกษา
+    uid: 'test_director_001',
+    email: 'director.test@utd.ac.th',
+    password: 'test1234',
+    displayName: 'ดร.อำนวย ผู้อำนวยการโรงเรียน',
+    prefix: 'ดร.',
+    firstName: 'อำนวย',
+    lastName: 'บริหารเลิศ',
+    position: 'ผู้อำนวยการสถานศึกษา',
+    roles: ['DIRECTOR'],
+    assignments: { departmentId: 'administration' }
   },
   {
     uid: 'test_parent_001',

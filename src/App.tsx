@@ -11,6 +11,7 @@ import { InfirmaryPortal } from './components/infirmary/InfirmaryPortal';
 import { GuidancePortal } from './components/guidance/GuidancePortal';
 import { FinancePortal } from './components/finance/FinancePortal';
 import { SupervisionPortal } from './components/supervision/SupervisionPortal';
+import { ApprovalsPortal } from './ApprovalsPortal';
 import { LoginPage } from './LoginPage';
 import { LogOut, Loader2 } from 'lucide-react';
 import { useStore } from './store';
@@ -131,6 +132,9 @@ export default function App() {
               <InfirmaryPortal />
             ) : user.activeRole === 'GUIDANCE_COUNSELOR' ? (
               <GuidancePortal />
+            ) : (['HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'] as const).includes(user.activeRole as any) ? (
+              // role ระดับบริหารที่ทำหน้าที่อนุมัติ (สอนแทน 4 ขั้น + เช็คชื่อย้อนหลัง) — เดิมตกไป TeacherPortal
+              <ApprovalsPortal />
             ) : user.role === 'teacher' ? (
               <TeacherPortal />
             ) : user.role === 'advisor' ? (
