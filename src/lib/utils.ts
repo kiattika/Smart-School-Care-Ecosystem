@@ -110,4 +110,22 @@ export function formatRoomName(room?: string): string {
   return room;
 }
 
+/**
+ * รูปแบบมาตรฐานสำหรับแสดงรายวิชา + ระดับชั้น + ห้องเรียน ทั้งโปรเจกต์
+ *   มีครบ:      "คณิตศาสตร์พื้นฐาน - ม.5/8 (943)"
+ *   ไม่มี level: "คณิตศาสตร์พื้นฐาน (943)"
+ *   ไม่มี room:  "คณิตศาสตร์พื้นฐาน - ม.5/8"
+ *   level == room (เช่น ห้อง = "ม.5/8"): ไม่ซ้ำ → "คณิตศาสตร์พื้นฐาน - ม.5/8"
+ */
+export function formatCourseTitle(name?: string, level?: string, room?: string): string {
+  const n = (name || '').trim();
+  // normalize "M.5/8" -> "ม.5/8" ให้ทั้งโปรเจกต์แสดงรูปแบบเดียว
+  const lv = (level || '').trim().replace(/^M\.\s*/i, 'ม.');
+  const rm = (room || '').trim();
+  let out = n || 'รายวิชา';
+  if (lv) out += ` - ${lv}`;
+  if (rm && !isSameRoom(rm, lv)) out += ` (${rm})`;
+  return out;
+}
+
 

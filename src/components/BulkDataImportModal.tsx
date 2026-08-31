@@ -595,7 +595,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           col1: courseCode || 'ไม่มีข้อมูล',
           col2: courseName || 'ไม่มีข้อมูล',
           col3: !isNaN(credits) ? `${credits} หน่วยกิต` : (creditsStr || 'ไม่มีข้อมูล'),
-          col4: room || level || 'ทุกห้อง',
+          col4: [level, room && room !== level ? `ห้อง ${room}` : ''].filter(Boolean).join(' • ') || 'ทุกห้อง',
           isValid,
           errorMessage: errors.length > 0 ? `⚠️ ${errors.join(', ')}` : undefined,
           parsedData: {

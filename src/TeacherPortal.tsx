@@ -1,4 +1,4 @@
-import { cn, parseThaiSchedule, isSameRoom } from "./lib/utils";
+import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/utils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { usePeriodsConfig } from './hooks/usePeriodsConfig';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
@@ -196,11 +196,14 @@ export function TeacherPortal() {
           }
         }
 
+        // level = ระดับชั้น (ม.5/8); ถ้า globalCourse ไม่มี ให้ใช้ roomName ต่อเมื่อ roomName เป็นชื่อชั้นเอง
+        const levelStr = gc.level || (/ม\.\s?\d/.test(gc.roomName) ? gc.roomName : '');
         return {
           id: gc.courseId,
           code: gc.code,
           name: gc.courseName,
           room: gc.roomName,
+          level: levelStr,
           term: '1/2569',
           studentsCount: gc.roomName.includes('5/8') ? 40 : gc.roomName.includes('5/9') ? 38 : gc.roomName.includes('5/11') ? 42 : 35,
           schedule: gc.scheduleString,
@@ -789,6 +792,8 @@ export function TeacherPortal() {
                         courseCode: raw.courseCode || raw.subjectCode || '',
                         courseName: raw.courseName || raw.subjectName || '',
                         targetClass: raw.targetClass || raw.room || raw.level || '',
+                        // ระดับชั้น (ม.5/8) แยกจากห้องกายภาพ (943) — ไฟล์ import เก็บชั้นไว้ที่ field `level`
+                        classLevel: raw.level || raw.targetClass || raw.room || '',
                         room: raw.room || raw.level || '',
                         type: raw.type || raw.subjectType || 'MAIN',
                         attendanceTaken: raw.attendanceTaken,
@@ -813,9 +818,11 @@ export function TeacherPortal() {
                   const endTime = formatTime(end);
 
                   // Find matching course in myCourses to get original id if available, or use a derived id
-                  const matchedCourse = myCourses.find(c => 
-                    c.code === item.courseCode && 
-                    (c.room?.replace(/^M\./i, 'ม.') === item.targetClass.replace(/^M\./i, 'ม.'))
+                  const matchedCourse = myCourses.find(c =>
+                    c.code === item.courseCode &&
+                    (isSameRoom(c.room, item.targetClass) ||
+                      isSameRoom(c.level, item.classLevel) ||
+                      isSameRoom(c.room, item.classLevel))
                   );
 
                   const courseId = matchedCourse ? matchedCourse.id : item.id;
@@ -836,7 +843,7 @@ export function TeacherPortal() {
                     endTime,
                     subjectCode: item.courseCode,
                     subjectName: item.courseName,
-                    className: item.targetClass,
+                    className: item.classLevel || item.targetClass,
                     room: item.room || (item.targetClass.includes('5/8') ? '[943] HR 5/8' : item.targetClass.includes('5/9') ? '[935] HR 5/9' : 'ห้องเรียน ' + item.targetClass),
                     attendanceTaken: isAttendanceTaken,
                     hasPostTeachingRecord: !!existingRecord,
@@ -867,9 +874,10 @@ export function TeacherPortal() {
                 const periodItem = mappedPeriods.find(p => p.id === periodId || p.courseId === periodId);
                 let course = myCourses.find(c => c.id === periodId);
                 if (!course && periodItem) {
-                  course = myCourses.find(c => 
-                    c.id === periodItem.courseId || 
-                    (c.code === periodItem.subjectCode && isSameRoom(c.room, periodItem.className))
+                  course = myCourses.find(c =>
+                    c.id === periodItem.courseId ||
+                    (c.code === periodItem.subjectCode &&
+                      (isSameRoom(c.room, periodItem.className) || isSameRoom(c.level, periodItem.className)))
                   );
                 }
                 if (!course && periodItem) {
@@ -878,6 +886,7 @@ export function TeacherPortal() {
                     code: periodItem.subjectCode,
                     name: periodItem.subjectName,
                     room: periodItem.className,
+                    level: periodItem.className,
                     term: '1/2569',
                     studentsCount: periodItem.studentsCount || 40,
                     attendanceTaken: !!periodItem.attendanceTaken,
@@ -970,7 +979,8 @@ export function TeacherPortal() {
                         setActiveCourse({
                           ...course,
                           periodIndex: pIndex,
-                          room: periodItem?.className || course.room
+                          room: periodItem?.className || course.room,
+                          level: periodItem?.className || course.level
                         });
                         setCurrentPeriod(PERIODS[pIndex] || `คาบ ${pIndex}`);
                         setView('class');
@@ -1015,7 +1025,8 @@ export function TeacherPortal() {
                         setActiveCourse({
                           ...course,
                           periodIndex: pIndex,
-                          room: periodItem?.className || course.room
+                          room: periodItem?.className || course.room,
+                          level: periodItem?.className || course.level
                         });
                         setCurrentPeriod(PERIODS[pIndex] || `คาบ ${pIndex}`);
                         setView('class');
@@ -1051,7 +1062,7 @@ export function TeacherPortal() {
                       >
                         <option value="">-- เลือกวิชาของท่าน --</option>
                         {globalCourses.filter(gc => gc.teacherEmail === user?.email).map(gc => (
-                          <option key={gc.courseId} value={gc.courseId}>{gc.code} {gc.courseName} ({gc.roomName}) - {gc.scheduleString}</option>
+                          <option key={gc.courseId} value={gc.courseId}>{gc.code} {formatCourseTitle(gc.courseName, gc.level, gc.roomName)} - {gc.scheduleString}</option>
                         ))}
                       </select>
                     </div>
@@ -1085,7 +1096,7 @@ export function TeacherPortal() {
                         >
                           <option value="">-- เลือกวิชาของเพื่อนครู --</option>
                           {globalCourses.filter(gc => gc.teacherEmail === swapTargetEmail).map(gc => (
-                            <option key={gc.courseId} value={gc.courseId}>{gc.code} {gc.courseName} ({gc.roomName}) - {gc.scheduleString}</option>
+                            <option key={gc.courseId} value={gc.courseId}>{gc.code} {formatCourseTitle(gc.courseName, gc.level, gc.roomName)} - {gc.scheduleString}</option>
                           ))}
                         </select>
                       </div>
@@ -1266,7 +1277,7 @@ export function TeacherPortal() {
                           <div key={idx} className="bg-[#0b0f19] p-5 border border-slate-800/80 rounded-xl space-y-3 hover:border-slate-700 transition-colors">
                             <div className="flex flex-wrap justify-between items-start gap-2">
                               <div>
-                                <h4 className="text-sm font-bold text-white">{course?.code} {course?.courseName} ({course?.roomName})</h4>
+                                <h4 className="text-sm font-bold text-white">{course?.code} {formatCourseTitle(course?.courseName, course?.level, course?.roomName)}</h4>
                                 <div className="text-[11px] text-slate-400 mt-0.5">
                                   วันที่สอน: {format(new Date(record.date), 'dd MMMM yyyy', { locale: th })} • ส่งเมื่อ: {new Date(record.submittedAt).toLocaleTimeString('th-TH')} น.
                                 </div>
@@ -1335,7 +1346,7 @@ export function TeacherPortal() {
                     >
                       <option value="">-- เลือกรายวิชา --</option>
                       {myCourses.map(c => (
-                        <option key={c.id} value={c.id}>{c.code} {c.name} ({c.room})</option>
+                        <option key={c.id} value={c.id}>{c.code} {formatCourseTitle(c.name, c.level, c.room)}</option>
                       ))}
                     </select>
                   </div>
@@ -1679,7 +1690,7 @@ export function TeacherPortal() {
                                 else setCopyTargetCourses(copyTargetCourses.filter(id => id !== c.id));
                               }}
                             />
-                            <span className="text-xs text-slate-300">{c.code} {c.name} ({c.room})</span>
+                            <span className="text-xs text-slate-300">{c.code} {formatCourseTitle(c.name, c.level, c.room)}</span>
                           </label>
                         ))}
                         {myCourses.filter(c => c.id !== selectedGradebookCourseId && c.code === myCourses.find(mc => mc.id === selectedGradebookCourseId)?.code).length === 0 && (
