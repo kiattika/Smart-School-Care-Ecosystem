@@ -25,6 +25,11 @@ import { SubstituteTeachingModule } from './components/SubstituteTeachingModule'
 
 const PERIODS = ['โฮมรูม', 'คาบ 1', 'คาบ 2', 'คาบ 3', 'คาบ 4', 'พักกลางวัน', 'คาบ 5', 'คาบ 6', 'คาบ 7', 'คาบ 8'];
 
+const DAY_TH_NAMES: Record<string, string> = {
+  monday: 'จันทร์', tuesday: 'อังคาร', wednesday: 'พุธ', thursday: 'พฤหัสบดี',
+  friday: 'ศุกร์', saturday: 'เสาร์', sunday: 'อาทิตย์'
+};
+
 export function TeacherPortal() {
   const {
     user,
@@ -43,7 +48,6 @@ export function TeacherPortal() {
     submitLateAttendanceRequest,
     lateAttendanceRequests,
     courses,
-    globalCourses,
     activeLearningPoints,
     setCourses,
     markAttendanceDone,
@@ -109,7 +113,30 @@ export function TeacherPortal() {
 
   const todayStr = format(currentDate, 'yyyy-MM-dd');
 
-
+  // รายวิชาทั้งระบบ (ทุกครู) — derive จาก Firestore `schedules` แบบ real-time
+  // แทนการอ่าน globalCourses จาก Zustand store ซึ่งจะมีค่าเฉพาะเซสชันที่เพิ่ง import เท่านั้น
+  // (พอเปิดหน้าใหม่/ล็อกอินใหม่/คนละเครื่อง store ว่าง → ตารางสอนหายทั้งที่ Firestore มีครบ)
+  const globalCourses: GlobalCourse[] = useMemo(() => {
+    return (fsSchedules as any[]).map(sch => {
+      const rawId = String(sch.id || '');
+      const courseId = rawId.startsWith('sch_') ? `course_${rawId.slice(4)}` : rawId;
+      const dayTh = DAY_TH_NAMES[String(sch.dayOfWeek || '').toLowerCase()] || sch.dayOfWeek || '';
+      const hasPeriod = sch.periodNumber !== undefined && sch.periodNumber !== null;
+      const scheduleString = dayTh
+        ? (hasPeriod ? `${dayTh} คาบ ${sch.periodNumber}` : dayTh)
+        : (sch.scheduleString || sch.schedule || '');
+      return {
+        courseId,
+        code: sch.subjectCode || sch.courseCode || '',
+        courseName: sch.subjectName || sch.courseName || '',
+        teacherName: sch.sourceTeacherName || sch.teacherName || sch.unlinkedTeacherName || 'ครูผู้สอน',
+        teacherEmail: sch.teacherEmail || sch.unlinkedTeacherEmail || '',
+        roomName: sch.room || sch.level || sch.targetClass || '',
+        scheduleString,
+        level: sch.level || '',
+      } as GlobalCourse;
+    });
+  }, [fsSchedules]);
 
   const myCourses: Course[] = useMemo(() => {
     const rawList = globalCourses
@@ -571,10 +598,12 @@ export function TeacherPortal() {
       markAttendanceDone(courseId);
 
       // Update Firestore schedules collection too
-      const matchedSched = fsSchedules.find(s => 
-        s.courseCode === activeCourse?.code && 
-        (s.targetClass.replace(/^M\./i, 'ม.') === activeCourse?.room?.replace(/^M\./i, 'ม.'))
-      );
+      const matchedSched = (fsSchedules as any[]).find(s => {
+        const code = s.courseCode || s.subjectCode || '';
+        const cls = String(s.targetClass || s.room || s.level || '');
+        return code === activeCourse?.code &&
+          cls.replace(/^M\./i, 'ม.') === activeCourse?.room?.replace(/^M\./i, 'ม.');
+      });
       if (matchedSched) {
         await updateScheduleAttendance(matchedSched.id, true);
       }
@@ -735,11 +764,41 @@ export function TeacherPortal() {
               // 2. Map and filter periods specifically for targetDayOfWeek
               const rawMappedPeriods: SubjectPeriod[] = [];
 
+              // schedules docs ที่ import จากไฟล์ภาระงานสอนใช้ field `dayOfWeek` (string) / `subjectCode` ฯลฯ
+              // ส่วน interface เดิมคาดหวัง `scheduleDay` (number) / `courseCode` — normalize ให้รองรับทั้งสองแบบ
+              const DAY_NAME_TO_NUM: Record<string, number> = {
+                sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6
+              };
               const todayFsSchedules = (!fsLoading && fsSchedules.length > 0)
-                ? fsSchedules.filter(item => 
-                    isTeacherEmailMatch(item.teacherEmail, user?.email) && 
-                    item.scheduleDay === targetDayOfWeek
-                  )
+                ? (fsSchedules as any[])
+                    .map(raw => {
+                      const dayNum = typeof raw.scheduleDay === 'number'
+                        ? raw.scheduleDay
+                        : DAY_NAME_TO_NUM[String(raw.dayOfWeek || '').toLowerCase()];
+                      return {
+                        id: raw.id,
+                        teacherEmail: raw.teacherEmail || raw.unlinkedTeacherEmail || '',
+                        teacherIds: raw.teacherIds,
+                        teacherId: raw.teacherId,
+                        scheduleDay: dayNum,
+                        periodNumber: raw.periodNumber,
+                        courseCode: raw.courseCode || raw.subjectCode || '',
+                        courseName: raw.courseName || raw.subjectName || '',
+                        targetClass: raw.targetClass || raw.room || raw.level || '',
+                        room: raw.room || raw.level || '',
+                        type: raw.type || raw.subjectType || 'MAIN',
+                        attendanceTaken: raw.attendanceTaken,
+                        studentsCount: raw.studentsCount,
+                        teachingPartner: raw.teachingPartner,
+                        partnerCheckedAttendance: raw.partnerCheckedAttendance,
+                      };
+                    })
+                    .filter(item =>
+                      (isTeacherEmailMatch(item.teacherEmail, user?.email) ||
+                        (user?.uid && (item.teacherId === user.uid ||
+                          (Array.isArray(item.teacherIds) && item.teacherIds.includes(user.uid))))) &&
+                      item.scheduleDay === targetDayOfWeek
+                    )
                 : [];
 
               if (todayFsSchedules.length > 0) {
@@ -1532,7 +1591,13 @@ export function TeacherPortal() {
               </div>
             )}
 
-            {myCourses.length === 0 && dashboardTab === 'courses' && (
+            {fsLoading && myCourses.length === 0 && dashboardTab === 'courses' && (
+              <div className="text-center py-20 border border-dashed border-white/10 rounded-2xl bg-[#151921]">
+                <span className="animate-spin text-2xl leading-none inline-block mb-3">⟳</span>
+                <p className="text-slate-500">กำลังโหลดตารางสอนจากฐานข้อมูล...</p>
+              </div>
+            )}
+            {!fsLoading && myCourses.length === 0 && dashboardTab === 'courses' && (
               <div className="text-center py-20 border border-dashed border-white/10 rounded-2xl bg-[#151921]">
                 <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-4" />
                 <h3 className="text-lg font-bold text-slate-300 mb-2">ยังไม่มีรายวิชาที่สอน</h3>

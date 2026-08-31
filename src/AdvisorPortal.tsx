@@ -3,6 +3,7 @@ import { Student } from "./types";
 import { MOCK_VISIT_DATA } from "./data/mockData";
 import React, { useState, useMemo } from 'react';
 import { useStore } from './store';
+import { useRealStudents } from "./hooks/useRealStudents";
 import { useHomeroomAttendance } from "./hooks/useHomeroomAttendance";
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -22,28 +23,30 @@ import { motion, AnimatePresence } from 'motion/react';
 // Mock Data for Home Visits
 
 export function AdvisorPortal() {
-  const { 
-    user, 
-    students, 
-    analytics, 
-    leaveRequests, 
+  const {
+    user,
+    analytics,
+    leaveRequests,
     updateLeaveRequestStatus,
     updateStudentProfile,
-    updateMorningAttendance,
     submitHomeVisit,
     homeVisits,
     selfAssessments
   } = useStore();
+
+  // อ่านรายชื่อนักเรียนจาก Firestore สด (real-time) แทน Zustand store แบบ session-local
+  // store จะมีข้อมูลก็ต่อเมื่อมีคน import ในเซสชันเดียวกันเท่านั้น — เปิดใหม่/ล็อกอินใหม่แล้วว่าง
+  const { students, loading: studentsLoading } = useRealStudents();
+
   const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment'>('dashboard');
   const [assessmentModalStudent, setAssessmentModalStudent] = useState<Student | null>(null);
   const [assessmentSearch, setAssessmentSearch] = useState('');
   const [assessmentFilter, setAssessmentFilter] = useState<'ALL' | 'COMPLETED' | 'PENDING'>('ALL');
-  
+
+  // สถานะเช็คชื่อโฮมรูมแบบ optimistic (ก่อนกด "บันทึกการเช็คชื่อทั้งหมด")
+  const [attendanceOverrides, setAttendanceOverrides] = useState<Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>>({});
+
   const myRoom = user?.profile?.assignments?.homeroomClass;
-  const myStudents = useMemo(() => {
-    if (!myRoom) return [];
-    return (students || []).filter(s => isSameRoom(s.room, myRoom) || isSameRoom((s as any).className, myRoom));
-  }, [myRoom, students]);
 
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const targetRoom = myRoom || 'ม.5/8';
@@ -54,6 +57,20 @@ export function AdvisorPortal() {
     requestUnlock: hrRequestUnlock
   } = useHomeroomAttendance(todayStr, targetRoom);
 
+  const myStudents = useMemo(() => {
+    if (!myRoom) return [];
+    return (students || [])
+      .filter(s => isSameRoom(s.room, myRoom) || isSameRoom((s as any).className, myRoom))
+      .map(s => {
+        // ลำดับความสำคัญของสถานะเช้า: override ในหน้าจอ > ค่าที่บันทึกใน Firestore (hrRecord) > ค่าใน student doc
+        const merged = attendanceOverrides[s.studentId]
+          ?? hrRecord?.students?.[s.studentId]
+          ?? s.attendance.morningStatus;
+        if (merged === s.attendance.morningStatus && !attendanceOverrides[s.studentId]) return s;
+        return { ...s, attendance: { ...s.attendance, morningStatus: merged } };
+      });
+  }, [myRoom, students, attendanceOverrides, hrRecord]);
+
   const handleSaveAll = async () => {
     try {
       const studentStatuses: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'> = {};
@@ -61,6 +78,7 @@ export function AdvisorPortal() {
         studentStatuses[student.studentId] = (student.attendance.morningStatus || 'PRESENT') as any;
       });
       await saveHomeroomAttendance(studentStatuses);
+      setAttendanceOverrides({}); // เคลียร์ optimistic overrides — ใช้ค่าจาก hrRecord (Firestore) แทน
       setToastMessage("บันทึกและโฮมรูมเรียบร้อยแล้ว ระบบทำการล็อกข้อมูลเรียบร้อย!");
       setTimeout(() => setToastMessage(null), 3000);
     } catch (e) {
@@ -366,10 +384,15 @@ export function AdvisorPortal() {
                   <div className="text-xs text-slate-400">สมาชิกทั้งหมด {myStudents.length} คน</div>
                 </div>
                 <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto content-start">
-                  {myStudents.length === 0 ? (
+                  {studentsLoading ? (
+                    <div className="col-span-full py-12 text-center text-slate-500 text-xs flex flex-col items-center justify-center gap-2">
+                      <span className="animate-spin text-xl leading-none">⟳</span>
+                      <span>กำลังโหลดรายชื่อนักเรียนจากฐานข้อมูล...</span>
+                    </div>
+                  ) : myStudents.length === 0 ? (
                     <div className="col-span-full py-12 text-center text-slate-500 text-xs flex flex-col items-center justify-center gap-2">
                       <Users className="w-8 h-8 text-slate-600" />
-                      <span>ยังไม่มีนักเรียนในห้องนี้</span>
+                      <span>ยังไม่มีนักเรียนในห้อง {myRoom}</span>
                       <span className="text-[10px] text-slate-600">กรุณานำเข้าข้อมูลนักเรียนผ่านระบบจัดการนักเรียนใน Admin Portal</span>
                     </div>
                   ) : (
@@ -671,6 +694,18 @@ export function AdvisorPortal() {
                 )}
 
                 <div className="divide-y divide-white/5 max-h-[60vh] overflow-y-auto pr-2 space-y-3">
+                  {studentsLoading && (
+                    <div className="py-10 text-center text-slate-500 text-xs flex flex-col items-center gap-2">
+                      <span className="animate-spin text-xl leading-none">⟳</span>
+                      <span>กำลังโหลดรายชื่อนักเรียนจากฐานข้อมูล...</span>
+                    </div>
+                  )}
+                  {!studentsLoading && myStudents.length === 0 && (
+                    <div className="py-10 text-center text-slate-500 text-xs flex flex-col items-center gap-2">
+                      <Users className="w-8 h-8 text-slate-600" />
+                      <span>ยังไม่มีนักเรียนในห้อง {myRoom}</span>
+                    </div>
+                  )}
                   {[...myStudents]
                     .sort((a, b) => a.studentNo - b.studentNo)
                     .map((student) => {
@@ -813,8 +848,8 @@ export function AdvisorPortal() {
                                 <button
                                   onClick={() => {
                                     if (isEditingLocked) return;
-                                    updateMorningAttendance(student.studentId, 'PRESENT', 'MANUAL');
-                                    setToastMessage(`เช็คชื่อและบันทึก 'มาเรียน' ให้เลขที่ ${student.studentNo} เรียบร้อยแล้ว`);
+                                    setAttendanceOverrides(prev => ({ ...prev, [student.studentId]: 'PRESENT' }));
+                                    setToastMessage(`เลือกสถานะ 'มาเรียน' ให้เลขที่ ${student.studentNo} แล้ว — กด "บันทึกการเช็คชื่อทั้งหมด" เพื่อยืนยัน`);
                                     setTimeout(() => setToastMessage(null), 3000);
                                   }}
                                   disabled={isEditingLocked}
@@ -830,8 +865,8 @@ export function AdvisorPortal() {
                                 <button
                                   onClick={() => {
                                     if (isEditingLocked) return;
-                                    updateMorningAttendance(student.studentId, 'LATE', 'MANUAL');
-                                    setToastMessage(`เช็คชื่อและบันทึก 'สาย' ให้เลขที่ ${student.studentNo} เรียบร้อยแล้ว`);
+                                    setAttendanceOverrides(prev => ({ ...prev, [student.studentId]: 'LATE' }));
+                                    setToastMessage(`เลือกสถานะ 'สาย' ให้เลขที่ ${student.studentNo} แล้ว — กด "บันทึกการเช็คชื่อทั้งหมด" เพื่อยืนยัน`);
                                     setTimeout(() => setToastMessage(null), 3000);
                                   }}
                                   disabled={isEditingLocked}
@@ -847,8 +882,8 @@ export function AdvisorPortal() {
                                 <button
                                   onClick={() => {
                                     if (isEditingLocked) return;
-                                    updateMorningAttendance(student.studentId, 'LEAVE', 'MANUAL');
-                                    setToastMessage(`เช็คชื่อและบันทึก 'ลาเรียน' ให้เลขที่ ${student.studentNo} เรียบร้อยแล้ว`);
+                                    setAttendanceOverrides(prev => ({ ...prev, [student.studentId]: 'LEAVE' }));
+                                    setToastMessage(`เลือกสถานะ 'ลาเรียน' ให้เลขที่ ${student.studentNo} แล้ว — กด "บันทึกการเช็คชื่อทั้งหมด" เพื่อยืนยัน`);
                                     setTimeout(() => setToastMessage(null), 3000);
                                   }}
                                   disabled={isEditingLocked}
@@ -864,8 +899,8 @@ export function AdvisorPortal() {
                                 <button
                                   onClick={() => {
                                     if (isEditingLocked) return;
-                                    updateMorningAttendance(student.studentId, 'ABSENT', 'MANUAL');
-                                    setToastMessage(`เช็คชื่อและบันทึก 'ขาดเรียน' ให้เลขที่ ${student.studentNo} เรียบร้อยแล้ว`);
+                                    setAttendanceOverrides(prev => ({ ...prev, [student.studentId]: 'ABSENT' }));
+                                    setToastMessage(`เลือกสถานะ 'ขาดเรียน' ให้เลขที่ ${student.studentNo} แล้ว — กด "บันทึกการเช็คชื่อทั้งหมด" เพื่อยืนยัน`);
                                     setTimeout(() => setToastMessage(null), 3000);
                                   }}
                                   disabled={isEditingLocked}
