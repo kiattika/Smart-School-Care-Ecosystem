@@ -400,26 +400,27 @@ export function AdvisorPortal() {
                     const studentAnalytics = analytics.find(a => a.studentId === student.studentId);
                     const bScore = studentAnalytics?.behaviorScore ?? 100;
                     
-                    const isSkipped = skippedStudents.some(s => s.studentId === student.studentId);
-                    const hasLeave = leaveRequests.some(r => r.studentId === student.studentId && r.status === 'APPROVED');
-                    
+                    // สถานะประจำวันอ่านจากการเช็คชื่อจริง (attendance_records ของวันนี้ — merge เข้า myStudents แล้ว)
+                    const morning = student.attendance.morningStatus;
+                    const hasApprovedLeave = leaveRequests.some(r => r.studentId === student.studentId && r.status === 'APPROVED');
+
                     let dailyStatusText = "มาเรียนปกติ";
                     let dailyStatusColor = "text-emerald-400";
                     let dailyStatusBg = "bg-emerald-500/10 border-emerald-500/20";
                     let DailyIcon = UserCheck;
 
-                    if (hasLeave) {
+                    if (morning === 'LEAVE' || hasApprovedLeave) {
                       dailyStatusText = "ลาหยุด";
                       dailyStatusColor = "text-indigo-400";
                       dailyStatusBg = "bg-indigo-500/10 border-indigo-500/20";
                       DailyIcon = FileText;
-                    } else if (isSkipped) {
-                      dailyStatusText = "หนีเรียน (คาบ 3)";
+                    } else if (morning === 'ABSENT') {
+                      dailyStatusText = "ขาดเรียน";
                       dailyStatusColor = "text-rose-400";
                       dailyStatusBg = "bg-rose-500/10 border-rose-500/20";
                       DailyIcon = UserX;
-                    } else if (student.studentId === '54003') {
-                      dailyStatusText = "มาสาย (สแกน 08:15)";
+                    } else if (morning === 'LATE') {
+                      dailyStatusText = "มาสาย";
                       dailyStatusColor = "text-amber-400";
                       dailyStatusBg = "bg-amber-500/10 border-amber-500/20";
                       DailyIcon = Activity;
