@@ -48,6 +48,33 @@ allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') ||
 - ปุ่ม dev/demo ที่ตั้งใจเป็นทางลัดจริงๆ (ไม่ผูก user จริง) ต้อง gate ด้วย `import.meta.env.DEV` และตั้งชื่อให้ตรงไปตรงมา (เช่น "Simulate") ไม่ใช่ทำให้ดูเหมือนงานจริง (เช่น "Mark Done")
 - ห้ามสร้างฟีเจอร์ import/data-entry ซ้ำซ้อนหลายชุดสำหรับงานเดียวกัน — ถ้ามี component จริงอยู่แล้ว (เช่น `BulkDataImportModal.tsx`) ให้ reuse ไม่สร้างใหม่
 
+### หน้า portal ต้องอ่าน students/courses จาก Firestore listener สด ไม่ใช่ Zustand store
+
+Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อมูลก็ต่อเมื่อมีคน import
+ในเซสชันเบราว์เซอร์เดียวกันเท่านั้น — เปิดหน้าใหม่/ล็อกอินใหม่/คนละเครื่อง store ว่าง
+→ หน้าจอขึ้น "ไม่มีข้อมูล" ทั้งที่ Firestore ครบ ให้ใช้ hook `useRealStudents()`
+(`onSnapshot('students')`) หรือ `useTeacherFirestoreSchedule()` (`onSnapshot('schedules')`) แทน
+
+**แก้แล้ว:** `AdvisorPortal.tsx`, `TeacherPortal.tsx` (ทั้ง students และ courses), `HomeVisitPortal.tsx`
+
+**เช็คลิสต์ที่ยังต้องแก้แบบเดียวกัน (backlog):**
+- `src/ExecutivePortal.tsx` — `students` → ExecutiveEngagementDashboard / ExecutiveLearnerAnalytics
+- `src/ParentPortal.tsx` — `students` (filter ด้วย parentUid)
+- `src/StudentPortal.tsx` — `students`
+- `src/components/ClassroomLeaderboard.tsx` — `students`
+- `src/components/finance/FinancePortal.tsx` — `students` (จับคู่ invoice)
+- `src/components/guidance/GuidancePortal.tsx` — `students` (dropdown SDQ)
+- `src/components/infirmary/InfirmaryPortal.tsx` — `students` (dropdown ห้องพยาบาล)
+- `src/components/supervision/SupervisionPortal.tsx` — `students`
+- `src/components/SubstituteTeachingModule.tsx` — `students` (เช็คชื่อสอนแทน)
+- `src/components/student-parent/*` — 7 ไฟล์: BehaviorDisciplineModule, SocioeconomicWelfareModule, AcademicHomeworkModule, PortfolioActivityVault, HealthMentalWellbeingModule, ParentEngagementServices, GateAttendanceTracker
+
+### แสดงรายวิชา+ระดับชั้น+ห้อง ใช้ `formatCourseTitle()` เสมอ
+
+จุดที่โชว์ชื่อวิชาคู่กับห้อง ต้องมีระดับชั้น (ม.5/8) ด้วย — ใช้ `formatCourseTitle(name, level, room)`
+จาก `src/lib/utils.ts` (คืน `"คณิตศาสตร์พื้นฐาน - ม.5/8 (943)"`). `Course.level` แยกจาก
+`Course.room` (ห้องกายภาพ เช่น "943"); schedule doc ที่ import เก็บชั้นไว้ที่ field `level`
+
 ---
 
 ## 🔴 ข้อมูลอ้างอิงบุคคล ต้องผูกด้วย identity ที่แน่นอน ไม่ใช่ string สมมติ
