@@ -1022,4 +1022,38 @@ export async function saveActiveLearningLogFirestore(record: ActiveLearningRecor
   }
 }
 
+/**
+ * Real-time listener สำหรับ active_learning_logs ทั้งหมด — ใช้ใน ClassroomLeaderboard
+ * เพื่อให้กระดานคะแนนแสดงข้อมูลจริงจาก Firestore (เดิมอ่านจาก Zustand store ที่ว่างเมื่อ
+ * เปิดหน้าใหม่/ล็อกอินใหม่ → กระดานว่างทั้งที่มี log จริง)
+ */
+export function subscribeActiveLearningLogs(
+  callback: (records: ActiveLearningRecord[]) => void
+): () => void {
+  try {
+    const ref = collection(db, 'active_learning_logs');
+    return onSnapshot(ref, (snapshot) => {
+      const rows = snapshot.docs.map(d => {
+        const data = d.data() as any;
+        return {
+          id: d.id,
+          studentId: String(data.studentId || ''),
+          courseId: data.courseId || undefined,
+          points: Number(data.points || 0),
+          category: data.category || 'GENERAL',
+          note: data.note || undefined,
+          awardedAt: data.awardedAt || '',
+        } as ActiveLearningRecord;
+      });
+      callback(rows);
+    }, (error) => {
+      console.warn('[subscribeActiveLearningLogs] Listener error:', error.message);
+      callback([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeActiveLearningLogs] Setup error:', error);
+    return () => {};
+  }
+}
+
 
