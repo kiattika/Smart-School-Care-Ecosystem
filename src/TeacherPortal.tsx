@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { usePeriodsConfig } from './hooks/usePeriodsConfig';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
+import { useRealStudents } from './hooks/useRealStudents';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass } from './services/firestoreService';
 import { TeacherScheduleList, SubjectPeriod } from './components/TeacherScheduleList';
 import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } from 'date-fns';
@@ -33,10 +34,9 @@ const DAY_TH_NAMES: Record<string, string> = {
 export function TeacherPortal() {
   const {
     user,
-    currentDate, 
-    currentPeriod, 
-    students, 
-    analytics, 
+    currentDate,
+    currentPeriod,
+    analytics,
     attendanceRecords,
     scheduleConfig,
     setCurrentPeriod,
@@ -64,6 +64,10 @@ export function TeacherPortal() {
     updateCourseScoreSetting,
     completeSubstituteAssignment
   } = useStore();
+
+  // รายชื่อนักเรียนอ่านจาก Firestore สด (real-time) แทน Zustand store แบบ session-local
+  // ใช้ในผังห้องเรียน (ClassroomSeatingManager), สุ่มนักเรียน, gradebook, Early Warning
+  const { students } = useRealStudents();
 
   // --- บันทึกหลังสอนแทน (deadline ก่อน 24:00 น. ของวันที่สอน) ---
   const [subCompleteTarget, setSubCompleteTarget] = useState<SubstituteAssignment | null>(null);
