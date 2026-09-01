@@ -34,6 +34,7 @@ import { HealthMentalWellbeingModule } from './components/student-parent/HealthM
 import { SocioeconomicWelfareModule } from './components/student-parent/SocioeconomicWelfareModule';
 import { BehaviorDisciplineModule } from './components/student-parent/BehaviorDisciplineModule';
 import { PortfolioActivityVault } from './components/student-parent/PortfolioActivityVault';
+import { StudentPortfolioSection } from './components/portfolio/StudentPortfolioSection';
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
 import { StudentSelfAssessmentForm } from './components/StudentSelfAssessmentForm';
@@ -447,9 +448,14 @@ export function StudentPortal() {
           <BehaviorDisciplineModule studentId={student.studentId} isParentView={false} />
         )}
 
-        {/* 5. Portfolio & TCAS 10-Page Exporter */}
+        {/* 5. Portfolio — บันทึกผลงานเอง (Firestore + อนุมัติโดยครูที่ปรึกษา) + คลังผลงานเดิม */}
         {activeTab === 'portfolio' && (
-          <PortfolioActivityVault studentId={student.studentId} />
+          <div className="space-y-8">
+            {user?.uid && <StudentPortfolioSection student={student} studentUid={user.uid} />}
+            <div className="border-t border-slate-800 pt-6">
+              <PortfolioActivityVault studentId={student.studentId} />
+            </div>
+          </div>
         )}
 
         {/* 6. Academic Reports & Homework */}

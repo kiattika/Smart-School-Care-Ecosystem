@@ -16,6 +16,7 @@ import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { ResponsiveContainer, LineChart, Line, XAxis, Tooltip as RechartsTooltip } from 'recharts';
 import { StudentAnalyticsDashboard } from './components/StudentAnalyticsDashboard';
+import { AdvisorPortfolioReview } from './components/portfolio/AdvisorPortfolioReview';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -276,8 +277,14 @@ export function AdvisorPortal() {
               className="w-full flex-1 flex flex-col"
             >
               {activeTab === 'dashboard' && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
-              
+            <div className="animate-in fade-in duration-300 space-y-4">
+            <div className="bg-[#121624] border border-white/10 rounded-2xl px-5 py-3">
+              <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-bold border border-indigo-400/30">ส่วน A</span>
+              <span className="ml-2 text-sm font-bold text-white">ข้อมูลทั่วไป & การดูแลช่วยเหลือ</span>
+              <p className="text-[11px] text-slate-400 mt-0.5">การมาโรงเรียน การหนีเรียน คำร้องลา การเช็คชื่อโฮมรูม การตอบแบบประเมิน การเยี่ยมบ้าน — ข้อมูลด้านวิชาการ/แฟ้มสะสมผลงานอยู่แท็บ “สถิติวิชาการ” (ส่วน B)</p>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
               {/* Column 1: Leave Requests & Radar */}
               <div className="lg:col-span-1 flex flex-col gap-6">
                 
@@ -463,9 +470,10 @@ export function AdvisorPortal() {
                   }))}
                 </div>
               </div>
-              
+
             </div>
-   
+            </div>
+
           )}
           {activeTab === 'visit-planner' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300 h-full">
@@ -925,8 +933,16 @@ export function AdvisorPortal() {
             </div>
           )}
           {activeTab === 'analytics' && (
-            <div className="max-w-7xl mx-auto w-full pb-10">
+            <div className="max-w-7xl mx-auto w-full pb-10 space-y-8">
+              <div className="bg-[#121624] border border-white/10 rounded-2xl px-5 py-3">
+                <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-bold border border-purple-400/30">ส่วน B</span>
+                <span className="ml-2 text-sm font-bold text-white">สถิติวิชาการ & แฟ้มสะสมผลงาน</span>
+                <p className="text-[11px] text-slate-400 mt-0.5">เกรด/ผลการเรียน รางวัล การอบรม ฝึกงาน จิตอาสา — เฉพาะข้อมูลด้านวิชาการ (แยกจากส่วน A ความประพฤติ/การดูแลทั่วไป ในแท็บ “แดชบอร์ดห้อง”)</p>
+              </div>
               <StudentAnalyticsDashboard roomName={myRoom || 'No Room'} students={myStudents} />
+              <div className="border-t border-white/10 pt-8">
+                <AdvisorPortfolioReview homeroomClass={myRoom} />
+              </div>
             </div>
           )}
 

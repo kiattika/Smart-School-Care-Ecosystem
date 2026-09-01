@@ -28,6 +28,7 @@ import { HealthMentalWellbeingModule } from './components/student-parent/HealthM
 import { SocioeconomicWelfareModule } from './components/student-parent/SocioeconomicWelfareModule';
 import { BehaviorDisciplineModule } from './components/student-parent/BehaviorDisciplineModule';
 import { PortfolioActivityVault } from './components/student-parent/PortfolioActivityVault';
+import { ParentPortfolioView } from './components/portfolio/ParentPortfolioView';
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
@@ -405,7 +406,12 @@ export function ParentPortal() {
 
         {/* 5. Portfolio Vault & TCAS */}
         {activeTab === 'portfolio' && (
-          <PortfolioActivityVault studentId={student.studentId} />
+          <div className="space-y-8">
+            <ParentPortfolioView parentUid={user?.uid} studentId={student.studentId} />
+            <div className="border-t border-slate-800 pt-6">
+              <PortfolioActivityVault studentId={student.studentId} />
+            </div>
+          </div>
         )}
 
         {/* 6. Academic Reports & Homework */}
