@@ -270,6 +270,22 @@ export function TeacherPortal() {
     return uniqueCourses;
   }, [globalCourses, user?.email, substituteAssignments, todayStr, periodSwaps, courses]);
 
+  // รายวิชาสำหรับ "สมุดบันทึกคะแนน" — ต้องเป็นวิชาที่ครูคนนี้เป็นผู้สอนหลักจริงเท่านั้น
+  // (ไม่รวมคาบสอนแทน/สลับคาบ — คนสอนแทนไม่ใช่ผู้ให้คะแนน) และจัดกลุ่มตาม "รหัสวิชา + ห้อง"
+  // 1 กลุ่ม ไม่ใช่แยกรายคาบ (เดิม dropdown ขึ้นวิชาเดียวซ้ำหลายบรรทัดตามจำนวนคาบ/สัปดาห์)
+  const gradebookCourses: Course[] = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Course[] = [];
+    for (const c of myCourses) {
+      if (c.roleLabel) continue; // สอนแทน / สลับคาบเรียน — ข้าม
+      const key = `${c.code}__${(c.room || '').replace(/^M\./i, 'ม.')}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(c);
+    }
+    return out;
+  }, [myCourses]);
+
   const [view, setView] = useState<'dashboard' | 'class' | 'active_learning'>('dashboard');
   const [activeCourse, setActiveCourse] = useState<Course | null>(null);
   // เข้าห้องเรียนในโหมด "เช็คชื่อย้อนหลัง" (อนุมัติแล้ว) — ล็อกกิจกรรมอื่น ทำได้แค่เช็คชื่อ
@@ -362,7 +378,7 @@ export function TeacherPortal() {
       return;
     }
 
-    const selectedCourse = myCourses.find(c => c.id === selectedGradebookCourseId);
+    const selectedCourse = gradebookCourses.find(c => c.id === selectedGradebookCourseId);
     const targetClassName = selectedCourse?.room || (selectedCourse as any)?.className || (selectedCourse as any)?.roomName || '';
     const courseCode = selectedCourse?.code || '';
     const term = selectedCourse?.term || '1/2569';
@@ -1491,7 +1507,7 @@ export function TeacherPortal() {
                       onChange={(e) => setSelectedGradebookCourseId(e.target.value)}
                     >
                       <option value="">-- เลือกรายวิชา --</option>
-                      {myCourses.map(c => (
+                      {gradebookCourses.map(c => (
                         <option key={c.id} value={c.id}>{c.code} {formatCourseTitle(c.name, c.level, c.room)}</option>
                       ))}
                     </select>
@@ -1505,7 +1521,7 @@ export function TeacherPortal() {
                 ) : (
                   <div className="overflow-x-auto">
                     {(() => {
-                      const selectedCourse = myCourses.find(c => c.id === selectedGradebookCourseId);
+                      const selectedCourse = gradebookCourses.find(c => c.id === selectedGradebookCourseId);
                       const targetClassName = selectedCourse?.room || (selectedCourse as any)?.className || (selectedCourse as any)?.roomName || '';
                       const courseCode = selectedCourse?.code || '';
                       const term = selectedCourse?.term || '1/2569';
@@ -1825,7 +1841,7 @@ export function TeacherPortal() {
                         <button onClick={() => { setIsCopyMode(false); setCopyTargetCourses([]); }} className="text-[10px] text-slate-500 hover:text-white">ยกเลิก</button>
                       </div>
                       <div className="max-h-32 overflow-y-auto space-y-1 pr-1">
-                        {myCourses.filter(c => c.id !== selectedGradebookCourseId && c.code === myCourses.find(mc => mc.id === selectedGradebookCourseId)?.code).map(c => (
+                        {gradebookCourses.filter(c => c.id !== selectedGradebookCourseId && c.code === gradebookCourses.find(mc => mc.id === selectedGradebookCourseId)?.code).map(c => (
                           <label key={c.id} className="flex items-center gap-2 p-2 hover:bg-white/5 rounded cursor-pointer">
                             <input 
                               type="checkbox" 
@@ -1839,7 +1855,7 @@ export function TeacherPortal() {
                             <span className="text-xs text-slate-300">{c.code} {formatCourseTitle(c.name, c.level, c.room)}</span>
                           </label>
                         ))}
-                        {myCourses.filter(c => c.id !== selectedGradebookCourseId && c.code === myCourses.find(mc => mc.id === selectedGradebookCourseId)?.code).length === 0 && (
+                        {gradebookCourses.filter(c => c.id !== selectedGradebookCourseId && c.code === gradebookCourses.find(mc => mc.id === selectedGradebookCourseId)?.code).length === 0 && (
                           <div className="text-xs text-slate-500 py-2 text-center">ไม่มีวิชาอื่นที่รหัสเดียวกันให้คัดลอก</div>
                         )}
                       </div>

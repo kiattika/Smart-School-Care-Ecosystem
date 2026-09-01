@@ -18,6 +18,7 @@ import { ResponsiveContainer, LineChart, Line, XAxis, Tooltip as RechartsTooltip
 import { StudentAnalyticsDashboard } from './components/StudentAnalyticsDashboard';
 import { AdvisorPortfolioReview } from './components/portfolio/AdvisorPortfolioReview';
 import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
+import { AdvisorGpsCheckInPanel } from './components/homevisit/AdvisorGpsCheckInPanel';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -640,6 +641,9 @@ export function AdvisorPortal() {
                   <div className="w-10 h-10 bg-rose-500/10 rounded-lg flex items-center justify-center text-rose-400 text-lg font-bold">✗</div>
                 </div>
               </div>
+
+              {/* GPS check-in ของนักเรียน (ย้ายมาจากหน้าครูประจำวิชา) */}
+              <AdvisorGpsCheckInPanel students={myStudents} />
 
               {/* Main Attendance List */}
               <div className="bg-[#1c1f2b] border border-white/10 rounded-xl p-6 shadow-lg flex-1">

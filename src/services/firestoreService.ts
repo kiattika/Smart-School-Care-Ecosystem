@@ -723,6 +723,31 @@ export async function saveGPSCheckInLogFirestore(log: GPSCheckInLog): Promise<vo
   }
 }
 
+/**
+ * real-time listener สำหรับ gps_check_in_logs ของวันหนึ่ง
+ * ครูที่ปรึกษาใช้ดูว่านักเรียนคนไหนเช็คอินเข้าโรงเรียนด้วย GPS จากพิกัดไหน เวลาไหน
+ * (HOMEROOM_TEACHER อ่านได้ตาม firestore.rules)
+ */
+export function subscribeGpsCheckInLogsByDate(
+  dateStr: string,
+  onUpdate: (logs: GPSCheckInLog[]) => void
+): () => void {
+  try {
+    const q = query(collection(db, 'gps_check_in_logs'), where('date', '==', dateStr));
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as GPSCheckInLog));
+      list.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeGpsCheckInLogsByDate] Listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeGpsCheckInLogsByDate] Setup error:', error);
+    return () => {};
+  }
+}
+
 export async function saveSchoolGeofenceConfigFirestore(config: SchoolGeofenceConfig): Promise<void> {
   const collectionPath = 'school_settings';
   try {
