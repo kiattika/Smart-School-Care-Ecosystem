@@ -14,6 +14,7 @@ export interface HomeroomAttendanceRecord {
   isLocked: boolean;
   requestedEditBy?: string | null;
   unlockedAt?: string | null;
+  source?: 'HOMEROOM_DEFAULT' | 'PERIOD_OVERRIDE'; // เช็คโดยครูประจำชั้นตอนเช้า = ค่าเริ่มต้นของทุกคาบวันนั้น
   students: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>;
 }
 
@@ -122,6 +123,7 @@ export function useHomeroomAttendance(date: string, room: string) {
       checkedAt: format(new Date(), 'HH:mm'),
       isLocked: true,
       requestedEditBy: null,
+      source: 'HOMEROOM_DEFAULT',
       students: studentsAttendance,
     };
 

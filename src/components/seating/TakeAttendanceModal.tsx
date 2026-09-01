@@ -147,6 +147,7 @@ export const TakeAttendanceModal: React.FC<TakeAttendanceModalProps> = ({
           periodNumber: pn,
           checkedAt,
           isLocked: true,
+          source: 'PERIOD_OVERRIDE',
           students: statuses
         });
       }

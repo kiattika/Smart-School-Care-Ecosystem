@@ -683,6 +683,7 @@ export function TeacherPortal() {
         periodNumber: periodNum,
         checkedAt: format(new Date(), 'HH:mm'),
         isLocked: true,
+        source: isHrActive ? 'HOMEROOM_DEFAULT' : 'PERIOD_OVERRIDE',
         students: studentStatuses
       });
 
