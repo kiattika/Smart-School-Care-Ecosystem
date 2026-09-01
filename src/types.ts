@@ -709,6 +709,19 @@ export interface StudentHomeLocation {
   updatedAt: string;
 }
 
+/**
+ * กลุ่มสาระการเรียนรู้ / กลุ่มงาน — จัดการผ่านเมนูแอดมิน (Firestore: department_config)
+ * เดิม hardcode เป็น array ใน StaffRoleManagementPage.tsx
+ */
+export interface DepartmentConfig {
+  id: string;
+  name: string;
+  order?: number;         // ลำดับการแสดงผล
+  kind?: 'LEARNING_AREA' | 'DIRECTORATE' | 'SUPPORT' | 'ACTIVITY'; // ประเภทกลุ่ม
+  parentId?: string | null; // กลุ่มย่อย (เช่น วิทย์-คอมพิวเตอร์ อยู่ใต้ วิทย์และเทคโนโลยี)
+  active?: boolean;
+}
+
 export interface TCASPortfolioConfig {
   studentId: string;
   targetFaculty: string;

@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store';
 import { cn } from '../lib/utils';
 import { SubstituteAssignment } from '../types';
-import { DEPARTMENTS } from './StaffRoleManagementPage';
+import { useDepartments } from '../hooks/useDepartments';
 
 const THAI_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#14b8a6', '#f43f5e'];
@@ -48,7 +48,7 @@ function toRecord(sa: SubstituteAssignment): SubRecord {
     substituteTeacherName: sa.substituteTeacherName || sa.substituteTeacherEmail || '',
     substituteTeacherEmail: (sa.substituteTeacherEmail || '').toLowerCase(),
     departmentId: sa.departmentId || '',
-    departmentName: sa.departmentName || DEPARTMENTS.find(d => d.id === sa.departmentId)?.name || 'ไม่ระบุกลุ่มสาระฯ',
+    departmentName: sa.departmentName || 'ไม่ระบุกลุ่มสาระฯ',
     isLogged: !!sa.isCompleted,
     isLate: !!sa.isLate,
     triggerType: sa.triggerType || '',
@@ -61,6 +61,7 @@ export function SubstituteTeachingAnalyticsModule() {
   const staffDirectory = useStore(s => s.staffDirectory);
 
   const isDev = import.meta.env.DEV;
+  const { departments, nameOf: deptNameOf } = useDepartments();
 
   const records = useMemo<SubRecord[]>(
     () => substituteAssignments.filter(sa => sa.status === 'APPROVED').map(toRecord),
@@ -71,7 +72,7 @@ export function SubstituteTeachingAnalyticsModule() {
 
   // persona: DEV = simulator select, PROD = ผู้ใช้จริง
   const [simTeacherEmail, setSimTeacherEmail] = useState('');
-  const [simDeptId, setSimDeptId] = useState(DEPARTMENTS[0]?.id || '');
+  const [simDeptId, setSimDeptId] = useState('');
 
   const myEmail = (user?.email || '').toLowerCase();
   const myProfile = staffDirectory.find(s => s.email?.toLowerCase() === myEmail);
@@ -83,7 +84,7 @@ export function SubstituteTeachingAnalyticsModule() {
     ? `${teacherProfile.prefix || ''}${teacherProfile.firstName} ${teacherProfile.lastName}`.trim()
     : (user?.displayName || teacherEmail || '-');
 
-  const deptName = DEPARTMENTS.find(d => d.id === deptId)?.name || 'ไม่ระบุกลุ่มสาระฯ';
+  const deptName = deptNameOf(deptId);
 
   // --- filters (HOD) ---
   const [hodTeacherFilter, setHodTeacherFilter] = useState('ALL');
@@ -248,7 +249,7 @@ export function SubstituteTeachingAnalyticsModule() {
             {activeTab === 'HOD' && (
               <select value={simDeptId} onChange={e => { setSimDeptId(e.target.value); setHodTeacherFilter('ALL'); }}
                 className="bg-slate-950 text-slate-200 border border-amber-500/20 rounded-lg p-1 px-2 text-[11px] font-semibold outline-none">
-                {DEPARTMENTS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             )}
           </div>
@@ -269,7 +270,7 @@ export function SubstituteTeachingAnalyticsModule() {
                     <h2 className="text-base font-extrabold text-white">{teacherName}</h2>
                     <p className="text-xs text-slate-400 mt-1">
                       {teacherProfile?.position || 'ครูผู้สอน'}
-                      {teacherProfile?.assignments?.departmentId ? ` · ${DEPARTMENTS.find(d => d.id === teacherProfile.assignments?.departmentId)?.name}` : ''}
+                      {teacherProfile?.assignments?.departmentId ? ` · ${deptNameOf(teacherProfile.assignments?.departmentId)}` : ''}
                     </p>
                   </div>
                 </div>

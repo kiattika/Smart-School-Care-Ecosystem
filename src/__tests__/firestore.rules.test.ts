@@ -953,6 +953,23 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
+  // 18. department_config — แอดมินจัดการกลุ่มสาระฯ
+  describe('department_config collection', () => {
+    it('lets any signed-in user read', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('department_config/math-dept').set({ name: 'คณิต', order: 1 });
+      });
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('department_config/math-dept').get());
+      await assertSucceeds(asUser('stu-1', ['STUDENT']).firestore().doc('department_config/math-dept').get());
+    });
+    it('only SUPER_ADMIN may write', async () => {
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('department_config/new-dept').set({ name: 'ใหม่', order: 5 }));
+      await assertFails(asRole('HEAD_OF_DEPARTMENT').firestore().doc('department_config/bad').set({ name: 'x' }));
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('department_config/bad').set({ name: 'x' }));
+      await assertFails(asAnonymous().firestore().doc('department_config/bad').set({ name: 'x' }));
+    });
+  });
+
   // 15. Default Deny Catch-All (Regression Test 5)
   describe('Default Deny Catch-All (Undeclared paths)', () => {
     it('REGRESSION: denies authenticated user with no matching role from reading or writing undeclared collections', async () => {

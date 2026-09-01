@@ -6,6 +6,7 @@ process.env.FIREBASE_AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOS
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 
 import firebaseConfig from '../firebase-applet-config.json';
+import { DEFAULT_DEPARTMENTS } from '../src/lib/departments';
 
 // Initialize Firebase Admin with the matching project ID (Auth only — Firestore ใช้ REST ด้านล่าง)
 const projectId = process.env.GCLOUD_PROJECT || firebaseConfig.projectId || 'kiattisak-project-001';
@@ -249,7 +250,7 @@ export const SEEDED_TEST_USERS: TestUserDef[] = [
     lastName: 'หลักสูตรดี',
     position: 'หัวหน้าฝ่ายวิชาการและหลักสูตร',
     roles: ['ACADEMIC_HEAD'],
-    assignments: { departmentId: 'academic-affairs' }
+    assignments: { departmentId: 'directorate' }
   },
   {
     // ขั้น 3: รองผู้อำนวยการฝ่ายวิชาการ (+ ผู้อนุมัติคำขอเช็คชื่อย้อนหลัง)
@@ -262,7 +263,7 @@ export const SEEDED_TEST_USERS: TestUserDef[] = [
     lastName: 'วิชาการดี',
     position: 'รองผู้อำนวยการกลุ่มบริหารวิชาการ',
     roles: ['DEPUTY_DIRECTOR_ACADEMIC'],
-    assignments: { departmentId: 'academic-affairs' }
+    assignments: { departmentId: 'directorate' }
   },
   {
     // ขั้น 4: ผู้อำนวยการสถานศึกษา
@@ -275,7 +276,7 @@ export const SEEDED_TEST_USERS: TestUserDef[] = [
     lastName: 'บริหารเลิศ',
     position: 'ผู้อำนวยการสถานศึกษา',
     roles: ['DIRECTOR'],
-    assignments: { departmentId: 'administration' }
+    assignments: { departmentId: 'directorate' }
   },
   {
     uid: 'test_parent_001',
@@ -555,6 +556,23 @@ export async function seedEmulatorAuth() {
     console.log(`\n🪑 Seeded sample attendance record and seating layout '${layoutId}'`);
   } catch (err: any) {
     console.warn('Notice seeding attendance & seating layout:', err.message);
+  }
+
+  // 8. Seed department_config (กลุ่มสาระฯ/กลุ่มงาน) — แอดมินแก้ไขต่อได้ผ่านเมนู
+  try {
+    for (const d of DEFAULT_DEPARTMENTS) {
+      await fsSet(`department_config/${d.id}`, {
+        name: d.name,
+        order: d.order,
+        kind: d.kind,
+        parentId: d.parentId ?? null,
+        active: true,
+        updatedAt: now(),
+      });
+    }
+    console.log(`\n🏫 Seeded ${DEFAULT_DEPARTMENTS.length} departments in 'department_config'`);
+  } catch (err: any) {
+    console.warn('Notice seeding department_config:', err.message);
   }
 
   console.log(`\n🎉 Seeded all ${SEEDED_TEST_USERS.length} test accounts successfully!`);

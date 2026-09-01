@@ -20,7 +20,8 @@ import { db } from '../lib/firebase';
 import { useStore } from '../store';
 import { cn, isSameRoom } from '../lib/utils';
 import { UserRole, SubstituteAssignment, SubstituteApprovalStage, SUBSTITUTE_STAGE_ROLE } from '../types';
-import { DEPARTMENTS, ROLE_NAMES_TH } from './StaffRoleManagementPage';
+import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
+import { useDepartments } from '../hooks/useDepartments';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -173,7 +174,7 @@ export function SubstituteTeachingModule() {
       : (user?.displayName || effectiveEmail || 'ผู้ใช้ระบบ');
   const effectiveDeptId = effectiveProfile?.assignments?.departmentId || '';
 
-  const deptName = (id?: string) => DEPARTMENTS.find(d => d.id === id)?.name || 'ไม่ได้ระบุกลุ่มสาระฯ';
+  const { nameOf: deptName } = useDepartments();
 
   // --- toast ---
   const [toast, setToast] = useState<{ title: string; message: string; error?: boolean } | null>(null);
@@ -209,7 +210,8 @@ export function SubstituteTeachingModule() {
   // Derived
   // -----------------------------------------------------------------------
   const deptTeachers = useMemo(() => {
-    const deptId = isDev ? (effectiveDeptId || DEPARTMENTS[0]?.id) : effectiveDeptId;
+    // ใช้ departmentId จริงของผู้ใช้เสมอ — ไม่ fallback ไปกลุ่มสาระแรก (เดิม hack ทำให้ role ผู้บริหารเห็นกระดานผิดกลุ่ม)
+    const deptId = effectiveDeptId;
     return staffDirectory.filter(s => s.assignments?.departmentId === deptId);
   }, [staffDirectory, effectiveDeptId, isDev]);
 
@@ -239,7 +241,8 @@ export function SubstituteTeachingModule() {
 
   // งานในกลุ่มสาระฯ ของ HOD (ดูจากกลุ่มสาระของครูที่ขาด หรือ departmentId ที่บันทึกไว้)
   const deptAssignments = useMemo(() => {
-    const deptId = isDev ? (effectiveDeptId || DEPARTMENTS[0]?.id) : effectiveDeptId;
+    // ใช้ departmentId จริงของผู้ใช้เสมอ — ไม่ fallback ไปกลุ่มสาระแรก (เดิม hack ทำให้ role ผู้บริหารเห็นกระดานผิดกลุ่ม)
+    const deptId = effectiveDeptId;
     return substituteAssignments
       .filter(sa => sa.departmentId === deptId || sa.proposedByEmail?.toLowerCase() === effectiveEmail)
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
@@ -623,7 +626,7 @@ export function SubstituteTeachingModule() {
           {canPropose && (
             <section className="space-y-4">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Layers className="w-5 h-5 text-amber-400" /> กระดานจัดครูสอนแทน — {deptName(effectiveDeptId || DEPARTMENTS[0]?.id)}
+                <Layers className="w-5 h-5 text-amber-400" /> กระดานจัดครูสอนแทน — {deptName(effectiveDeptId)}
               </h2>
               {deptAssignments.length === 0 ? (
                 <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-12 text-center text-slate-500">

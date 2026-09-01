@@ -723,6 +723,35 @@ export async function saveGPSCheckInLogFirestore(log: GPSCheckInLog): Promise<vo
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Department config (department_config) — กลุ่มสาระฯ/กลุ่มงาน จัดการโดยแอดมิน
+ * ──────────────────────────────────────────────────────────────────────────── */
+export async function saveDepartmentConfig(dept: {
+  id: string; name: string; order?: number; kind?: string; parentId?: string | null; active?: boolean;
+}): Promise<void> {
+  try {
+    await setDoc(doc(db, 'department_config', dept.id), {
+      name: dept.name,
+      order: dept.order ?? 999,
+      kind: dept.kind ?? 'LEARNING_AREA',
+      parentId: dept.parentId ?? null,
+      active: dept.active ?? true,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `department_config/${dept.id}`);
+  }
+}
+
+/** soft-delete (active:false) — ไม่ลบจริงเพื่อไม่ให้ข้อมูลอ้างอิงเดิม (staff.departmentId) เสีย */
+export async function deactivateDepartmentConfig(id: string): Promise<void> {
+  try {
+    await setDoc(doc(db, 'department_config', id), { active: false, updatedAt: serverTimestamp() }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `department_config/${id}`);
+  }
+}
+
 /**
  * real-time listener สำหรับ gps_check_in_logs ของวันหนึ่ง
  * ครูที่ปรึกษาใช้ดูว่านักเรียนคนไหนเช็คอินเข้าโรงเรียนด้วย GPS จากพิกัดไหน เวลาไหน

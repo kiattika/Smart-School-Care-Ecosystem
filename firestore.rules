@@ -376,6 +376,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 26. Department config — กลุ่มสาระฯ/กลุ่มงาน (แอดมินจัดการ)
+    match /department_config/{deptId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN');
+    }
+
     // Default Deny All Catch-All for unknown paths
     match /{document=**} {
       allow read, write: if false;
