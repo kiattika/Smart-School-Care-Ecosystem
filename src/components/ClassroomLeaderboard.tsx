@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Trophy, 
   Medal, 
@@ -24,8 +24,9 @@ import {
   Cell, 
   CartesianGrid 
 } from 'recharts';
-import { useStore } from '../store';
-import { Student } from '../types';
+import { ActiveLearningRecord } from '../types';
+import { useRealStudents } from '../hooks/useRealStudents';
+import { subscribeActiveLearningLogs } from '../services/firestoreService';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 
@@ -41,7 +42,20 @@ const PODIUM_COLORS = [
 ];
 
 export const ClassroomLeaderboard: React.FC = () => {
-  const { students, activeLearningPoints, activeLearningLogs, courses } = useStore();
+  // ข้อมูลจริงจาก Firestore สด — ไม่พึ่ง Zustand store ที่ว่างเมื่อเปิดหน้าใหม่/ล็อกอินใหม่
+  const { students } = useRealStudents();
+  const [alLogs, setAlLogs] = useState<ActiveLearningRecord[]>([]);
+  useEffect(() => subscribeActiveLearningLogs(setAlLogs), []);
+
+  // รวมคะแนนต่อคนจาก log ทั้งหมด (ไม่ต่ำกว่า 0)
+  const activeLearningPoints = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const log of alLogs) {
+      map[log.studentId] = (map[log.studentId] || 0) + Number(log.points || 0);
+    }
+    for (const k of Object.keys(map)) map[k] = Math.max(0, map[k]);
+    return map;
+  }, [alLogs]);
 
   const [selectedRoom, setSelectedRoom] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -96,11 +110,11 @@ export const ClassroomLeaderboard: React.FC = () => {
 
   // Statistics
   const totalPointsAwarded = useMemo(() => {
-    return Object.values(activeLearningPoints).reduce((acc, p) => acc + p, 0);
+    return Object.values(activeLearningPoints).reduce((acc: number, p) => acc + Number(p), 0);
   }, [activeLearningPoints]);
 
   const activeStudentsCount = useMemo(() => {
-    return Object.values(activeLearningPoints).filter(p => p > 0).length;
+    return Object.values(activeLearningPoints).filter(p => Number(p) > 0).length;
   }, [activeLearningPoints]);
 
   const topStudent = rankedStudents[0];

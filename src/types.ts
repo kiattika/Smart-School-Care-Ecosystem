@@ -90,21 +90,38 @@ export interface LeaveRequest {
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
 }
 
-export interface LateAttendanceRequest {
-  id: string;
-  teacherName: string;
-  subjectCode: string;
-  subjectName: string;
-  room: string;
-  period: string;
-  reason: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  createdAt: Date;
-}
-
 export interface ScheduleConfig {
   isActivityDay: boolean;
   shortenMinutes: number; // 0, 5, or 10
+}
+
+export type LateAttendanceStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+/**
+ * คำขอ "เช็คชื่อย้อนหลัง" ของครูผู้สอน (เก็บใน Firestore collection `late_attendance_requests`)
+ * (แทน action เดิมใน store ที่เขียนแค่ local state — คำขอหายข้าม session)
+ * ผู้อนุมัติ: DEPUTY_DIRECTOR_ACADEMIC (รองผู้อำนวยการฝ่ายวิชาการ) — ยืนยันจากทางโรงเรียน
+ * document ไม่ถูกลบตอนอนุมัติ/ปฏิเสธ — เปลี่ยนแค่ status เพื่อเก็บประวัติ
+ */
+export interface LateAttendanceRequestRecord {
+  id: string;
+  teacherId: string;        // Firebase Auth UID จริง (ไม่ใช่อีเมล)
+  teacherName: string;
+  teacherEmail?: string;
+  scheduleId: string;       // อ้างอิง schedules/{id}
+  subjectCode: string;
+  subjectName: string;
+  level: string;            // ระดับชั้น เช่น "ม.5/8"
+  periodNumber: number;     // คาบที่
+  room: string;             // ห้องกายภาพ เช่น "943"
+  teachingDate: string;     // YYYY-MM-DD ของคาบที่ขอเช็คย้อนหลัง
+  reason: string;
+  status: LateAttendanceStatus;
+  requestedAt: string;      // ISO string
+  approverUid: string | null;
+  approverName: string | null;
+  decidedAt: string | null; // ISO string
+  rejectReason: string | null;
 }
 
 export interface GlobalCourse {
@@ -154,6 +171,11 @@ export interface PostTeachingRecord {
   solutions: string;
   submittedAt: string;
   isLate: boolean;
+  // ตัวช่วยจับคู่ให้แม่นขึ้น เมื่อ courseId ระหว่างเซสชันไม่ตรงกัน (schedule doc id เปลี่ยนรูป ฯลฯ)
+  scheduleId?: string;
+  subjectCode?: string;
+  level?: string;
+  room?: string;
 }
 
 export interface PeriodSwap {
@@ -642,6 +664,64 @@ export interface VolunteerHourRecord {
   description?: string;
 }
 
+/**
+ * แฟ้มสะสมผลงานที่นักเรียนบันทึกเองเข้ามา (Firestore: student_portfolio_entries)
+ * ต้องผ่านการอนุมัติจากครูที่ปรึกษาก่อนจึงจะแสดงให้ผู้ปกครอง/แดชบอร์ดวิชาการเห็น
+ */
+export type StudentPortfolioEntryType = 'AWARD' | 'TRAINING' | 'INTERNSHIP' | 'VOLUNTEER';
+export type PortfolioReviewStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface StudentPortfolioEntry {
+  id: string;
+  studentId: string;             // studentId 5 หลัก (= doc id ของ students)
+  studentUid: string;            // Firebase Auth UID ของนักเรียน
+  homeroomClass: string;         // ห้องของนักเรียน (denormalize ตอนสร้าง — ใช้เช็คสิทธิ์ครูที่ปรึกษา)
+  parentUid: string | null;      // parentUid ของนักเรียน (denormalize — ให้ผู้ปกครอง query ได้)
+  type: StudentPortfolioEntryType;
+  title: string;
+  description: string;
+  entryDate: string;             // วันที่เกิดกิจกรรมจริง (YYYY-MM-DD)
+  submittedAt: string;           // ISO string
+  attachmentUrl: string | null;  // ไฟล์แนบ (ยังไม่มี infra อัปโหลด — เว้น null ได้)
+  status: PortfolioReviewStatus;
+  reviewedBy: string | null;     // UID ครูที่อนุมัติ/ปฏิเสธ
+  reviewedByName: string | null;
+  reviewedAt: string | null;     // ISO string
+  rejectReason: string | null;
+}
+
+/**
+ * พิกัด GPS + ภาพถ่ายบ้านนักเรียน สำหรับครูที่ปรึกษาวางแผนออกเยี่ยมบ้าน
+ * (Firestore: student_home_locations/{studentId}) — ข้อมูลอ่อนไหว: ห้ามผู้ปกครอง/ครูวิชาอื่นเข้าถึง
+ * พิกัดต้องมาจาก navigator.geolocation เท่านั้น ห้ามให้กรอกเอง
+ */
+export interface StudentHomeLocation {
+  id: string;                    // = studentId
+  studentId: string;
+  studentUid: string;
+  homeroomClass: string;         // denormalize — ใช้เช็คสิทธิ์ครูที่ปรึกษา
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;       // ความแม่นยำ (เมตร) จาก geolocation
+  capturedAt: string;            // ISO string — เวลาที่อ่านพิกัดจริง
+  photoUrls: string[];           // อย่างน้อย 1 รูป (Firebase Storage download URL)
+  landmarkNotes: string | null;
+  updatedAt: string;
+}
+
+/**
+ * กลุ่มสาระการเรียนรู้ / กลุ่มงาน — จัดการผ่านเมนูแอดมิน (Firestore: department_config)
+ * เดิม hardcode เป็น array ใน StaffRoleManagementPage.tsx
+ */
+export interface DepartmentConfig {
+  id: string;
+  name: string;
+  order?: number;         // ลำดับการแสดงผล
+  kind?: 'LEARNING_AREA' | 'DIRECTORATE' | 'SUPPORT' | 'ACTIVITY'; // ประเภทกลุ่ม
+  parentId?: string | null; // กลุ่มย่อย (เช่น วิทย์-คอมพิวเตอร์ อยู่ใต้ วิทย์และเทคโนโลยี)
+  active?: boolean;
+}
+
 export interface TCASPortfolioConfig {
   studentId: string;
   targetFaculty: string;
@@ -780,7 +860,6 @@ export interface StoreState {
   analytics: StudentAnalytics[];
   attendanceRecords: Record<string, Record<string, AttendanceStatus>>; // mapped by courseId -> studentId
   leaveRequests: LeaveRequest[];
-  lateAttendanceRequests: LateAttendanceRequest[];
   scheduleConfig: ScheduleConfig;
   schoolCheckInRecords: Record<string, { status: AttendanceStatus, time?: Date }>;
   
@@ -854,8 +933,6 @@ export interface StoreState {
   moveStudentSeat: (studentId: string, newSeatIndex: number | null) => void;
   resetClassroomSeats: (room?: string) => void;
   autoAssignClassroomSeats: (room?: string, capacity?: number) => void;
-  submitLateAttendanceRequest: (req: Omit<LateAttendanceRequest, 'id' | 'status'>) => void;
-  updateLateAttendanceRequestStatus: (id: string, status: 'APPROVED' | 'REJECTED') => void;
   setScheduleConfig: (config: ScheduleConfig) => void;
   setGlobalCourses: (courses: GlobalCourse[]) => void;
   setHomeroomAssignments: (assignments: Record<string, string>) => void;

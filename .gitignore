@@ -10,3 +10,13 @@ ui-debug.log
 emulator-data/
 .env*
 !.env.example
+
+# local emulator export snapshots (partial, not canonical)
+firebase-export-*/
+false/
+# session work notes
+NIGHT-STATUS-*.md
+MORNING-STATUS-*.md
+AFTERNOON-STATUS-*.md
+EVENING-STATUS-*.md
+STATUS-*.md

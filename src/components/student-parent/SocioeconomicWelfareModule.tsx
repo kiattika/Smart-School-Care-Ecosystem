@@ -20,18 +20,20 @@ import {
   UserCheck
 } from 'lucide-react';
 import { useStore } from '../../store';
-import { GuardianBackground, HomeVisitLogRecord, EQFHardshipScreening } from '../../types';
+import { GuardianBackground, HomeVisitLogRecord, EQFHardshipScreening, Student } from '../../types';
 
-export function SocioeconomicWelfareModule({ studentId }: { studentId: string }) {
-  const { 
-    guardianProfiles, 
-    homeVisitLogs, 
-    eqfHardshipScreenings, 
-    students 
+export function SocioeconomicWelfareModule({ studentId, student: studentProp }: { studentId: string; student?: Student }) {
+  const {
+    guardianProfiles,
+    homeVisitLogs,
+    eqfHardshipScreenings,
+    students
   } = useStore();
 
-  const student = students.find(s => s.studentId === studentId) || students[0];
-  const guardian = guardianProfiles[student.studentId] || {
+  // ใช้ student ที่ส่งมาเป็น prop ก่อน (มาจาก Firestore สดใน StudentPortal/ParentPortal)
+  // แล้วค่อย fallback ไป store — กัน white screen ตอน store ว่าง (crash ที่ student.studentId)
+  const student = studentProp || students.find(s => s.studentId === studentId) || students[0];
+  const guardian = guardianProfiles[student?.studentId] || {
     relation: 'บิดา',
     fullName: 'นายสมชาย เจริญสุข',
     phone: '081-987-6543',
@@ -48,14 +50,14 @@ export function SocioeconomicWelfareModule({ studentId }: { studentId: string })
     }
   };
 
-  const visit = homeVisitLogs.find(v => v.studentId === student.studentId) || {
+  const visit = homeVisitLogs.find(v => v.studentId === student?.studentId) || {
     id: 'hv-01',
-    studentId: student.studentId,
+    studentId: student?.studentId ?? studentId,
     visitedDate: '2026-07-08',
     teacherName: 'ครูกิตติศักดิ์',
     counselorName: 'ครูแนะแนวพิมพ์ชนก',
-    coordinates: student.homeLocation.coordinates,
-    addressText: student.homeLocation.address,
+    coordinates: student?.homeLocation?.coordinates ?? [13.7563, 100.5018],
+    addressText: student?.homeLocation?.address ?? '',
     livingConditions: 'บ้านเดี่ยวปูนสองชั้น สภาพแวดล้อมสงบ มีโต๊ะหนังสือและห้องอ่านหนังสือเป็นสัดส่วนชัดเจน',
     photos: [
       {
@@ -72,9 +74,9 @@ export function SocioeconomicWelfareModule({ studentId }: { studentId: string })
     studentEnvironmentRating: 5
   };
 
-  const eqf = eqfHardshipScreenings[student.studentId] || {
+  const eqf = eqfHardshipScreenings[student?.studentId] || {
     id: 'eqf-01',
-    studentId: student.studentId,
+    studentId: student?.studentId ?? studentId,
     householdIncomePerCapita: 14500,
     electricityBillMonthly: 1200,
     housingConditionRating: 5,
@@ -89,6 +91,14 @@ export function SocioeconomicWelfareModule({ studentId }: { studentId: string })
 
   const [activeTab, setActiveTab] = useState<'family' | 'homevisit' | 'eqf'>('family');
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+
+  if (!student) {
+    return (
+      <div className="py-12 text-center text-slate-400 text-sm border border-dashed border-slate-800 rounded-2xl">
+        กำลังโหลดข้อมูลนักเรียน…
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -218,7 +228,7 @@ export function SocioeconomicWelfareModule({ studentId }: { studentId: string })
               <span className="text-slate-400 block">ที่อยู่ตามทะเบียนบ้าน & ที่พักปัจจุบัน:</span>
               <p className="font-medium text-slate-200 leading-relaxed flex items-start gap-1.5">
                 <MapPin className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-                {student.homeLocation.address}
+                {student.homeLocation?.address || visit.addressText || '—'}
               </p>
             </div>
 

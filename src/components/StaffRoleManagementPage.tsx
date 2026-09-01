@@ -24,12 +24,15 @@ import {
   AlertCircle,
   FileSpreadsheet,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  Layers
 } from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { UserProfile, UserRole } from '../types';
 import { BulkDataImportModal, ImportType } from './BulkDataImportModal';
+import { useDepartments } from '../hooks/useDepartments';
+import { DepartmentManagerModal } from './admin/DepartmentManagerModal';
 
 // พจนานุกรมชื่อภาษาไทยของบทบาท
 export const ROLE_NAMES_TH: Record<UserRole, string> = {
@@ -69,18 +72,11 @@ export const ROLE_COLORS: Record<UserRole, { bg: string; text: string; border: s
   STUDENT: { bg: 'bg-sky-500/10', text: 'text-sky-300', border: 'border-sky-500/20' },
 };
 
-// กลุ่มสาระการเรียนรู้
-export const DEPARTMENTS = [
-  { id: 'sci-dept', name: 'กลุ่มสาระฯ วิทยาศาสตร์และเทคโนโลยี' },
-  { id: 'math-dept', name: 'กลุ่มสาระฯ คณิตศาสตร์' },
-  { id: 'thai-dept', name: 'กลุ่มสาระฯ ภาษาไทย' },
-  { id: 'art-dept', name: 'กลุ่มสาระฯ ศิลปะ' },
-  { id: 'foreign-dept', name: 'กลุ่มสาระฯ ภาษาต่างประเทศ' },
-  { id: 'soc-dept', name: 'กลุ่มสาระฯ สังคมศึกษา ศาสนา และวัฒนธรรม' },
-  { id: 'health-dept', name: 'กลุ่มสาระฯ สุขศึกษาและพลศึกษา' },
-  { id: 'career-dept', name: 'กลุ่มสาระฯ การงานอาชีพ' },
-  { id: 'administration', name: 'ฝ่ายบริหารงานบุคคล' },
-];
+// กลุ่มสาระการเรียนรู้ — ย้ายไป src/lib/departments.ts (เลี่ยง circular import)
+export { DEFAULT_DEPARTMENTS } from '../lib/departments';
+import { DEFAULT_DEPARTMENTS as _DEFAULT_DEPARTMENTS } from '../lib/departments';
+/** @deprecated ใช้ hook `useDepartments()` แทน — เหลือไว้ชั่วคราวกัน import เดิมพัง */
+export const DEPARTMENTS = _DEFAULT_DEPARTMENTS;
 
 const ROOM_OPTIONS = [
   'ม.1/1', 'ม.1/2', 'ม.2/3', 'ม.4/1', 'ม.4/2', 'ม.5/1', 'ม.5/2', 'ม.5/8', 'ม.5/9', 'ม.5/11'
@@ -91,6 +87,9 @@ export function StaffRoleManagementPage() {
   const [staffList, setStaffList] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+
+  // กลุ่มสาระฯ/กลุ่มงาน จาก Firestore (แอดมินแก้ไขได้) — ไม่ใช่ hardcoded array แล้ว
+  const { departments, isFallback: deptIsFallback } = useDepartments();
 
   useEffect(() => {
     setIsLoading(true);
@@ -169,6 +168,7 @@ export function StaffRoleManagementPage() {
 
   // Bulk Import state
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
+  const [showDeptManager, setShowDeptManager] = useState(false);
 
   // กรองตารางรายชื่อบุคลากรตามเงื่อนไขค้นหา
   const filteredStaff = useMemo(() => {
@@ -421,6 +421,15 @@ export function StaffRoleManagementPage() {
             <span>นำเข้าข้อมูลชุดใหญ่ (Bulk Import)</span>
           </button>
 
+          {/* จัดการกลุ่มสาระฯ */}
+          <button
+            onClick={() => setShowDeptManager(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition-all active:scale-[0.98] cursor-pointer border border-white/10"
+          >
+            <Layers className="w-4 h-4 text-amber-400" />
+            <span>จัดการกลุ่มสาระฯ ({departments.length})</span>
+          </button>
+
           {/* Info stats pill */}
           <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl px-4 py-2.5 flex items-center gap-3 shrink-0">
             <div className="w-8 h-8 bg-indigo-500/10 text-indigo-400 rounded-lg flex items-center justify-center">
@@ -460,7 +469,7 @@ export function StaffRoleManagementPage() {
             className="w-full bg-slate-950 border border-white/10 rounded-xl pl-20 pr-4 py-2.5 text-xs text-slate-200 focus:border-indigo-500 outline-none transition-all appearance-none cursor-pointer"
           >
             <option value="ALL">ทั้งหมด (ทุกสังกัด)</option>
-            {DEPARTMENTS.map(dept => (
+            {departments.map(dept => (
               <option key={dept.id} value={dept.id}>{dept.name}</option>
             ))}
           </select>
@@ -544,7 +553,7 @@ export function StaffRoleManagementPage() {
                 </tr>
               ) : (
                 filteredStaff.map(staff => {
-                  const currentDeptName = DEPARTMENTS.find(d => d.id === staff.assignments?.departmentId)?.name || 'ไม่ได้ระบุสังกัด';
+                  const currentDeptName = departments.find(d => d.id === staff.assignments?.departmentId)?.name || 'ไม่ได้ระบุสังกัด';
                   
                   return (
                     <tr key={staff.id} className="hover:bg-white/[0.02] transition-colors group">
@@ -751,7 +760,7 @@ export function StaffRoleManagementPage() {
                       className="w-full bg-slate-950 border border-white/10 rounded-lg p-2.5 text-xs text-slate-200 outline-none"
                     >
                       <option value="">-- ไม่ระบุสังกัด --</option>
-                      {DEPARTMENTS.map(dept => (
+                      {departments.map(dept => (
                         <option key={dept.id} value={dept.id}>{dept.name}</option>
                       ))}
                     </select>
@@ -759,7 +768,7 @@ export function StaffRoleManagementPage() {
                   {formRoles.includes('HEAD_OF_DEPARTMENT') && (
                     <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-[10px] text-amber-300 flex items-start gap-2">
                       <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                      <p>เนื่องจาก ติ๊กเลือก <strong>หัวหน้ากลุ่มสาระฯ</strong> บุคลากรจะได้รับสิทธิ์ตรวจสอบสิทธิ์ในการอนุมัติเกรดและรายงานทั้งหมดของกลุ่มสาระฯ "<strong>{DEPARTMENTS.find(d => d.id === formDept)?.name || 'กรุณาเลือกกลุ่มสาระฯ ด้านบน'}</strong>" นี้</p>
+                      <p>เนื่องจาก ติ๊กเลือก <strong>หัวหน้ากลุ่มสาระฯ</strong> บุคลากรจะได้รับสิทธิ์ตรวจสอบสิทธิ์ในการอนุมัติเกรดและรายงานทั้งหมดของกลุ่มสาระฯ "<strong>{departments.find(d => d.id === formDept)?.name || 'กรุณาเลือกกลุ่มสาระฯ ด้านบน'}</strong>" นี้</p>
                     </div>
                   )}
                 </div>
@@ -928,6 +937,13 @@ export function StaffRoleManagementPage() {
           </div>
         </div>
       )}
+
+      <DepartmentManagerModal
+        isOpen={showDeptManager}
+        onClose={() => setShowDeptManager(false)}
+        departments={departments}
+        isFallback={deptIsFallback}
+      />
 
       {/* Bulk Data Import Modal component mounting */}
       <BulkDataImportModal

@@ -16,6 +16,9 @@ import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { ResponsiveContainer, LineChart, Line, XAxis, Tooltip as RechartsTooltip } from 'recharts';
 import { StudentAnalyticsDashboard } from './components/StudentAnalyticsDashboard';
+import { AdvisorPortfolioReview } from './components/portfolio/AdvisorPortfolioReview';
+import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
+import { AdvisorGpsCheckInPanel } from './components/homevisit/AdvisorGpsCheckInPanel';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -276,8 +279,14 @@ export function AdvisorPortal() {
               className="w-full flex-1 flex flex-col"
             >
               {activeTab === 'dashboard' && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
-              
+            <div className="animate-in fade-in duration-300 space-y-4">
+            <div className="bg-[#121624] border border-white/10 rounded-2xl px-5 py-3">
+              <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-bold border border-indigo-400/30">ส่วน A</span>
+              <span className="ml-2 text-sm font-bold text-white">ข้อมูลทั่วไป & การดูแลช่วยเหลือ</span>
+              <p className="text-[11px] text-slate-400 mt-0.5">การมาโรงเรียน การหนีเรียน คำร้องลา การเช็คชื่อโฮมรูม การตอบแบบประเมิน การเยี่ยมบ้าน — ข้อมูลด้านวิชาการ/แฟ้มสะสมผลงานอยู่แท็บ “สถิติวิชาการ” (ส่วน B)</p>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
               {/* Column 1: Leave Requests & Radar */}
               <div className="lg:col-span-1 flex flex-col gap-6">
                 
@@ -400,26 +409,27 @@ export function AdvisorPortal() {
                     const studentAnalytics = analytics.find(a => a.studentId === student.studentId);
                     const bScore = studentAnalytics?.behaviorScore ?? 100;
                     
-                    const isSkipped = skippedStudents.some(s => s.studentId === student.studentId);
-                    const hasLeave = leaveRequests.some(r => r.studentId === student.studentId && r.status === 'APPROVED');
-                    
+                    // สถานะประจำวันอ่านจากการเช็คชื่อจริง (attendance_records ของวันนี้ — merge เข้า myStudents แล้ว)
+                    const morning = student.attendance.morningStatus;
+                    const hasApprovedLeave = leaveRequests.some(r => r.studentId === student.studentId && r.status === 'APPROVED');
+
                     let dailyStatusText = "มาเรียนปกติ";
                     let dailyStatusColor = "text-emerald-400";
                     let dailyStatusBg = "bg-emerald-500/10 border-emerald-500/20";
                     let DailyIcon = UserCheck;
 
-                    if (hasLeave) {
+                    if (morning === 'LEAVE' || hasApprovedLeave) {
                       dailyStatusText = "ลาหยุด";
                       dailyStatusColor = "text-indigo-400";
                       dailyStatusBg = "bg-indigo-500/10 border-indigo-500/20";
                       DailyIcon = FileText;
-                    } else if (isSkipped) {
-                      dailyStatusText = "หนีเรียน (คาบ 3)";
+                    } else if (morning === 'ABSENT') {
+                      dailyStatusText = "ขาดเรียน";
                       dailyStatusColor = "text-rose-400";
                       dailyStatusBg = "bg-rose-500/10 border-rose-500/20";
                       DailyIcon = UserX;
-                    } else if (student.studentId === '54003') {
-                      dailyStatusText = "มาสาย (สแกน 08:15)";
+                    } else if (morning === 'LATE') {
+                      dailyStatusText = "มาสาย";
                       dailyStatusColor = "text-amber-400";
                       dailyStatusBg = "bg-amber-500/10 border-amber-500/20";
                       DailyIcon = Activity;
@@ -462,12 +472,17 @@ export function AdvisorPortal() {
                   }))}
                 </div>
               </div>
-              
+
             </div>
-   
+            </div>
+
           )}
           {activeTab === 'visit-planner' && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300 h-full">
+            <div className="animate-in fade-in duration-300 space-y-6">
+            <div className="bg-[#1c1f2b] border border-white/10 rounded-xl p-4">
+              <AdvisorHomeLocationMap homeroomClass={myRoom} students={myStudents} />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
               {/* Left Column: Visit List */}
               <div className="lg:col-span-1 flex flex-col gap-4 bg-[#1c1f2b] border border-white/10 rounded-xl p-4 overflow-y-auto">
                 <div className="flex justify-between items-center mb-2">
@@ -578,7 +593,8 @@ export function AdvisorPortal() {
                 </div>
               </div>
             </div>
-   
+            </div>
+
           )}
           {activeTab === 'school-checkin' && (
             <div className="animate-in fade-in duration-300 h-full flex flex-col gap-6 max-w-5xl mx-auto w-full pb-10">
@@ -625,6 +641,9 @@ export function AdvisorPortal() {
                   <div className="w-10 h-10 bg-rose-500/10 rounded-lg flex items-center justify-center text-rose-400 text-lg font-bold">✗</div>
                 </div>
               </div>
+
+              {/* GPS check-in ของนักเรียน (ย้ายมาจากหน้าครูประจำวิชา) */}
+              <AdvisorGpsCheckInPanel students={myStudents} />
 
               {/* Main Attendance List */}
               <div className="bg-[#1c1f2b] border border-white/10 rounded-xl p-6 shadow-lg flex-1">
@@ -924,8 +943,16 @@ export function AdvisorPortal() {
             </div>
           )}
           {activeTab === 'analytics' && (
-            <div className="max-w-7xl mx-auto w-full pb-10">
+            <div className="max-w-7xl mx-auto w-full pb-10 space-y-8">
+              <div className="bg-[#121624] border border-white/10 rounded-2xl px-5 py-3">
+                <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-[10px] font-bold border border-purple-400/30">ส่วน B</span>
+                <span className="ml-2 text-sm font-bold text-white">สถิติวิชาการ & แฟ้มสะสมผลงาน</span>
+                <p className="text-[11px] text-slate-400 mt-0.5">เกรด/ผลการเรียน รางวัล การอบรม ฝึกงาน จิตอาสา — เฉพาะข้อมูลด้านวิชาการ (แยกจากส่วน A ความประพฤติ/การดูแลทั่วไป ในแท็บ “แดชบอร์ดห้อง”)</p>
+              </div>
               <StudentAnalyticsDashboard roomName={myRoom || 'No Room'} students={myStudents} />
+              <div className="border-t border-white/10 pt-8">
+                <AdvisorPortfolioReview homeroomClass={myRoom} />
+              </div>
             </div>
           )}
 

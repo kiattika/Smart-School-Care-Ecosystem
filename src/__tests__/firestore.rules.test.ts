@@ -7,16 +7,21 @@ import {
   assertSucceeds,
   assertFails,
 } from '@firebase/rules-unit-testing';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 
 let testEnv: RulesTestEnvironment;
+
+// เคารพ FIRESTORE_EMULATOR_HOST ที่ `firebase emulators:exec` ตั้งให้ (เช่นตอนรันบน
+// พอร์ตสำรองเพราะ emulator หลักติดพอร์ต 8080 อยู่) — fallback เป็น 127.0.0.1:8080 ตามเดิม
+const [EMU_HOST, EMU_PORT] = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':');
 
 beforeAll(async () => {
   testEnv = await initializeTestEnvironment({
     projectId: 'kiattisak-project-001',
     firestore: {
       rules: fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8'),
-      host: '127.0.0.1',
-      port: 8080,
+      host: EMU_HOST,
+      port: Number(EMU_PORT),
     },
   });
 });
@@ -97,6 +102,60 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertFails(
         asRole('SUBJECT_TEACHER').firestore().doc('students/std-bad-write').set({ name: 'Illegal Write' })
       );
+    });
+
+    // TASK 1: staff roles ที่ต้องใช้ทะเบียนนักเรียนทั้งโรงเรียน (แนะแนว/พยาบาล/การเงิน/ศึกษานิเทศก์)
+    it('allows GUIDANCE_COUNSELOR / INFIRMARY_STAFF / FINANCE_STAFF / INSTRUCTIONAL_SUPERVISOR to LIST students', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/s1').set({ name: 'A', parentUid: 'p1' });
+        await ctx.firestore().doc('students/s2').set({ name: 'B' }); // ไม่มี parentUid — ทดสอบว่า list ไม่ crash
+      });
+      for (const role of ['GUIDANCE_COUNSELOR', 'INFIRMARY_STAFF', 'FINANCE_STAFF', 'INSTRUCTIONAL_SUPERVISOR']) {
+        await assertSucceeds(getDocs(collection(asRole(role).firestore(), 'students')));
+      }
+    });
+
+    it('REGRESSION: a parent can LIST only their own children (query filtered by parentUid); unfiltered list denied', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/s1').set({ name: 'Child A', parentUid: 'parent-alice' });
+        await ctx.firestore().doc('students/s2').set({ name: 'Other', parentUid: 'parent-bob' });
+      });
+      const parentDb = asUser('parent-alice', ['PARENT']).firestore();
+      await assertSucceeds(getDocs(query(collection(parentDb, 'students'), where('parentUid', '==', 'parent-alice'))));
+      await assertFails(getDocs(collection(parentDb, 'students')));
+    });
+
+    it('REGRESSION: a plain signed-in user with no relevant role cannot list students', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/s1').set({ name: 'A', parentUid: 'p1' });
+      });
+      await assertFails(getDocs(collection(asRole('SOME_OTHER_ROLE').firestore(), 'students')));
+    });
+
+    it('allows a STUDENT to read their own record (studentUid matching auth.uid)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-self').set({ name: 'Me', studentUid: 'stu-uid-1' });
+      });
+      const studentDb = asUser('stu-uid-1', ['STUDENT']).firestore();
+      await assertSucceeds(studentDb.doc('students/std-self').get());
+    });
+
+    it('denies a STUDENT reading another student record', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-other').set({ name: 'Someone Else', studentUid: 'stu-uid-2' });
+      });
+      const studentDb = asUser('stu-uid-1', ['STUDENT']).firestore();
+      await assertFails(studentDb.doc('students/std-other').get());
+    });
+
+    it('REGRESSION: a STUDENT can LIST only their own record (query filtered by studentUid); unfiltered list denied', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/s1').set({ name: 'Me', studentUid: 'stu-uid-1' });
+        await ctx.firestore().doc('students/s2').set({ name: 'Other', studentUid: 'stu-uid-2' });
+      });
+      const studentDb = asUser('stu-uid-1', ['STUDENT']).firestore();
+      await assertSucceeds(getDocs(query(collection(studentDb, 'students'), where('studentUid', '==', 'stu-uid-1'))));
+      await assertFails(getDocs(collection(studentDb, 'students')));
     });
   });
 
@@ -638,6 +697,60 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
+  // 16b. late_attendance_requests — ครูขอเช็คชื่อย้อนหลัง, อนุมัติโดย DEPUTY_DIRECTOR_ACADEMIC
+  describe('late_attendance_requests collection', () => {
+    const seedReq = (extra: Record<string, any> = {}) =>
+      testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('late_attendance_requests/lar-01').set({
+          id: 'lar-01', teacherId: 'teacher-uid-1', teacherName: 'ครู ก', scheduleId: 'sch_x',
+          subjectCode: 'ค32101', subjectName: 'คณิต', level: 'ม.5/8', periodNumber: 7, room: '943',
+          teachingDate: '2026-08-31', reason: 'ลืมเช็ค', status: 'PENDING',
+          requestedAt: '2026-08-31T14:00:00.000Z', approverUid: null, approverName: null,
+          decidedAt: null, rejectReason: null, ...extra,
+        });
+      });
+
+    it('เจ้าของคำขอ + DEPUTY_DIRECTOR_ACADEMIC + SUPER_ADMIN อ่านได้; คนอื่นอ่านไม่ได้', async () => {
+      await seedReq();
+      await assertSucceeds(asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore().doc('late_attendance_requests/lar-01').get());
+      await assertSucceeds(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('late_attendance_requests/lar-01').get());
+      await assertFails(asUser('teacher-uid-2', ['SUBJECT_TEACHER']).firestore().doc('late_attendance_requests/lar-01').get());
+      await assertFails(asAnonymous().firestore().doc('late_attendance_requests/lar-01').get());
+    });
+
+    it('ครูสร้างคำขอของตัวเอง (status=PENDING) ได้; สร้างในนามคนอื่น หรือ status อื่น ไม่ได้', async () => {
+      const teacherDb = asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore();
+      await assertSucceeds(teacherDb.doc('late_attendance_requests/lar-new').set({
+        teacherId: 'teacher-uid-1', scheduleId: 's1', status: 'PENDING', reason: 'r', periodNumber: 7,
+      }));
+      await assertFails(teacherDb.doc('late_attendance_requests/lar-bad-owner').set({
+        teacherId: 'teacher-uid-2', scheduleId: 's1', status: 'PENDING',
+      }));
+      await assertFails(teacherDb.doc('late_attendance_requests/lar-bad-status').set({
+        teacherId: 'teacher-uid-1', scheduleId: 's1', status: 'APPROVED',
+      }));
+    });
+
+    it('REGRESSION: อนุมัติ/ปฏิเสธได้เฉพาะ DEPUTY_DIRECTOR_ACADEMIC / SUPER_ADMIN — ครูเจ้าของแก้ status เองไม่ได้', async () => {
+      await seedReq();
+      await assertSucceeds(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01')
+        .set({ status: 'APPROVED', approverUid: 'dep-1' }, { merge: true }));
+      await seedReq();
+      await assertFails(asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore().doc('late_attendance_requests/lar-01')
+        .set({ status: 'APPROVED' }, { merge: true }));
+    });
+
+    it('REGRESSION: ผู้อนุมัติแก้ teacherId ของคำขอไม่ได้ (ตรึงเจ้าของ) + ลบ document ไม่ได้', async () => {
+      await seedReq();
+      await assertFails(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01')
+        .set({ status: 'APPROVED', teacherId: 'someone-else' }, { merge: true }));
+      await seedReq();
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc('late_attendance_requests/lar-01').delete());
+      await assertFails(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01').delete());
+    });
+  });
+
   // 17. parent_verification_records - SUPER_ADMIN only (PDPA-sensitive identity data)
   describe('parent_verification_records collection', () => {
     it('allows SUPER_ADMIN to read and write parent verification records', async () => {
@@ -683,6 +796,183 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertFails(
         asAnonymous().firestore().doc('parent_verification_records/pv-bad-4').set({ studentId: '38501' })
       );
+    });
+  });
+
+  // 16. student_portfolio_entries — นักเรียนบันทึกผลงานเอง + ครูที่ปรึกษาอนุมัติ
+  describe('student_portfolio_entries collection', () => {
+    const STU_UID = 'stu-uid-p1';
+    const STU_ID = 'p-std-1';
+    const ROOM = 'ม.5/8';
+    const PARENT_UID = 'parent-p1';
+    const HR_TEACHER_UID = 'hr-teacher-1';
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, room: ROOM, parentUid: PARENT_UID, name: 'Portfolio Kid' });
+        await ctx.firestore().doc(`staff/${HR_TEACHER_UID}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+        await ctx.firestore().doc(`staff/other-hr`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+      });
+    }
+    const baseEntry = (over: Record<string, unknown> = {}) => ({
+      studentId: STU_ID, studentUid: STU_UID, homeroomClass: ROOM, parentUid: PARENT_UID,
+      type: 'AWARD', title: 'รางวัลชนะเลิศ', description: 'แข่งคณิต', entryDate: '2026-08-01',
+      submittedAt: '2026-08-02T00:00:00.000Z', attachmentUrl: null,
+      status: 'PENDING', reviewedBy: null, reviewedByName: null, reviewedAt: null, rejectReason: null,
+      ...over,
+    });
+
+    it('lets a student create their own PENDING entry', async () => {
+      await seed();
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('student_portfolio_entries/e1').set(baseEntry()));
+    });
+    it('denies a student self-approving on create', async () => {
+      await seed();
+      await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('student_portfolio_entries/e2').set(baseEntry({ status: 'APPROVED' })));
+    });
+    it('denies a student creating an entry for someone else', async () => {
+      await seed();
+      await assertFails(asUser('other-stu', ['STUDENT']).firestore().doc('student_portfolio_entries/e3').set(baseEntry({ studentUid: 'other-stu' })));
+    });
+    it('denies a student faking homeroomClass', async () => {
+      await seed();
+      await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('student_portfolio_entries/e4').set(baseEntry({ homeroomClass: 'ม.6/1' })));
+    });
+
+    it('lets the student read their own entry in any status; the homeroom teacher reads it too', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_portfolio_entries/e5').set(baseEntry({ status: 'PENDING' }));
+      });
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('student_portfolio_entries/e5').get());
+      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_portfolio_entries/e5').get());
+    });
+    it('denies a homeroom teacher of a different room from reading', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_portfolio_entries/e6').set(baseEntry());
+      });
+      await assertFails(asUser('other-hr', ['HOMEROOM_TEACHER']).firestore().doc('student_portfolio_entries/e6').get());
+    });
+    it('lets a parent read only APPROVED entries of their child', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_portfolio_entries/e7a').set(baseEntry({ status: 'APPROVED' }));
+        await ctx.firestore().doc('student_portfolio_entries/e7b').set(baseEntry({ status: 'PENDING' }));
+      });
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('student_portfolio_entries/e7a').get());
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('student_portfolio_entries/e7b').get());
+    });
+
+    it('lets the homeroom teacher approve (review fields only)', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_portfolio_entries/e8').set(baseEntry());
+      });
+      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_portfolio_entries/e8').set(
+        baseEntry({ status: 'APPROVED', reviewedBy: HR_TEACHER_UID, reviewedByName: 'ครูที่ปรึกษา', reviewedAt: '2026-08-03T00:00:00.000Z' })
+      ));
+    });
+    it('REGRESSION: denies the homeroom teacher editing student-authored content while reviewing', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_portfolio_entries/e9').set(baseEntry());
+      });
+      await assertFails(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_portfolio_entries/e9').set(
+        baseEntry({ status: 'APPROVED', reviewedBy: HR_TEACHER_UID, title: 'ครูแก้ชื่อเรื่อง' })
+      ));
+    });
+    it('denies a SUBJECT_TEACHER (not the homeroom teacher) from approving', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_portfolio_entries/e10').set(baseEntry());
+      });
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('student_portfolio_entries/e10').set(
+        baseEntry({ status: 'APPROVED', reviewedBy: 'test-uid' })
+      ));
+    });
+    it('denies deleting a portfolio entry', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_portfolio_entries/e11').set(baseEntry());
+      });
+      await assertFails(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_portfolio_entries/e11').delete());
+    });
+  });
+
+  // 17. student_home_locations — พิกัด GPS + ภาพบ้าน (ห้ามผู้ปกครอง/ครูวิชาอื่นเข้าถึง)
+  describe('student_home_locations collection', () => {
+    const STU_UID = 'stu-uid-h1';
+    const STU_ID = 'h-std-1';
+    const ROOM = 'ม.5/8';
+    const PARENT_UID = 'parent-h1';
+    const HR_TEACHER_UID = 'hr-teacher-h';
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, room: ROOM, parentUid: PARENT_UID });
+        await ctx.firestore().doc(`staff/${HR_TEACHER_UID}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+      });
+    }
+    const loc = (over: Record<string, unknown> = {}) => ({
+      studentId: STU_ID, studentUid: STU_UID, homeroomClass: ROOM,
+      latitude: 17.62, longitude: 100.09, accuracy: 12,
+      capturedAt: '2026-08-01T00:00:00.000Z', photoUrls: ['https://storage/x.jpg'], landmarkNotes: null,
+      updatedAt: '2026-08-01T00:00:00.000Z', id: STU_ID,
+      ...over,
+    });
+
+    it('lets a student write their own home location with a photo', async () => {
+      await seed();
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_home_locations/${STU_ID}`).set(loc()));
+    });
+    it('denies writing a home location with no photo', async () => {
+      await seed();
+      await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_home_locations/${STU_ID}`).set(loc({ photoUrls: [] })));
+    });
+    it('denies a student writing another student home location', async () => {
+      await seed();
+      await assertFails(asUser('intruder', ['STUDENT']).firestore().doc(`student_home_locations/${STU_ID}`).set(loc({ studentUid: 'intruder' })));
+    });
+    it('lets the homeroom teacher read it; denies the parent and other teachers', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_home_locations/${STU_ID}`).set(loc());
+      });
+      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc(`student_home_locations/${STU_ID}`).get());
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc(`student_home_locations/${STU_ID}`).get());
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc(`student_home_locations/${STU_ID}`).get());
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_home_locations/${STU_ID}`).get());
+    });
+    it('denies deleting a home location', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_home_locations/${STU_ID}`).set(loc());
+      });
+      await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_home_locations/${STU_ID}`).delete());
+    });
+    it('REGRESSION: reading a not-yet-created home-location doc does not error (listener before first save)', async () => {
+      await seed();
+      // ไม่มี doc — get ต้องผ่านแบบ "ไม่มีข้อมูล" ไม่ใช่ rule error
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('student_home_locations/never-created').get());
+      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_home_locations/never-created').get());
+    });
+  });
+
+  // 18. department_config — แอดมินจัดการกลุ่มสาระฯ
+  describe('department_config collection', () => {
+    it('lets any signed-in user read', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('department_config/math-dept').set({ name: 'คณิต', order: 1 });
+      });
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('department_config/math-dept').get());
+      await assertSucceeds(asUser('stu-1', ['STUDENT']).firestore().doc('department_config/math-dept').get());
+    });
+    it('only SUPER_ADMIN may write', async () => {
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('department_config/new-dept').set({ name: 'ใหม่', order: 5 }));
+      await assertFails(asRole('HEAD_OF_DEPARTMENT').firestore().doc('department_config/bad').set({ name: 'x' }));
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('department_config/bad').set({ name: 'x' }));
+      await assertFails(asAnonymous().firestore().doc('department_config/bad').set({ name: 'x' }));
     });
   });
 

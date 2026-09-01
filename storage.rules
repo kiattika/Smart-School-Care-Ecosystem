@@ -1,0 +1,49 @@
+rules_version = '2';
+
+// Firebase Storage security rules
+// โปรเจกต์นี้ใช้ Storage เฉพาะ "ภาพถ่ายบ้านนักเรียน" (ประกอบการวางแผนออกเยี่ยมบ้าน)
+// ข้อมูลอ่อนไหวเรื่องความปลอดภัยที่อยู่อาศัย — เขียน/อ่านโดยตรงได้เฉพาะเจ้าของนักเรียนเท่านั้น
+//
+// ครูที่ปรึกษาดูรูปได้ผ่าน download URL (มี token) ที่เก็บใน Firestore doc
+// `student_home_locations/{studentId}` ซึ่ง firestore.rules จำกัดให้อ่านได้เฉพาะ
+// ครูที่ปรึกษาห้องนั้น + เจ้าของ + SUPER_ADMIN — จึงไม่ต้องทำ cross-service check ที่นี่
+// (Storage rules อ่าน Firestore named database ไม่ได้อยู่แล้ว)
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function ownerImageRules(ownerUid) {
+      return isSignedIn() && request.auth.uid == ownerUid;
+    }
+
+    // path: student_home_photos/{ownerUid}/{fileName}  — ownerUid = Firebase Auth UID ของนักเรียน
+    match /student_home_photos/{ownerUid}/{fileName} {
+      // อ่านโดยตรง: เจ้าของเท่านั้น (ครูใช้ tokenized download URL จาก Firestore doc แทน)
+      allow read: if ownerImageRules(ownerUid);
+      // เขียน (create/update): เจ้าของเท่านั้น + ต้องเป็นรูปภาพ + ไม่เกิน 5MB
+      allow create, update: if ownerImageRules(ownerUid)
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if false; // เก็บหลักฐาน — ลบผ่าน admin เท่านั้น
+    }
+
+    // path: student_portfolio_photos/{ownerUid}/{fileName} — ภาพประกอบแฟ้มสะสมผลงาน
+    match /student_portfolio_photos/{ownerUid}/{fileName} {
+      // อ่าน: เจ้าของ + ผู้ที่มี download URL (จาก Firestore doc ที่ครู/ผู้ปกครองอ่านได้)
+      allow read: if ownerImageRules(ownerUid);
+      allow create, update: if ownerImageRules(ownerUid)
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if false;
+    }
+
+    // ทุก path อื่น: ปฏิเสธทั้งหมด
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

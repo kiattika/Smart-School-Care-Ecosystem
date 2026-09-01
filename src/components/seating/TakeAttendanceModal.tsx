@@ -130,7 +130,9 @@ export const TakeAttendanceModal: React.FC<TakeAttendanceModalProps> = ({
       const dateStr = format(currentDate, 'yyyy-MM-dd');
       const rawRoom = course.room || 'ม.5/8';
       const roomStr = rawRoom.replace('/', '-');
-      const periodNum = course.periodIndex || 1;
+      // คาบ 0 (โฮมรูม) เป็นคาบจริง — ห้าม falsy check (`|| 1`) ไม่งั้น record ถูกเขียนผิดคาบ
+      // แล้ว TeacherPortal จับคู่ไม่เจอ → คาบที่เช็คแล้วกลับไปโชว์ "ขอเช็คชื่อย้อนหลัง"
+      const periodNum = (course.periodIndex !== undefined && course.periodIndex !== null) ? course.periodIndex : 1;
       const recordId = `${dateStr}_${roomStr}_p${periodNum}`;
 
       // Write directly to Firestore attendance_records collection
@@ -189,7 +191,7 @@ export const TakeAttendanceModal: React.FC<TakeAttendanceModalProps> = ({
                 <span>•</span>
                 <span className="flex items-center gap-1 font-mono text-slate-300">
                   <Calendar className="w-3.5 h-3.5 text-emerald-400" />
-                  {format(currentDate, 'dd MMMM yyyy', { locale: th })} (คาบที่ {course.periodIndex || 1})
+                  {format(currentDate, 'dd MMMM yyyy', { locale: th })} (คาบที่ {(course.periodIndex !== undefined && course.periodIndex !== null) ? course.periodIndex : 1})
                 </span>
               </p>
             </div>

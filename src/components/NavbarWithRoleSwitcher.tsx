@@ -69,7 +69,34 @@ export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
     badgeBorder: 'border-amber-500/20',
     iconBg: 'bg-amber-500/20',
     iconColor: 'text-amber-400',
-    description: 'จัดการคะแนน อนุมัติผลการเรียนในกลุ่มสาระฯ'
+    description: 'เสนอจัดครูสอนแทน (ขั้น 1) และอนุมัติผลการเรียนในกลุ่มสาระฯ'
+  },
+  ACADEMIC_HEAD: {
+    label: 'หัวหน้าฝ่ายวิชาการและหลักสูตร',
+    badgeBg: 'bg-orange-500/10',
+    badgeText: 'text-orange-400',
+    badgeBorder: 'border-orange-500/20',
+    iconBg: 'bg-orange-500/20',
+    iconColor: 'text-orange-400',
+    description: 'อนุมัติงานจัดครูสอนแทน ขั้นที่ 2'
+  },
+  DEPUTY_DIRECTOR_ACADEMIC: {
+    label: 'รองผู้อำนวยการฝ่ายวิชาการ',
+    badgeBg: 'bg-violet-500/10',
+    badgeText: 'text-violet-400',
+    badgeBorder: 'border-violet-500/20',
+    iconBg: 'bg-violet-500/20',
+    iconColor: 'text-violet-400',
+    description: 'อนุมัติงานจัดครูสอนแทน ขั้นที่ 3 และคำขอเช็คชื่อย้อนหลัง'
+  },
+  DIRECTOR: {
+    label: 'ผู้อำนวยการสถานศึกษา',
+    badgeBg: 'bg-red-500/10',
+    badgeText: 'text-red-400',
+    badgeBorder: 'border-red-500/20',
+    iconBg: 'bg-red-500/20',
+    iconColor: 'text-red-400',
+    description: 'อนุมัติงานจัดครูสอนแทน ขั้นสุดท้าย (ขั้นที่ 4)'
   },
   HOMEROOM_TEACHER: {
     label: 'ครูประจำชั้น',

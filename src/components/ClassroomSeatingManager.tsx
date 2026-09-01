@@ -39,6 +39,7 @@ import { SeatingLayout, SeatingGroup, SeatingSeat, SeatingAssignment } from '../
 import { cn, isSameRoom, formatRoomName, formatCourseTitle } from '../lib/utils';
 import { useStore } from '../store';
 import { RandomStudentPickerModal, ClassroomDeskGroup } from './RandomStudentPickerModal';
+import { buildDeskGroupsForPicker } from '../lib/seatingPicker';
 import { SeatHistoryModal } from './seating/SeatHistoryModal';
 import { TemplatePickerModal } from './seating/TemplatePickerModal';
 import { CreateGroupModal } from './seating/CreateGroupModal';
@@ -61,6 +62,8 @@ interface ClassroomSeatingManagerProps {
   onBackToDashboard?: () => void;
   onSelectStudentDetail?: (student: Student) => void;
   onTakeAttendance?: () => void;
+  /** โหมด "เช็คชื่อย้อนหลัง" (อนุมัติแล้ว) — ทำได้แค่เช็คชื่อ ล็อกการจัดผัง/สุ่ม/ให้คะแนน */
+  attendanceOnly?: boolean;
 }
 
 export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = ({
@@ -68,7 +71,8 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   students,
   onBackToDashboard,
   onSelectStudentDetail,
-  onTakeAttendance
+  onTakeAttendance,
+  attendanceOnly = false
 }) => {
   const course: Course = propCourse || {
     id: 'course-m58-default',
@@ -165,7 +169,8 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
         const dateStr = format(currentDate || new Date(), 'yyyy-MM-dd');
         const rawRoom = course?.room || 'ม.5/8';
         const roomStr = rawRoom.replace('/', '-');
-        const periodNum = course?.periodIndex || 1;
+        // คาบ 0 (โฮมรูม) เป็นคาบจริง — ห้าม falsy check (`|| 1`) ให้ตรงกับตัวเขียน (TakeAttendanceModal)
+        const periodNum = (course?.periodIndex !== undefined && course?.periodIndex !== null) ? course.periodIndex : 1;
         const recordId = `${dateStr}_${roomStr}_p${periodNum}`;
 
         const rec = await getAttendanceRecord(recordId);
@@ -474,6 +479,11 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
 
   // 6. Seat Assignment Handlers
   const handleAssignStudent = async (student: Student, seat: SeatingSeat, group: SeatingGroup) => {
+    if (attendanceOnly) {
+      setSaveToast('โหมดเช็คชื่อย้อนหลัง: ทำได้เฉพาะการเช็คชื่อ ไม่สามารถจัดที่นั่งใหม่ได้');
+      setTimeout(() => setSaveToast(null), 2500);
+      return;
+    }
     if (isLayoutLocked) {
       setSaveToast('⚠️ ผังที่นั่งถูกล็อกไว้ ปลดล็อกก่อนทำการเปลี่ยนแปลง');
       setTimeout(() => setSaveToast(null), 3000);
@@ -559,7 +569,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   };
 
   const handleSwapSeats = async (seatAId: string, seatBId: string) => {
-    if (isLayoutLocked || seatAId === seatBId) return;
+    if (attendanceOnly || isLayoutLocked || seatAId === seatBId) return;
 
     const assignA = assignments[seatAId];
     const assignB = assignments[seatBId];
@@ -779,29 +789,12 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
     setTimeout(() => setSaveToast(null), 3000);
   };
 
-  // Convert current dynamic groups to format expected by RandomStudentPickerModal
-  const classroomGroupsForPicker: ClassroomDeskGroup[] = useMemo(() => {
-    return groups.map((g, idx) => {
-      const seatedStudentsInGroup: Student[] = [];
-      g.seats.forEach(s => {
-        const assign = assignments[s.id];
-        if (assign && !assign.effectiveTo) {
-          const student = courseStudents.find(st => st.studentId === assign.studentId);
-          if (student) {
-            seatedStudentsInGroup.push(student);
-          }
-        }
-      });
-
-      return {
-        id: g.id,
-        name: g.name,
-        tableNumber: g.order || idx + 1,
-        icon: g.shape === 'POD' ? '🧪' : '🪑',
-        students: seatedStudentsInGroup
-      };
-    });
-  }, [groups, assignments, courseStudents]);
+  // Convert current dynamic groups to pickable "desk" units for RandomStudentPickerModal.
+  // ROW/GRID ("แถวโต๊ะคู่") ถูกหั่นเป็นโต๊ะละ 2 ที่นั่ง — ไม่งั้น "สุ่มโต๊ะ" จะได้ทั้งแถว ดู buildDeskGroupsForPicker
+  const classroomGroupsForPicker: ClassroomDeskGroup[] = useMemo(
+    () => buildDeskGroupsForPicker(groups, assignments, courseStudents),
+    [groups, assignments, courseStudents]
+  );
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#0b0e14] text-slate-100 overflow-hidden select-none font-sans">
@@ -856,6 +849,12 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
             </button>
           </div>
 
+          {attendanceOnly ? (
+            <span className="px-3 py-2 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-xl text-xs font-bold flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5" /> โหมดเช็คชื่อย้อนหลัง — เช็คชื่อได้อย่างเดียว
+            </span>
+          ) : (
+          <>
           {/* Random Picker Button */}
           <button
             onClick={() => setShowRandomPicker(true)}
@@ -922,6 +921,8 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
             {isSaving ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-3.5 h-3.5" />}
             <span>บันทึกผัง</span>
           </button>
+          </>
+          )}
         </div>
       </header>
 
@@ -1118,7 +1119,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
                     </div>
 
                     {/* Group Capacity Controls & Delete */}
-                    {!isLayoutLocked && (
+                    {!isLayoutLocked && !attendanceOnly && (
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => handleResizeGroup(group.id, -1)}
@@ -1266,7 +1267,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
                                 )}
 
                                 {/* Quick Point Increment */}
-                                {!isLayoutLocked && !isAbsent && (
+                                {!isLayoutLocked && !isAbsent && !attendanceOnly && (
                                   <button
                                     onClick={e => {
                                       e.stopPropagation();

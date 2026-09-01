@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, Query, CollectionReference } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Student } from '../types';
 
@@ -80,15 +80,49 @@ function mapDocToStudent(id: string, data: any): Student {
   } as Student;
 }
 
-export function useRealStudents() {
+export interface UseRealStudentsOptions {
+  /**
+   * จำกัดเฉพาะนักเรียนที่ผูกกับ parentUid นี้ (สำหรับ ParentPortal)
+   * — ต้อง filter ฝั่ง query เพื่อให้ผ่าน firestore.rules (rule เช็ค resource.data.parentUid == auth.uid)
+   *   การ list ทั้ง collection แบบไม่ filter จะถูกปฏิเสธสำหรับ role ที่ไม่มีสิทธิ์อ่านทั้งหมด
+   */
+  parentUid?: string | null;
+  /**
+   * จำกัดเฉพาะ record ของนักเรียนคนนี้ (สำหรับ StudentPortal) — filter ฝั่ง query
+   * เพื่อให้ผ่าน firestore.rules (rule เช็ค resource.data.studentUid == auth.uid);
+   * list ทั้ง collection ถูกปฏิเสธสำหรับ role STUDENT
+   */
+  studentUid?: string | null;
+}
+
+export function useRealStudents(options: UseRealStudentsOptions = {}) {
+  const { parentUid, studentUid } = options;
+  // ผู้เรียกส่ง key มา = ตั้งใจ query แบบ filtered — ถ้าค่ายังว่าง (auth ยังไม่ resolve)
+  // ต้อง "รอ" ไม่ใช่ fallback ไป query ทั้ง collection (ซึ่ง STUDENT/PARENT จะโดน rules ปฏิเสธ
+  // แล้วหน้าจอเด้งขึ้น "ยังไม่ได้ผูกกับทะเบียนนักเรียน" ชั่วขณะ ก่อนจะแก้ตัวเองตอน auth มา)
+  const wantsFilter = 'studentUid' in options || 'parentUid' in options;
+  const filterNotReady = wantsFilter && !studentUid && !parentUid;
+
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (filterNotReady) {
+      // ยัง loading อยู่ — ยังไม่ query จนกว่า id จะพร้อม
+      setLoading(true);
+      setStudents([]);
+      return;
+    }
     setLoading(true);
+    const col = collection(db, 'students') as CollectionReference;
+    const ref: Query = studentUid
+      ? query(col, where('studentUid', '==', studentUid))
+      : parentUid
+      ? query(col, where('parentUid', '==', parentUid))
+      : col;
     const unsubscribe = onSnapshot(
-      collection(db, 'students'),
+      ref,
       (snapshot) => {
         const list = snapshot.docs.map(docSnap => mapDocToStudent(docSnap.id, docSnap.data()));
         list.sort((a, b) => {
@@ -112,7 +146,7 @@ export function useRealStudents() {
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [parentUid, studentUid, filterNotReady]);
 
   return { students, loading, error };
 }

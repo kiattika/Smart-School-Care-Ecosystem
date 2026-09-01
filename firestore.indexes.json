@@ -32,6 +32,14 @@
         { "fieldPath": "className", "order": "ASCENDING" },
         { "fieldPath": "studentNumber", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "student_portfolio_entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "parentUid", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

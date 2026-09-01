@@ -31,7 +31,10 @@ import {
   ParentAppointment,
   BillingInvoice,
   ActiveLearningRecord,
-  UserProfile
+  UserProfile,
+  LateAttendanceRequestRecord,
+  StudentPortfolioEntry,
+  StudentHomeLocation
 } from '../types';
 import { SchoolGeofenceConfig } from '../utils/geoUtils';
 
@@ -720,6 +723,60 @@ export async function saveGPSCheckInLogFirestore(log: GPSCheckInLog): Promise<vo
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Department config (department_config) — กลุ่มสาระฯ/กลุ่มงาน จัดการโดยแอดมิน
+ * ──────────────────────────────────────────────────────────────────────────── */
+export async function saveDepartmentConfig(dept: {
+  id: string; name: string; order?: number; kind?: string; parentId?: string | null; active?: boolean;
+}): Promise<void> {
+  try {
+    await setDoc(doc(db, 'department_config', dept.id), {
+      name: dept.name,
+      order: dept.order ?? 999,
+      kind: dept.kind ?? 'LEARNING_AREA',
+      parentId: dept.parentId ?? null,
+      active: dept.active ?? true,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `department_config/${dept.id}`);
+  }
+}
+
+/** soft-delete (active:false) — ไม่ลบจริงเพื่อไม่ให้ข้อมูลอ้างอิงเดิม (staff.departmentId) เสีย */
+export async function deactivateDepartmentConfig(id: string): Promise<void> {
+  try {
+    await setDoc(doc(db, 'department_config', id), { active: false, updatedAt: serverTimestamp() }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `department_config/${id}`);
+  }
+}
+
+/**
+ * real-time listener สำหรับ gps_check_in_logs ของวันหนึ่ง
+ * ครูที่ปรึกษาใช้ดูว่านักเรียนคนไหนเช็คอินเข้าโรงเรียนด้วย GPS จากพิกัดไหน เวลาไหน
+ * (HOMEROOM_TEACHER อ่านได้ตาม firestore.rules)
+ */
+export function subscribeGpsCheckInLogsByDate(
+  dateStr: string,
+  onUpdate: (logs: GPSCheckInLog[]) => void
+): () => void {
+  try {
+    const q = query(collection(db, 'gps_check_in_logs'), where('date', '==', dateStr));
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as GPSCheckInLog));
+      list.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeGpsCheckInLogsByDate] Listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeGpsCheckInLogsByDate] Setup error:', error);
+    return () => {};
+  }
+}
+
 export async function saveSchoolGeofenceConfigFirestore(config: SchoolGeofenceConfig): Promise<void> {
   const collectionPath = 'school_settings';
   try {
@@ -811,6 +868,81 @@ export function subscribePostTeachingRecords(onUpdate: (records: PostTeachingRec
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Late Attendance Requests — ครูขอเช็คชื่อย้อนหลัง (Firestore: late_attendance_requests)
+ * ผู้อนุมัติ: DEPUTY_DIRECTOR_ACADEMIC / SUPER_ADMIN
+ * ไม่ลบ document ตอนอนุมัติ/ปฏิเสธ — merge เปลี่ยนแค่ status เพื่อเก็บประวัติ
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const LATE_ATTENDANCE_COL = 'late_attendance_requests';
+
+export async function submitLateAttendanceRequestFirestore(
+  req: Omit<LateAttendanceRequestRecord,
+    'id' | 'status' | 'requestedAt' | 'approverUid' | 'approverName' | 'decidedAt' | 'rejectReason'>
+): Promise<string> {
+  // random id → ทุกครั้งที่ยื่นคือ create ใหม่ (rule อนุญาตให้ครู create ของตัวเองเท่านั้น)
+  const id = `lar_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const ref = doc(db, LATE_ATTENDANCE_COL, id);
+  const payload: LateAttendanceRequestRecord = {
+    ...(stripUndefined(req as Record<string, any>) as any),
+    id,
+    status: 'PENDING',
+    requestedAt: new Date().toISOString(),
+    approverUid: null,
+    approverName: null,
+    decidedAt: null,
+    rejectReason: null,
+  };
+  try {
+    await setDoc(ref, payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${LATE_ATTENDANCE_COL}/${id}`);
+  }
+  return id;
+}
+
+export async function decideLateAttendanceRequestFirestore(
+  id: string,
+  decision: 'APPROVED' | 'REJECTED',
+  approver: { uid: string; name: string },
+  rejectReason?: string
+): Promise<void> {
+  const ref = doc(db, LATE_ATTENDANCE_COL, id);
+  try {
+    // merge — เก็บ field เดิม (teacherId/scheduleId/reason ฯลฯ) ไว้ครบ เปลี่ยนแค่สถานะ
+    await setDoc(ref, {
+      status: decision,
+      approverUid: approver.uid,
+      approverName: approver.name,
+      decidedAt: new Date().toISOString(),
+      rejectReason: decision === 'REJECTED' ? (rejectReason || 'ไม่ระบุเหตุผล') : null,
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${LATE_ATTENDANCE_COL}/${id}`);
+  }
+}
+
+/** real-time listener; ส่ง filter.teacherId เพื่อดูเฉพาะคำขอของครูคนนั้น (ผ่าน firestore.rules) */
+export function subscribeLateAttendanceRequests(
+  onUpdate: (reqs: LateAttendanceRequestRecord[]) => void,
+  filter?: { teacherId?: string }
+): () => void {
+  try {
+    const col = collection(db, LATE_ATTENDANCE_COL);
+    const ref = filter?.teacherId ? query(col, where('teacherId', '==', filter.teacherId)) : col;
+    return onSnapshot(ref, (snapshot) => {
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as LateAttendanceRequestRecord));
+      list.sort((a, b) => (b.requestedAt || '').localeCompare(a.requestedAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeLateAttendanceRequests] Listener error:', error.message);
+    });
+  } catch (error) {
+    console.warn('[subscribeLateAttendanceRequests] Setup error:', error);
+    return () => {};
+  }
+}
+
 export function subscribeStaffList(onUpdate: (staff: UserProfile[]) => void): () => void {
   const collectionPath = 'staff';
   try {
@@ -836,7 +968,7 @@ export async function savePostTeachingRecordFirestore(record: PostTeachingRecord
   try {
     const ref = doc(db, collectionPath, docId);
     await setDoc(ref, {
-      ...record,
+      ...stripUndefined(record as Record<string, any>),
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
@@ -943,6 +1075,195 @@ export async function saveActiveLearningLogFirestore(record: ActiveLearningRecor
     }, { merge: true });
   } catch (error) {
     console.warn('[saveActiveLearningLogFirestore] Firestore notice:', error);
+  }
+}
+
+/**
+ * Real-time listener สำหรับ active_learning_logs ทั้งหมด — ใช้ใน ClassroomLeaderboard
+ * เพื่อให้กระดานคะแนนแสดงข้อมูลจริงจาก Firestore (เดิมอ่านจาก Zustand store ที่ว่างเมื่อ
+ * เปิดหน้าใหม่/ล็อกอินใหม่ → กระดานว่างทั้งที่มี log จริง)
+ */
+export function subscribeActiveLearningLogs(
+  callback: (records: ActiveLearningRecord[]) => void
+): () => void {
+  try {
+    const ref = collection(db, 'active_learning_logs');
+    return onSnapshot(ref, (snapshot) => {
+      const rows = snapshot.docs.map(d => {
+        const data = d.data() as any;
+        return {
+          id: d.id,
+          studentId: String(data.studentId || ''),
+          courseId: data.courseId || undefined,
+          points: Number(data.points || 0),
+          category: data.category || 'GENERAL',
+          note: data.note || undefined,
+          awardedAt: data.awardedAt || '',
+        } as ActiveLearningRecord;
+      });
+      callback(rows);
+    }, (error) => {
+      console.warn('[subscribeActiveLearningLogs] Listener error:', error.message);
+      callback([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeActiveLearningLogs] Setup error:', error);
+    return () => {};
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Student Portfolio Entries (student_portfolio_entries)
+ * นักเรียนบันทึกผลงานเอง (รางวัล/อบรม/ฝึกงาน/จิตอาสา) → ครูที่ปรึกษาอนุมัติ
+ * ก่อนแสดงให้ผู้ปกครอง/แดชบอร์ดวิชาการ. ไม่ลบ doc — merge เปลี่ยนแค่ฟิลด์รีวิว
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const PORTFOLIO_COL = 'student_portfolio_entries';
+
+/** นักเรียนสร้างรายการใหม่ (status ต้องเป็น PENDING — firestore.rules บังคับ) */
+export async function submitStudentPortfolioEntry(
+  entry: Pick<StudentPortfolioEntry,
+    'studentId' | 'studentUid' | 'homeroomClass' | 'parentUid' | 'type' | 'title' | 'description' | 'entryDate'> &
+    Partial<Pick<StudentPortfolioEntry, 'attachmentUrl'>>
+): Promise<string> {
+  const id = `pfe_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const payload: StudentPortfolioEntry = {
+    id,
+    studentId: entry.studentId,
+    studentUid: entry.studentUid,
+    homeroomClass: entry.homeroomClass,
+    parentUid: entry.parentUid ?? null,
+    type: entry.type,
+    title: entry.title,
+    description: entry.description,
+    entryDate: entry.entryDate,
+    submittedAt: new Date().toISOString(),
+    attachmentUrl: entry.attachmentUrl ?? null,
+    status: 'PENDING',
+    reviewedBy: null,
+    reviewedByName: null,
+    reviewedAt: null,
+    rejectReason: null,
+  };
+  try {
+    await setDoc(doc(db, PORTFOLIO_COL, id), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${PORTFOLIO_COL}/${id}`);
+  }
+  return id;
+}
+
+/** ครูที่ปรึกษาอนุมัติ/ปฏิเสธ — merge เฉพาะฟิลด์รีวิว (rule ไม่ยอมให้แก้เนื้อหา) */
+export async function decideStudentPortfolioEntry(
+  id: string,
+  decision: 'APPROVED' | 'REJECTED',
+  reviewer: { uid: string; name: string },
+  rejectReason?: string
+): Promise<void> {
+  try {
+    await setDoc(doc(db, PORTFOLIO_COL, id), {
+      status: decision,
+      reviewedBy: reviewer.uid,
+      reviewedByName: reviewer.name,
+      reviewedAt: new Date().toISOString(),
+      rejectReason: decision === 'REJECTED' ? (rejectReason || 'ไม่ระบุเหตุผล') : null,
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${PORTFOLIO_COL}/${id}`);
+  }
+}
+
+/**
+ * real-time listener. เลือก filter ตามผู้ใช้ (ต้อง filter ฝั่ง query ให้ผ่าน firestore.rules):
+ *  - { studentUid }             → นักเรียนดูของตัวเอง (ทุกสถานะ)
+ *  - { homeroomClass }          → ครูที่ปรึกษาดูทั้งห้อง (ทุกสถานะ)
+ *  - { parentUid, approvedOnly } → ผู้ปกครองดูของบุตรหลาน (เฉพาะ APPROVED)
+ */
+export function subscribeStudentPortfolioEntries(
+  onUpdate: (entries: StudentPortfolioEntry[]) => void,
+  filter: { studentUid?: string; homeroomClass?: string; parentUid?: string; approvedOnly?: boolean }
+): () => void {
+  try {
+    const col = collection(db, PORTFOLIO_COL);
+    const clauses = [];
+    if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
+    if (filter.homeroomClass) clauses.push(where('homeroomClass', '==', filter.homeroomClass));
+    if (filter.parentUid) clauses.push(where('parentUid', '==', filter.parentUid));
+    if (filter.approvedOnly) clauses.push(where('status', '==', 'APPROVED'));
+    if (clauses.length === 0) { onUpdate([]); return () => {}; }
+    return onSnapshot(query(col, ...clauses), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as StudentPortfolioEntry));
+      list.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeStudentPortfolioEntries] Listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeStudentPortfolioEntries] Setup error:', error);
+    return () => {};
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Student Home Locations (student_home_locations/{studentId})
+ * พิกัด GPS + ภาพบ้าน — อ่อนไหว: เจ้าของ + ครูที่ปรึกษาห้องนั้น + SUPER_ADMIN เท่านั้น
+ * doc id = studentId (บ้านเดียวต่อคน, upsert)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const HOME_LOCATION_COL = 'student_home_locations';
+
+export async function saveStudentHomeLocation(
+  loc: Omit<StudentHomeLocation, 'id' | 'updatedAt'>
+): Promise<void> {
+  const payload: StudentHomeLocation = {
+    ...loc,
+    id: loc.studentId,
+    landmarkNotes: loc.landmarkNotes ?? null,
+    accuracy: loc.accuracy ?? null,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    await setDoc(doc(db, HOME_LOCATION_COL, loc.studentId), payload, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${HOME_LOCATION_COL}/${loc.studentId}`);
+  }
+}
+
+/** นักเรียนดูพิกัดบ้านของตัวเอง (single doc) */
+export function subscribeStudentHomeLocation(
+  studentId: string,
+  onUpdate: (loc: StudentHomeLocation | null) => void
+): () => void {
+  try {
+    return onSnapshot(doc(db, HOME_LOCATION_COL, studentId), (snap) => {
+      onUpdate(snap.exists() ? ({ id: snap.id, ...snap.data() } as StudentHomeLocation) : null);
+    }, (error) => {
+      console.warn('[subscribeStudentHomeLocation] Listener error:', error.message);
+      onUpdate(null);
+    });
+  } catch (error) {
+    console.warn('[subscribeStudentHomeLocation] Setup error:', error);
+    return () => {};
+  }
+}
+
+/** ครูที่ปรึกษาดูพิกัดบ้านนักเรียนทั้งห้อง (query by homeroomClass — ผ่าน firestore.rules) */
+export function subscribeStudentHomeLocationsByRoom(
+  homeroomClass: string,
+  onUpdate: (locs: StudentHomeLocation[]) => void
+): () => void {
+  try {
+    const q = query(collection(db, HOME_LOCATION_COL), where('homeroomClass', '==', homeroomClass));
+    return onSnapshot(q, (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as StudentHomeLocation)));
+    }, (error) => {
+      console.warn('[subscribeStudentHomeLocationsByRoom] Listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeStudentHomeLocationsByRoom] Setup error:', error);
+    return () => {};
   }
 }
 

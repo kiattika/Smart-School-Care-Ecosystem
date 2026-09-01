@@ -1,6 +1,8 @@
 import { cn } from "./lib/utils";
 import React, { useState } from 'react';
 import { useStore } from './store';
+import { useRealStudents } from './hooks/useRealStudents';
+import { Loader2 } from 'lucide-react';
 import { 
   QrCode, 
   Flame, 
@@ -32,32 +34,63 @@ import { HealthMentalWellbeingModule } from './components/student-parent/HealthM
 import { SocioeconomicWelfareModule } from './components/student-parent/SocioeconomicWelfareModule';
 import { BehaviorDisciplineModule } from './components/student-parent/BehaviorDisciplineModule';
 import { PortfolioActivityVault } from './components/student-parent/PortfolioActivityVault';
+import { StudentPortfolioSection } from './components/portfolio/StudentPortfolioSection';
+import { StudentHomeLocationForm } from './components/homevisit/StudentHomeLocationForm';
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
 import { StudentSelfAssessmentForm } from './components/StudentSelfAssessmentForm';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 
 export function StudentPortal() {
-  const { 
-    students, 
-    analytics, 
-    attendanceRecords, 
-    schoolCheckInRecords, 
-    markSchoolCheckIn, 
+  const {
+    analytics,
     selfAssessments,
     saveSelfAssessment
   } = useStore();
-  
+  const user = useStore(s => s.user);
+
+  // อ่าน record ของตัวเองจาก Firestore สด — ไม่พึ่ง Zustand store ที่ว่างเมื่อล็อกอินใหม่/คนละเครื่อง
+  // (เดิม `students[0]` จาก store ว่าง → `student` undefined → หน้าขาว). firestore.rules อนุญาต
+  // STUDENT อ่านเฉพาะ doc ที่ studentUid == auth.uid ผ่าน query filter นี้
+  const { students: myStudents, loading: studentsLoading } = useRealStudents({ studentUid: user?.uid });
+
   // 7 Module Tabs + Assessment + Overview
   const [activeTab, setActiveTab] = useState<
     'overview' | 'gate' | 'health' | 'socio' | 'behavior' | 'portfolio' | 'academic' | 'parent' | 'assessment'
   >('overview');
 
-  const [selectedStudentId, setSelectedStudentId] = useState<string>('38502');
+  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [viewDetailModal, setViewDetailModal] = useState(false);
 
-  // Student resolution
-  const student = students.find(s => s.studentId === selectedStudentId) || students.find(s => s.studentId === '38502') || students[0];
+  // Student resolution — โดยปกติ STUDENT จะเห็น record เดียว (ของตัวเอง);
+  // selectedStudentId ใช้เฉพาะ DEV profile switcher ถ้ามีมากกว่าหนึ่ง
+  const student =
+    myStudents.find(s => s.studentId === selectedStudentId) || myStudents[0];
+
+  if (studentsLoading) {
+    return (
+      <div className="w-full min-h-screen flex flex-col items-center justify-center gap-3 text-slate-400">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
+        <p className="text-sm">กำลังโหลดข้อมูลนักเรียน…</p>
+      </div>
+    );
+  }
+
+  if (!student) {
+    return (
+      <div className="w-full max-w-lg mx-auto min-h-screen flex flex-col items-center justify-center gap-4 text-center px-6">
+        <div className="w-16 h-16 rounded-2xl bg-slate-800/60 border border-slate-700 flex items-center justify-center">
+          <User className="w-8 h-8 text-slate-500" />
+        </div>
+        <h1 className="text-lg font-bold text-white">ยังไม่มีข้อมูลนักเรียนสำหรับบัญชีนี้</h1>
+        <p className="text-sm text-slate-400">
+          บัญชี {user?.email || 'นี้'} ยังไม่ได้ผูกกับทะเบียนนักเรียน (field <code className="text-slate-300">studentUid</code>)
+          กรุณาติดต่อครูประจำชั้นหรือผู้ดูแลระบบเพื่อเชื่อมบัญชี
+        </p>
+      </div>
+    );
+  }
+
   const studentAnalytics = analytics.find(a => a.studentId === student.studentId) || {
     behaviorScore: 98,
     gpa: 3.88
@@ -116,21 +149,23 @@ export function StudentPortal() {
           </div>
         </div>
 
-        {/* Student Selector Switcher (for testing multiple student profiles) */}
-        <div className="flex items-center gap-3 self-stretch md:self-auto bg-slate-800/60 p-2 rounded-2xl border border-slate-700/60">
-          <span className="text-xs text-slate-400 pl-2">สลับโปรไฟล์นักเรียน:</span>
-          <select
-            value={student.studentId}
-            onChange={(e) => setSelectedStudentId(e.target.value)}
-            className="bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-1.5 font-bold focus:outline-none focus:border-indigo-500"
-          >
-            {students.map(s => (
-              <option key={s.studentId} value={s.studentId}>
-                {s.name} (ม.{s.room || '5/8'})
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* DEV: ถ้า query คืนมามากกว่าหนึ่ง record (เช่นบัญชีทดสอบผูกหลายคน) ให้สลับได้ */}
+        {import.meta.env.DEV && myStudents.length > 1 && (
+          <div className="flex items-center gap-3 self-stretch md:self-auto bg-slate-800/60 p-2 rounded-2xl border border-slate-700/60">
+            <span className="text-xs text-slate-400 pl-2">สลับโปรไฟล์ (DEV):</span>
+            <select
+              value={student.studentId}
+              onChange={(e) => setSelectedStudentId(e.target.value)}
+              className="bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-1.5 font-bold focus:outline-none focus:border-indigo-500"
+            >
+              {myStudents.map(s => (
+                <option key={s.studentId} value={s.studentId}>
+                  {s.name} (ม.{s.room || '5/8'})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* 7 Core Module Navigation Bar */}
@@ -406,7 +441,14 @@ export function StudentPortal() {
 
         {/* 3. Socioeconomic & Home Visit */}
         {activeTab === 'socio' && (
-          <SocioeconomicWelfareModule studentId={student.studentId} />
+          <div className="space-y-8">
+            {user?.uid && (
+              <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-5">
+                <StudentHomeLocationForm student={student} studentUid={user.uid} />
+              </div>
+            )}
+            <SocioeconomicWelfareModule studentId={student.studentId} student={student} />
+          </div>
         )}
 
         {/* 4. Behavior & Conduct Certificate */}
@@ -414,9 +456,14 @@ export function StudentPortal() {
           <BehaviorDisciplineModule studentId={student.studentId} isParentView={false} />
         )}
 
-        {/* 5. Portfolio & TCAS 10-Page Exporter */}
+        {/* 5. Portfolio — บันทึกผลงานเอง (Firestore + อนุมัติโดยครูที่ปรึกษา) + คลังผลงานเดิม */}
         {activeTab === 'portfolio' && (
-          <PortfolioActivityVault studentId={student.studentId} />
+          <div className="space-y-8">
+            {user?.uid && <StudentPortfolioSection student={student} studentUid={user.uid} />}
+            <div className="border-t border-slate-800 pt-6">
+              <PortfolioActivityVault studentId={student.studentId} />
+            </div>
+          </div>
         )}
 
         {/* 6. Academic Reports & Homework */}

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../../store';
+import { useRealStudents } from '../../hooks/useRealStudents';
 import { 
   Wallet, 
   Receipt, 
@@ -22,7 +23,8 @@ import {
 import { BillingInvoice } from '../../types';
 
 export function FinancePortal() {
-  const { students, billingInvoices, payBillingInvoice } = useStore();
+  const { billingInvoices, payBillingInvoice } = useStore();
+  const { students } = useRealStudents(); // นักเรียนจาก Firestore สด (ใช้แสดงชื่อในใบแจ้งหนี้)
   const [activeTab, setActiveTab] = useState<'collection' | 'requisitions' | 'reports'>('collection');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
