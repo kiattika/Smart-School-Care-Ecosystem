@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Clock, CheckCircle2, History, BookOpen, FileText, CheckCircle, Calendar, Sparkles } from 'lucide-react';
 import { mergeConsecutivePeriods, periodRangeLabel } from '../lib/mergeConsecutivePeriods';
+import { isNonStudentSession } from '../utils/teacherLoadReportParser';
 
 export interface SubjectPeriod {
   id: string;
@@ -107,6 +108,9 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
   };
 
   const filteredPeriods = sortedPeriods.filter(p => {
+    // วิชาที่ไม่มีนักเรียน (PLC / ประชุมครู / พักกลางวัน) — ไม่ต้องเช็คชื่อ ไม่แสดงในหน้านี้
+    // (ยังนับรวมในภาระงานสอนที่ TeachingLoadTable ตามปกติ)
+    if (isNonStudentSession(p.subjectName, p.subjectCode, p.level || p.className)) return false;
     if (selectedClass === 'ALL') return true;
     return normalizeClassName(p.className) === selectedClass;
   });

@@ -9,7 +9,8 @@ import {
   deriveSubjectCode,
   parseTeacherLoadReport,
   generateScheduleDocuments,
-  isTeacherLoadReportFormat
+  isTeacherLoadReportFormat,
+  isNonStudentSession
 } from '../utils/teacherLoadReportParser';
 
 describe('Teacher Load Report Parser (รายงานภาระงานสอน)', () => {
@@ -132,6 +133,21 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
       ]) {
         expect(detectSubjectType(name, '-')).toBe('ACTIVITY');
       }
+    });
+  });
+
+  describe('isNonStudentSession — วิชาที่ไม่มีนักเรียน (ไม่ต้องเช็คชื่อ)', () => {
+    it('PLC / ประชุมครู / พักกลางวัน / ระดับ Non-Student → true', () => {
+      expect(isNonStudentSession('PLC (กิจกรรม)', 'PLC')).toBe(true);
+      expect(isNonStudentSession('PLC', '-', 'Non-Student')).toBe(true);
+      expect(isNonStudentSession('ประชุมกลุ่มสาระ', 'X')).toBe(true);
+      expect(isNonStudentSession('พักกลางวัน', 'Lunch')).toBe(true);
+      expect(isNonStudentSession('อะไรก็ได้', '-', 'Non-Student')).toBe(true);
+    });
+    it('วิชาปกติ + กิจกรรมที่มีนักเรียน (ชุมนุม/โฮมรูม) → false', () => {
+      expect(isNonStudentSession('คณิตศาสตร์พื้นฐาน', 'ค32101', 'ม.5/8')).toBe(false);
+      expect(isNonStudentSession('กิจกรรมชุมนุม', '-', 'ม.5/8')).toBe(false);
+      expect(isNonStudentSession('HomeRoom (กิจกรรม)', 'HR', 'ม.5/8')).toBe(false);
     });
   });
 
