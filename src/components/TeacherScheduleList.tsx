@@ -63,8 +63,13 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
   };
 
   // 1. Extract and sort class options dynamically from periods from least to greatest
+  // (ไม่รวมรายการที่ไม่มีนักเรียน เช่น PLC/Non-Student — ไม่แสดงในหน้าเช็คชื่ออยู่แล้ว)
   const uniqueClassNames: string[] = Array.from(
-    new Set(periods.map(p => normalizeClassName(p.className)))
+    new Set(
+      periods
+        .filter(p => !isNonStudentSession(p.subjectName, p.subjectCode, p.level || p.className))
+        .map(p => normalizeClassName(p.className))
+    )
   );
 
   const sortedClassNames = uniqueClassNames.sort((a: string, b: string) => {
