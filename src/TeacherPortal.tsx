@@ -1032,7 +1032,25 @@ export function TeacherPortal() {
                   };
                 }
                 const pIndex = periodItem ? periodItem.periodNumber : (course?.periodIndex || 1);
-                return { course, pIndex, periodItem };
+
+                // คาบรวม: หาคาบที่ติดกัน (periodNumber ต่อเนื่อง) วิชา+ห้องเดียวกัน — เช็คชื่อครั้งเดียวครอบทุกคาบย่อย
+                let periodRange: number[] = [pIndex];
+                if (periodItem) {
+                  const sameCourse = mappedPeriods
+                    .filter(p =>
+                      p.subjectCode === periodItem.subjectCode &&
+                      isSameRoom(p.className, periodItem.className) &&
+                      isSameRoom(p.room, periodItem.room) &&
+                      (p.type || 'MAIN') === (periodItem.type || 'MAIN'))
+                    .map(p => p.periodNumber)
+                    .sort((a, b) => a - b);
+                  // ขยายช่วงต่อเนื่องรอบ ๆ pIndex
+                  const range = [pIndex];
+                  for (let n = pIndex - 1; sameCourse.includes(n); n--) range.unshift(n);
+                  for (let n = pIndex + 1; sameCourse.includes(n); n++) range.push(n);
+                  periodRange = range;
+                }
+                return { course, pIndex, periodItem, periodRange };
               };
 
               return (
@@ -1112,15 +1130,16 @@ export function TeacherPortal() {
                     isNextDay={isNextDay}
                     dayLabel={dayLabel}
                     onTakeAttendance={(periodId) => {
-                      const { course, pIndex, periodItem } = resolveCourseAndPeriod(periodId);
+                      const { course, pIndex, periodItem, periodRange } = resolveCourseAndPeriod(periodId);
                       if (course) {
                         setRetroactiveAttendanceMode(false);
                         setActiveCourse({
                           ...course,
                           periodIndex: pIndex,
+                          periodRange,
                           room: periodItem?.className || course.room,
                           level: periodItem?.className || course.level
-                        });
+                        } as any);
                         setCurrentPeriod(PERIODS[pIndex] || `คาบ ${pIndex}`);
                         setView('class');
                       }

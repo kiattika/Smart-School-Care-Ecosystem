@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Clock, CheckCircle2, History, BookOpen, FileText, CheckCircle, Calendar, Sparkles } from 'lucide-react';
+import { mergeConsecutivePeriods, periodRangeLabel } from '../lib/mergeConsecutivePeriods';
 
 export interface SubjectPeriod {
   id: string;
@@ -21,6 +22,10 @@ export interface SubjectPeriod {
   scheduleId?: string;          // schedules/{id} — ใช้ยื่นคำขอเช็คชื่อย้อนหลัง
   level?: string;               // ระดับชั้น เช่น ม.5/8
   lateRequestStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | null;  // สถานะคำขอเช็คชื่อย้อนหลังของครูคนนี้
+  // คาบรวม (double/triple period ติดกัน) — ดู lib/mergeConsecutivePeriods
+  periodNumberEnd?: number;        // คาบสุดท้ายของช่วง (ถ้ารวม)
+  mergedCourseIds?: string[];      // courseId ของทุกคาบย่อยในช่วง
+  mergedPeriodNumbers?: number[];  // periodNumber ของทุกคาบย่อยในช่วง
 }
 
 interface TeacherScheduleListProps {
@@ -105,6 +110,9 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
     if (selectedClass === 'ALL') return true;
     return normalizeClassName(p.className) === selectedClass;
   });
+
+  // รวมคาบติดกัน (เช่น คาบ 3-4 วิชา+ห้องเดียวกัน) ให้เป็นแถวเดียว
+  const displayPeriods = useMemo(() => mergeConsecutivePeriods(filteredPeriods), [filteredPeriods]);
 
   // ปุ่มบันทึกหลังสอน — gate ไว้: บันทึกได้ต่อเมื่อเช็คชื่อคาบนั้นเสร็จแล้วเท่านั้น
   // (business rule: ต้องทำกิจกรรมการเรียนการสอน = เช็คชื่อ ก่อน ถึงจะบันทึกหลังสอนได้)
@@ -228,18 +236,18 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
       </div>
 
       {/* สรุปสถานะเช็คชื่อรายคาบของวันนี้ — ให้หาเจอง่ายว่าคาบไหนเช็คแล้ว/ยัง */}
-      {filteredPeriods.length > 0 && (
+      {displayPeriods.length > 0 && (
         <div className="bg-[#161f30] border border-slate-800/80 rounded-xl px-4 py-3" id="attendance-status-summary">
           <div className="flex items-center justify-between gap-3 mb-2">
             <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" /> สถานะการเช็คชื่อวันนี้
             </span>
             <span className="text-xs font-bold text-emerald-400">
-              เช็คแล้ว {filteredPeriods.filter(p => p.attendanceTaken).length}/{filteredPeriods.length} คาบ
+              เช็คแล้ว {displayPeriods.filter(p => p.attendanceTaken).length}/{displayPeriods.length} คาบ
             </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {filteredPeriods.map(p => (
+            {displayPeriods.map(p => (
               <span
                 key={p.id}
                 title={`${p.subjectCode} ${p.subjectName} · ${normalizeClassName(p.className)}`}
@@ -251,7 +259,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                     : 'bg-slate-800/60 text-slate-400 border-slate-700/60'
                 }`}
               >
-                คาบ {p.periodNumber} {p.attendanceTaken ? '✓' : p.lateRequestStatus === 'PENDING' ? '⋯' : '—'}
+                คาบ {periodRangeLabel(p)} {p.attendanceTaken ? '✓' : p.lateRequestStatus === 'PENDING' ? '⋯' : '—'}
               </span>
             ))}
           </div>
@@ -260,12 +268,12 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
 
       {/* List ของคาบเรียน */}
       <div className="space-y-4" id="periods-list-container">
-        {filteredPeriods.length === 0 ? (
+        {displayPeriods.length === 0 ? (
           <div className="text-center py-12 bg-[#161f30] rounded-xl border border-slate-800/80 text-slate-300 text-sm" id="empty-schedule-state">
             ไม่มีวิชา/คาบเรียนในตารางสอนสำหรับวันหรือตัวเลือกนี้
           </div>
         ) : (
-          filteredPeriods.map((period) => {
+          displayPeriods.map((period) => {
             const status = getPeriodStatus(period.startTime, period.endTime);
             const displayClassName = normalizeClassName(period.className);
 
@@ -280,7 +288,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                   <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 w-full">
                     <div className="flex items-start gap-4">
                       <span className="bg-slate-800/80 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700/50 whitespace-nowrap">
-                        คาบที่ {period.periodNumber}
+                        คาบที่ {periodRangeLabel(period)}
                       </span>
                       <div className="space-y-1">
                         <div className="flex flex-wrap items-center gap-2">
@@ -387,7 +395,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                   <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 w-full">
                     <div className="flex items-start gap-4">
                       <span className="bg-slate-800/80 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700/50 whitespace-nowrap">
-                        คาบที่ {period.periodNumber}
+                        คาบที่ {periodRangeLabel(period)}
                       </span>
                       <div className="space-y-1">
                         <div className="flex flex-wrap items-center gap-2">
@@ -465,7 +473,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                 <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 w-full">
                   <div className="flex items-start gap-4">
                     <span className="bg-slate-800/80 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700/50 whitespace-nowrap">
-                      คาบที่ {period.periodNumber}
+                      คาบที่ {periodRangeLabel(period)}
                     </span>
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
