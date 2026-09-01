@@ -359,9 +359,12 @@ service cloud.firestore {
     //     อ่อนไหวเรื่องความปลอดภัยที่อยู่อาศัย: เจ้าของ + ครูที่ปรึกษาห้องนั้น + SUPER_ADMIN เท่านั้น
     //     **ผู้ปกครองและครูวิชาอื่นเข้าถึงไม่ได้**
     match /student_home_locations/{studentId} {
+      // resource == null = doc ยังไม่ถูกสร้าง (นักเรียนเปิดหน้าก่อนบันทึกครั้งแรก) —
+      // ต้องยอมให้ get ผ่านแบบ "ไม่มีข้อมูล" ไม่งั้น rule error (Null value) แล้ว listener พัง
       allow read: if hasRole('SUPER_ADMIN')
-                     || (isSignedIn() && resource.data.studentUid == request.auth.uid)
-                     || isHomeroomTeacherOf(resource.data.homeroomClass);
+                     || (isSignedIn() && resource == null)
+                     || (resource != null && resource.data.studentUid == request.auth.uid)
+                     || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass));
 
       // นักเรียนเขียนของตัวเองเท่านั้น; homeroomClass ต้องตรงกับ students/{studentId} จริง
       allow create, update: if isSignedIn()

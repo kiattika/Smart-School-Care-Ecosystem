@@ -951,6 +951,12 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       });
       await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_home_locations/${STU_ID}`).delete());
     });
+    it('REGRESSION: reading a not-yet-created home-location doc does not error (listener before first save)', async () => {
+      await seed();
+      // ไม่มี doc — get ต้องผ่านแบบ "ไม่มีข้อมูล" ไม่ใช่ rule error
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('student_home_locations/never-created').get());
+      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_home_locations/never-created').get());
+    });
   });
 
   // 18. department_config — แอดมินจัดการกลุ่มสาระฯ
