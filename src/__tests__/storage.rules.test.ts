@@ -18,6 +18,9 @@ let testEnv: RulesTestEnvironment;
 // รูปเล็ก ๆ (bytes) พร้อม content-type image/*
 const tinyPng = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 
+// .put() คืน UploadTask (thenable แต่ไม่ใช่ Promise แท้) — assertSucceeds/assertFails ต้องการ Promise
+const asPromise = <T,>(p: PromiseLike<T>): Promise<T> => Promise.resolve(p);
+
 beforeAll(async () => {
   testEnv = await initializeTestEnvironment({
     projectId: 'kiattisak-project-001',
@@ -35,30 +38,22 @@ beforeEach(async () => { await testEnv.clearStorage(); });
 describe('Storage Security Rules — student_home_photos', () => {
   it('lets the owner upload an image under their own uid prefix', async () => {
     const s = testEnv.authenticatedContext('stu-1', { roles: ['STUDENT'] }).storage();
-    await assertSucceeds(
-      s.ref('student_home_photos/stu-1/a.jpg').put(tinyPng, { contentType: 'image/jpeg' })
-    );
+    await assertSucceeds(asPromise(s.ref('student_home_photos/stu-1/a.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
   });
 
   it('denies uploading under a different uid prefix', async () => {
     const s = testEnv.authenticatedContext('stu-1', { roles: ['STUDENT'] }).storage();
-    await assertFails(
-      s.ref('student_home_photos/stu-2/a.jpg').put(tinyPng, { contentType: 'image/jpeg' })
-    );
+    await assertFails(asPromise(s.ref('student_home_photos/stu-2/a.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
   });
 
   it('denies uploading a non-image content type', async () => {
     const s = testEnv.authenticatedContext('stu-1', { roles: ['STUDENT'] }).storage();
-    await assertFails(
-      s.ref('student_home_photos/stu-1/notes.txt').put(new Uint8Array([1, 2, 3]), { contentType: 'text/plain' })
-    );
+    await assertFails(asPromise(s.ref('student_home_photos/stu-1/notes.txt').put(new Uint8Array([1, 2, 3]), { contentType: 'text/plain' })));
   });
 
   it('denies an unauthenticated upload', async () => {
     const s = testEnv.unauthenticatedContext().storage();
-    await assertFails(
-      s.ref('student_home_photos/stu-1/a.jpg').put(tinyPng, { contentType: 'image/jpeg' })
-    );
+    await assertFails(asPromise(s.ref('student_home_photos/stu-1/a.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
   });
 
   it('lets the owner read their own file but denies another signed-in user reading it directly', async () => {
@@ -78,6 +73,6 @@ describe('Storage Security Rules — student_home_photos', () => {
 
   it('denies writing outside student_home_photos', async () => {
     const s = testEnv.authenticatedContext('stu-1', { roles: ['STUDENT'] }).storage();
-    await assertFails(s.ref('random/x.jpg').put(tinyPng, { contentType: 'image/jpeg' }));
+    await assertFails(asPromise(s.ref('random/x.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
   });
 });
