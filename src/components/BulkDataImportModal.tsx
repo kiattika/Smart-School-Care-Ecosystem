@@ -13,7 +13,8 @@ import {
   Info,
   ShieldAlert,
   Users,
-  ArrowRight
+  ArrowRight,
+  Loader2
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -76,6 +77,28 @@ export interface ValidatedRow {
   parsedData: Record<string, any>;
 }
 
+/**
+ * สร้าง schedule document id ให้ตรงกับที่ handleImport เขียนจริง (Teacher Load Report path)
+ * `sch_${safeCode}_${cleanRoom}_${dayOfWeek}_p${periodNumber}`
+ */
+function scheduleDocIdFor(subjectCode: string, room: string, level: string, dayOfWeek: string, periodNumber: number): string {
+  const safeCode = String(subjectCode || 'X').replace(/[^\p{L}\p{N}\p{M}_-]+/gu, '_');
+  const cleanRoom = (room || level || 'all').replace(/[^a-zA-Z0-9]/g, '_');
+  return `sch_${safeCode}_${cleanRoom}_${dayOfWeek}_p${periodNumber}`;
+}
+
+/** ตัวระบุครูของ schedule doc หนึ่ง ๆ (uid / อีเมล / ชื่อ) — ใช้เทียบว่า "ครูคนนี้อยู่ในไฟล์ import รอบนี้ไหม" */
+function scheduleTeacherKeys(data: Record<string, any>): string[] {
+  const keys: string[] = [];
+  if (data.teacherId) keys.push(String(data.teacherId).toLowerCase());
+  if (Array.isArray(data.teacherIds)) data.teacherIds.forEach((t: string) => keys.push(String(t).toLowerCase()));
+  if (data.teacherEmail) keys.push(String(data.teacherEmail).toLowerCase());
+  if (data.unlinkedTeacherEmail) keys.push(String(data.unlinkedTeacherEmail).toLowerCase());
+  if (data.sourceTeacherName) keys.push(String(data.sourceTeacherName).trim());
+  if (data.unlinkedTeacherName) keys.push(String(data.unlinkedTeacherName).trim());
+  return keys.filter(Boolean);
+}
+
 // Normalize object keys for flexible column matching
 function normalizeRowKeys(row: Record<string, any>): Record<string, any> {
   const result: Record<string, any> = {};
@@ -109,7 +132,12 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   const [isStaffLoading, setIsStaffLoading] = useState(false);
   const [realStudentIds, setRealStudentIds] = useState<Set<string>>(new Set());
   const [isStudentIdsLoading, setIsStudentIdsLoading] = useState(false);
-  
+
+  // โหมด sync/replace สำหรับ COURSE: schedule เก่าของครูที่อยู่ในไฟล์นี้ ที่ไม่มีในไฟล์ใหม่
+  const [staleSchedules, setStaleSchedules] = useState<{ id: string; label: string }[]>([]);
+  const [scanningStale, setScanningStale] = useState(false);
+  const [replaceStale, setReplaceStale] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const staffSigRef = useRef<string>('');
 
@@ -990,6 +1018,25 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         setImportProgress(Math.min(95, Math.round((processedCount / totalValid) * 90) + 10));
       }
 
+      // ── sync/replace: ลบ schedule เก่าของครูในไฟล์นี้ที่ไม่มีในไฟล์ใหม่ (admin ยืนยันแล้ว) ──
+      if (importType === 'COURSE' && replaceStale && staleSchedules.length > 0) {
+        // กันลบ doc ที่มี attendance_records ผูก scheduleId อยู่
+        const attSnap = await getDocs(collection(db, 'attendance_records'));
+        const referencedSchedIds = new Set<string>();
+        attSnap.forEach(a => {
+          const sid = (a.data() as any).scheduleId;
+          if (sid) referencedSchedIds.add(String(sid));
+        });
+        const toDelete = staleSchedules.filter(s => !referencedSchedIds.has(s.id));
+        const skipped = staleSchedules.length - toDelete.length;
+        for (let i = 0; i < toDelete.length; i += 450) {
+          const delBatch = writeBatch(db);
+          toDelete.slice(i, i + 450).forEach(s => delBatch.delete(doc(db, 'schedules', s.id)));
+          await delBatch.commit();
+        }
+        console.log(`[BulkDataImportModal] sync/replace: ลบ schedule เก่า ${toDelete.length} รายการ (ข้าม ${skipped} รายการที่มี attendance ผูกอยู่)`);
+      }
+
       // Update local Zustand store
       if (newStudentsToStore.length > 0) {
         addStudentsToStore(newStudentsToStore);
@@ -1026,6 +1073,58 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
     [rawParsedRows, importType, realStaffList, realStudentIds]
   );
   const isValidated = rawParsedRows !== null;
+
+  // ── COURSE sync/replace: หา schedule เก่าของครูที่อยู่ในไฟล์นี้ ที่ไม่มีในไฟล์ใหม่ ──
+  // Bulk Import COURSE เขียนแบบ merge เท่านั้น ไม่เคยลบของเก่า → ข้อมูลผีสะสม (เช่น ห้อง 944
+  // ที่ไม่มีในไฟล์จริงแต่ค้างจาก import ทดสอบรอบก่อน). สแกนไว้ให้ admin ยืนยันลบก่อน import
+  useEffect(() => {
+    setStaleSchedules([]);
+    setReplaceStale(false);
+    if (importType !== 'COURSE' || previewData.length === 0) return;
+    const validRows = previewData.filter(r => r.isValid && r.parsedData?.isTeacherLoadReport);
+    if (validRows.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      setScanningStale(true);
+      try {
+        // 1. doc id ทั้งหมดที่ไฟล์นี้จะเขียน
+        const newIds = new Set<string>();
+        // 2. ตัวระบุครูทุกคนในไฟล์นี้
+        const fileTeacherKeys = new Set<string>();
+        for (const r of validRows) {
+          const p = r.parsedData;
+          for (const k of [p.matchedTeacherId, p.matchedTeacherEmail, p.teacherEmail, p.teacherName, p.unlinkedTeacherName]) {
+            if (k) fileTeacherKeys.add(String(k).toLowerCase().trim());
+          }
+          for (const slot of (p.slots || [])) {
+            newIds.add(scheduleDocIdFor(p.subjectCode, p.room, p.level, slot.dayOfWeek, slot.periodNumber));
+          }
+        }
+
+        const snap = await getDocs(collection(db, 'schedules'));
+        if (cancelled) return;
+        const stale: { id: string; label: string }[] = [];
+        snap.forEach(d => {
+          if (newIds.has(d.id)) return; // ยังอยู่ในไฟล์ใหม่
+          const data = d.data() as Record<string, any>;
+          const belongsToFileTeacher = scheduleTeacherKeys(data)
+            .some(k => fileTeacherKeys.has(String(k).toLowerCase().trim()));
+          if (!belongsToFileTeacher) return; // ครูคนนี้ไม่อยู่ในไฟล์รอบนี้ — ไม่แตะ
+          stale.push({
+            id: d.id,
+            label: `${data.subjectCode || data.courseCode || '?'} · ห้อง ${data.room || data.level || '?'} · ${data.dayOfWeek || ''} คาบ ${data.periodNumber ?? '?'}`,
+          });
+        });
+        if (!cancelled) setStaleSchedules(stale);
+      } catch (e) {
+        console.warn('[BulkDataImportModal] stale schedule scan failed:', e);
+      } finally {
+        if (!cancelled) setScanningStale(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [previewData, importType]);
 
   if (!isOpen) return null;
 
@@ -1355,6 +1454,38 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                   <strong>เกณฑ์ความปลอดภัย Firestore Batched Writes:</strong> ระบบจะละเว้นแถวที่ "พบข้อผิดพลาด" และนำเข้าเฉพาะแถวที่ "ผ่านเกณฑ์ตรวจสอบ" จำนวน {validCount} รายการ เข้าสู่ฐานข้อมูล Firestore ในรูปแบบ Batched Write แบบกลุ่มละไม่เกิน 500 รายการอย่างเสถียร
                 </p>
               </div>
+
+              {/* COURSE sync/replace — ลบข้อมูลตารางสอนเก่าที่ไม่มีในไฟล์ใหม่ */}
+              {importType === 'COURSE' && (scanningStale || staleSchedules.length > 0) && (
+                <div className="bg-amber-950/30 border border-amber-500/40 rounded-xl p-3 space-y-2">
+                  {scanningStale ? (
+                    <p className="text-[11px] text-amber-300 flex items-center gap-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> กำลังตรวจข้อมูลตารางสอนเก่าที่ค้างอยู่…
+                    </p>
+                  ) : (
+                    <>
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={replaceStale}
+                          onChange={e => setReplaceStale(e.target.checked)}
+                          className="mt-0.5 rounded border-amber-500/40 bg-black text-amber-500 focus:ring-amber-500/50"
+                        />
+                        <span className="text-[11px] text-amber-200">
+                          <strong>โหมด Sync/Replace:</strong> พบตารางสอนเก่าของครูในไฟล์นี้ <strong>{staleSchedules.length} รายการ</strong> ที่ไม่มีอยู่ในไฟล์ที่กำลังนำเข้า
+                          — ติ๊กเพื่อ <strong className="text-red-300">ลบถาวร</strong> (เฉพาะครูที่ปรากฏในไฟล์นี้ ไม่แตะครูคนอื่น; ข้ามรายการที่มีการเช็คชื่อผูกอยู่)
+                        </span>
+                      </label>
+                      <details className="text-[10px] text-amber-300/80">
+                        <summary className="cursor-pointer">ดูรายการที่จะลบ ({staleSchedules.length})</summary>
+                        <ul className="mt-1 space-y-0.5 max-h-32 overflow-y-auto font-mono">
+                          {staleSchedules.map(s => <li key={s.id}>• {s.label}</li>)}
+                        </ul>
+                      </details>
+                    </>
+                  )}
+                </div>
+              )}
 
             </div>
           )}
