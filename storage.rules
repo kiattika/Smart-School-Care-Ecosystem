@@ -1,0 +1,40 @@
+rules_version = '2';
+
+// Firebase Storage security rules
+// โปรเจกต์นี้ใช้ Storage เฉพาะ "ภาพถ่ายบ้านนักเรียน" (ประกอบการวางแผนออกเยี่ยมบ้าน)
+// ข้อมูลอ่อนไหวเรื่องความปลอดภัยที่อยู่อาศัย — เขียน/อ่านโดยตรงได้เฉพาะเจ้าของนักเรียนเท่านั้น
+//
+// ครูที่ปรึกษาดูรูปได้ผ่าน download URL (มี token) ที่เก็บใน Firestore doc
+// `student_home_locations/{studentId}` ซึ่ง firestore.rules จำกัดให้อ่านได้เฉพาะ
+// ครูที่ปรึกษาห้องนั้น + เจ้าของ + SUPER_ADMIN — จึงไม่ต้องทำ cross-service check ที่นี่
+// (Storage rules อ่าน Firestore named database ไม่ได้อยู่แล้ว)
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // path: student_home_photos/{ownerUid}/{fileName}  — ownerUid = Firebase Auth UID ของนักเรียน
+    match /student_home_photos/{ownerUid}/{fileName} {
+
+      // อ่านโดยตรง: เจ้าของเท่านั้น (ครูใช้ tokenized download URL จาก Firestore doc แทน)
+      allow read: if isSignedIn() && request.auth.uid == ownerUid;
+
+      // เขียน (create/update): เจ้าของเท่านั้น + ต้องเป็นรูปภาพ + ไม่เกิน 5MB
+      allow create, update: if isSignedIn()
+        && request.auth.uid == ownerUid
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+
+      // ห้ามลบผ่าน client (เก็บหลักฐาน — ถ้าต้องลบให้ทำผ่าน admin)
+      allow delete: if false;
+    }
+
+    // ทุก path อื่น: ปฏิเสธทั้งหมด
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

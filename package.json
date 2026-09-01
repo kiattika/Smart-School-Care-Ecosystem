@@ -13,6 +13,7 @@
     "emulators": "firebase emulators:start --import=./emulator-data --export-on-exit",
     "emulators:exec": "firebase emulators:exec --project=kiattisak-project-001 --import=./emulator-data \"npx vitest run src/__tests__/firestore.rules.test.ts\"",
     "emulators:exec:isolated": "firebase emulators:exec --config=firebase.rulestest.json --project=kiattisak-project-001 --only firestore \"npx vitest run src/__tests__/firestore.rules.test.ts\"",
+    "emulators:exec:storage": "firebase emulators:exec --config=firebase.storagetest.json --project=kiattisak-project-001 --only storage \"npx vitest run src/__tests__/storage.rules.test.ts\"",
     "seed:emulator": "tsx scripts/seedEmulatorAuth.ts"
   },
   "dependencies": {

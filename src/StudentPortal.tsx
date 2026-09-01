@@ -35,6 +35,7 @@ import { SocioeconomicWelfareModule } from './components/student-parent/Socioeco
 import { BehaviorDisciplineModule } from './components/student-parent/BehaviorDisciplineModule';
 import { PortfolioActivityVault } from './components/student-parent/PortfolioActivityVault';
 import { StudentPortfolioSection } from './components/portfolio/StudentPortfolioSection';
+import { StudentHomeLocationForm } from './components/homevisit/StudentHomeLocationForm';
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
 import { StudentSelfAssessmentForm } from './components/StudentSelfAssessmentForm';
@@ -440,7 +441,14 @@ export function StudentPortal() {
 
         {/* 3. Socioeconomic & Home Visit */}
         {activeTab === 'socio' && (
-          <SocioeconomicWelfareModule studentId={student.studentId} />
+          <div className="space-y-8">
+            {user?.uid && (
+              <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-5">
+                <StudentHomeLocationForm student={student} studentUid={user.uid} />
+              </div>
+            )}
+            <SocioeconomicWelfareModule studentId={student.studentId} />
+          </div>
         )}
 
         {/* 4. Behavior & Conduct Certificate */}

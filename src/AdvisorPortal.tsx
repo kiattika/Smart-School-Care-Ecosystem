@@ -17,6 +17,7 @@ import { twMerge } from 'tailwind-merge';
 import { ResponsiveContainer, LineChart, Line, XAxis, Tooltip as RechartsTooltip } from 'recharts';
 import { StudentAnalyticsDashboard } from './components/StudentAnalyticsDashboard';
 import { AdvisorPortfolioReview } from './components/portfolio/AdvisorPortfolioReview';
+import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -476,7 +477,11 @@ export function AdvisorPortal() {
 
           )}
           {activeTab === 'visit-planner' && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300 h-full">
+            <div className="animate-in fade-in duration-300 space-y-6">
+            <div className="bg-[#1c1f2b] border border-white/10 rounded-xl p-4">
+              <AdvisorHomeLocationMap homeroomClass={myRoom} students={myStudents} />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
               {/* Left Column: Visit List */}
               <div className="lg:col-span-1 flex flex-col gap-4 bg-[#1c1f2b] border border-white/10 rounded-xl p-4 overflow-y-auto">
                 <div className="flex justify-between items-center mb-2">
@@ -587,7 +592,8 @@ export function AdvisorPortal() {
                 </div>
               </div>
             </div>
-   
+            </div>
+
           )}
           {activeTab === 'school-checkin' && (
             <div className="animate-in fade-in duration-300 h-full flex flex-col gap-6 max-w-5xl mx-auto w-full pb-10">
