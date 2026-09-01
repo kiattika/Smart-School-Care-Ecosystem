@@ -2170,11 +2170,11 @@ export function TeacherPortal() {
         </div>
       )}
 
-      {view === 'active_learning' && activeCourse && (
-        <ActiveLearningClassroom 
-          course={activeCourse} 
-          students={courseStudents} 
-          onBack={() => setView('dashboard')} 
+      {view === 'active_learning' && activeCourse && !retroactiveAttendanceMode && (
+        <ActiveLearningClassroom
+          course={activeCourse}
+          students={courseStudents}
+          onBack={() => setView('dashboard')}
         />
       )}
         </motion.div>
