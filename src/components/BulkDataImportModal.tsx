@@ -784,8 +784,9 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               behaviorScore: 100,
               riskLevel: 'NORMAL',
               status: 'ACTIVE',
-              parentUid: null, // Critical: Unset/null on initial import until linked
-              parentId: null,
+              // ห้ามใส่ parentUid/parentId/studentUid ที่นี่ — เขียนแบบ merge อยู่แล้ว
+              // ถ้าใส่ null ลงไป การ re-import จะลบ link ที่เชื่อมไว้แล้ว (เช่นบัญชีทดสอบนักเรียน/ผู้ปกครอง)
+              // นักเรียนใหม่ที่ยังไม่มี field เหล่านี้ = ยังไม่ผูกบัญชี ซึ่งถูกต้องอยู่แล้ว
               parentMobile: parsedData.parentMobile || '',
               homeLocation: {
                 address: '',

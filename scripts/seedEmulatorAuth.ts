@@ -1,6 +1,5 @@
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getAuth, UserRecord } from 'firebase-admin/auth';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 // Force point to local Firebase Emulator
 process.env.FIREBASE_AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
@@ -8,7 +7,7 @@ process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '12
 
 import firebaseConfig from '../firebase-applet-config.json';
 
-// Initialize Firebase Admin with the matching project ID
+// Initialize Firebase Admin with the matching project ID (Auth only — Firestore ใช้ REST ด้านล่าง)
 const projectId = process.env.GCLOUD_PROJECT || firebaseConfig.projectId || 'kiattisak-project-001';
 
 if (!getApps().length) {
@@ -19,14 +18,86 @@ if (!getApps().length) {
 
 const auth = getAuth();
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Firestore writes via REST (ไม่ใช้ firebase-admin SDK)
+//
+// firebase-admin SDK เขียน named database (non-default) บน Firestore emulator
+// ทำ transaction lock ค้าง (ABORTED: Transaction lock timeout) แล้วไม่ปล่อย —
+// emulator เขียนไม่ได้ทั้ง instance จนกว่าจะ restart. เกิดซ้ำหลายครั้ง
+// (ดู memory: emulator-export-lock). REST API ไม่มีปัญหานี้
+//
 // CRITICAL: client ใช้ named database (firebaseConfig.firestoreDatabaseId) ไม่ใช่ (default)
-// ถ้า seed เขียนลง (default) ตามค่า default ของ getFirestore() → client อ่านคนละ namespace
-// → staff/students ที่ seed มา "หายไป" ในหน้าเว็บ (เป็นสาเหตุจริงของบั๊ก import ตารางสอน)
-const firestoreDatabaseId: string | undefined = (firebaseConfig as any).firestoreDatabaseId || undefined;
-const db = firestoreDatabaseId ? getFirestore(firestoreDatabaseId) : getFirestore();
+// ─────────────────────────────────────────────────────────────────────────────
+const firestoreDatabaseId: string = (firebaseConfig as any).firestoreDatabaseId || '(default)';
+const FS_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
+const FS_BASE = `http://${FS_HOST}/v1/projects/${projectId}/databases/${firestoreDatabaseId}/documents`;
 
-console.log(`✅ Connected to Firebase Emulator (Auth: 127.0.0.1:9099, Firestore: 127.0.0.1:8080)`);
-console.log(`   Firestore database: ${firestoreDatabaseId || '(default)'}`);
+function toValue(v: any): any {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (v instanceof Date) return { timestampValue: v.toISOString() };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number') return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === 'string') return { stringValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(toValue) } };
+  if (typeof v === 'object') {
+    const fields: Record<string, any> = {};
+    for (const [k, val] of Object.entries(v)) fields[k] = toValue(val);
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(v) };
+}
+
+/** ค่าที่ใช้แทน FieldValue.serverTimestamp() (REST path ตรง ๆ ไม่มี server transform) */
+const now = () => new Date();
+
+/** set แบบ merge (เขียนเฉพาะ field ที่ส่งมา ไม่ลบ field อื่น) เหมือน { merge: true } */
+async function fsSet(path: string, data: Record<string, any>): Promise<void> {
+  const fields: Record<string, any> = {};
+  const mask: string[] = [];
+  for (const [k, v] of Object.entries(data)) {
+    fields[k] = toValue(v);
+    mask.push(`updateMask.fieldPaths=${encodeURIComponent(k)}`);
+  }
+  const res = await fetch(`${FS_BASE}/${path}?${mask.join('&')}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+    body: JSON.stringify({ fields }),
+  });
+  if (!res.ok) {
+    throw new Error(`fsSet ${path} → ${res.status} ${(await res.text()).slice(0, 200)}`);
+  }
+}
+
+async function fsGetExists(path: string): Promise<boolean> {
+  const res = await fetch(`${FS_BASE}/${path}`, { headers: { Authorization: 'Bearer owner' } });
+  return res.ok;
+}
+
+// เลียนแบบ API เดิม db.collection('x').doc('y').set(data) → fsSet('x/y', data)
+const db = {
+  collection: (col: string) => ({
+    doc: (id: string) => ({
+      set: (data: Record<string, any>, _opts?: unknown) => fsSet(`${col}/${encodeURIComponent(id)}`, data),
+      get: async () => ({ exists: await fsGetExists(`${col}/${encodeURIComponent(id)}`) }),
+    }),
+  }),
+  // batch → เขียนทีละ doc ตามลำดับ (REST ไม่มี batch commit ตรง ๆ ใน 1 request; seed ไม่ต้อง atomic)
+  batch: () => {
+    const ops: Array<() => Promise<void>> = [];
+    return {
+      set: (ref: { __path: string }, data: Record<string, any>, _opts?: unknown) => {
+        ops.push(() => fsSet(ref.__path, data));
+      },
+      commit: async () => { for (const op of ops) await op(); },
+    };
+  },
+};
+// helper สำหรับ batch.set ให้ได้ ref ที่มี __path
+const ref = (col: string, id: string) => ({ __path: `${col}/${encodeURIComponent(id)}` });
+const FieldValue = { serverTimestamp: now };
+
+console.log(`✅ Connected to Firebase Emulator (Auth: ${process.env.FIREBASE_AUTH_EMULATOR_HOST}, Firestore REST: ${FS_HOST})`);
+console.log(`   Firestore database: ${firestoreDatabaseId}`);
 
 export interface TestUserDef {
   uid: string;
@@ -210,11 +281,11 @@ export const SEEDED_TEST_USERS: TestUserDef[] = [
     uid: 'test_parent_001',
     email: 'parent.test@gmail.com',
     password: 'test1234',
-    displayName: 'คุณพ่อมนตรี (ผู้ปกครองนายกิตติคุณ)',
+    displayName: 'ผู้ปกครองของ นายยศกร รักเรียน (ม.5/8)',
     prefix: 'นาย',
-    firstName: 'มนตรี',
-    lastName: 'มงคลศิลป์',
-    position: 'ผู้ปกครองนักเรียน (นายกิตติคุณ มงคลศิลป์ ม.5/8)',
+    firstName: 'ผู้ปกครอง',
+    lastName: 'รักเรียน',
+    position: 'ผู้ปกครองนักเรียน (นายยศกร รักเรียน ม.5/8 เลขที่ 1)',
     roles: [],
     studentInfo: {
       studentId: '38501',
@@ -227,10 +298,10 @@ export const SEEDED_TEST_USERS: TestUserDef[] = [
     uid: 'test_student_001',
     email: 'student.test@utd.ac.th',
     password: 'test1234',
-    displayName: 'นายกิตติคุณ มงคลศิลป์ (ม.5/8)',
+    displayName: 'นายยศกร รักเรียน (ม.5/8)',
     prefix: 'นาย',
-    firstName: 'กิตติคุณ',
-    lastName: 'มงคลศิลป์',
+    firstName: 'ยศกร',
+    lastName: 'รักเรียน',
     position: 'นักเรียนชั้น ม.5/8 เลขที่ 1',
     roles: ['STUDENT'],
     studentInfo: {
@@ -315,24 +386,49 @@ export async function seedEmulatorAuth() {
         updatedAt: FieldValue.serverTimestamp()
       }, { merge: true });
 
-      // 4. If student/parent info is attached, write matching student record
+      // 4. If student/parent info is attached, LINK the test account to a REAL student doc.
+      //    เดิม seed เขียนทับชื่อ/ชั้น/คะแนนเป็นค่าปลอม ("กิตติคุณ มงคลศิลป์") ทับข้อมูลจริงจากไฟล์ import
+      //    ทำให้ students/38501 กลายเป็น Frankenstein doc (name="ยศกร รักเรียน" แต่ fullName="กิตติคุณ")
+      //    → ตอนนี้ merge เฉพาะ field ผูกบัญชี (studentUid/parentUid/parentId) เท่านั้น
+      //    ถ้ายังไม่มี doc (seed ก่อน import) จึงค่อยสร้าง minimal doc ด้วยค่าจริงที่รู้
       if (userDef.studentInfo) {
         const studentDocRef = db.collection('students').doc(userDef.studentInfo.studentId);
-        await studentDocRef.set({
-          studentId: userDef.studentInfo.studentId,
-          studentNumber: userDef.studentInfo.studentNumber,
-          studentNo: userDef.studentInfo.studentNumber,
-          fullName: 'นายกิตติคุณ มงคลศิลป์',
-          nickname: 'กิต',
-          className: userDef.studentInfo.className,
-          room: userDef.studentInfo.className,
-          behaviorScore: 100,
-          riskLevel: 'NORMAL',
-          parentId: userDef.studentInfo.parentId,
-          parentUid: userDef.studentInfo.parentId,
+        const existing = await studentDocRef.get();
+        const linkFields = {
           studentUid: userDef.uid,
-          updatedAt: FieldValue.serverTimestamp()
-        }, { merge: true });
+          parentUid: userDef.studentInfo.parentId,
+          parentId: userDef.studentInfo.parentId,
+          updatedAt: FieldValue.serverTimestamp(),
+        };
+        if (existing.exists) {
+          // ข้อมูลจริงจากไฟล์ import อยู่แล้ว — แตะแค่ field ผูกบัญชี ไม่ยุ่งชื่อ/ชั้น/คะแนน
+          await studentDocRef.set(linkFields, { merge: true });
+        } else {
+          // seed แบบ standalone (ยังไม่ได้ import ไฟล์) — สร้าง doc ด้วยค่าจริงของ 38501
+          await studentDocRef.set({
+            ...linkFields,
+            id: userDef.studentInfo.studentId,
+            studentId: userDef.studentInfo.studentId,
+            studentCode: userDef.studentInfo.studentId,
+            studentNumber: userDef.studentInfo.studentNumber,
+            studentNo: userDef.studentInfo.studentNumber,
+            number: userDef.studentInfo.studentNumber,
+            prefix: 'นาย',
+            title: 'นาย',
+            firstName: 'ยศกร',
+            lastName: 'รักเรียน',
+            name: 'นายยศกร รักเรียน',
+            fullName: 'นายยศกร รักเรียน',
+            nickname: '',
+            className: userDef.studentInfo.className,
+            room: userDef.studentInfo.className,
+            grade: 'ม.5',
+            behaviorScore: 100,
+            riskLevel: 'NORMAL',
+            status: 'ACTIVE',
+            createdAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
 
         // Add a sample parent notification for testing relational parent rules
         const notifDocRef = db.collection('parent_notifications').doc(`notif_parent_test_01`);
@@ -403,10 +499,10 @@ export async function seedEmulatorAuth() {
 
     const batch = db.batch();
     for (const p of defaultAdminPeriods) {
-      batch.set(db.collection('admin_periods_config').doc(p.id), p, { merge: true });
+      batch.set(ref('admin_periods_config', p.id), p, { merge: true });
     }
 
-    batch.set(db.collection('school_settings').doc('periods_config'), {
+    batch.set(ref('school_settings', 'periods_config'), {
       periods: defaultAdminPeriods,
       updatedAt: FieldValue.serverTimestamp()
     }, { merge: true });
