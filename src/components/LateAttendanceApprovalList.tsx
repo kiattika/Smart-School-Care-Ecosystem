@@ -9,11 +9,13 @@ import {
 } from '../services/firestoreService';
 
 /**
- * รายการคำขอ "เช็คชื่อย้อนหลัง" ของครูผู้สอน — สำหรับผู้อนุมัติ (DEPUTY_DIRECTOR_ACADEMIC / SUPER_ADMIN)
+ * รายการคำขอ "เช็คชื่อย้อนหลัง" ของครูผู้สอน
+ * - ผู้อนุมัติ (DEPUTY_DIRECTOR_ACADEMIC / SUPER_ADMIN): อนุมัติ/ปฏิเสธได้
+ * - `readOnly` (เช่น DIRECTOR ที่ดูเพื่อกำกับดูแล): ดูรายการอย่างเดียว ไม่มีปุ่มอนุมัติ/ปฏิเสธ
+ *   (business logic: การอนุมัติจริงจบที่ DEPUTY_DIRECTOR_ACADEMIC — ผอ. ไม่กดอนุมัติเองในขั้นนี้)
  * อ่านจาก Firestore สด (late_attendance_requests) — อนุมัติ/ปฏิเสธ = merge เปลี่ยนแค่ status (ไม่ลบ doc)
- * ใช้ได้ทั้งใน ApprovalsPortal และหน้าอื่น ๆ ที่ต้องการ
  */
-export function LateAttendanceApprovalList() {
+export function LateAttendanceApprovalList({ readOnly = false }: { readOnly?: boolean } = {}) {
   const user = useStore(s => s.user);
   const [requests, setRequests] = useState<LateAttendanceRequestRecord[]>([]);
   const [toast, setToast] = useState<string | null>(null);
@@ -76,7 +78,7 @@ export function LateAttendanceApprovalList() {
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {req.status === 'PENDING' ? (
+          {req.status === 'PENDING' && !readOnly ? (
             <>
               <button
                 onClick={() => decide(req, 'APPROVED')}
@@ -94,9 +96,10 @@ export function LateAttendanceApprovalList() {
           ) : (
             <span className={cn(
               'px-2.5 py-1 rounded text-[11px] font-bold border',
+              req.status === 'PENDING' ? 'bg-amber-500/10 text-amber-400 border-amber-500/25' :
               req.status === 'APPROVED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25' : 'bg-red-500/10 text-red-400 border-red-500/25'
             )}>
-              {req.status === 'APPROVED' ? 'อนุมัติแล้ว' : 'ปฏิเสธแล้ว'}
+              {req.status === 'PENDING' ? 'รออนุมัติ' : req.status === 'APPROVED' ? 'อนุมัติแล้ว' : 'ปฏิเสธแล้ว'}
             </span>
           )}
         </div>
@@ -108,13 +111,18 @@ export function LateAttendanceApprovalList() {
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-bold text-white flex items-center gap-2">
-          <Clock className="w-5 h-5 text-amber-400" /> คำขอเช็คชื่อย้อนหลัง (รออนุมัติ)
+          <Clock className="w-5 h-5 text-amber-400" /> คำขอเช็คชื่อย้อนหลัง{readOnly ? '' : ' (รออนุมัติ)'}
           {pending.length > 0 && (
             <span className="text-[11px] bg-amber-500 text-slate-950 font-bold px-2 py-0.5 rounded-full">{pending.length}</span>
           )}
+          {readOnly && (
+            <span className="text-[10px] font-bold bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full">ดูอย่างเดียว</span>
+          )}
         </h3>
         <p className="text-xs text-slate-400 mt-1">
-          คำขอจากครูผู้สอนที่ลืมเช็คชื่อในคาบ — อนุมัติแล้วครูจะเข้าเช็คชื่อย้อนหลังได้ (เช็คชื่ออย่างเดียว)
+          {readOnly
+            ? 'ดูเพื่อกำกับดูแล — การอนุมัติจริงดำเนินการโดยรองผู้อำนวยการฝ่ายวิชาการ'
+            : 'คำขอจากครูผู้สอนที่ลืมเช็คชื่อในคาบ — อนุมัติแล้วครูจะเข้าเช็คชื่อย้อนหลังได้ (เช็คชื่ออย่างเดียว)'}
         </p>
       </div>
 

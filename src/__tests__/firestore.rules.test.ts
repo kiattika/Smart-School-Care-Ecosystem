@@ -710,13 +710,26 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
         });
       });
 
-    it('เจ้าของคำขอ + DEPUTY_DIRECTOR_ACADEMIC + SUPER_ADMIN อ่านได้; คนอื่นอ่านไม่ได้', async () => {
+    it('เจ้าของคำขอ + DEPUTY_DIRECTOR_ACADEMIC + SUPER_ADMIN + DIRECTOR + EXECUTIVE อ่านได้; คนอื่นอ่านไม่ได้', async () => {
       await seedReq();
       await assertSucceeds(asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore().doc('late_attendance_requests/lar-01').get());
       await assertSucceeds(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01').get());
       await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('late_attendance_requests/lar-01').get());
+      await assertSucceeds(asRole('DIRECTOR').firestore().doc('late_attendance_requests/lar-01').get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('late_attendance_requests/lar-01').get());
       await assertFails(asUser('teacher-uid-2', ['SUBJECT_TEACHER']).firestore().doc('late_attendance_requests/lar-01').get());
+      await assertFails(asRole('HEAD_OF_DEPARTMENT').firestore().doc('late_attendance_requests/lar-01').get());
       await assertFails(asAnonymous().firestore().doc('late_attendance_requests/lar-01').get());
+    });
+
+    it('REGRESSION: DIRECTOR อ่านได้อย่างเดียว — สร้าง/แก้ status/ลบ ไม่ได้', async () => {
+      await seedReq();
+      const dir = asRole('DIRECTOR').firestore();
+      await assertSucceeds(dir.doc('late_attendance_requests/lar-01').get());
+      await assertFails(dir.doc('late_attendance_requests/lar-01').set({ status: 'APPROVED', approverUid: 'dir-1' }, { merge: true }));
+      await assertFails(dir.doc('late_attendance_requests/lar-01').set({ status: 'REJECTED' }, { merge: true }));
+      await assertFails(dir.doc('late_attendance_requests/lar-new-by-dir').set({ teacherId: 'dir-1', scheduleId: 's', status: 'PENDING' }));
+      await assertFails(dir.doc('late_attendance_requests/lar-01').delete());
     });
 
     it('ครูสร้างคำขอของตัวเอง (status=PENDING) ได้; สร้างในนามคนอื่น หรือ status อื่น ไม่ได้', async () => {

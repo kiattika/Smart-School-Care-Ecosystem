@@ -293,8 +293,10 @@ service cloud.firestore {
     // ผู้อนุมัติ: DEPUTY_DIRECTOR_ACADEMIC (รองผู้อำนวยการฝ่ายวิชาการ) / SUPER_ADMIN — ยืนยันจากทางโรงเรียน
     // document ไม่ถูกลบตอนอนุมัติ/ปฏิเสธ (allow delete: if false) — เก็บประวัติ เปลี่ยนแค่ status
     match /late_attendance_requests/{reqId} {
+      // DIRECTOR อ่านได้เพื่อกำกับดูแล (read-only) — การอนุมัติจริงจบที่ DEPUTY_DIRECTOR_ACADEMIC
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
+                     hasRole('DIRECTOR') ||
                      hasRole('EXECUTIVE') ||
                      (isSignedIn() && resource.data.teacherId == request.auth.uid);
 
