@@ -225,6 +225,26 @@ export function detectSubjectType(subjectName: string, subjectCode: string): 'MA
 }
 
 /**
+ * รายการที่ "ไม่มีนักเรียน" — ประชุมครู/กิจกรรมเฉพาะครู เช่น PLC, ประชุม, พักกลางวัน
+ * นับรวมในภาระงานสอน แต่ **ไม่ต้องแสดงในหน้าเช็คชื่อ** (ไม่มีปุ่มเช็คชื่อ/เข้าสู่ชั้นเรียน)
+ */
+export function isNonStudentSession(subjectName: string, subjectCode: string, level?: string): boolean {
+  const name = (subjectName || '').toUpperCase();
+  const code = (subjectCode || '').toUpperCase().trim();
+  const lvl = (level || '').replace(/[\s.\-_]/g, '').toUpperCase();
+  return (
+    code === 'PLC' ||
+    code === 'LUNCH' ||
+    name.includes('PLC') ||
+    name.includes('ประชุม') ||
+    name.includes('พักกลางวัน') ||
+    name.includes('LUNCH') ||
+    lvl === 'NONSTUDENT' ||           // คอลัมน์ "ระดับ" = "Non-Student"
+    lvl.includes('ไม่มีนักเรียน')
+  );
+}
+
+/**
  * สร้างรหัสวิชาสำรองแบบ deterministic จากชื่อรายวิชา
  * ใช้เมื่อคอลัมน์ "รหัสวิชา" ในไฟล์เป็น "-" หรือว่าง (พบบ่อยในแถวกิจกรรมของรายงานจริง)
  * — ไม่ใช่การ fabricate identity ของคน แต่เป็น key ของ schedule document ที่ stable + traceable

@@ -19,6 +19,7 @@ import {
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { writeBatch, doc, serverTimestamp, collection, getDocs, onSnapshot } from 'firebase/firestore';
+import { computeSyncReplacePlan } from '../lib/scheduleSyncReplace';
 import { db } from '../lib/firebase';
 import { useStore } from '../store';
 import { Student, Course, GlobalCourse, UserRole } from '../types';
@@ -75,28 +76,6 @@ export interface ValidatedRow {
   errorMessage?: string;
   warnings?: string[];
   parsedData: Record<string, any>;
-}
-
-/**
- * สร้าง schedule document id ให้ตรงกับที่ handleImport เขียนจริง (Teacher Load Report path)
- * `sch_${safeCode}_${cleanRoom}_${dayOfWeek}_p${periodNumber}`
- */
-function scheduleDocIdFor(subjectCode: string, room: string, level: string, dayOfWeek: string, periodNumber: number): string {
-  const safeCode = String(subjectCode || 'X').replace(/[^\p{L}\p{N}\p{M}_-]+/gu, '_');
-  const cleanRoom = (room || level || 'all').replace(/[^a-zA-Z0-9]/g, '_');
-  return `sch_${safeCode}_${cleanRoom}_${dayOfWeek}_p${periodNumber}`;
-}
-
-/** ตัวระบุครูของ schedule doc หนึ่ง ๆ (uid / อีเมล / ชื่อ) — ใช้เทียบว่า "ครูคนนี้อยู่ในไฟล์ import รอบนี้ไหม" */
-function scheduleTeacherKeys(data: Record<string, any>): string[] {
-  const keys: string[] = [];
-  if (data.teacherId) keys.push(String(data.teacherId).toLowerCase());
-  if (Array.isArray(data.teacherIds)) data.teacherIds.forEach((t: string) => keys.push(String(t).toLowerCase()));
-  if (data.teacherEmail) keys.push(String(data.teacherEmail).toLowerCase());
-  if (data.unlinkedTeacherEmail) keys.push(String(data.unlinkedTeacherEmail).toLowerCase());
-  if (data.sourceTeacherName) keys.push(String(data.sourceTeacherName).trim());
-  if (data.unlinkedTeacherName) keys.push(String(data.unlinkedTeacherName).trim());
-  return keys.filter(Boolean);
 }
 
 // Normalize object keys for flexible column matching
@@ -1077,46 +1056,34 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   // ── COURSE sync/replace: หา schedule เก่าของครูที่อยู่ในไฟล์นี้ ที่ไม่มีในไฟล์ใหม่ ──
   // Bulk Import COURSE เขียนแบบ merge เท่านั้น ไม่เคยลบของเก่า → ข้อมูลผีสะสม (เช่น ห้อง 944
   // ที่ไม่มีในไฟล์จริงแต่ค้างจาก import ทดสอบรอบก่อน). สแกนไว้ให้ admin ยืนยันลบก่อน import
+  //
+  // ⚠️ SAFETY: ถ้าครูคนไหน "มีแถวที่ import ไม่ผ่าน" ในไฟล์นี้ → **ไม่แตะ schedule เก่าของครูคนนั้นเลย**
+  // (เดิม: ครูมีแถววิชาการที่ valid + แถวกิจกรรมที่ parse ไม่ผ่าน → newIds มีแค่วิชาการ →
+  //  กิจกรรมเดิมของครูโดน flag ว่า stale แล้วโดนลบทั้งหมด — สาเหตุจริงของ "คาบกิจกรรมหาย")
   useEffect(() => {
     setStaleSchedules([]);
     setReplaceStale(false);
     if (importType !== 'COURSE' || previewData.length === 0) return;
-    const validRows = previewData.filter(r => r.isValid && r.parsedData?.isTeacherLoadReport);
+    const loadRows = previewData.filter(r => r.parsedData?.isTeacherLoadReport);
+    const validRows = loadRows.filter(r => r.isValid);
     if (validRows.length === 0) return;
 
     let cancelled = false;
     (async () => {
       setScanningStale(true);
       try {
-        // 1. doc id ทั้งหมดที่ไฟล์นี้จะเขียน
-        const newIds = new Set<string>();
-        // 2. ตัวระบุครูทุกคนในไฟล์นี้
-        const fileTeacherKeys = new Set<string>();
-        for (const r of validRows) {
-          const p = r.parsedData;
-          for (const k of [p.matchedTeacherId, p.matchedTeacherEmail, p.teacherEmail, p.teacherName, p.unlinkedTeacherName]) {
-            if (k) fileTeacherKeys.add(String(k).toLowerCase().trim());
-          }
-          for (const slot of (p.slots || [])) {
-            newIds.add(scheduleDocIdFor(p.subjectCode, p.room, p.level, slot.dayOfWeek, slot.periodNumber));
-          }
-        }
-
         const snap = await getDocs(collection(db, 'schedules'));
         if (cancelled) return;
-        const stale: { id: string; label: string }[] = [];
-        snap.forEach(d => {
-          if (newIds.has(d.id)) return; // ยังอยู่ในไฟล์ใหม่
-          const data = d.data() as Record<string, any>;
-          const belongsToFileTeacher = scheduleTeacherKeys(data)
-            .some(k => fileTeacherKeys.has(String(k).toLowerCase().trim()));
-          if (!belongsToFileTeacher) return; // ครูคนนี้ไม่อยู่ในไฟล์รอบนี้ — ไม่แตะ
-          stale.push({
-            id: d.id,
-            label: `${data.subjectCode || data.courseCode || '?'} · ห้อง ${data.room || data.level || '?'} · ${data.dayOfWeek || ''} คาบ ${data.periodNumber ?? '?'}`,
-          });
-        });
-        if (!cancelled) setStaleSchedules(stale);
+        const existingDocs = snap.docs.map(d => ({ id: d.id, data: d.data() as Record<string, any> }));
+        const plan = computeSyncReplacePlan(
+          loadRows.map(r => ({ isValid: r.isValid, parsedData: r.parsedData as Record<string, any> })),
+          existingDocs,
+        );
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          plan.debug.forEach(line => console.log('[SYNC-REPLACE]', line));
+        }
+        if (!cancelled) setStaleSchedules(plan.stale.map(s => ({ id: s.id, label: s.label })));
       } catch (e) {
         console.warn('[BulkDataImportModal] stale schedule scan failed:', e);
       } finally {

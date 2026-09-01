@@ -160,6 +160,8 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   // 2. Attendance Status & Gating (Firestore-backed)
   const courseId = course?.id || 'default-course';
   const [firestoreAttendance, setFirestoreAttendance] = useState<Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'> | null>(null);
+  // ค่าเริ่มต้นจากการเช็คชื่อโฮมรูมตอนเช้า — ใช้ pre-fill ฟอร์มเช็คชื่อคาบ (ไม่ใช้ gate ว่าเช็คคาบนี้แล้ว)
+  const [homeroomDefault, setHomeroomDefault] = useState<Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'> | null>(null);
 
   // Fetch real attendance record from Firestore for today's course/period
   useEffect(() => {
@@ -171,11 +173,18 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
         const roomStr = rawRoom.replace('/', '-');
         // คาบ 0 (โฮมรูม) เป็นคาบจริง — ห้าม falsy check (`|| 1`) ให้ตรงกับตัวเขียน (TakeAttendanceModal)
         const periodNum = (course?.periodIndex !== undefined && course?.periodIndex !== null) ? course.periodIndex : 1;
-        const recordId = `${dateStr}_${roomStr}_p${periodNum}`;
 
-        const rec = await getAttendanceRecord(recordId);
-        if (rec && rec.students && isMounted) {
-          setFirestoreAttendance(rec.students);
+        const rec = await getAttendanceRecord(`${dateStr}_${roomStr}_p${periodNum}`);
+        if (isMounted) setFirestoreAttendance(rec?.students || null);
+
+        // ถ้าคาบนี้ยังไม่ได้เช็ค → ดึงสถานะจากโฮมรูมตอนเช้ามาเป็นค่าเริ่มต้น
+        if (!rec?.students && periodNum !== 0) {
+          const hr =
+            (await getAttendanceRecord(`${dateStr}_${roomStr}`)) ||
+            (await getAttendanceRecord(`${dateStr}_${roomStr}_p0`));
+          if (isMounted) setHomeroomDefault(hr?.students || null);
+        } else if (isMounted) {
+          setHomeroomDefault(null);
         }
       } catch (err) {
         console.error('Error loading attendance from Firestore:', err);
@@ -187,7 +196,10 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
     };
   }, [course?.room, course?.periodIndex, currentDate]);
 
+  // gating: เฉพาะ record ของคาบนี้จริง ๆ (โฮมรูม default ไม่นับว่า "เช็คคาบนี้แล้ว")
   const currentAttendance = firestoreAttendance || attendanceRecords[courseId] || attendanceRecords[course.code] || {};
+  // ค่าที่ pre-fill ในฟอร์มเช็คชื่อ: คาบนี้ > โฮมรูมตอนเช้า > store
+  const attendancePrefill = firestoreAttendance || homeroomDefault || attendanceRecords[courseId] || attendanceRecords[course.code] || {};
   const hasAttendanceRecords = Object.keys(currentAttendance).length > 0;
   // Gated strictly when real student attendance statuses exist
   const isAttendanceDone = hasAttendanceRecords;
@@ -1345,7 +1357,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
         course={course}
         students={courseStudents}
         currentDate={currentDate}
-        initialAttendance={currentAttendance}
+        initialAttendance={attendancePrefill}
         teacherId={user?.uid || 'teacher_001'}
         teacherName={user?.displayName || 'ครูผู้สอน'}
         onAttendanceSaved={(newStatuses) => {

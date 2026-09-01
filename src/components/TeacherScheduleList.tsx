@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Clock, CheckCircle2, History, BookOpen, FileText, CheckCircle, Calendar, Sparkles } from 'lucide-react';
+import { mergeConsecutivePeriods, periodRangeLabel } from '../lib/mergeConsecutivePeriods';
+import { isNonStudentSession } from '../utils/teacherLoadReportParser';
 
 export interface SubjectPeriod {
   id: string;
@@ -21,6 +23,10 @@ export interface SubjectPeriod {
   scheduleId?: string;          // schedules/{id} — ใช้ยื่นคำขอเช็คชื่อย้อนหลัง
   level?: string;               // ระดับชั้น เช่น ม.5/8
   lateRequestStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | null;  // สถานะคำขอเช็คชื่อย้อนหลังของครูคนนี้
+  // คาบรวม (double/triple period ติดกัน) — ดู lib/mergeConsecutivePeriods
+  periodNumberEnd?: number;        // คาบสุดท้ายของช่วง (ถ้ารวม)
+  mergedCourseIds?: string[];      // courseId ของทุกคาบย่อยในช่วง
+  mergedPeriodNumbers?: number[];  // periodNumber ของทุกคาบย่อยในช่วง
 }
 
 interface TeacherScheduleListProps {
@@ -57,8 +63,13 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
   };
 
   // 1. Extract and sort class options dynamically from periods from least to greatest
+  // (ไม่รวมรายการที่ไม่มีนักเรียน เช่น PLC/Non-Student — ไม่แสดงในหน้าเช็คชื่ออยู่แล้ว)
   const uniqueClassNames: string[] = Array.from(
-    new Set(periods.map(p => normalizeClassName(p.className)))
+    new Set(
+      periods
+        .filter(p => !isNonStudentSession(p.subjectName, p.subjectCode, p.level || p.className))
+        .map(p => normalizeClassName(p.className))
+    )
   );
 
   const sortedClassNames = uniqueClassNames.sort((a: string, b: string) => {
@@ -102,9 +113,15 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
   };
 
   const filteredPeriods = sortedPeriods.filter(p => {
+    // วิชาที่ไม่มีนักเรียน (PLC / ประชุมครู / พักกลางวัน) — ไม่ต้องเช็คชื่อ ไม่แสดงในหน้านี้
+    // (ยังนับรวมในภาระงานสอนที่ TeachingLoadTable ตามปกติ)
+    if (isNonStudentSession(p.subjectName, p.subjectCode, p.level || p.className)) return false;
     if (selectedClass === 'ALL') return true;
     return normalizeClassName(p.className) === selectedClass;
   });
+
+  // รวมคาบติดกัน (เช่น คาบ 3-4 วิชา+ห้องเดียวกัน) ให้เป็นแถวเดียว
+  const displayPeriods = useMemo(() => mergeConsecutivePeriods(filteredPeriods), [filteredPeriods]);
 
   // ปุ่มบันทึกหลังสอน — gate ไว้: บันทึกได้ต่อเมื่อเช็คชื่อคาบนั้นเสร็จแล้วเท่านั้น
   // (business rule: ต้องทำกิจกรรมการเรียนการสอน = เช็คชื่อ ก่อน ถึงจะบันทึกหลังสอนได้)
@@ -228,18 +245,18 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
       </div>
 
       {/* สรุปสถานะเช็คชื่อรายคาบของวันนี้ — ให้หาเจอง่ายว่าคาบไหนเช็คแล้ว/ยัง */}
-      {filteredPeriods.length > 0 && (
+      {displayPeriods.length > 0 && (
         <div className="bg-[#161f30] border border-slate-800/80 rounded-xl px-4 py-3" id="attendance-status-summary">
           <div className="flex items-center justify-between gap-3 mb-2">
             <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" /> สถานะการเช็คชื่อวันนี้
             </span>
             <span className="text-xs font-bold text-emerald-400">
-              เช็คแล้ว {filteredPeriods.filter(p => p.attendanceTaken).length}/{filteredPeriods.length} คาบ
+              เช็คแล้ว {displayPeriods.filter(p => p.attendanceTaken).length}/{displayPeriods.length} คาบ
             </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {filteredPeriods.map(p => (
+            {displayPeriods.map(p => (
               <span
                 key={p.id}
                 title={`${p.subjectCode} ${p.subjectName} · ${normalizeClassName(p.className)}`}
@@ -251,7 +268,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                     : 'bg-slate-800/60 text-slate-400 border-slate-700/60'
                 }`}
               >
-                คาบ {p.periodNumber} {p.attendanceTaken ? '✓' : p.lateRequestStatus === 'PENDING' ? '⋯' : '—'}
+                คาบ {periodRangeLabel(p)} {p.attendanceTaken ? '✓' : p.lateRequestStatus === 'PENDING' ? '⋯' : '—'}
               </span>
             ))}
           </div>
@@ -260,12 +277,12 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
 
       {/* List ของคาบเรียน */}
       <div className="space-y-4" id="periods-list-container">
-        {filteredPeriods.length === 0 ? (
+        {displayPeriods.length === 0 ? (
           <div className="text-center py-12 bg-[#161f30] rounded-xl border border-slate-800/80 text-slate-300 text-sm" id="empty-schedule-state">
             ไม่มีวิชา/คาบเรียนในตารางสอนสำหรับวันหรือตัวเลือกนี้
           </div>
         ) : (
-          filteredPeriods.map((period) => {
+          displayPeriods.map((period) => {
             const status = getPeriodStatus(period.startTime, period.endTime);
             const displayClassName = normalizeClassName(period.className);
 
@@ -280,7 +297,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                   <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 w-full">
                     <div className="flex items-start gap-4">
                       <span className="bg-slate-800/80 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700/50 whitespace-nowrap">
-                        คาบที่ {period.periodNumber}
+                        คาบที่ {periodRangeLabel(period)}
                       </span>
                       <div className="space-y-1">
                         <div className="flex flex-wrap items-center gap-2">
@@ -338,13 +355,20 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                             </>
                           )}
                         </div>
+                      ) : period.lateRequestStatus === 'APPROVED' ? (
+                        // เช็คชื่อ "ย้อนหลัง" แล้ว — ทำได้แค่เช็คชื่ออย่างเดียว ห้ามเข้าห้องทำกิจกรรมอื่น
+                        // (business logic: การเช็คชื่อย้อนหลังต่างจากเช็คชื่อตามเวลาจริง — ไม่ปลดล็อก "เข้าสู่ชั้นเรียน")
+                        <span className="px-3 py-1.5 text-xs font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 rounded-lg flex items-center gap-1.5">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> เช็คชื่อย้อนหลังเรียบร้อยแล้ว
+                          <span className="text-[10px] text-slate-400 font-normal">(เช็คชื่ออย่างเดียว)</span>
+                        </span>
                       ) : (
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="px-3 py-1.5 text-xs font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 rounded-lg flex items-center gap-1">
                             <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> เช็คชื่อเรียบร้อยแล้ว
                           </span>
                           {onEnterClassroom && (
-                            <button 
+                            <button
                               id={`btn-past-enter-class-${period.id}`}
                               onClick={() => onEnterClassroom(period.courseId)}
                               className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 rounded-lg flex items-center gap-1.5 transition active:scale-95 shadow-md shadow-indigo-600/25"
@@ -380,7 +404,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                   <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 w-full">
                     <div className="flex items-start gap-4">
                       <span className="bg-slate-800/80 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700/50 whitespace-nowrap">
-                        คาบที่ {period.periodNumber}
+                        คาบที่ {periodRangeLabel(period)}
                       </span>
                       <div className="space-y-1">
                         <div className="flex flex-wrap items-center gap-2">
@@ -458,7 +482,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                 <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 w-full">
                   <div className="flex items-start gap-4">
                     <span className="bg-slate-800/80 text-slate-300 text-xs font-bold px-3 py-1.5 rounded-lg border border-slate-700/50 whitespace-nowrap">
-                      คาบที่ {period.periodNumber}
+                      คาบที่ {periodRangeLabel(period)}
                     </span>
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-2">

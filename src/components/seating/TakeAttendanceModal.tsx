@@ -133,20 +133,24 @@ export const TakeAttendanceModal: React.FC<TakeAttendanceModalProps> = ({
       // คาบ 0 (โฮมรูม) เป็นคาบจริง — ห้าม falsy check (`|| 1`) ไม่งั้น record ถูกเขียนผิดคาบ
       // แล้ว TeacherPortal จับคู่ไม่เจอ → คาบที่เช็คแล้วกลับไปโชว์ "ขอเช็คชื่อย้อนหลัง"
       const periodNum = (course.periodIndex !== undefined && course.periodIndex !== null) ? course.periodIndex : 1;
-      const recordId = `${dateStr}_${roomStr}_p${periodNum}`;
 
-      // Write directly to Firestore attendance_records collection
-      await saveAttendanceRecord({
-        id: recordId,
-        date: dateStr,
-        room: rawRoom,
-        checkedByTeacherId: teacherId,
-        checkedByName: teacherName,
-        periodNumber: periodNum,
-        checkedAt: format(new Date(), 'HH:mm'),
-        isLocked: true,
-        students: statuses
-      });
+      // คาบรวม (double/triple period ติดกัน) — เช็คชื่อครั้งเดียว บันทึกให้ทุกคาบย่อยในช่วง
+      const periodRange: number[] = (course as any).periodRange?.length ? (course as any).periodRange : [periodNum];
+      const checkedAt = format(new Date(), 'HH:mm');
+      for (const pn of periodRange) {
+        await saveAttendanceRecord({
+          id: `${dateStr}_${roomStr}_p${pn}`,
+          date: dateStr,
+          room: rawRoom,
+          checkedByTeacherId: teacherId,
+          checkedByName: teacherName,
+          periodNumber: pn,
+          checkedAt,
+          isLocked: true,
+          source: 'PERIOD_OVERRIDE',
+          students: statuses
+        });
+      }
 
       // Notify parent component to update state & persistence
       onAttendanceSaved(statuses);

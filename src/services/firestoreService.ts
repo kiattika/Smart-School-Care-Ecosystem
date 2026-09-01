@@ -104,6 +104,9 @@ export interface FirestoreAttendanceRecord {
   periodNumber: number; // 0 for Homeroom, 1-8 for classes
   checkedAt: any;
   isLocked: boolean;
+  // HOMEROOM_DEFAULT = เช็คชื่อโดยครูประจำชั้นตอนเช้า (ใช้เป็นค่าเริ่มต้นของทุกคาบวันนั้น)
+  // PERIOD_OVERRIDE  = ครูผู้สอนเช็ค/แก้เฉพาะคาบตัวเอง
+  source?: 'HOMEROOM_DEFAULT' | 'PERIOD_OVERRIDE';
   students: {
     [studentId: string]: 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE';
   };

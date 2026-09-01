@@ -21,7 +21,10 @@ import { LateAttendanceRequestRecord } from './types';
  * จะทำให้ tab/สิทธิ์ปนกันและ maintain ยากกว่า
  */
 
-const LATE_ATTENDANCE_VIEWER_ROLES = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN', 'EXECUTIVE'];
+// role ที่เห็น tab "เช็คชื่อย้อนหลัง" — DIRECTOR เห็นแบบ read-only (กำกับดูแล)
+const LATE_ATTENDANCE_VIEWER_ROLES = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN', 'EXECUTIVE', 'DIRECTOR'];
+// role ที่อนุมัติ/ปฏิเสธได้จริง — นอกเหนือจากนี้ (เช่น DIRECTOR) เห็นอย่างเดียว
+const LATE_ATTENDANCE_APPROVER_ROLES = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN'];
 
 const ROLE_LABEL: Record<string, string> = {
   HEAD_OF_DEPARTMENT: 'หัวหน้ากลุ่มสาระการเรียนรู้',
@@ -35,6 +38,7 @@ export function ApprovalsPortal() {
   const substituteAssignments = useStore(s => s.substituteAssignments);
   const activeRole = user?.activeRole || '';
   const canSeeLateAttendance = LATE_ATTENDANCE_VIEWER_ROLES.includes(activeRole);
+  const lateAttendanceReadOnly = !LATE_ATTENDANCE_APPROVER_ROLES.includes(activeRole);
 
   const [tab, setTab] = useState<'substitute' | 'late-attendance'>('substitute');
 
@@ -123,7 +127,7 @@ export function ApprovalsPortal() {
         )}
         {tab === 'late-attendance' && canSeeLateAttendance && (
           <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6">
-            <LateAttendanceApprovalList />
+            <LateAttendanceApprovalList readOnly={lateAttendanceReadOnly} />
           </div>
         )}
       </div>
