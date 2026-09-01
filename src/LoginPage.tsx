@@ -16,8 +16,8 @@ const EMULATOR_TEST_USERS = [
   { email: 'guidance.test@utd.ac.th', label: 'ครูแนะแนว / จิตวิทยา', roleTag: 'GUIDANCE_COUNSELOR', desc: 'ดร.สุดา (สิทธิ์เข้าถึง PHQ-9)' },
   { email: 'finance.test@utd.ac.th', label: 'ฝ่ายการเงิน', roleTag: 'FINANCE_STAFF', desc: 'นางศิริพร การเงินพัสดุ' },
   { email: 'infirmary.test@utd.ac.th', label: 'ห้องพยาบาล', roleTag: 'INFIRMARY_STAFF', desc: 'น.ส.กนกวรรณ พยาบาล' },
-  { email: 'parent.test@gmail.com', label: 'ผู้ปกครอง (นายกิตติคุณ)', roleTag: 'PARENT', desc: 'คุณพ่อมนตรี มงคลศิลป์' },
-  { email: 'student.test@utd.ac.th', label: 'นักเรียน (ม.5/8)', roleTag: 'STUDENT', desc: 'นายกิตติคุณ มงคลศิลป์' },
+  { email: 'parent.test@gmail.com', label: 'ผู้ปกครอง (ของ นายยศกร)', roleTag: 'PARENT', desc: 'ผู้ปกครองนักเรียน 38501' },
+  { email: 'student.test@utd.ac.th', label: 'นักเรียน (ม.5/8)', roleTag: 'STUDENT', desc: 'นายยศกร รักเรียน (38501)' },
 ];
 
 export function LoginPage() {
