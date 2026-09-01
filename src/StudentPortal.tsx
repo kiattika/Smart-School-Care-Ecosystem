@@ -447,7 +447,7 @@ export function StudentPortal() {
                 <StudentHomeLocationForm student={student} studentUid={user.uid} />
               </div>
             )}
-            <SocioeconomicWelfareModule studentId={student.studentId} />
+            <SocioeconomicWelfareModule studentId={student.studentId} student={student} />
           </div>
         )}
 

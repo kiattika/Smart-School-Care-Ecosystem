@@ -396,7 +396,7 @@ export function ParentPortal() {
 
         {/* 3. Socioeconomic Welfare & Home Visit */}
         {activeTab === 'socio' && (
-          <SocioeconomicWelfareModule studentId={student.studentId} />
+          <SocioeconomicWelfareModule studentId={student.studentId} student={student} />
         )}
 
         {/* 4. Behavior & Conduct */}

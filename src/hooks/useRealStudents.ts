@@ -97,11 +97,23 @@ export interface UseRealStudentsOptions {
 
 export function useRealStudents(options: UseRealStudentsOptions = {}) {
   const { parentUid, studentUid } = options;
+  // ผู้เรียกส่ง key มา = ตั้งใจ query แบบ filtered — ถ้าค่ายังว่าง (auth ยังไม่ resolve)
+  // ต้อง "รอ" ไม่ใช่ fallback ไป query ทั้ง collection (ซึ่ง STUDENT/PARENT จะโดน rules ปฏิเสธ
+  // แล้วหน้าจอเด้งขึ้น "ยังไม่ได้ผูกกับทะเบียนนักเรียน" ชั่วขณะ ก่อนจะแก้ตัวเองตอน auth มา)
+  const wantsFilter = 'studentUid' in options || 'parentUid' in options;
+  const filterNotReady = wantsFilter && !studentUid && !parentUid;
+
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (filterNotReady) {
+      // ยัง loading อยู่ — ยังไม่ query จนกว่า id จะพร้อม
+      setLoading(true);
+      setStudents([]);
+      return;
+    }
     setLoading(true);
     const col = collection(db, 'students') as CollectionReference;
     const ref: Query = studentUid
@@ -134,7 +146,7 @@ export function useRealStudents(options: UseRealStudentsOptions = {}) {
     );
 
     return () => unsubscribe();
-  }, [parentUid, studentUid]);
+  }, [parentUid, studentUid, filterNotReady]);
 
   return { students, loading, error };
 }
