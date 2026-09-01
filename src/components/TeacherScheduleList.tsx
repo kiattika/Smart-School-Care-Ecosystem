@@ -338,13 +338,20 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                             </>
                           )}
                         </div>
+                      ) : period.lateRequestStatus === 'APPROVED' ? (
+                        // เช็คชื่อ "ย้อนหลัง" แล้ว — ทำได้แค่เช็คชื่ออย่างเดียว ห้ามเข้าห้องทำกิจกรรมอื่น
+                        // (business logic: การเช็คชื่อย้อนหลังต่างจากเช็คชื่อตามเวลาจริง — ไม่ปลดล็อก "เข้าสู่ชั้นเรียน")
+                        <span className="px-3 py-1.5 text-xs font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 rounded-lg flex items-center gap-1.5">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> เช็คชื่อย้อนหลังเรียบร้อยแล้ว
+                          <span className="text-[10px] text-slate-400 font-normal">(เช็คชื่ออย่างเดียว)</span>
+                        </span>
                       ) : (
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="px-3 py-1.5 text-xs font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 rounded-lg flex items-center gap-1">
                             <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> เช็คชื่อเรียบร้อยแล้ว
                           </span>
                           {onEnterClassroom && (
-                            <button 
+                            <button
                               id={`btn-past-enter-class-${period.id}`}
                               onClick={() => onEnterClassroom(period.courseId)}
                               className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 rounded-lg flex items-center gap-1.5 transition active:scale-95 shadow-md shadow-indigo-600/25"
