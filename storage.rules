@@ -16,19 +16,28 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    function ownerImageRules(ownerUid) {
+      return isSignedIn() && request.auth.uid == ownerUid;
+    }
+
     // path: student_home_photos/{ownerUid}/{fileName}  — ownerUid = Firebase Auth UID ของนักเรียน
     match /student_home_photos/{ownerUid}/{fileName} {
-
       // อ่านโดยตรง: เจ้าของเท่านั้น (ครูใช้ tokenized download URL จาก Firestore doc แทน)
-      allow read: if isSignedIn() && request.auth.uid == ownerUid;
-
+      allow read: if ownerImageRules(ownerUid);
       // เขียน (create/update): เจ้าของเท่านั้น + ต้องเป็นรูปภาพ + ไม่เกิน 5MB
-      allow create, update: if isSignedIn()
-        && request.auth.uid == ownerUid
+      allow create, update: if ownerImageRules(ownerUid)
         && request.resource.size < 5 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
+      allow delete: if false; // เก็บหลักฐาน — ลบผ่าน admin เท่านั้น
+    }
 
-      // ห้ามลบผ่าน client (เก็บหลักฐาน — ถ้าต้องลบให้ทำผ่าน admin)
+    // path: student_portfolio_photos/{ownerUid}/{fileName} — ภาพประกอบแฟ้มสะสมผลงาน
+    match /student_portfolio_photos/{ownerUid}/{fileName} {
+      // อ่าน: เจ้าของ + ผู้ที่มี download URL (จาก Firestore doc ที่ครู/ผู้ปกครองอ่านได้)
+      allow read: if ownerImageRules(ownerUid);
+      allow create, update: if ownerImageRules(ownerUid)
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
       allow delete: if false;
     }
 

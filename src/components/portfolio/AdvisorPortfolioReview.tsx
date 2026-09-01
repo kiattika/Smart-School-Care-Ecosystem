@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Award, GraduationCap, Briefcase, HandHeart, CheckCircle2, XCircle, Loader2, FolderCheck } from 'lucide-react';
+import { Award, GraduationCap, Briefcase, HandHeart, CheckCircle2, XCircle, Loader2, FolderCheck, Paperclip } from 'lucide-react';
 import { useStore } from '../../store';
 import { StudentPortfolioEntry, StudentPortfolioEntryType } from '../../types';
 import {
@@ -97,6 +97,12 @@ export function AdvisorPortfolioReview({ homeroomClass }: { homeroomClass?: stri
           )}
         </div>
         <p className="text-xs text-slate-300 mt-2 whitespace-pre-wrap">{e.description}</p>
+        {e.attachmentUrl && (
+          <a href={e.attachmentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 mt-2 text-[11px] text-blue-400">
+            <Paperclip className="w-3 h-3" />
+            <img src={e.attachmentUrl} alt="แนบ" className="w-16 h-16 object-cover rounded border border-slate-700" />
+          </a>
+        )}
         {e.status === 'REJECTED' && e.rejectReason && (
           <p className="text-[11px] text-red-400 mt-2">เหตุผล: {e.rejectReason}</p>
         )}

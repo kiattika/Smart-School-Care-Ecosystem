@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Award, GraduationCap, Briefcase, HandHeart, Plus, Clock, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Award, GraduationCap, Briefcase, HandHeart, Plus, Clock, CheckCircle2, XCircle, Loader2, Camera, Trash2, Paperclip } from 'lucide-react';
 import { Student, StudentPortfolioEntry, StudentPortfolioEntryType } from '../../types';
 import {
   subscribeStudentPortfolioEntries,
   submitStudentPortfolioEntry,
 } from '../../services/firestoreService';
+import { compressImage, formatBytes, CompressedImage } from '../../lib/imageCompression';
+import { uploadPortfolioPhoto } from '../../services/storageService';
 
 /**
  * ฟอร์ม + รายการแฟ้มสะสมผลงานฝั่งนักเรียน (เขียนเข้า student_portfolio_entries)
@@ -36,6 +38,10 @@ export function StudentPortfolioSection({ student, studentUid }: { student: Stud
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [entryDate, setEntryDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [photo, setPhoto] = useState<CompressedImage | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => { if (photo) URL.revokeObjectURL(photo.previewUrl); }, [photo]);
 
   useEffect(() => {
     if (!studentUid) return;
@@ -55,12 +61,28 @@ export function StudentPortfolioSection({ student, studentUid }: { student: Stud
 
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3500); };
 
-  const resetForm = () => { setType('AWARD'); setTitle(''); setDescription(''); setEntryDate(new Date().toISOString().slice(0, 10)); };
+  const resetForm = () => {
+    setType('AWARD'); setTitle(''); setDescription(''); setEntryDate(new Date().toISOString().slice(0, 10));
+    setPhoto(p => { if (p) URL.revokeObjectURL(p.previewUrl); return null; });
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const onPickPhoto = async (f: File | undefined) => {
+    if (!f) return;
+    try {
+      setPhoto(prev => { if (prev) URL.revokeObjectURL(prev.previewUrl); return null; });
+      setPhoto(await compressImage(f));
+    } catch (e) {
+      flash(e instanceof Error ? e.message : 'ประมวลผลรูปไม่สำเร็จ');
+    }
+  };
 
   const handleSubmit = async () => {
     if (!title.trim() || !description.trim() || !entryDate) { flash('กรุณากรอกหัวข้อ รายละเอียด และวันที่ให้ครบ'); return; }
     setSaving(true);
     try {
+      let attachmentUrl: string | null = null;
+      if (photo) attachmentUrl = await uploadPortfolioPhoto(studentUid, photo.blob);
       await submitStudentPortfolioEntry({
         studentId: student.studentId,
         studentUid,
@@ -70,6 +92,7 @@ export function StudentPortfolioSection({ student, studentUid }: { student: Stud
         title: title.trim(),
         description: description.trim(),
         entryDate,
+        attachmentUrl,
       });
       resetForm();
       setShowForm(false);
@@ -129,6 +152,28 @@ export function StudentPortfolioSection({ student, studentUid }: { student: Stud
             placeholder="รายละเอียด เช่น จัดโดยหน่วยงานใด บทบาทของนักเรียน ผลที่ได้รับ"
             className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
           />
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5"
+            >
+              <Camera className="w-4 h-4" /> {photo ? 'เปลี่ยนรูป' : 'แนบรูป (ไม่บังคับ)'}
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" hidden onChange={e => onPickPhoto(e.target.files?.[0] || undefined)} />
+            {photo && (
+              <div className="relative">
+                <img src={photo.previewUrl} alt="แนบ" className="w-16 h-16 object-cover rounded-lg border border-slate-700" />
+                <button
+                  type="button"
+                  onClick={() => setPhoto(p => { if (p) URL.revokeObjectURL(p.previewUrl); return null; })}
+                  className="absolute -top-1.5 -right-1.5 bg-slate-900 border border-slate-700 rounded-md p-0.5 text-red-400"
+                ><Trash2 className="w-3 h-3" /></button>
+                <span className="absolute bottom-0 inset-x-0 bg-black/70 text-[8px] text-emerald-400 text-center rounded-b-lg">{formatBytes(photo.bytesAfter)}</span>
+              </div>
+            )}
+          </div>
+
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-xs text-slate-400 flex items-center gap-2">
               วันที่เกิดกิจกรรม
@@ -147,7 +192,7 @@ export function StudentPortfolioSection({ student, studentUid }: { student: Stud
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} ส่งให้ครูที่ปรึกษา
             </button>
           </div>
-          <p className="text-[10px] text-slate-500">* ยังไม่รองรับการแนบไฟล์ในเวอร์ชันนี้ — กรอกรายละเอียดเป็นข้อความ</p>
+          <p className="text-[10px] text-slate-500">รูปจะถูกย่อ/บีบอัดในเครื่องก่อนอัปโหลด (ด้านยาว ≤ 1280px)</p>
         </div>
       )}
 
@@ -179,6 +224,12 @@ export function StudentPortfolioSection({ student, studentUid }: { student: Stud
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 mt-2 whitespace-pre-wrap">{e.description}</p>
+                {e.attachmentUrl && (
+                  <a href={e.attachmentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 mt-2 text-[11px] text-blue-400">
+                    <Paperclip className="w-3 h-3" />
+                    <img src={e.attachmentUrl} alt="แนบ" className="w-14 h-14 object-cover rounded border border-slate-700" />
+                  </a>
+                )}
                 {e.status === 'REJECTED' && e.rejectReason && (
                   <p className="text-[11px] text-red-400 mt-2 bg-red-950/20 rounded-lg px-2 py-1.5">
                     เหตุผลที่ไม่อนุมัติ: {e.rejectReason}

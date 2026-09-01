@@ -71,8 +71,15 @@ describe('Storage Security Rules — student_home_photos', () => {
     await assertFails(testEnv.authenticatedContext('stu-1', { roles: ['STUDENT'] }).storage().ref('student_home_photos/stu-1/a.jpg').delete());
   });
 
-  it('denies writing outside student_home_photos', async () => {
+  it('denies writing outside the allowed folders', async () => {
     const s = testEnv.authenticatedContext('stu-1', { roles: ['STUDENT'] }).storage();
     await assertFails(asPromise(s.ref('random/x.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
+  });
+
+  it('applies the same owner rules to student_portfolio_photos', async () => {
+    const own = testEnv.authenticatedContext('stu-1', { roles: ['STUDENT'] }).storage();
+    await assertSucceeds(asPromise(own.ref('student_portfolio_photos/stu-1/p.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
+    await assertFails(asPromise(own.ref('student_portfolio_photos/stu-2/p.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
+    await assertFails(asPromise(own.ref('student_portfolio_photos/stu-1/p.pdf').put(new Uint8Array([1]), { contentType: 'application/pdf' })));
   });
 });

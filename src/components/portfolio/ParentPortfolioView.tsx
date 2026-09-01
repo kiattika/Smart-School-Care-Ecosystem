@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Award, GraduationCap, Briefcase, HandHeart, Loader2, FolderHeart } from 'lucide-react';
+import { Award, GraduationCap, Briefcase, HandHeart, Loader2, FolderHeart, Paperclip } from 'lucide-react';
 import { StudentPortfolioEntry, StudentPortfolioEntryType } from '../../types';
 import { subscribeStudentPortfolioEntries } from '../../services/firestoreService';
 
@@ -64,6 +64,12 @@ export function ParentPortfolioView({ parentUid, studentId }: { parentUid?: stri
                   </div>
                 </div>
                 <p className="text-xs text-slate-300 mt-2 whitespace-pre-wrap">{e.description}</p>
+                {e.attachmentUrl && (
+                  <a href={e.attachmentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 mt-2 text-[11px] text-blue-400">
+                    <Paperclip className="w-3 h-3" />
+                    <img src={e.attachmentUrl} alt="แนบ" className="w-16 h-16 object-cover rounded border border-slate-700" />
+                  </a>
+                )}
                 {e.reviewedByName && (
                   <p className="text-[10px] text-slate-500 mt-2">รับรองโดย {e.reviewedByName}</p>
                 )}
