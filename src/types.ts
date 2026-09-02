@@ -252,11 +252,18 @@ export interface SubstituteAssignment {
   leaveReason?: string;
   triggerSource?: 'SICK_LEAVE' | 'LEAVE_REQUEST' | 'DIRECT_ASSIGNMENT';
   leaveRequestId?: string;
-  // ผู้เสนอจัดครู (หัวหน้ากลุ่มสาระฯ) — ขั้นที่ 1 ถือว่าอนุมัติโดยผู้เสนอ
+  // ผู้เสนอจัดครู — ถ้าเป็นหัวหน้ากลุ่มสาระฯ (proposedByRole === 'HEAD_OF_DEPARTMENT') ขั้นที่ 1
+  // ถือว่าอนุมัติโดยผู้เสนอทันที; ถ้าครูขอเอง (SUBJECT_TEACHER/HOMEROOM_TEACHER) ขั้นที่ 1
+  // ต้องรอหัวหน้ากลุ่มสาระฯ ตัวจริงมาอนุมัติก่อน (ดู proposeSubstituteAssignment ใน store.ts)
   proposedByEmail?: string;
   proposedByName?: string;
   proposedByRole?: string;
   notes?: string;
+  // วิธี B (หาครูสอนแทน): TEACHING = สอนเนื้อหาจริง, SUPERVISION_ONLY = ควบคุมชั้นเรียนอย่างเดียว
+  // (บังคับเมื่อครูสอนแทนมาจากกลุ่มสาระอื่น) — ต้องแนบใบงาน/ใบความรู้/แบบทดสอบก่อนส่งคำขอได้
+  coverageMode?: 'TEACHING' | 'SUPERVISION_ONLY';
+  worksheetAttachmentUrl?: string;
+  worksheetAttachmentName?: string;
   // เส้นตายบันทึกหลังสอน = 24:00 น. ของวันที่สอนแทน
   postTeachingDueAt?: string;
   isCompleted?: boolean;

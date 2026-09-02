@@ -13,6 +13,8 @@ import {
   Check,
   Info,
   Layers,
+  Upload,
+  Paperclip,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, onSnapshot } from 'firebase/firestore';
@@ -22,6 +24,7 @@ import { cn, isSameRoom } from '../lib/utils';
 import { UserRole, SubstituteAssignment, SubstituteApprovalStage, SUBSTITUTE_STAGE_ROLE } from '../types';
 import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
 import { useDepartments } from '../hooks/useDepartments';
+import { uploadSubstituteWorksheet } from '../services/storageService';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -48,6 +51,20 @@ interface NormalizedSchedule {
   name: string;
   room: string;
   targetClass: string;
+  level: string;          // ระดับชั้น (เช่น "ม.5") — ใช้จัดลำดับครูแนะนำสอนแทนตามระดับชั้นเดียวกัน
+}
+
+/** คาบสอนหนึ่งวันหนึ่งคาบ ผูกกับวันที่จริงในช่วงที่เลือก (ใช้เลือกได้หลายวัน/บางคาบ) */
+interface DateSlot extends NormalizedSchedule {
+  date: string;
+}
+
+/** ผู้สมัครครูสอนแทนที่ระบบแนะนำ พร้อมลำดับความสำคัญ (tier) */
+interface SubCandidate {
+  email: string;
+  name: string;
+  tier: 1 | 2 | 3; // 1=กลุ่มสาระ+ระดับเดียวกัน, 2=กลุ่มสาระเดียวกัน(ระดับอื่น), 3=ข้ามกลุ่มสาระ (บังคับ SUPERVISION_ONLY)
+  conflict: string | null;
 }
 
 const STAGE_LABEL_TH: Record<SubstituteApprovalStage, string> = {
@@ -65,14 +82,18 @@ const TRIGGER_LABEL_TH: Record<string, string> = {
 };
 
 const SIM_ROLES: { role: UserRole; label: string }[] = [
-  { role: 'HEAD_OF_DEPARTMENT', label: 'หัวหน้ากลุ่มสาระฯ — เสนอจัดครูสอนแทน' },
+  { role: 'HEAD_OF_DEPARTMENT', label: 'หัวหน้ากลุ่มสาระฯ — เสนอจัดครู / อนุมัติขั้น 1' },
   { role: 'ACADEMIC_HEAD', label: 'หัวหน้าฝ่ายวิชาการฯ — อนุมัติขั้น 2' },
   { role: 'DEPUTY_DIRECTOR_ACADEMIC', label: 'รองผู้อำนวยการฝ่ายวิชาการ — อนุมัติขั้น 3' },
   { role: 'DIRECTOR', label: 'ผู้อำนวยการ — อนุมัติขั้น 4' },
-  { role: 'SUBJECT_TEACHER', label: 'ครูผู้รับมอบหมายสอนแทน — บันทึกหลังสอน' },
+  { role: 'SUBJECT_TEACHER', label: 'ครูผู้สอน — ขอลากิจ/ราชการเอง หรือรับมอบหมายสอนแทน' },
+  { role: 'HOMEROOM_TEACHER', label: 'ครูประจำชั้น — ขอลากิจ/ราชการเอง หรือรับมอบหมายสอนแทน' },
 ];
 
-const APPROVAL_ROLES: UserRole[] = ['ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'];
+// HEAD_OF_DEPARTMENT อยู่ในนี้ด้วย เพื่อให้เห็นคิว "รออนุมัติขั้น 1" ของคำขอที่ครูยื่นขอเอง
+// (ปกติ HOD เป็นผู้เสนอเอง ขั้น 1 จึงถือว่าอนุมัติแล้วอัตโนมัติ — แต่ถ้าครู SUBJECT_TEACHER/
+// HOMEROOM_TEACHER ยื่นขอเองสำหรับลากิจ/ไปราชการ ขั้น 1 ต้องรอ HOD อนุมัติจริงผ่านคิวนี้)
+const APPROVAL_ROLES: UserRole[] = ['HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'];
 
 // ---------------------------------------------------------------------------
 // Live schedules subscription (read-only)
@@ -120,6 +141,7 @@ function useSchedulesCollection(staffById: Map<string, string>) {
         name: s.courseName || s.subjectName || s.courseCode || s.subjectCode || 'รายวิชา',
         room: s.room || s.targetClass || '',
         targetClass: s.targetClass || s.room || '',
+        level: s.level || '',
       };
     });
   }, [raw, staffById]);
@@ -141,7 +163,7 @@ export function SubstituteTeachingModule() {
   const isDev = import.meta.env.DEV;
 
   // บทบาทของผู้ใช้จริงถ้าอยู่ในลำดับ workflow สอนแทน — ใช้เป็นค่าเริ่มต้นของ persona
-  const SUB_WORKFLOW_ROLES: UserRole[] = ['HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR', 'SUBJECT_TEACHER'];
+  const SUB_WORKFLOW_ROLES: UserRole[] = ['HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR', 'SUBJECT_TEACHER', 'HOMEROOM_TEACHER'];
   const realWorkflowRole = (user?.activeRole && SUB_WORKFLOW_ROLES.includes(user.activeRole)) ? user.activeRole : undefined;
 
   // --- persona: เริ่มจากบทบาทผู้ใช้จริง (DEV มี dropdown override ให้ทดสอบทุกขั้นได้) ---
@@ -188,9 +210,16 @@ export function SubstituteTeachingModule() {
   const [absentEmail, setAbsentEmail] = useState('');
   const [triggerType, setTriggerType] = useState<'SICK_LEAVE' | 'PERSONAL_LEAVE' | 'OFFICIAL_DUTY'>('SICK_LEAVE');
   const [leaveReason, setLeaveReason] = useState('');
-  const [absenceDate, setAbsenceDate] = useState(new Date().toISOString().split('T')[0]);
-  const [selectedScheduleId, setSelectedScheduleId] = useState('');
-  const [subEmail, setSubEmail] = useState('');
+  const todayStr = new Date().toISOString().split('T')[0];
+  // ช่วงวันที่ลา — รองรับลาหลายวันติดกันแบบฟอร์มจริง (เดิมเลือกได้แค่วันเดียว)
+  const [rangeStart, setRangeStart] = useState(todayStr);
+  const [rangeEnd, setRangeEnd] = useState(todayStr);
+  // เลือกได้บางคาบไม่บังคับทุกคาบ — key คือ `${date}::${scheduleId}`
+  const [selectedSlotKeys, setSelectedSlotKeys] = useState<Set<string>>(new Set());
+  // ครูสอนแทนที่เลือกต่อคาบ (key เดียวกับ selectedSlotKeys)
+  const [slotSubEmail, setSlotSubEmail] = useState<Record<string, string>>({});
+  // ไฟล์ใบงาน/ใบความรู้/แบบทดสอบต่อคาบ — บังคับเมื่อ coverageMode เป็น SUPERVISION_ONLY (ครูข้ามกลุ่มสาระ)
+  const [slotWorksheetFile, setSlotWorksheetFile] = useState<Record<string, File | null>>({});
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -215,13 +244,43 @@ export function SubstituteTeachingModule() {
     return staffDirectory.filter(s => s.assignments?.departmentId === deptId);
   }, [staffDirectory, effectiveDeptId, isDev]);
 
-  const absentTeacherSchedules = useMemo(() => {
-    if (!absentEmail) return [];
-    const dayNum = jsDateToThaiDayNum(absenceDate);
-    return schedules
-      .filter(s => s.emails.includes(absentEmail.toLowerCase()) && s.day === dayNum && s.period >= 0)
-      .sort((a, b) => a.period - b.period);
-  }, [schedules, absentEmail, absenceDate]);
+  // ครู SUBJECT_TEACHER/HOMEROOM_TEACHER ขอลากิจ/ไปราชการด้วยตนเองได้ (ไม่รวมลาป่วย — หัวหน้ากลุ่มสาระฯ
+  // ยังคงเป็นคนจัดครูให้โดยตรงตามเดิม) — HOD ยังเสนอแทนคนอื่นในกลุ่มสาระได้เหมือนเดิมทุกกรณีการลา
+  const canSelfPropose = effectiveRole === 'SUBJECT_TEACHER' || effectiveRole === 'HOMEROOM_TEACHER';
+
+  // ระดับชั้นที่แต่ละครู (อีเมล lowercase) กำลังสอนอยู่จริง — อ่านจากตารางสอนสด ไม่ใช่ import เก่า
+  const teacherLevels = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    schedules.forEach(s => {
+      if (!s.level) return;
+      s.emails.forEach(email => {
+        if (!m.has(email)) m.set(email, new Set());
+        m.get(email)!.add(s.level);
+      });
+    });
+    return m;
+  }, [schedules]);
+
+  // คาบสอนจริงของครูที่ลา ตลอดช่วงวันที่เลือก (ผูกกับวันที่จริงแต่ละวัน ไม่ใช่แค่วันเดียว)
+  const rangeSlots = useMemo<DateSlot[]>(() => {
+    if (!absentEmail || !rangeStart || !rangeEnd) return [];
+    const start = new Date(rangeStart + 'T00:00:00');
+    const end = new Date(rangeEnd + 'T00:00:00');
+    if (end < start) return [];
+    const out: DateSlot[] = [];
+    const emailLower = absentEmail.toLowerCase();
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr = d.toISOString().split('T')[0];
+      const dayNum = jsDateToThaiDayNum(dateStr);
+      schedules
+        .filter(s => s.emails.includes(emailLower) && s.day === dayNum && s.period >= 0)
+        .sort((a, b) => a.period - b.period)
+        .forEach(s => out.push({ ...s, date: dateStr }));
+    }
+    return out;
+  }, [schedules, absentEmail, rangeStart, rangeEnd]);
+
+  const slotKey = (s: DateSlot) => `${s.date}::${s.id}`;
 
   const checkCandidateConflict = (candidateEmail: string, sched: NormalizedSchedule | undefined, date: string): string | null => {
     if (!sched) return null;
@@ -237,6 +296,48 @@ export function SubstituteTeachingModule() {
     );
     if (subClash) return `ถูกจัดสอนแทนห้อง ${subClash.room} คาบนี้แล้ว`;
     return null;
+  };
+
+  /**
+   * แนะนำครูสอนแทนสำหรับคาบที่เลือก เรียงลำดับ:
+   * tier 1 = กลุ่มสาระเดียวกัน + สอนระดับชั้นเดียวกัน + ว่างจริง
+   * tier 2 = กลุ่มสาระเดียวกัน (ระดับอื่น) + ว่างจริง
+   * tier 3 = ข้ามกลุ่มสาระ (ให้เลือกเองทั้งหมด ระบบไม่ auto-suggest ระดับนี้) — บังคับ SUPERVISION_ONLY
+   */
+  const getCandidatesForSlot = (slot: DateSlot): { tier1: SubCandidate[]; tier2: SubCandidate[]; tier3: SubCandidate[] } => {
+    const deptId = effectiveDeptId;
+    const absentLower = absentEmail.toLowerCase();
+    const toCandidate = (t: typeof staffDirectory[number], tier: 1 | 2 | 3): SubCandidate => ({
+      email: t.email,
+      name: `${t.prefix || ''}${t.firstName} ${t.lastName}`.trim(),
+      tier,
+      conflict: checkCandidateConflict(t.email, slot, slot.date),
+    });
+
+    const inDept = staffDirectory.filter(t => t.email?.toLowerCase() !== absentLower && t.assignments?.departmentId === deptId);
+    const tier1: SubCandidate[] = [];
+    const tier2: SubCandidate[] = [];
+    inDept.forEach(t => {
+      const levels = teacherLevels.get(t.email?.toLowerCase() || '');
+      const sameLevel = !!slot.level && !!levels?.has(slot.level);
+      (sameLevel ? tier1 : tier2).push(toCandidate(t, sameLevel ? 1 : 2));
+    });
+
+    const tier1Free = tier1.filter(c => !c.conflict);
+    const tier2Free = tier2.filter(c => !c.conflict);
+
+    // ขยายไปกลุ่มสาระอื่นเฉพาะเมื่อกลุ่มสาระเดียวกันหาครูว่างจริงไม่ได้เลย (สุดวิสัยจริง)
+    const tier3: SubCandidate[] = (tier1Free.length === 0 && tier2Free.length === 0)
+      ? staffDirectory
+          .filter(t =>
+            t.email?.toLowerCase() !== absentLower &&
+            t.assignments?.departmentId !== deptId &&
+            (t.roles.includes('SUBJECT_TEACHER') || t.roles.includes('HOMEROOM_TEACHER'))
+          )
+          .map(t => toCandidate(t, 3))
+      : [];
+
+    return { tier1, tier2, tier3 };
   };
 
   // งานในกลุ่มสาระฯ ของ HOD (ดูจากกลุ่มสาระของครูที่ขาด หรือ departmentId ที่บันทึกไว้)
@@ -268,6 +369,14 @@ export function SubstituteTeachingModule() {
       .sort((a, b) => a.date.localeCompare(b.date));
   }, [substituteAssignments, effectiveEmail]);
 
+  // คำขอลากิจ/ไปราชการที่ครู (SUBJECT_TEACHER/HOMEROOM_TEACHER) ยื่นขอด้วยตนเอง — ต่างจาก deptAssignments
+  // ของ HOD ตรงที่นี่คือมุมมอง "คำขอของฉัน" เฉพาะรายการที่ตัวเองเป็นผู้เสนอเอง (ไม่ใช่กรณี HOD จัดให้)
+  const myOwnRequests = useMemo(() => {
+    return substituteAssignments
+      .filter(sa => sa.proposedByEmail?.toLowerCase() === effectiveEmail && sa.proposedByRole !== 'HEAD_OF_DEPARTMENT')
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }, [substituteAssignments, effectiveEmail]);
+
   const isOverdue = (sa: SubstituteAssignment) =>
     !sa.isCompleted && sa.postTeachingDueAt ? Date.now() > new Date(sa.postTeachingDueAt).getTime() : false;
 
@@ -276,50 +385,94 @@ export function SubstituteTeachingModule() {
   // -----------------------------------------------------------------------
   const resetProposeForm = () => {
     setAbsentEmail(''); setTriggerType('SICK_LEAVE'); setLeaveReason('');
-    setAbsenceDate(new Date().toISOString().split('T')[0]);
-    setSelectedScheduleId(''); setSubEmail(''); setNotes('');
+    setRangeStart(todayStr); setRangeEnd(todayStr);
+    setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({});
+    setNotes('');
   };
 
   const handlePropose = async () => {
-    const sched = absentTeacherSchedules.find(s => s.id === selectedScheduleId);
     const absent = staffDirectory.find(s => s.email?.toLowerCase() === absentEmail.toLowerCase());
-    const sub = staffDirectory.find(s => s.email?.toLowerCase() === subEmail.toLowerCase());
-    if (!sched || !absent || !sub) {
-      showToast('ข้อมูลไม่ครบ', 'กรุณาเลือกครูที่ลา คาบสอน และครูผู้สอนแทนให้ครบถ้วน', true);
+    const slots = rangeSlots.filter(s => selectedSlotKeys.has(slotKey(s)));
+    if (!absent || slots.length === 0) {
+      showToast('ข้อมูลไม่ครบ', 'กรุณาเลือกครูที่ลาและอย่างน้อย 1 คาบสอนที่ต้องจัดครูแทน', true);
       return;
     }
     if ((triggerType === 'PERSONAL_LEAVE' || triggerType === 'OFFICIAL_DUTY') && !leaveReason.trim()) {
       showToast('ต้องระบุเหตุผล', 'การลากิจ/ไปราชการ ต้องแจ้งเหตุผลประกอบ', true);
       return;
     }
-    const scheduleStr = `${THAI_DAY_ABBREV[sched.day] || ''}${sched.period}`;
+
+    // ตรวจให้ครบทุกคาบก่อนเริ่มอัปโหลด/บันทึกจริง กันบันทึกครึ่งๆ กลางๆ
+    for (const slot of slots) {
+      const key = slotKey(slot);
+      const subEmailForSlot = slotSubEmail[key];
+      const slotLabel = `${THAI_DAY_ABBREV[slot.day] || ''}${slot.period} (${slot.date})`;
+      if (!subEmailForSlot) {
+        showToast('เลือกครูสอนแทนไม่ครบ', `กรุณาเลือกครูสอนแทนสำหรับคาบ ${slotLabel}`, true);
+        return;
+      }
+      const sub = staffDirectory.find(s => s.email?.toLowerCase() === subEmailForSlot.toLowerCase());
+      const isCrossDept = sub?.assignments?.departmentId !== effectiveDeptId;
+      if (isCrossDept && !slotWorksheetFile[key]) {
+        showToast('ต้องแนบใบงาน', `ครูสอนแทนคาบ ${slotLabel} เป็นครูข้ามกลุ่มสาระ (ควบคุมชั้นเรียนอย่างเดียว) — ต้องแนบใบงาน/ใบความรู้/แบบทดสอบก่อนส่งคำขอ`, true);
+        return;
+      }
+    }
 
     setSubmitting(true);
     try {
-      await proposeSubstituteAssignment({
-        originalTeacherEmail: absent.email,
-        originalTeacherName: `${absent.prefix || ''}${absent.firstName} ${absent.lastName}`.trim(),
-        substituteTeacherEmail: sub.email,
-        substituteTeacherName: `${sub.prefix || ''}${sub.firstName} ${sub.lastName}`.trim(),
-        courseId: sched.id,
-        courseCode: sched.code,
-        courseName: sched.name,
-        room: sched.room || sched.targetClass,
-        periodName: sched.period === 0 ? 'คาบ 0 (โฮมรูม)' : `คาบ ${sched.period}`,
-        schedule: scheduleStr,
-        date: absenceDate,
-        departmentName: deptName(effectiveDeptId || absent.assignments?.departmentId),
-        departmentId: effectiveDeptId || absent.assignments?.departmentId || '',
-        triggerType,
-        leaveReason: leaveReason.trim() || (triggerType === 'SICK_LEAVE' ? 'ลาป่วย' : ''),
-        proposedByEmail: effectiveEmail,
-        proposedByName: effectiveName,
-        proposedByRole: 'HEAD_OF_DEPARTMENT',
-        notes: notes.trim(),
-      });
+      let successCount = 0;
+      for (const slot of slots) {
+        const key = slotKey(slot);
+        const sub = staffDirectory.find(s => s.email?.toLowerCase() === slotSubEmail[key].toLowerCase());
+        if (!sub) continue;
+        const isCrossDept = sub.assignments?.departmentId !== effectiveDeptId;
+        const coverageMode: 'TEACHING' | 'SUPERVISION_ONLY' = isCrossDept ? 'SUPERVISION_ONLY' : 'TEACHING';
+
+        let worksheetAttachmentUrl: string | undefined;
+        let worksheetAttachmentName: string | undefined;
+        const file = slotWorksheetFile[key];
+        if (coverageMode === 'SUPERVISION_ONLY' && file && user?.uid) {
+          const uploaded = await uploadSubstituteWorksheet(user.uid, file);
+          worksheetAttachmentUrl = uploaded.url;
+          worksheetAttachmentName = uploaded.name;
+        }
+
+        const scheduleStr = `${THAI_DAY_ABBREV[slot.day] || ''}${slot.period}`;
+        await proposeSubstituteAssignment({
+          originalTeacherEmail: absent.email,
+          originalTeacherName: `${absent.prefix || ''}${absent.firstName} ${absent.lastName}`.trim(),
+          substituteTeacherEmail: sub.email,
+          substituteTeacherName: `${sub.prefix || ''}${sub.firstName} ${sub.lastName}`.trim(),
+          courseId: slot.id,
+          courseCode: slot.code,
+          courseName: slot.name,
+          room: slot.room || slot.targetClass,
+          periodName: slot.period === 0 ? 'คาบ 0 (โฮมรูม)' : `คาบ ${slot.period}`,
+          schedule: scheduleStr,
+          date: slot.date,
+          departmentName: deptName(effectiveDeptId || absent.assignments?.departmentId),
+          departmentId: effectiveDeptId || absent.assignments?.departmentId || '',
+          triggerType,
+          leaveReason: leaveReason.trim() || (triggerType === 'SICK_LEAVE' ? 'ลาป่วย' : ''),
+          proposedByEmail: effectiveEmail,
+          proposedByName: effectiveName,
+          proposedByRole: effectiveRole,
+          notes: notes.trim(),
+          coverageMode,
+          worksheetAttachmentUrl,
+          worksheetAttachmentName,
+        });
+        successCount++;
+      }
       setProposeOpen(false);
       resetProposeForm();
-      showToast('เสนอจัดครูสอนแทนสำเร็จ', 'ส่งเข้าลำดับอนุมัติ ขั้นที่ 2 (หัวหน้าฝ่ายวิชาการและหลักสูตร) แล้ว');
+      showToast(
+        'เสนอจัดครูสอนแทนสำเร็จ',
+        effectiveRole === 'HEAD_OF_DEPARTMENT'
+          ? `บันทึก ${successCount} คาบ — ส่งเข้าลำดับอนุมัติขั้นที่ 2 (หัวหน้าฝ่ายวิชาการและหลักสูตร) แล้ว`
+          : `บันทึก ${successCount} คาบ — ส่งรออนุมัติขั้นที่ 1 (หัวหน้ากลุ่มสาระฯ) แล้ว`
+      );
     } catch (err) {
       showToast('บันทึกไม่สำเร็จ', err instanceof Error ? err.message : String(err), true);
     } finally {
@@ -349,10 +502,18 @@ export function SubstituteTeachingModule() {
         leaveReason: sa.leaveReason,
         proposedByEmail: effectiveEmail,
         proposedByName: effectiveName,
-        proposedByRole: 'HEAD_OF_DEPARTMENT',
+        proposedByRole: effectiveRole,
         notes: sa.notes,
+        coverageMode: sa.coverageMode,
+        worksheetAttachmentUrl: sa.worksheetAttachmentUrl,
+        worksheetAttachmentName: sa.worksheetAttachmentName,
       });
-      showToast('ส่งอนุมัติใหม่แล้ว', 'รายการถูกส่งกลับเข้าลำดับอนุมัติขั้นที่ 2 อีกครั้ง');
+      showToast(
+        'ส่งอนุมัติใหม่แล้ว',
+        effectiveRole === 'HEAD_OF_DEPARTMENT'
+          ? 'รายการถูกส่งกลับเข้าลำดับอนุมัติขั้นที่ 2 อีกครั้ง'
+          : 'รายการถูกส่งกลับเข้าลำดับอนุมัติขั้นที่ 1 (หัวหน้ากลุ่มสาระฯ) อีกครั้ง'
+      );
     } catch (err) {
       showToast('ไม่สำเร็จ', err instanceof Error ? err.message : String(err), true);
     } finally {
@@ -488,9 +649,22 @@ export function SubstituteTeachingModule() {
         <span className="text-slate-500">ประเภท:</span> {TRIGGER_LABEL_TH[sa.triggerType || ''] || '-'}
         {sa.leaveReason ? <> · <span className="text-slate-500">เหตุผล:</span> {sa.leaveReason}</> : null}
       </div>
-      <div className="text-[11px] text-slate-300">
-        <span className="text-slate-500">ครูสอนแทน:</span> <span className="font-bold text-white underline">{sa.substituteTeacherName}</span>
+      <div className="text-[11px] text-slate-300 flex items-center gap-2 flex-wrap">
+        <span><span className="text-slate-500">ครูสอนแทน:</span> <span className="font-bold text-white underline">{sa.substituteTeacherName}</span></span>
+        {sa.coverageMode === 'SUPERVISION_ONLY' && (
+          <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[9px] font-bold">
+            ควบคุมชั้นเรียนอย่างเดียว (ข้ามกลุ่มสาระ)
+          </span>
+        )}
       </div>
+      {sa.worksheetAttachmentUrl ? (
+        <a
+          href={sa.worksheetAttachmentUrl} target="_blank" rel="noopener noreferrer"
+          className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 underline underline-offset-2"
+        >
+          <Paperclip className="w-3.5 h-3.5" /> {sa.worksheetAttachmentName || 'ใบงาน/ใบความรู้/แบบทดสอบ'}
+        </a>
+      ) : null}
       {sa.notes ? (
         <div className="text-[11px] text-slate-400"><span className="text-slate-500 font-bold">งานมอบหมาย:</span> {sa.notes}</div>
       ) : null}
@@ -500,7 +674,7 @@ export function SubstituteTeachingModule() {
   const roleLabel = ROLE_NAMES_TH[effectiveRole] || effectiveRole;
   const canPropose = effectiveRole === 'HEAD_OF_DEPARTMENT';
   const isApprover = APPROVAL_ROLES.includes(effectiveRole);
-  const isSubTeacher = effectiveRole === 'SUBJECT_TEACHER' || effectiveRole === 'HOMEROOM_TEACHER';
+  const isSubTeacher = canSelfPropose; // SUBJECT_TEACHER/HOMEROOM_TEACHER — เดิมชื่อ isSubTeacher, มีความหมายเดียวกับ canSelfPropose
   const isOversight = effectiveRole === 'SUPER_ADMIN' || effectiveRole === 'EXECUTIVE';
 
   // -----------------------------------------------------------------------
@@ -547,12 +721,20 @@ export function SubstituteTeachingModule() {
             </p>
           </div>
 
-          {canPropose && (
+          {(canPropose || canSelfPropose) && (
             <button
-              onClick={() => { resetProposeForm(); setProposeOpen(true); }}
+              onClick={() => {
+                resetProposeForm();
+                if (!canPropose && canSelfPropose) {
+                  // ครูขอลากิจ/ไปราชการด้วยตนเอง — ล็อกชื่อครูที่ลาเป็นตัวเอง และจำกัดประเภทการลา (ไม่รวมลาป่วย)
+                  setAbsentEmail(effectiveEmail);
+                  setTriggerType('PERSONAL_LEAVE');
+                }
+                setProposeOpen(true);
+              }}
               className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 shrink-0 border border-indigo-500/30"
             >
-              <PlusCircle className="w-4 h-4" /> แจ้งครูลา / จัดครูสอนแทน
+              <PlusCircle className="w-4 h-4" /> {canPropose ? 'แจ้งครูลา / จัดครูสอนแทน' : 'ขอลากิจ / ไปราชการ'}
             </button>
           )}
         </div>
@@ -621,6 +803,49 @@ export function SubstituteTeachingModule() {
       {/* MAIN */}
       <div className="max-w-7xl mx-auto px-6 mt-8 grid grid-cols-1 xl:grid-cols-3 gap-8">
         <div className="xl:col-span-2 space-y-8">
+
+          {/* MY OWN REQUESTS — ครูที่ขอลากิจ/ไปราชการด้วยตนเอง ติดตามสถานะคำขอของตัวเอง */}
+          {canSelfPropose && (
+            <section className="space-y-4">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <FileText className="w-5 h-5 text-amber-400" /> คำขอลากิจ/ไปราชการของฉัน
+                <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] font-mono">{myOwnRequests.length}</span>
+              </h2>
+              {myOwnRequests.length === 0 ? (
+                <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-12 text-center text-slate-500">
+                  <AlertCircle className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                  <p className="text-sm font-semibold">ยังไม่เคยยื่นคำขอลากิจ/ไปราชการ</p>
+                  <p className="text-xs text-slate-600 mt-1">กดปุ่ม "ขอลากิจ / ไปราชการ" มุมบนขวาเพื่อเริ่ม</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {myOwnRequests.map(sa => (
+                    <div key={sa.id} className="bg-[#111622] border border-slate-800 rounded-2xl p-5 space-y-3">
+                      <div className="flex justify-between items-start">
+                        <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">{sa.departmentName}</span>
+                        <StatusBadge sa={sa} />
+                      </div>
+                      <CourseInfo sa={sa} />
+                      <ApprovalChain sa={sa} />
+                      {sa.status === 'REJECTED' && sa.rejectionReason && (
+                        <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-3 text-xs text-red-400">
+                          <div className="font-bold flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> ส่งกลับโดย {sa.rejectedByName} ({sa.rejectedByRole})</div>
+                          <p className="italic text-[11px] mt-1">{sa.rejectionReason}</p>
+                          <button
+                            onClick={() => handleRepropose(sa)}
+                            disabled={submitting}
+                            className="mt-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg flex items-center gap-1"
+                          >
+                            <Send className="w-3 h-3" /> แก้ไขและเสนออนุมัติใหม่
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* HOD BOARD */}
           {canPropose && (
@@ -826,11 +1051,11 @@ export function SubstituteTeachingModule() {
           <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-[#111622] border border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4 my-8"
+              className="bg-[#111622] border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4 my-8"
             >
               <div className="flex justify-between items-start border-b border-slate-800 pb-3">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <UserCheck className="w-5 h-5 text-amber-400" /> แจ้งครูลาและจัดครูสอนแทน
+                  <UserCheck className="w-5 h-5 text-amber-400" /> {canPropose ? 'แจ้งครูลาและจัดครูสอนแทน' : 'ขอลากิจ / ไปราชการ (จัดครูสอนแทนด้วยตนเอง)'}
                 </h3>
                 <button onClick={() => setProposeOpen(false)} className="p-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-400 hover:text-white">
                   <XCircle className="w-4 h-4" />
@@ -838,19 +1063,28 @@ export function SubstituteTeachingModule() {
               </div>
 
               <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1.5">ครูที่ลา (ในกลุ่มสาระฯ ของท่าน)</label>
-                  <select
-                    value={absentEmail}
-                    onChange={e => { setAbsentEmail(e.target.value); setSelectedScheduleId(''); setSubEmail(''); }}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold"
-                  >
-                    <option value="">-- เลือกครูที่ลา --</option>
-                    {deptTeachers.map(t => (
-                      <option key={t.id} value={t.email}>{t.prefix}{t.firstName} {t.lastName} ({t.position})</option>
-                    ))}
-                  </select>
-                </div>
+                {canPropose ? (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1.5">ครูที่ลา (ในกลุ่มสาระฯ ของท่าน)</label>
+                    <select
+                      value={absentEmail}
+                      onChange={e => { setAbsentEmail(e.target.value); setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({}); }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold"
+                    >
+                      <option value="">-- เลือกครูที่ลา --</option>
+                      {deptTeachers.map(t => (
+                        <option key={t.id} value={t.email}>{t.prefix}{t.firstName} {t.lastName} ({t.position})</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1.5">ครูที่ลา</label>
+                    <div className="w-full bg-slate-950/60 border border-slate-800 rounded-xl p-3 text-xs text-white font-semibold">
+                      {effectiveName} <span className="text-slate-500 font-normal">({effectiveEmail})</span>
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -860,16 +1094,32 @@ export function SubstituteTeachingModule() {
                       onChange={e => setTriggerType(e.target.value as any)}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold"
                     >
-                      <option value="SICK_LEAVE">ลาป่วย</option>
+                      {canPropose && <option value="SICK_LEAVE">ลาป่วย</option>}
                       <option value="PERSONAL_LEAVE">ลากิจ</option>
                       <option value="OFFICIAL_DUTY">ไปราชการ</option>
                     </select>
                   </div>
+                  <div />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-slate-400 mb-1.5">วันที่ลา</label>
+                    <label className="block text-xs font-bold text-slate-400 mb-1.5">วันที่เริ่มลา</label>
                     <input
-                      type="date" value={absenceDate}
-                      onChange={e => { setAbsenceDate(e.target.value); setSelectedScheduleId(''); }}
+                      type="date" value={rangeStart}
+                      onChange={e => {
+                        setRangeStart(e.target.value);
+                        if (rangeEnd < e.target.value) setRangeEnd(e.target.value);
+                        setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({});
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 mb-1.5">วันที่สิ้นสุด (ลาหลายวันติดกันได้)</label>
+                    <input
+                      type="date" value={rangeEnd} min={rangeStart}
+                      onChange={e => { setRangeEnd(e.target.value); setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({}); }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-mono"
                     />
                   </div>
@@ -889,43 +1139,95 @@ export function SubstituteTeachingModule() {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-400 mb-1.5">
-                    คาบสอนที่ต้องจัดแทน (ดึงจากตารางสอนจริงของครู · {absentEmail ? `${absentTeacherSchedules.length} คาบในวันนี้` : 'เลือกครูก่อน'})
+                    คาบสอนที่ต้องจัดแทน (ดึงจากตารางสอนจริงตลอดช่วงวันที่เลือก · เลือกได้บางคาบ ไม่บังคับทุกคาบ
+                    {absentEmail ? ` · พบ ${rangeSlots.length} คาบ` : ''})
                   </label>
-                  <select
-                    value={selectedScheduleId} onChange={e => { setSelectedScheduleId(e.target.value); setSubEmail(''); }}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold"
-                  >
-                    <option value="">-- เลือกคาบสอน --</option>
-                    {absentTeacherSchedules.map(s => (
-                      <option key={s.id} value={s.id}>
-                        {THAI_DAY_ABBREV[s.day]}{s.period} · {s.code} {s.name} · {s.room || s.targetClass}
-                      </option>
-                    ))}
-                  </select>
-                  {absentEmail && absentTeacherSchedules.length === 0 && (
-                    <p className="text-[10px] text-amber-400 mt-1">ไม่พบคาบสอนของครูท่านนี้ในวันที่เลือก (ตรวจสอบ collection schedules)</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1.5">ครูผู้สอนแทน (กลุ่มสาระฯ เดียวกัน · ตรวจตารางชนแล้ว)</label>
-                  <select
-                    value={subEmail} onChange={e => setSubEmail(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold"
-                  >
-                    <option value="">-- เลือกครูผู้สอนแทน --</option>
-                    {deptTeachers
-                      .filter(t => t.email?.toLowerCase() !== absentEmail.toLowerCase())
-                      .map(t => {
-                        const sched = absentTeacherSchedules.find(s => s.id === selectedScheduleId);
-                        const conflict = checkCandidateConflict(t.email, sched, absenceDate);
+                  {!absentEmail ? (
+                    <p className="text-[11px] text-slate-500">เลือกครูที่ลาก่อน</p>
+                  ) : rangeSlots.length === 0 ? (
+                    <p className="text-[10px] text-amber-400">ไม่พบคาบสอนของครูท่านนี้ในช่วงวันที่เลือก (ตรวจสอบ collection schedules)</p>
+                  ) : (
+                    <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+                      {rangeSlots.map(slot => {
+                        const key = slotKey(slot);
+                        const checked = selectedSlotKeys.has(key);
+                        const { tier1, tier2, tier3 } = getCandidatesForSlot(slot);
+                        const chosenEmail = slotSubEmail[key] || '';
+                        const chosenCandidate = [...tier1, ...tier2, ...tier3].find(c => c.email === chosenEmail);
+                        const isCrossDept = chosenCandidate?.tier === 3;
                         return (
-                          <option key={t.id} value={t.email} disabled={!!conflict}>
-                            {t.prefix}{t.firstName} {t.lastName} {conflict ? `❌ ${conflict}` : '✓ ว่าง'}
-                          </option>
+                          <div key={key} className={cn('border rounded-xl p-3', checked ? 'border-amber-500/40 bg-amber-500/5' : 'border-slate-800 bg-slate-950/40')}>
+                            <label className="flex items-center gap-2 text-xs text-white font-semibold cursor-pointer">
+                              <input
+                                type="checkbox" checked={checked} className="accent-amber-500"
+                                onChange={e => setSelectedSlotKeys(prev => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(key); else next.delete(key);
+                                  return next;
+                                })}
+                              />
+                              {THAI_DAY_ABBREV[slot.day]}{slot.period} · {slot.code} {slot.name} · {slot.room || slot.targetClass} · {slot.date}
+                            </label>
+
+                            {checked && (
+                              <div className="mt-2 pl-6 space-y-2">
+                                <select
+                                  value={chosenEmail}
+                                  onChange={e => setSlotSubEmail(prev => ({ ...prev, [key]: e.target.value }))}
+                                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-[11px] text-white outline-none focus:border-amber-500"
+                                >
+                                  <option value="">-- เลือกครูสอนแทน --</option>
+                                  {tier1.length > 0 && (
+                                    <optgroup label="กลุ่มสาระเดียวกัน + ระดับเดียวกัน (แนะนำ)">
+                                      {tier1.map(c => (
+                                        <option key={c.email} value={c.email} disabled={!!c.conflict}>
+                                          {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                  {tier2.length > 0 && (
+                                    <optgroup label="กลุ่มสาระเดียวกัน (ระดับอื่น)">
+                                      {tier2.map(c => (
+                                        <option key={c.email} value={c.email} disabled={!!c.conflict}>
+                                          {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                  {tier3.length > 0 && (
+                                    <optgroup label="⚠️ ข้ามกลุ่มสาระ (สุดวิสัย — ควบคุมชั้นเรียนอย่างเดียว)">
+                                      {tier3.map(c => (
+                                        <option key={c.email} value={c.email} disabled={!!c.conflict}>
+                                          {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  )}
+                                </select>
+
+                                {isCrossDept && (
+                                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5 space-y-1.5">
+                                    <p className="text-[10px] text-amber-400 font-bold flex items-center gap-1">
+                                      <AlertCircle className="w-3 h-3 shrink-0" /> ครูข้ามกลุ่มสาระ — ควบคุมชั้นเรียนอย่างเดียว ต้องแนบใบงาน/ใบความรู้/แบบทดสอบก่อนส่งคำขอ
+                                    </p>
+                                    <label className="flex items-center gap-2 text-[10px] text-slate-300 cursor-pointer bg-slate-950 border border-slate-800 rounded-lg p-2 hover:border-amber-500/40">
+                                      <Upload className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                      {slotWorksheetFile[key]?.name || 'แนบไฟล์ใบงาน (PDF/Word/รูปภาพ) — ไม่เกิน 10MB'}
+                                      <input
+                                        type="file" accept=".pdf,.doc,.docx,image/*" className="hidden"
+                                        onChange={e => setSlotWorksheetFile(prev => ({ ...prev, [key]: e.target.files?.[0] || null }))}
+                                      />
+                                    </label>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
-                  </select>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -942,10 +1244,10 @@ export function SubstituteTeachingModule() {
                 <button onClick={() => setProposeOpen(false)} className="px-4 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400">ยกเลิก</button>
                 <button
                   onClick={handlePropose}
-                  disabled={submitting || !absentEmail || !selectedScheduleId || !subEmail}
+                  disabled={submitting || !absentEmail || selectedSlotKeys.size === 0}
                   className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5"
                 >
-                  <Send className="w-3.5 h-3.5" /> {submitting ? 'กำลังบันทึก...' : 'เสนอเข้าลำดับอนุมัติ'}
+                  <Send className="w-3.5 h-3.5" /> {submitting ? 'กำลังบันทึก...' : `เสนอเข้าลำดับอนุมัติ (${selectedSlotKeys.size} คาบ)`}
                 </button>
               </div>
             </motion.div>

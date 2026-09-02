@@ -662,6 +662,21 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       );
     });
 
+    it('allows SUBJECT_TEACHER and HOMEROOM_TEACHER to self-propose a personal-leave/official-duty request (stage 1 stays pending)', async () => {
+      await assertSucceeds(
+        asRole('SUBJECT_TEACHER').firestore().doc('substitute_assignments/sub-self-1').set({
+          courseId: 'c1', triggerType: 'PERSONAL_LEAVE', proposedByRole: 'SUBJECT_TEACHER',
+          status: 'PENDING_APPROVAL', currentApprovalStage: 'STAGE_1_HEAD_OF_DEPARTMENT',
+        })
+      );
+      await assertSucceeds(
+        asRole('HOMEROOM_TEACHER').firestore().doc('substitute_assignments/sub-self-2').set({
+          courseId: 'c1', triggerType: 'OFFICIAL_DUTY', proposedByRole: 'HOMEROOM_TEACHER',
+          status: 'PENDING_APPROVAL', currentApprovalStage: 'STAGE_1_HEAD_OF_DEPARTMENT',
+        })
+      );
+    });
+
     it('REGRESSION: denies PARENT and STUDENT from writing substitute_assignments', async () => {
       await assertFails(
         asRole('PARENT').firestore().doc('substitute_assignments/sub-bad').set({ courseId: 'c1', status: 'APPROVED' })

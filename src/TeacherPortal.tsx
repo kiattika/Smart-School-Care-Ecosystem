@@ -22,6 +22,7 @@ import { TeachingLoadTable } from './components/TeachingLoadTable';
 import { ClassroomSeatingManager } from './components/ClassroomSeatingManager';
 import { ClassroomLeaderboard } from './components/ClassroomLeaderboard';
 import { GPSGeofenceCheckinModal } from './components/GPSGeofenceCheckinModal';
+import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
 
 // Helper for tailwind classes
 
@@ -328,6 +329,8 @@ export function TeacherPortal() {
   // New States for Dashboard Navigation
   const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence'>('courses');
   const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
+  // ขอลากิจ/ไปราชการด้วยตนเอง — reuse SubstituteTeachingModule เต็มรูปแบบ (ไม่สร้างฟอร์มซ้ำ)
+  const [showSubSelfService, setShowSubSelfService] = useState(false);
 
   // Dynamic Role-Based Access Control (RBAC) Tab Filtering
   const availableDashboardTabs = useMemo(() => {
@@ -1226,7 +1229,24 @@ export function TeacherPortal() {
             {/* role อนุมัติสอนแทน (HEAD_OF_DEPARTMENT ฯลฯ) ถูก route ไป ApprovalsPortal แล้ว —
                 หน้านี้เหลือเฉพาะฟอร์มขอสลับคาบของครูผู้สอนทั่วไป */}
             {dashboardTab === 'substitutions' && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in duration-300">
+              <div className="space-y-6 animate-in fade-in duration-300">
+                {/* ขอลากิจ/ไปราชการด้วยตนเอง (ครูรู้ล่วงหน้า ต่างจากลาป่วยที่หัวหน้ากลุ่มสาระฯ จัดให้) */}
+                <div className="bg-gradient-to-br from-indigo-950/60 to-[#161f30] border border-indigo-500/20 rounded-xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      <Calendar className="w-5 h-5 text-indigo-400" /> ขอลากิจ / ไปราชการ (จัดครูสอนแทนด้วยตนเอง)
+                    </h3>
+                    <p className="text-xs text-slate-400">ระบุคาบสอนจากตารางสอนจริง ระบบแนะนำครูสอนแทนให้ และติดตามสถานะอนุมัติ 4 ขั้นได้ที่นี่</p>
+                  </div>
+                  <button
+                    onClick={() => setShowSubSelfService(true)}
+                    className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-lg transition-colors shadow-lg shadow-indigo-600/20 shrink-0 flex items-center gap-1.5"
+                  >
+                    <PlusCircle className="w-4 h-4" /> ขอลากิจ / ไปราชการ
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {/* Form to submit request */}
                 <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4">
                   <h3 className="text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-3">
@@ -1437,6 +1457,7 @@ export function TeacherPortal() {
                       })()}
                     </div>
                   </div>
+                </div>
                 </div>
               </div>
             )}
@@ -2765,6 +2786,21 @@ export function TeacherPortal() {
         isOpen={isTeacherGPSModalOpen}
         onClose={() => setIsTeacherGPSModalOpen(false)}
       />
+
+      {/* ขอลากิจ/ไปราชการด้วยตนเอง — reuse SubstituteTeachingModule เต็มรูปแบบ (มีฟอร์มขอ + ติดตามสถานะอนุมัติ 4 ขั้นในตัว) */}
+      <AnimatePresence>
+        {showSubSelfService && (
+          <div className="fixed inset-0 z-[70] bg-slate-950 overflow-y-auto">
+            <button
+              onClick={() => setShowSubSelfService(false)}
+              className="fixed top-4 right-4 z-[71] p-2 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg text-slate-300 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <SubstituteTeachingModule />
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* บันทึกหลังสอนแทน (deadline ก่อน 24:00 น. ของวันที่สอน) */}
       <AnimatePresence>

@@ -210,13 +210,16 @@ service cloud.firestore {
     //   - SUBJECT_TEACHER แก้ได้เฉพาะ field ชุด completion* / isCompleted / completedAt เท่านั้น
     match /substitute_assignments/{assignmentId} {
       allow read: if isSignedIn();
+      // SUBJECT_TEACHER/HOMEROOM_TEACHER เขียนได้เพื่อรองรับครูขอลากิจ/ไปราชการด้วยตนเอง
+      // (สถานะเริ่มต้นล็อกที่ STAGE_1_HEAD_OF_DEPARTMENT เสมอในโค้ด client — ดู proposeSubstituteAssignment)
       allow write: if hasRole('SUPER_ADMIN') ||
                       hasRole('HEAD_OF_DEPARTMENT') ||
                       hasRole('ACADEMIC_HEAD') ||
                       hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
                       hasRole('DIRECTOR') ||
                       hasRole('EXECUTIVE') ||
-                      hasRole('SUBJECT_TEACHER');
+                      hasRole('SUBJECT_TEACHER') ||
+                      hasRole('HOMEROOM_TEACHER');
     }
 
     match /post_teaching_records/{recordId} {
