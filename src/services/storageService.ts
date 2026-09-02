@@ -29,3 +29,20 @@ export const uploadHomePhoto = (ownerUid: string, blob: Blob) =>
 /** ภาพประกอบแฟ้มสะสมผลงาน */
 export const uploadPortfolioPhoto = (ownerUid: string, blob: Blob) =>
   uploadStudentPhoto('student_portfolio_photos', ownerUid, blob);
+
+/**
+ * แนบใบงาน/ใบความรู้/แบบทดสอบ สำหรับคาบสอนแทนที่ครูสอนแทนเป็นแบบ "ควบคุมชั้นเรียนอย่างเดียว"
+ * (ครูสอนแทนข้ามกลุ่มสาระ ไม่ได้สอนเนื้อหาจริง) — ไม่บีบอัดไฟล์ (รองรับ PDF/Word/รูปภาพตามต้นฉบับ)
+ * path: substitute_worksheets/{ownerUid}/{fileName}  — ownerUid = Firebase Auth UID ของครูเจ้าของวิชา (ผู้เสนอคำขอ)
+ */
+export async function uploadSubstituteWorksheet(
+  ownerUid: string,
+  file: File,
+): Promise<{ url: string; name: string }> {
+  const safeName = file.name.replace(/[^\w.\-ก-๙]+/g, '_');
+  const objectName = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`;
+  const objectRef = ref(storage, `substitute_worksheets/${ownerUid}/${objectName}`);
+  await uploadBytes(objectRef, file, { contentType: file.type || 'application/octet-stream' });
+  const url = await getDownloadURL(objectRef);
+  return { url, name: file.name };
+}

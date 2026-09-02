@@ -510,11 +510,15 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const proposerEmail = payload.proposedByEmail || '';
     const proposerName = payload.proposedByName || '';
+    // ขั้นที่ 1 ถือว่าอนุมัติโดยผู้เสนอทันที เฉพาะกรณีผู้เสนอคือหัวหน้ากลุ่มสาระฯ ตัวจริงเท่านั้น
+    // — ถ้าครูขอลากิจ/ไปราชการด้วยตนเอง (proposedByRole เป็น SUBJECT_TEACHER/HOMEROOM_TEACHER)
+    // ขั้นที่ 1 ต้องรอหัวหน้ากลุ่มสาระฯ มาอนุมัติจริงก่อน ห้าม auto-approve แทน
+    const isHodProposer = payload.proposedByRole === 'HEAD_OF_DEPARTMENT';
 
     const chain: SubstituteApprovalStep[] = SUBSTITUTE_STAGE_ORDER
       .filter((s): s is Exclude<SubstituteApprovalStage, 'COMPLETED'> => s !== 'COMPLETED')
       .map((stage, idx) => {
-        if (idx === 0) {
+        if (idx === 0 && isHodProposer) {
           return {
             stage,
             approverRole: SUBSTITUTE_STAGE_ROLE[stage],
@@ -539,7 +543,7 @@ export const useStore = create<StoreState>((set, get) => ({
       ...rest,
       id,
       status: 'PENDING_APPROVAL',
-      currentApprovalStage: 'STAGE_2_ACADEMIC_HEAD',
+      currentApprovalStage: isHodProposer ? 'STAGE_2_ACADEMIC_HEAD' : 'STAGE_1_HEAD_OF_DEPARTMENT',
       approvalChain: chain,
       postTeachingDueAt: `${payload.date}T23:59:59`,
       isCompleted: false,
