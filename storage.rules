@@ -41,6 +41,18 @@ service firebase.storage {
       allow delete: if false;
     }
 
+    // path: substitute_worksheets/{ownerUid}/{fileName} — ใบงาน/ใบความรู้/แบบทดสอบ ที่ครูเจ้าของวิชา
+    // แนบให้ครูสอนแทนแบบ "ควบคุมชั้นเรียนอย่างเดียว" (ครูสอนแทนข้ามกลุ่มสาระ) — ownerUid = ครูผู้เสนอคำขอ
+    // อ่าน: เจ้าของ + ครูสอนแทนที่ถูกมอบหมายเข้าถึงผ่าน tokenized download URL ที่เก็บใน
+    // substitute_assignments/{id} (อ่านได้ตาม firestore.rules) เหมือน pattern ภาพถ่ายบ้าน/แฟ้มสะสมผลงานด้านบน
+    match /substitute_worksheets/{ownerUid}/{fileName} {
+      allow read: if ownerImageRules(ownerUid);
+      allow create, update: if ownerImageRules(ownerUid)
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*|application/pdf|application/msword|application/vnd\\.openxmlformats-officedocument\\..*');
+      allow delete: if false;
+    }
+
     // ทุก path อื่น: ปฏิเสธทั้งหมด
     match /{allPaths=**} {
       allow read, write: if false;

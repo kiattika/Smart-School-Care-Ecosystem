@@ -83,3 +83,45 @@ describe('Storage Security Rules — student_home_photos', () => {
     await assertFails(asPromise(own.ref('student_portfolio_photos/stu-1/p.pdf').put(new Uint8Array([1]), { contentType: 'application/pdf' })));
   });
 });
+
+describe('Storage Security Rules — substitute_worksheets', () => {
+  it('lets the owner (proposing teacher) upload a PDF worksheet under their own uid prefix', async () => {
+    const t = testEnv.authenticatedContext('teacher-1', { roles: ['SUBJECT_TEACHER'] }).storage();
+    await assertSucceeds(asPromise(t.ref('substitute_worksheets/teacher-1/worksheet.pdf').put(new Uint8Array([1, 2, 3]), { contentType: 'application/pdf' })));
+  });
+
+  it('lets the owner upload an image worksheet', async () => {
+    const t = testEnv.authenticatedContext('teacher-1', { roles: ['SUBJECT_TEACHER'] }).storage();
+    await assertSucceeds(asPromise(t.ref('substitute_worksheets/teacher-1/scan.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
+  });
+
+  it('denies uploading under a different uid prefix', async () => {
+    const t = testEnv.authenticatedContext('teacher-1', { roles: ['SUBJECT_TEACHER'] }).storage();
+    await assertFails(asPromise(t.ref('substitute_worksheets/teacher-2/worksheet.pdf').put(new Uint8Array([1]), { contentType: 'application/pdf' })));
+  });
+
+  it('denies an unsupported content type (e.g. plain text)', async () => {
+    const t = testEnv.authenticatedContext('teacher-1', { roles: ['SUBJECT_TEACHER'] }).storage();
+    await assertFails(asPromise(t.ref('substitute_worksheets/teacher-1/notes.txt').put(new Uint8Array([1]), { contentType: 'text/plain' })));
+  });
+
+  it('denies an unauthenticated upload', async () => {
+    const s = testEnv.unauthenticatedContext().storage();
+    await assertFails(asPromise(s.ref('substitute_worksheets/teacher-1/worksheet.pdf').put(new Uint8Array([1]), { contentType: 'application/pdf' })));
+  });
+
+  it('lets the owner read their own file but denies another signed-in teacher reading it directly (assigned sub reads via tokenized URL from Firestore instead)', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.storage().ref('substitute_worksheets/teacher-1/worksheet.pdf').put(new Uint8Array([1]), { contentType: 'application/pdf' });
+    });
+    await assertSucceeds(testEnv.authenticatedContext('teacher-1', { roles: ['SUBJECT_TEACHER'] }).storage().ref('substitute_worksheets/teacher-1/worksheet.pdf').getDownloadURL());
+    await assertFails(testEnv.authenticatedContext('teacher-2', { roles: ['SUBJECT_TEACHER'] }).storage().ref('substitute_worksheets/teacher-1/worksheet.pdf').getDownloadURL());
+  });
+
+  it('denies deleting a file via client', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.storage().ref('substitute_worksheets/teacher-1/worksheet.pdf').put(new Uint8Array([1]), { contentType: 'application/pdf' });
+    });
+    await assertFails(testEnv.authenticatedContext('teacher-1', { roles: ['SUBJECT_TEACHER'] }).storage().ref('substitute_worksheets/teacher-1/worksheet.pdf').delete());
+  });
+});
