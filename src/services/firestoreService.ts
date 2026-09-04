@@ -833,6 +833,23 @@ export async function updateSubstituteAssignmentFirestore(
   }
 }
 
+/** อัปเดตหลาย document พร้อมกันแบบ atomic — ใช้ตอนยืนยัน/ปฏิเสธ (respondToTeacherConfirmation) */
+export async function updateSubstituteAssignmentsBatchFirestore(
+  patches: { id: string; patch: Partial<SubstituteAssignment> }[]
+): Promise<void> {
+  const collectionPath = 'substitute_assignments';
+  try {
+    const { writeBatch } = await import('firebase/firestore');
+    const batch = writeBatch(db);
+    patches.forEach(({ id, patch }) => {
+      batch.set(doc(db, collectionPath, id), { ...stripUndefined(patch as Record<string, any>), updatedAt: serverTimestamp() }, { merge: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/batch(${patches.map(p => p.id).join(',')})`);
+  }
+}
+
 export function subscribeSubstituteAssignments(onUpdate: (assignments: SubstituteAssignment[]) => void): () => void {
   const collectionPath = 'substitute_assignments';
   try {

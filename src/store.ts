@@ -35,7 +35,7 @@ import {
   SubstituteApprovalStage,
   PostTeachingRecord
 } from './types';
-import { SUBSTITUTE_STAGE_ROLE, SUBSTITUTE_STAGE_ORDER } from './types';
+import { SUBSTITUTE_STAGE_ROLE, SUBSTITUTE_STAGE_ORDER, SUBSTITUTE_TEACHER_DECLINED_ROLE } from './types';
 import { DEFAULT_SCHOOL_GEOFENCE } from './utils/geoUtils';
 import { 
   saveSelfAssessmentRecord, 
@@ -47,6 +47,7 @@ import {
   saveSchoolGeofenceConfigFirestore,
   saveSubstituteAssignmentFirestore,
   updateSubstituteAssignmentFirestore,
+  updateSubstituteAssignmentsBatchFirestore,
   savePostTeachingRecordFirestore,
   save2QScreeningFirestore,
   savePHQ9ScreeningFirestore,
@@ -58,6 +59,37 @@ import {
 } from './services/firestoreService';
 
 const STATUS_CYCLE: AttendanceStatus[] = ['PRESENT', 'ABSENT', 'LATE', 'LEAVE'];
+
+/** สร้าง approval chain 4 ขั้น — ขั้นที่ 1 auto-approve เฉพาะเมื่อผู้เสนอคือ HEAD_OF_DEPARTMENT ตัวจริง */
+function buildSubstituteApprovalChain(
+  isHodProposer: boolean,
+  proposerEmail: string,
+  proposerName: string,
+  now: string
+): SubstituteApprovalStep[] {
+  return SUBSTITUTE_STAGE_ORDER
+    .filter((s): s is Exclude<SubstituteApprovalStage, 'COMPLETED'> => s !== 'COMPLETED')
+    .map((stage, idx) => {
+      if (idx === 0 && isHodProposer) {
+        return {
+          stage,
+          approverRole: SUBSTITUTE_STAGE_ROLE[stage],
+          approverName: proposerName,
+          approverEmail: proposerEmail,
+          status: 'APPROVED' as const,
+          approvedAt: now,
+          comment: 'เสนอจัดครูสอนแทนโดยหัวหน้ากลุ่มสาระฯ',
+        };
+      }
+      return {
+        stage,
+        approverRole: SUBSTITUTE_STAGE_ROLE[stage],
+        approverName: '',
+        approverEmail: '',
+        status: 'PENDING' as const,
+      };
+    });
+}
 
 export const useStore = create<StoreState>((set, get) => ({
   user: null,
@@ -514,39 +546,28 @@ export const useStore = create<StoreState>((set, get) => ({
     // — ถ้าครูขอลากิจ/ไปราชการด้วยตนเอง (proposedByRole เป็น SUBJECT_TEACHER/HOMEROOM_TEACHER)
     // ขั้นที่ 1 ต้องรอหัวหน้ากลุ่มสาระฯ มาอนุมัติจริงก่อน ห้าม auto-approve แทน
     const isHodProposer = payload.proposedByRole === 'HEAD_OF_DEPARTMENT';
+    const chain = buildSubstituteApprovalChain(isHodProposer, proposerEmail, proposerName, now);
 
-    const chain: SubstituteApprovalStep[] = SUBSTITUTE_STAGE_ORDER
-      .filter((s): s is Exclude<SubstituteApprovalStage, 'COMPLETED'> => s !== 'COMPLETED')
-      .map((stage, idx) => {
-        if (idx === 0 && isHodProposer) {
-          return {
-            stage,
-            approverRole: SUBSTITUTE_STAGE_ROLE[stage],
-            approverName: proposerName,
-            approverEmail: proposerEmail,
-            status: 'APPROVED' as const,
-            approvedAt: now,
-            comment: 'เสนอจัดครูสอนแทนโดยหัวหน้ากลุ่มสาระฯ',
-          };
-        }
-        return {
-          stage,
-          approverRole: SUBSTITUTE_STAGE_ROLE[stage],
-          approverName: '',
-          approverEmail: '',
-          status: 'PENDING' as const,
-        };
-      });
+    // ครูที่ถูกมอบหมาย (substituteTeacherEmail) ต้องกดยืนยันก่อนเข้า approval chain เสมอ — ไม่ว่า
+    // ใครเป็นผู้เสนอ (HOD หรือครูขอเอง) กันกรณีเลือกครูสอนแทนฝ่ายเดียวแล้วส่งเข้าอนุมัติเลย
+    // ยกเว้น "resubmit" รายการที่ครูสอนแทน "คนเดิม" เคยกดยืนยันไปแล้วครั้งหนึ่ง (ถูกส่งกลับจาก
+    // ขั้นอนุมัติ แล้วผู้เสนอแก้ไขรายละเอียดส่งใหม่โดยไม่เปลี่ยนตัวครู — ไม่ต้องยืนยันซ้ำ) —
+    // ถ้าเปลี่ยนไปเลือกครูสอนแทนคนใหม่ (เช่น คนเดิมกดปฏิเสธ) ต้องให้คนใหม่ยืนยันเสมอ
+    const alreadyConfirmedBySubstitute =
+      !!existing?.teacherConfirmedAt &&
+      existing.substituteTeacherEmail?.toLowerCase() === payload.substituteTeacherEmail?.toLowerCase();
+    const needsTeacherConfirmation = !alreadyConfirmedBySubstitute;
 
     const { id: _ignored, ...rest } = payload;
     const assignment: SubstituteAssignment = {
       ...rest,
       id,
-      status: 'PENDING_APPROVAL',
+      status: needsTeacherConfirmation ? 'PENDING_TEACHER_CONFIRMATION' : 'PENDING_APPROVAL',
       currentApprovalStage: isHodProposer ? 'STAGE_2_ACADEMIC_HEAD' : 'STAGE_1_HEAD_OF_DEPARTMENT',
       approvalChain: chain,
       postTeachingDueAt: `${payload.date}T23:59:59`,
       isCompleted: false,
+      teacherConfirmedAt: alreadyConfirmedBySubstitute ? existing?.teacherConfirmedAt : undefined,
       rejectionReason: undefined,
       rejectedAt: undefined,
       rejectedByName: undefined,
@@ -567,10 +588,47 @@ export const useStore = create<StoreState>((set, get) => ({
     return assignment;
   },
 
+  // ครูที่ถูกมอบหมาย (substituteTeacherEmail) ยืนยัน/ปฏิเสธ ก่อนเข้า approval chain 4 ขั้น
+  respondToTeacherConfirmation: async (id, decision, responder, reason) => {
+    const target = get().substituteAssignments.find(s => s.id === id);
+    if (!target) throw new Error('ไม่พบรายการจัดครูสอนแทน');
+    if (target.status !== 'PENDING_TEACHER_CONFIRMATION') {
+      throw new Error('รายการนี้ไม่ได้อยู่ในสถานะรอยืนยันจากครูสอนแทน');
+    }
+    if (target.substituteTeacherEmail?.toLowerCase() !== responder.email.toLowerCase()) {
+      throw new Error('เฉพาะครูที่ถูกมอบหมายให้สอนแทนคาบนี้เท่านั้นที่ยืนยัน/ปฏิเสธได้');
+    }
+    if (decision === 'DECLINE' && !reason?.trim()) {
+      throw new Error('การปฏิเสธต้องระบุเหตุผล');
+    }
+
+    const now = new Date().toISOString();
+    const buildPatch = (): Partial<SubstituteAssignment> =>
+      decision === 'DECLINE'
+        ? {
+            status: 'REJECTED',
+            rejectionReason: reason?.trim() || '',
+            rejectedAt: now,
+            rejectedByName: responder.name,
+            rejectedByRole: SUBSTITUTE_TEACHER_DECLINED_ROLE,
+          }
+        : { status: 'PENDING_APPROVAL', teacherConfirmedAt: now };
+
+    const patch = buildPatch();
+    await updateSubstituteAssignmentsBatchFirestore([{ id: target.id, patch }]);
+
+    set((state) => ({
+      substituteAssignments: state.substituteAssignments.map(a => (a.id === id ? { ...a, ...patch } : a)),
+    }));
+  },
+
   // อนุมัติ/ปฏิเสธ ตามลำดับขั้น — sequential, ห้ามบุคคลเดียวข้ามหลายขั้น
   decideSubstituteApproval: async (id, decision, approver, comment) => {
     const target = get().substituteAssignments.find(s => s.id === id);
     if (!target) throw new Error('ไม่พบรายการจัดครูสอนแทน');
+    if (target.status !== 'PENDING_APPROVAL') {
+      throw new Error('รายการนี้ไม่อยู่ในสถานะรออนุมัติ (อาจรอครูสอนแทนยืนยันก่อน หรือดำเนินการเสร็จแล้ว)');
+    }
 
     const stage = target.currentApprovalStage;
     if (!stage || stage === 'COMPLETED') {

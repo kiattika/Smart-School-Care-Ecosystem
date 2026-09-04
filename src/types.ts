@@ -199,6 +199,10 @@ export type SubstituteApprovalStage =
 // - PERSONAL_LEAVE (ลากิจ) / OFFICIAL_DUTY (ไปราชการ): ครูแจ้งเหตุผลล่วงหน้า cross-reference กับตารางสอนจริง
 export type SubstituteTriggerType = 'SICK_LEAVE' | 'PERSONAL_LEAVE' | 'OFFICIAL_DUTY';
 
+// sentinel สำหรับ SubstituteAssignment.rejectedByRole เมื่อครูที่ถูกมอบหมายกด "ปฏิเสธ"
+// ตอนขั้นยืนยันตัวตน (ไม่ใช่ role จริงในลำดับอนุมัติ 4 ขั้น — ใช้แยกแยะการแสดงผลใน UI)
+export const SUBSTITUTE_TEACHER_DECLINED_ROLE = 'SUBSTITUTE_TEACHER_DECLINED';
+
 // ลำดับขั้นอนุมัติ 4 ขั้น (sequential) → role ที่มีสิทธิ์อนุมัติแต่ละขั้น
 export const SUBSTITUTE_STAGE_ROLE: Record<Exclude<SubstituteApprovalStage, 'COMPLETED'>, string> = {
   STAGE_1_HEAD_OF_DEPARTMENT: 'HEAD_OF_DEPARTMENT',
@@ -240,13 +244,20 @@ export interface SubstituteAssignment {
   date: string;
   departmentName?: string;
   departmentId?: string;
-  status?: 'PENDING_ASSIGNMENT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
+  // PENDING_TEACHER_CONFIRMATION = รอครูที่ถูกมอบหมาย (substituteTeacherEmail) กดยืนยัน/ปฏิเสธ
+  // ก่อน — ยังไม่เข้า approval chain 4 ขั้น (ดู respondToTeacherConfirmation ใน store.ts)
+  status?: 'PENDING_TEACHER_CONFIRMATION' | 'PENDING_ASSIGNMENT' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
   currentApprovalStage?: SubstituteApprovalStage;
   approvalChain?: SubstituteApprovalStep[];
   rejectionReason?: string;
   rejectedAt?: string;
+  // ค่าปกติเป็น role ในลำดับอนุมัติ (เช่น ACADEMIC_HEAD) — ถ้าครูที่ถูกมอบหมายกด "ปฏิเสธ"
+  // ตอนขั้นยืนยันตัวตน (ก่อนเข้า approval chain) จะเป็นค่า SUBSTITUTE_TEACHER_DECLINED_ROLE แทน
   rejectedByRole?: string;
   rejectedByName?: string;
+  // ครูที่ถูกมอบหมาย (substituteTeacherEmail) กดยืนยันเมื่อใด — ต้องมีค่านี้ก่อนถึงจะเข้า
+  // approval chain ได้ (ดู proposeSubstituteAssignment/respondToTeacherConfirmation ใน store.ts)
+  teacherConfirmedAt?: string;
   // ประเภทการลา + เหตุผล เก็บเป็น field ในเอกสารนี้เอง (ยังไม่แยก collection teacher-leave)
   triggerType?: SubstituteTriggerType;
   leaveReason?: string;
@@ -276,6 +287,13 @@ export interface SubstituteAssignment {
   createdAt?: string;
   updatedAt?: string;
 }
+
+// payload สำหรับเสนอ/resubmit รายการจัดครูสอนแทน 1 เอกสาร — field ที่ระบบคำนวณเอง (status,
+// currentApprovalStage, approvalChain, createdAt, updatedAt, postTeachingDueAt) ไม่ต้องส่งมา
+export type ProposeSubstitutePayload = { id?: string } & Omit<
+  SubstituteAssignment,
+  'id' | 'status' | 'currentApprovalStage' | 'approvalChain' | 'createdAt' | 'updatedAt' | 'postTeachingDueAt'
+>;
 
 export interface HomeVisit {
   studentId: string;
@@ -964,12 +982,14 @@ export interface StoreState {
   setPostTeachingRecords: (list: PostTeachingRecord[]) => void;
 
   // Substitute Teaching workflow (เขียน Firestore จริง)
-  proposeSubstituteAssignment: (
-    payload: { id?: string } & Omit<
-      SubstituteAssignment,
-      'id' | 'status' | 'currentApprovalStage' | 'approvalChain' | 'createdAt' | 'updatedAt' | 'postTeachingDueAt'
-    >
-  ) => Promise<SubstituteAssignment>;
+  proposeSubstituteAssignment: (payload: ProposeSubstitutePayload) => Promise<SubstituteAssignment>;
+  // ครูที่ถูกมอบหมาย (substituteTeacherEmail) ยืนยัน/ปฏิเสธ ก่อนเข้า approval chain 4 ขั้น
+  respondToTeacherConfirmation: (
+    id: string,
+    decision: 'CONFIRM' | 'DECLINE',
+    responder: { email: string; name: string },
+    reason?: string
+  ) => Promise<void>;
   decideSubstituteApproval: (
     id: string,
     decision: 'APPROVE' | 'REJECT',
