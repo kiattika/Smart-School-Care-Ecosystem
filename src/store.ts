@@ -550,15 +550,17 @@ export const useStore = create<StoreState>((set, get) => ({
     const isHodProposer = payload.proposedByRole === 'HEAD_OF_DEPARTMENT';
     const chain = buildSubstituteApprovalChain(isHodProposer, proposerEmail, proposerName, now);
 
-    // ครูที่ถูกมอบหมาย (substituteTeacherEmail) ต้องกดยืนยันก่อนเข้า approval chain เสมอ — ไม่ว่า
-    // ใครเป็นผู้เสนอ (HOD หรือครูขอเอง) กันกรณีเลือกครูสอนแทนฝ่ายเดียวแล้วส่งเข้าอนุมัติเลย
-    // ยกเว้น "resubmit" รายการที่ครูสอนแทน "คนเดิม" เคยกดยืนยันไปแล้วครั้งหนึ่ง (ถูกส่งกลับจาก
-    // ขั้นอนุมัติ แล้วผู้เสนอแก้ไขรายละเอียดส่งใหม่โดยไม่เปลี่ยนตัวครู — ไม่ต้องยืนยันซ้ำ) —
-    // ถ้าเปลี่ยนไปเลือกครูสอนแทนคนใหม่ (เช่น คนเดิมกดปฏิเสธ) ต้องให้คนใหม่ยืนยันเสมอ
+    // ครูที่ถูกมอบหมาย (substituteTeacherEmail) ต้องกดยืนยันก่อนเข้า approval chain — ยกเว้น
+    // กรณีลาป่วย (isHodProposer) ซึ่งเป็นสถานการณ์ฉุกเฉินวันเดียวกัน หัวหน้ากลุ่มสาระฯ ต้องสั่งการ
+    // ให้ครูเข้าสอนแทนได้ทันที ไม่ต้องรอยืนยันในแอพก่อน (ยืนยันจากโรงเรียนแล้ว — ต่างจากลากิจ/
+    // ไปราชการที่ครูขอเอง ซึ่งยังต้องผ่านขั้นตอนนี้เหมือนเดิม)
+    // สำหรับกรณีที่ยังต้องยืนยัน — ยกเว้น "resubmit" รายการที่ครูสอนแทน "คนเดิม" เคยกดยืนยันไปแล้ว
+    // ครั้งหนึ่ง (ถูกส่งกลับจากขั้นอนุมัติ แล้วผู้เสนอแก้ไขรายละเอียดส่งใหม่โดยไม่เปลี่ยนตัวครู —
+    // ไม่ต้องยืนยันซ้ำ) — ถ้าเปลี่ยนไปเลือกครูสอนแทนคนใหม่ (เช่น คนเดิมกดปฏิเสธ) ต้องให้คนใหม่ยืนยันเสมอ
     const alreadyConfirmedBySubstitute =
       !!existing?.teacherConfirmedAt &&
       existing.substituteTeacherEmail?.toLowerCase() === payload.substituteTeacherEmail?.toLowerCase();
-    const needsTeacherConfirmation = !alreadyConfirmedBySubstitute;
+    const needsTeacherConfirmation = !isHodProposer && !alreadyConfirmedBySubstitute;
 
     const { id: _ignored, ...rest } = payload;
     const assignment: SubstituteAssignment = {
@@ -607,7 +609,9 @@ export const useStore = create<StoreState>((set, get) => ({
       return {
         ...rest,
         id,
-        status: 'PENDING_TEACHER_CONFIRMATION',
+        // เช่นเดียวกับ proposeSubstituteAssignment — ถ้า HOD เป็นผู้เสนอ (เช่น จัดสอนแทนกรณีลาป่วย)
+        // ข้าม gate ยืนยันตัวตนไปเลย เข้าสู่การอนุมัติทันที ไม่ต้องรอครูกดยืนยัน
+        status: isHodProposer ? 'PENDING_APPROVAL' : 'PENDING_TEACHER_CONFIRMATION',
         currentApprovalStage: isHodProposer ? 'STAGE_2_ACADEMIC_HEAD' : 'STAGE_1_HEAD_OF_DEPARTMENT',
         approvalChain: chain,
         postTeachingDueAt: `${payload.date}T23:59:59`,
