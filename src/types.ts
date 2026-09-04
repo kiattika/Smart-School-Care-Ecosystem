@@ -258,6 +258,10 @@ export interface SubstituteAssignment {
   // ครูที่ถูกมอบหมาย (substituteTeacherEmail) กดยืนยันเมื่อใด — ต้องมีค่านี้ก่อนถึงจะเข้า
   // approval chain ได้ (ดู proposeSubstituteAssignment/respondToTeacherConfirmation ใน store.ts)
   teacherConfirmedAt?: string;
+  // SWAP (แลกคาบสองทาง): เอกสารนี้เป็นครึ่งหนึ่งของคู่แลกคาบ ผูกกับอีก document ผ่าน linkedSwapId
+  // — ยืนยัน/ปฏิเสธฝั่งใดฝั่งหนึ่งจะ cascade ไปอีกฝั่งเสมอ (ดู respondToTeacherConfirmation)
+  swapMode?: 'COVER' | 'SWAP';
+  linkedSwapId?: string;
   // ประเภทการลา + เหตุผล เก็บเป็น field ในเอกสารนี้เอง (ยังไม่แยก collection teacher-leave)
   triggerType?: SubstituteTriggerType;
   leaveReason?: string;
@@ -983,7 +987,14 @@ export interface StoreState {
 
   // Substitute Teaching workflow (เขียน Firestore จริง)
   proposeSubstituteAssignment: (payload: ProposeSubstitutePayload) => Promise<SubstituteAssignment>;
-  // ครูที่ถูกมอบหมาย (substituteTeacherEmail) ยืนยัน/ปฏิเสธ ก่อนเข้า approval chain 4 ขั้น
+  // แลกคาบสอนสองทาง (วิธี A) — เขียน 2 document พร้อมกันแบบ atomic (Firestore batch) ผูกกันด้วย
+  // linkedSwapId ทั้งคู่; ทั้งคู่เริ่มที่ PENDING_TEACHER_CONFIRMATION เสมอ (swapMode บังคับเป็น 'SWAP')
+  proposeSubstituteSwap: (
+    legA: ProposeSubstitutePayload,
+    legB: ProposeSubstitutePayload
+  ) => Promise<{ legA: SubstituteAssignment; legB: SubstituteAssignment }>;
+  // ครูที่ถูกมอบหมาย (substituteTeacherEmail) ยืนยัน/ปฏิเสธ ก่อนเข้า approval chain 4 ขั้น —
+  // ถ้าเป็นคู่แลกคาบ (swapMode 'SWAP') จะ cascade ไปอีกฝั่งของ linkedSwapId เสมอ
   respondToTeacherConfirmation: (
     id: string,
     decision: 'CONFIRM' | 'DECLINE',

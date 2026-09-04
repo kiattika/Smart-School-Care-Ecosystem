@@ -47,6 +47,7 @@ import {
   saveSchoolGeofenceConfigFirestore,
   saveSubstituteAssignmentFirestore,
   updateSubstituteAssignmentFirestore,
+  saveSubstituteSwapPairFirestore,
   updateSubstituteAssignmentsBatchFirestore,
   savePostTeachingRecordFirestore,
   save2QScreeningFirestore,
@@ -60,7 +61,8 @@ import {
 
 const STATUS_CYCLE: AttendanceStatus[] = ['PRESENT', 'ABSENT', 'LATE', 'LEAVE'];
 
-/** สร้าง approval chain 4 ขั้น — ขั้นที่ 1 auto-approve เฉพาะเมื่อผู้เสนอคือ HEAD_OF_DEPARTMENT ตัวจริง */
+/** สร้าง approval chain 4 ขั้น — ขั้นที่ 1 auto-approve เฉพาะเมื่อผู้เสนอคือ HEAD_OF_DEPARTMENT ตัวจริง
+ *  ใช้ร่วมกันทั้ง proposeSubstituteAssignment (เดี่ยว) และ proposeSubstituteSwap (คู่แลกคาบ) */
 function buildSubstituteApprovalChain(
   isHodProposer: boolean,
   proposerEmail: string,
@@ -588,6 +590,51 @@ export const useStore = create<StoreState>((set, get) => ({
     return assignment;
   },
 
+  // แลกคาบสอนสองทาง (วิธี A) — เขียน 2 document พร้อมกันแบบ atomic ผูกกันด้วย linkedSwapId
+  // ทั้งคู่เริ่มที่ PENDING_TEACHER_CONFIRMATION เสมอ (ยังไม่รองรับ resubmit คู่แลกคาบที่เคยยืนยันแล้ว
+  // — ถือเป็นคำขอใหม่ทุกครั้ง ต่างจาก proposeSubstituteAssignment เดี่ยวที่ resubmit ได้)
+  proposeSubstituteSwap: async (legA, legB) => {
+    const now = new Date().toISOString();
+    const idA = legA.id || `sub_${legA.courseId}_${legA.date}_${Date.now()}_a`;
+    const idB = legB.id || `sub_${legB.courseId}_${legB.date}_${Date.now()}_b`;
+
+    const buildLeg = (payload: typeof legA, id: string, linkedId: string): SubstituteAssignment => {
+      const proposerEmail = payload.proposedByEmail || '';
+      const proposerName = payload.proposedByName || '';
+      const isHodProposer = payload.proposedByRole === 'HEAD_OF_DEPARTMENT';
+      const chain = buildSubstituteApprovalChain(isHodProposer, proposerEmail, proposerName, now);
+      const { id: _ignored, ...rest } = payload;
+      return {
+        ...rest,
+        id,
+        status: 'PENDING_TEACHER_CONFIRMATION',
+        currentApprovalStage: isHodProposer ? 'STAGE_2_ACADEMIC_HEAD' : 'STAGE_1_HEAD_OF_DEPARTMENT',
+        approvalChain: chain,
+        postTeachingDueAt: `${payload.date}T23:59:59`,
+        isCompleted: false,
+        swapMode: 'SWAP',
+        linkedSwapId: linkedId,
+        createdAt: now,
+        updatedAt: now,
+      };
+    };
+
+    const assignmentA = buildLeg(legA, idA, idB);
+    const assignmentB = buildLeg(legB, idB, idA);
+
+    await saveSubstituteSwapPairFirestore(assignmentA, assignmentB);
+
+    set((state) => ({
+      substituteAssignments: [
+        ...state.substituteAssignments.filter(s => s.id !== idA && s.id !== idB),
+        assignmentA,
+        assignmentB,
+      ],
+    }));
+
+    return { legA: assignmentA, legB: assignmentB };
+  },
+
   // ครูที่ถูกมอบหมาย (substituteTeacherEmail) ยืนยัน/ปฏิเสธ ก่อนเข้า approval chain 4 ขั้น
   respondToTeacherConfirmation: async (id, decision, responder, reason) => {
     const target = get().substituteAssignments.find(s => s.id === id);
@@ -615,10 +662,24 @@ export const useStore = create<StoreState>((set, get) => ({
         : { status: 'PENDING_APPROVAL', teacherConfirmedAt: now };
 
     const patch = buildPatch();
-    await updateSubstituteAssignmentsBatchFirestore([{ id: target.id, patch }]);
+    const patches: { id: string; patch: Partial<SubstituteAssignment> }[] = [{ id: target.id, patch }];
+
+    // คู่แลกคาบ (SWAP) — ยืนยัน/ปฏิเสธฝั่งเดียว cascade ไปอีกฝั่งเสมอ เพราะเป็นข้อตกลงเดียวกัน
+    // (กันกรณีอีกฝั่งค้างเป็นภาระผูกพันครึ่งๆ กลางๆ โดยไม่มีใครยืนยัน)
+    if (target.swapMode === 'SWAP' && target.linkedSwapId) {
+      const linked = get().substituteAssignments.find(s => s.id === target.linkedSwapId);
+      if (linked && linked.status === 'PENDING_TEACHER_CONFIRMATION') {
+        patches.push({ id: linked.id, patch });
+      }
+    }
+
+    await updateSubstituteAssignmentsBatchFirestore(patches);
 
     set((state) => ({
-      substituteAssignments: state.substituteAssignments.map(a => (a.id === id ? { ...a, ...patch } : a)),
+      substituteAssignments: state.substituteAssignments.map(a => {
+        const found = patches.find(p => p.id === a.id);
+        return found ? { ...a, ...found.patch } : a;
+      }),
     }));
   },
 
@@ -695,11 +756,35 @@ export const useStore = create<StoreState>((set, get) => ({
       };
     }
 
-    await updateSubstituteAssignmentFirestore(id, patch);
+    // คู่แลกคาบ (SWAP) — ถ้าฝ่ายอนุมัติปฏิเสธฝั่งใดฝั่งหนึ่งระหว่างลำดับ 4 ขั้น cascade ไปอีกฝั่งเสมอ
+    // (กันภาระผูกพันค้างฝั่งเดียว — swap เป็นข้อตกลงแบบให้-รับพร้อมกัน ถ้าฝั่งหนึ่งไม่ผ่านอีกฝั่งก็ควรล้มด้วย)
+    const patches: { id: string; patch: Partial<SubstituteAssignment> }[] = [{ id, patch }];
+    if (decision === 'REJECT' && target.swapMode === 'SWAP' && target.linkedSwapId) {
+      const linked = get().substituteAssignments.find(s => s.id === target.linkedSwapId);
+      if (linked && linked.status !== 'REJECTED' && linked.status !== 'APPROVED') {
+        patches.push({
+          id: linked.id,
+          patch: {
+            status: 'REJECTED',
+            rejectionReason: `ยกเลิกอัตโนมัติ — อีกฝั่งของคู่แลกคาบถูกส่งกลับแก้ไข (${comment || 'ไม่ระบุเหตุผล'})`,
+            rejectedAt: decidedAt,
+            rejectedByName: approver.name,
+            rejectedByRole: approver.role,
+          },
+        });
+      }
+    }
+
+    if (patches.length > 1) {
+      await updateSubstituteAssignmentsBatchFirestore(patches);
+    } else {
+      await updateSubstituteAssignmentFirestore(id, patch);
+    }
     set((state) => ({
-      substituteAssignments: state.substituteAssignments.map(a =>
-        a.id === id ? { ...a, ...patch } : a
-      ),
+      substituteAssignments: state.substituteAssignments.map(a => {
+        const found = patches.find(p => p.id === a.id);
+        return found ? { ...a, ...found.patch } : a;
+      }),
     }));
   },
 

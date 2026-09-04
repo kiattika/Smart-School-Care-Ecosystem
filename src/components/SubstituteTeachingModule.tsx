@@ -15,9 +15,11 @@ import {
   Layers,
   Upload,
   Paperclip,
+  Repeat,
   Users,
   ThumbsUp,
   ThumbsDown,
+  Link2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, onSnapshot } from 'firebase/firestore';
@@ -166,6 +168,7 @@ export function SubstituteTeachingModule() {
   const substituteAssignments = useStore(s => s.substituteAssignments);
   const students = useStore(s => s.students);
   const proposeSubstituteAssignment = useStore(s => s.proposeSubstituteAssignment);
+  const proposeSubstituteSwap = useStore(s => s.proposeSubstituteSwap);
   const respondToTeacherConfirmation = useStore(s => s.respondToTeacherConfirmation);
   const decideSubstituteApproval = useStore(s => s.decideSubstituteApproval);
   const completeSubstituteAssignment = useStore(s => s.completeSubstituteAssignment);
@@ -232,6 +235,13 @@ export function SubstituteTeachingModule() {
   const [slotWorksheetFile, setSlotWorksheetFile] = useState<Record<string, File | null>>({});
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // TASK 3 — โหมดต่อคาบ: 'COVER' (หาครูสอนแทน — ค่าเริ่มต้น) หรือ 'SWAP' (แลกคาบสอนสองทาง)
+  const [slotSwapMode, setSlotSwapMode] = useState<Record<string, 'COVER' | 'SWAP'>>({});
+  const [slotSwapPartnerEmail, setSlotSwapPartnerEmail] = useState<Record<string, string>>({});
+  // key ของคาบ "จ่ายคืน" ที่เลือก (มาจาก getRepaymentSlotsForPartner) — รูปแบบเดียวกับ slotKey
+  const [slotSwapRepaymentKey, setSlotSwapRepaymentKey] = useState<Record<string, string>>({});
+  // เก็บ DateSlot ของคาบจ่ายคืนที่เลือกจริง (ต้องใช้ตอน submit) — แยกจาก key เพราะต้องใช้ทั้ง object
+  const [slotSwapRepaymentSlot, setSlotSwapRepaymentSlot] = useState<Record<string, DateSlot | null>>({});
 
   // --- decide modal (ขั้นอนุมัติ 4 ขั้น) ---
   const [decideTarget, setDecideTarget] = useState<SubstituteAssignment | null>(null);
@@ -362,6 +372,47 @@ export function SubstituteTeachingModule() {
     return { tier1, tier2, tier3 };
   };
 
+  /**
+   * วิธี A (แลกคาบสอน) — แนะนำครูที่มีตารางสอนอยู่ใน "ห้องเดียวกัน" (room ตรงกัน) กับคาบที่ขอแลก
+   * ไม่จำกัดกลุ่มสาระ (ต่างจากวิธี B) เพราะเกณฑ์คือความคุ้นเคยกับห้องเรียนนั้น ไม่ใช่วิชา
+   */
+  const getSwapPartnerCandidates = (slot: DateSlot): SubCandidate[] => {
+    const absentLower = absentEmail.toLowerCase();
+    const emails = new Set<string>();
+    schedules.forEach(s => {
+      if (isSameRoom(s.room, slot.room) && s.id !== slot.id) {
+        s.emails.forEach(e => { if (e !== absentLower) emails.add(e); });
+      }
+    });
+    return Array.from(emails).map(email => {
+      const t = staffDirectory.find(x => x.email?.toLowerCase() === email);
+      const name = t ? `${t.prefix || ''}${t.firstName} ${t.lastName}`.trim() : email;
+      // ต้องว่างจริงในคาบของ R ที่ขอลา (ไม่งั้นมาสอนแทนไม่ได้)
+      return { email: t?.email || email, name, tier: 1 as const, conflict: checkCandidateConflict(email, slot, slot.date) };
+    }).sort((a, b) => (a.conflict ? 1 : 0) - (b.conflict ? 1 : 0));
+  };
+
+  /** คาบของครู P (partner) ในอีก 14 วันข้างหน้าจากวันที่ขอแลก ที่ครู R (ผู้ขอ) ว่างจริง — ใช้เลือก "คาบจ่ายคืน"
+   *  ไม่รวมวันที่อยู่ในช่วงลาของ R เอง (rangeStart..rangeEnd) เพราะ R ไม่อยู่โรงเรียนช่วงนั้น */
+  const getRepaymentSlotsForPartner = (partnerEmail: string, fromDate: string): DateSlot[] => {
+    const out: DateSlot[] = [];
+    const partnerLower = partnerEmail.toLowerCase();
+    const start = new Date(fromDate + 'T00:00:00');
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(start); d.setDate(d.getDate() + i);
+      const dateStr = d.toISOString().split('T')[0];
+      if (dateStr >= rangeStart && dateStr <= rangeEnd) continue; // R ลาอยู่ช่วงนี้ ไปสอนแทนไม่ได้
+      const dayNum = jsDateToThaiDayNum(dateStr);
+      schedules
+        .filter(s => s.emails.includes(partnerLower) && s.day === dayNum && s.period >= 0)
+        .forEach(s => {
+          const conflict = checkCandidateConflict(absentEmail, s, dateStr); // R ต้องว่างจริงคาบนี้
+          if (!conflict) out.push({ ...s, date: dateStr });
+        });
+    }
+    return out;
+  };
+
   // งานในกลุ่มสาระฯ ของ HOD (ดูจากกลุ่มสาระของครูที่ขาด หรือ departmentId ที่บันทึกไว้)
   const deptAssignments = useMemo(() => {
     // ใช้ departmentId จริงของผู้ใช้เสมอ — ไม่ fallback ไปกลุ่มสาระแรก (เดิม hack ทำให้ role ผู้บริหารเห็นกระดานผิดกลุ่ม)
@@ -422,6 +473,7 @@ export function SubstituteTeachingModule() {
     setAbsentEmail(''); setTriggerType('SICK_LEAVE'); setLeaveReason('');
     setRangeStart(todayStr); setRangeEnd(todayStr);
     setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({});
+    setSlotSwapMode({}); setSlotSwapPartnerEmail({}); setSlotSwapRepaymentKey({}); setSlotSwapRepaymentSlot({});
     setNotes('');
   };
 
@@ -441,6 +493,17 @@ export function SubstituteTeachingModule() {
     for (const slot of slots) {
       const key = slotKey(slot);
       const slotLabel = `${THAI_DAY_ABBREV[slot.day] || ''}${slot.period} (${slot.date})`;
+      if ((slotSwapMode[key] || 'COVER') === 'SWAP') {
+        if (!slotSwapPartnerEmail[key]) {
+          showToast('เลือกครูที่จะแลกคาบไม่ครบ', `กรุณาเลือกครูที่จะแลกคาบสำหรับคาบ ${slotLabel}`, true);
+          return;
+        }
+        if (!slotSwapRepaymentSlot[key]) {
+          showToast('เลือกคาบจ่ายคืนไม่ครบ', `กรุณาเลือกคาบของท่านที่จะไปจ่ายคืนสำหรับคาบ ${slotLabel}`, true);
+          return;
+        }
+        continue;
+      }
       const subEmailForSlot = slotSubEmail[key];
       if (!subEmailForSlot) {
         showToast('เลือกครูสอนแทนไม่ครบ', `กรุณาเลือกครูสอนแทนสำหรับคาบ ${slotLabel}`, true);
@@ -464,6 +527,49 @@ export function SubstituteTeachingModule() {
         const deptIdFinal = effectiveDeptId || absent.assignments?.departmentId || '';
         const deptNameFinal = deptName(effectiveDeptId || absent.assignments?.departmentId);
 
+        if ((slotSwapMode[key] || 'COVER') === 'SWAP') {
+          // วิธี A — แลกคาบสอนสองทาง: legA = ครู P สอนแทน R คาบนี้, legB = R ไปสอนแทน P ในคาบจ่ายคืน
+          const partnerEmail = slotSwapPartnerEmail[key];
+          const partner = staffDirectory.find(s => s.email?.toLowerCase() === partnerEmail.toLowerCase());
+          const repaySlot = slotSwapRepaymentSlot[key];
+          if (!partner || !repaySlot) continue;
+          const repayScheduleStr = `${THAI_DAY_ABBREV[repaySlot.day] || ''}${repaySlot.period}`;
+
+          await proposeSubstituteSwap(
+            {
+              originalTeacherEmail: absent.email,
+              originalTeacherName: `${absent.prefix || ''}${absent.firstName} ${absent.lastName}`.trim(),
+              substituteTeacherEmail: partner.email,
+              substituteTeacherName: `${partner.prefix || ''}${partner.firstName} ${partner.lastName}`.trim(),
+              courseId: slot.id, courseCode: slot.code, courseName: slot.name,
+              room: slot.room || slot.targetClass,
+              periodName: slot.period === 0 ? 'คาบ 0 (โฮมรูม)' : `คาบ ${slot.period}`,
+              schedule: scheduleStr, date: slot.date,
+              departmentName: deptNameFinal, departmentId: deptIdFinal,
+              triggerType, leaveReason: leaveReasonFinal,
+              proposedByEmail: effectiveEmail, proposedByName: effectiveName, proposedByRole: effectiveRole,
+              notes: notes.trim(), coverageMode: 'TEACHING',
+            },
+            {
+              originalTeacherEmail: partner.email,
+              originalTeacherName: `${partner.prefix || ''}${partner.firstName} ${partner.lastName}`.trim(),
+              substituteTeacherEmail: absent.email,
+              substituteTeacherName: `${absent.prefix || ''}${absent.firstName} ${absent.lastName}`.trim(),
+              courseId: repaySlot.id, courseCode: repaySlot.code, courseName: repaySlot.name,
+              room: repaySlot.room || repaySlot.targetClass,
+              periodName: repaySlot.period === 0 ? 'คาบ 0 (โฮมรูม)' : `คาบ ${repaySlot.period}`,
+              schedule: repayScheduleStr, date: repaySlot.date,
+              departmentName: deptNameFinal, departmentId: deptIdFinal,
+              triggerType, leaveReason: `แลกคาบ — จ่ายคืนให้ ${partner.prefix || ''}${partner.firstName} ${partner.lastName}`,
+              proposedByEmail: effectiveEmail, proposedByName: effectiveName, proposedByRole: effectiveRole,
+              notes: notes.trim(), coverageMode: 'TEACHING',
+            }
+          );
+          successCount++;
+          continue;
+        }
+
+        // วิธี B — หาครูสอนแทน (ทางเดียว)
         const sub = staffDirectory.find(s => s.email?.toLowerCase() === slotSubEmail[key].toLowerCase());
         if (!sub) continue;
         const isCrossDept = sub.assignments?.departmentId !== effectiveDeptId;
@@ -508,7 +614,7 @@ export function SubstituteTeachingModule() {
       resetProposeForm();
       showToast(
         'ส่งคำขอสำเร็จ',
-        `บันทึก ${successCount} คาบ — รอครูสอนแทนกดยืนยันก่อนเข้าสู่ลำดับอนุมัติ 4 ขั้น`
+        `บันทึก ${successCount} คาบ — รอครูสอนแทน/ครูที่แลกคาบกดยืนยันก่อนเข้าสู่ลำดับอนุมัติ 4 ขั้น`
       );
     } catch (err) {
       showToast('บันทึกไม่สำเร็จ', err instanceof Error ? err.message : String(err), true);
@@ -602,13 +708,14 @@ export function SubstituteTeachingModule() {
         { email: effectiveEmail, name: effectiveName },
         confirmReason.trim()
       );
+      const isSwap = confirmTarget.swapMode === 'SWAP';
       setConfirmTarget(null);
       setConfirmReason('');
       showToast(
         confirmMode === 'CONFIRM' ? 'ยืนยันสำเร็จ' : 'ปฏิเสธแล้ว',
         confirmMode === 'CONFIRM'
-          ? 'รายการเข้าสู่ลำดับอนุมัติ 4 ขั้นแล้ว'
-          : 'แจ้งครูผู้ขอให้เลือกครูสอนแทนคนใหม่แล้ว'
+          ? `รายการเข้าสู่ลำดับอนุมัติ 4 ขั้นแล้ว${isSwap ? ' (ทั้งคู่ของคาบแลก)' : ''}`
+          : `แจ้งครูผู้ขอให้เลือกครูสอนแทนคนใหม่แล้ว${isSwap ? ' (ยกเลิกทั้งคู่ของคาบแลก)' : ''}`
       );
     } catch (err) {
       showToast('ดำเนินการไม่สำเร็จ', err instanceof Error ? err.message : String(err), true);
@@ -769,7 +876,21 @@ export function SubstituteTeachingModule() {
             ควบคุมชั้นเรียนอย่างเดียว (ข้ามกลุ่มสาระ)
           </span>
         )}
+        {sa.swapMode === 'SWAP' && (
+          <span className="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded text-[9px] font-bold flex items-center gap-1">
+            <Repeat className="w-2.5 h-2.5" /> แลกคาบสอน
+          </span>
+        )}
       </div>
+      {sa.swapMode === 'SWAP' && sa.linkedSwapId && (() => {
+        const linked = substituteAssignments.find(l => l.id === sa.linkedSwapId);
+        return linked ? (
+          <div className="text-[11px] text-purple-300 bg-purple-500/5 border border-purple-500/15 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+            <Link2 className="w-3 h-3 shrink-0" />
+            คู่แลกคาบ: {linked.substituteTeacherName} ไปสอนแทน {linked.originalTeacherName} · {linked.periodName} ({linked.schedule}) · {linked.date}
+          </div>
+        ) : null;
+      })()}
       {sa.worksheetAttachmentUrl ? (
         <a
           href={sa.worksheetAttachmentUrl} target="_blank" rel="noopener noreferrer"
@@ -1244,6 +1365,7 @@ export function SubstituteTeachingModule() {
                       onChange={e => {
                         setAbsentEmail(e.target.value);
                         setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({});
+                        setSlotSwapMode({}); setSlotSwapPartnerEmail({}); setSlotSwapRepaymentKey({}); setSlotSwapRepaymentSlot({});
                       }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold"
                     >
@@ -1287,6 +1409,7 @@ export function SubstituteTeachingModule() {
                         setRangeStart(e.target.value);
                         if (rangeEnd < e.target.value) setRangeEnd(e.target.value);
                         setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({});
+                        setSlotSwapMode({}); setSlotSwapPartnerEmail({}); setSlotSwapRepaymentKey({}); setSlotSwapRepaymentSlot({});
                       }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-mono"
                     />
@@ -1298,6 +1421,7 @@ export function SubstituteTeachingModule() {
                       onChange={e => {
                         setRangeEnd(e.target.value);
                         setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({});
+                        setSlotSwapMode({}); setSlotSwapPartnerEmail({}); setSlotSwapRepaymentKey({}); setSlotSwapRepaymentSlot({});
                       }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-mono"
                     />
@@ -1348,60 +1472,146 @@ export function SubstituteTeachingModule() {
                               {THAI_DAY_ABBREV[slot.day]}{slot.period} · {slot.code} {slot.name} · {slot.room || slot.targetClass} · {slot.date}
                             </label>
 
-                            {checked && (
-                              <div className="mt-2 pl-6 space-y-2">
-                                <select
-                                  value={chosenEmail}
-                                  onChange={e => setSlotSubEmail(prev => ({ ...prev, [key]: e.target.value }))}
-                                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-[11px] text-white outline-none focus:border-amber-500"
-                                >
-                                  <option value="">-- เลือกครูสอนแทน --</option>
-                                  {tier1.length > 0 && (
-                                    <optgroup label="กลุ่มสาระเดียวกัน + ระดับเดียวกัน (แนะนำ)">
-                                      {tier1.map(c => (
-                                        <option key={c.email} value={c.email} disabled={!!c.conflict}>
-                                          {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                  {tier2.length > 0 && (
-                                    <optgroup label="กลุ่มสาระเดียวกัน (ระดับอื่น)">
-                                      {tier2.map(c => (
-                                        <option key={c.email} value={c.email} disabled={!!c.conflict}>
-                                          {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                  {tier3.length > 0 && (
-                                    <optgroup label="⚠️ ข้ามกลุ่มสาระ (สุดวิสัย — ควบคุมชั้นเรียนอย่างเดียว)">
-                                      {tier3.map(c => (
-                                        <option key={c.email} value={c.email} disabled={!!c.conflict}>
-                                          {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                </select>
+                            {checked && (() => {
+                              const mode = slotSwapMode[key] || 'COVER';
+                              const partnerCandidates = mode === 'SWAP' ? getSwapPartnerCandidates(slot) : [];
+                              const chosenPartnerEmail = slotSwapPartnerEmail[key] || '';
+                              const repaymentSlots = chosenPartnerEmail ? getRepaymentSlotsForPartner(chosenPartnerEmail, slot.date) : [];
+                              const chosenRepaymentKey = slotSwapRepaymentKey[key] || '';
 
-                                {isCrossDept && (
-                                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5 space-y-1.5">
-                                    <p className="text-[10px] text-amber-400 font-bold flex items-center gap-1">
-                                      <AlertCircle className="w-3 h-3 shrink-0" /> ครูข้ามกลุ่มสาระ — ควบคุมชั้นเรียนอย่างเดียว ต้องแนบใบงาน/ใบความรู้/แบบทดสอบก่อนส่งคำขอ
-                                    </p>
-                                    <label className="flex items-center gap-2 text-[10px] text-slate-300 cursor-pointer bg-slate-950 border border-slate-800 rounded-lg p-2 hover:border-amber-500/40">
-                                      <Upload className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                                      {slotWorksheetFile[key]?.name || 'แนบไฟล์ใบงาน (PDF/Word/รูปภาพ) — ไม่เกิน 10MB'}
-                                      <input
-                                        type="file" accept=".pdf,.doc,.docx,image/*" className="hidden"
-                                        onChange={e => setSlotWorksheetFile(prev => ({ ...prev, [key]: e.target.files?.[0] || null }))}
-                                      />
-                                    </label>
+                              return (
+                                <div className="mt-2 pl-6 space-y-2">
+                                  {/* TASK 3 — เลือกวิธี: หาครูสอนแทน (ทางเดียว) vs แลกคาบสอน (สองทาง) */}
+                                  <div className="inline-flex rounded-lg overflow-hidden border border-slate-800 text-[10px] font-bold">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSlotSwapMode(prev => ({ ...prev, [key]: 'COVER' }))}
+                                      className={cn('px-2.5 py-1.5', mode === 'COVER' ? 'bg-amber-600 text-white' : 'bg-slate-950 text-slate-400 hover:text-slate-200')}
+                                    >
+                                      หาครูสอนแทน
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setSlotSwapMode(prev => ({ ...prev, [key]: 'SWAP' }))}
+                                      className={cn('px-2.5 py-1.5 flex items-center gap-1', mode === 'SWAP' ? 'bg-purple-600 text-white' : 'bg-slate-950 text-slate-400 hover:text-slate-200')}
+                                    >
+                                      <Repeat className="w-3 h-3" /> แลกคาบสอน
+                                    </button>
                                   </div>
-                                )}
-                              </div>
-                            )}
+
+                                  {mode === 'COVER' ? (
+                                    <>
+                                      <select
+                                        value={chosenEmail}
+                                        onChange={e => setSlotSubEmail(prev => ({ ...prev, [key]: e.target.value }))}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-[11px] text-white outline-none focus:border-amber-500"
+                                      >
+                                        <option value="">-- เลือกครูสอนแทน --</option>
+                                        {tier1.length > 0 && (
+                                          <optgroup label="กลุ่มสาระเดียวกัน + ระดับเดียวกัน (แนะนำ)">
+                                            {tier1.map(c => (
+                                              <option key={c.email} value={c.email} disabled={!!c.conflict}>
+                                                {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                        {tier2.length > 0 && (
+                                          <optgroup label="กลุ่มสาระเดียวกัน (ระดับอื่น)">
+                                            {tier2.map(c => (
+                                              <option key={c.email} value={c.email} disabled={!!c.conflict}>
+                                                {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                        {tier3.length > 0 && (
+                                          <optgroup label="⚠️ ข้ามกลุ่มสาระ (สุดวิสัย — ควบคุมชั้นเรียนอย่างเดียว)">
+                                            {tier3.map(c => (
+                                              <option key={c.email} value={c.email} disabled={!!c.conflict}>
+                                                {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                      </select>
+
+                                      {isCrossDept && (
+                                        <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5 space-y-1.5">
+                                          <p className="text-[10px] text-amber-400 font-bold flex items-center gap-1">
+                                            <AlertCircle className="w-3 h-3 shrink-0" /> ครูข้ามกลุ่มสาระ — ควบคุมชั้นเรียนอย่างเดียว ต้องแนบใบงาน/ใบความรู้/แบบทดสอบก่อนส่งคำขอ
+                                          </p>
+                                          <label className="flex items-center gap-2 text-[10px] text-slate-300 cursor-pointer bg-slate-950 border border-slate-800 rounded-lg p-2 hover:border-amber-500/40">
+                                            <Upload className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                            {slotWorksheetFile[key]?.name || 'แนบไฟล์ใบงาน (PDF/Word/รูปภาพ) — ไม่เกิน 10MB'}
+                                            <input
+                                              type="file" accept=".pdf,.doc,.docx,image/*" className="hidden"
+                                              onChange={e => setSlotWorksheetFile(prev => ({ ...prev, [key]: e.target.files?.[0] || null }))}
+                                            />
+                                          </label>
+                                        </div>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <div className="space-y-2 bg-purple-500/5 border border-purple-500/20 rounded-lg p-2.5">
+                                      <div>
+                                        <label className="block text-[10px] font-bold text-purple-300 mb-1">
+                                          ครูที่จะแลกคาบด้วย (มีตารางสอนในห้อง {slot.room || slot.targetClass})
+                                        </label>
+                                        <select
+                                          value={chosenPartnerEmail}
+                                          onChange={e => {
+                                            setSlotSwapPartnerEmail(prev => ({ ...prev, [key]: e.target.value }));
+                                            setSlotSwapRepaymentKey(prev => ({ ...prev, [key]: '' }));
+                                            setSlotSwapRepaymentSlot(prev => ({ ...prev, [key]: null }));
+                                          }}
+                                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-[11px] text-white outline-none focus:border-purple-500"
+                                        >
+                                          <option value="">-- เลือกครูที่จะแลกคาบ --</option>
+                                          {partnerCandidates.map(c => (
+                                            <option key={c.email} value={c.email} disabled={!!c.conflict}>
+                                              {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        {partnerCandidates.length === 0 && (
+                                          <p className="text-[10px] text-purple-300/70 mt-1">ไม่พบครูที่มีตารางสอนในห้องเดียวกันนี้</p>
+                                        )}
+                                      </div>
+
+                                      {chosenPartnerEmail && (
+                                        <div>
+                                          <label className="block text-[10px] font-bold text-purple-300 mb-1">
+                                            คาบของท่านที่จะไปจ่ายคืน (ต้องเป็นคาบที่ท่านว่างจริง ภายใน 14 วัน)
+                                          </label>
+                                          <select
+                                            value={chosenRepaymentKey}
+                                            onChange={e => {
+                                              const k = e.target.value;
+                                              setSlotSwapRepaymentKey(prev => ({ ...prev, [key]: k }));
+                                              const found = repaymentSlots.find(r => slotKey(r) === k) || null;
+                                              setSlotSwapRepaymentSlot(prev => ({ ...prev, [key]: found }));
+                                            }}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-[11px] text-white outline-none focus:border-purple-500"
+                                          >
+                                            <option value="">-- เลือกคาบจ่ายคืน --</option>
+                                            {repaymentSlots.map(r => (
+                                              <option key={slotKey(r)} value={slotKey(r)}>
+                                                {THAI_DAY_ABBREV[r.day]}{r.period} · {r.code} {r.name} · {r.room || r.targetClass} · {r.date}
+                                              </option>
+                                            ))}
+                                          </select>
+                                          {repaymentSlots.length === 0 && (
+                                            <p className="text-[10px] text-purple-300/70 mt-1">ไม่พบคาบของครูท่านนี้ในอีก 14 วันข้างหน้าที่ท่านว่างจริง</p>
+                                          )}
+                                        </div>
+                                      )}
+                                      <p className="text-[9px] text-purple-300/70">แลกคาบสอน = ครูทั้งสองฝ่ายสอนวิชาของตัวเองจริง (ไม่ใช่ควบคุมชั้นเรียนอย่างเดียว) และต้องรอครูที่แลกคาบยืนยันก่อนเข้าสู่การอนุมัติเช่นกัน</p>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         );
                       })}
@@ -1487,10 +1697,14 @@ export function SubstituteTeachingModule() {
               <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
                 {confirmMode === 'CONFIRM' ? <ThumbsUp className="w-5 h-5 text-emerald-400" /> : <ThumbsDown className="w-5 h-5 text-red-400" />}
                 {confirmMode === 'CONFIRM' ? 'ยืนยันรับทราบ' : 'ปฏิเสธการมอบหมาย'}
+                {confirmTarget.swapMode === 'SWAP' && <span className="text-purple-400 text-xs font-normal">(คู่แลกคาบ)</span>}
               </h3>
               <div className="text-xs text-slate-300 bg-slate-950/40 rounded-xl p-3 border border-slate-800/80">
                 {confirmTarget.courseCode} {confirmTarget.courseName} · {confirmTarget.room} · {confirmTarget.periodName} ({confirmTarget.schedule}) · {confirmTarget.date}<br />
                 แทนคุณครู: <span className="font-bold text-white">{confirmTarget.originalTeacherName}</span>
+                {confirmTarget.swapMode === 'SWAP' && (
+                  <p className="text-purple-300 mt-1">การยืนยัน/ปฏิเสธนี้จะมีผลกับคาบ "จ่ายคืน" ของคู่แลกคาบพร้อมกันทั้งคู่</p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-400 mb-1.5">
