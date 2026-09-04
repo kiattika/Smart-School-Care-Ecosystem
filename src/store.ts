@@ -35,7 +35,7 @@ import {
   SubstituteApprovalStage,
   PostTeachingRecord
 } from './types';
-import { SUBSTITUTE_STAGE_ROLE, SUBSTITUTE_STAGE_ORDER } from './types';
+import { SUBSTITUTE_STAGE_ROLE, SUBSTITUTE_STAGE_ORDER, SUBSTITUTE_TEACHER_DECLINED_ROLE } from './types';
 import { DEFAULT_SCHOOL_GEOFENCE } from './utils/geoUtils';
 import { 
   saveSelfAssessmentRecord, 
@@ -47,6 +47,8 @@ import {
   saveSchoolGeofenceConfigFirestore,
   saveSubstituteAssignmentFirestore,
   updateSubstituteAssignmentFirestore,
+  saveSubstituteSwapPairFirestore,
+  updateSubstituteAssignmentsBatchFirestore,
   savePostTeachingRecordFirestore,
   save2QScreeningFirestore,
   savePHQ9ScreeningFirestore,
@@ -58,6 +60,38 @@ import {
 } from './services/firestoreService';
 
 const STATUS_CYCLE: AttendanceStatus[] = ['PRESENT', 'ABSENT', 'LATE', 'LEAVE'];
+
+/** สร้าง approval chain 4 ขั้น — ขั้นที่ 1 auto-approve เฉพาะเมื่อผู้เสนอคือ HEAD_OF_DEPARTMENT ตัวจริง
+ *  ใช้ร่วมกันทั้ง proposeSubstituteAssignment (เดี่ยว) และ proposeSubstituteSwap (คู่แลกคาบ) */
+function buildSubstituteApprovalChain(
+  isHodProposer: boolean,
+  proposerEmail: string,
+  proposerName: string,
+  now: string
+): SubstituteApprovalStep[] {
+  return SUBSTITUTE_STAGE_ORDER
+    .filter((s): s is Exclude<SubstituteApprovalStage, 'COMPLETED'> => s !== 'COMPLETED')
+    .map((stage, idx) => {
+      if (idx === 0 && isHodProposer) {
+        return {
+          stage,
+          approverRole: SUBSTITUTE_STAGE_ROLE[stage],
+          approverName: proposerName,
+          approverEmail: proposerEmail,
+          status: 'APPROVED' as const,
+          approvedAt: now,
+          comment: 'เสนอจัดครูสอนแทนโดยหัวหน้ากลุ่มสาระฯ',
+        };
+      }
+      return {
+        stage,
+        approverRole: SUBSTITUTE_STAGE_ROLE[stage],
+        approverName: '',
+        approverEmail: '',
+        status: 'PENDING' as const,
+      };
+    });
+}
 
 export const useStore = create<StoreState>((set, get) => ({
   user: null,
@@ -514,39 +548,30 @@ export const useStore = create<StoreState>((set, get) => ({
     // — ถ้าครูขอลากิจ/ไปราชการด้วยตนเอง (proposedByRole เป็น SUBJECT_TEACHER/HOMEROOM_TEACHER)
     // ขั้นที่ 1 ต้องรอหัวหน้ากลุ่มสาระฯ มาอนุมัติจริงก่อน ห้าม auto-approve แทน
     const isHodProposer = payload.proposedByRole === 'HEAD_OF_DEPARTMENT';
+    const chain = buildSubstituteApprovalChain(isHodProposer, proposerEmail, proposerName, now);
 
-    const chain: SubstituteApprovalStep[] = SUBSTITUTE_STAGE_ORDER
-      .filter((s): s is Exclude<SubstituteApprovalStage, 'COMPLETED'> => s !== 'COMPLETED')
-      .map((stage, idx) => {
-        if (idx === 0 && isHodProposer) {
-          return {
-            stage,
-            approverRole: SUBSTITUTE_STAGE_ROLE[stage],
-            approverName: proposerName,
-            approverEmail: proposerEmail,
-            status: 'APPROVED' as const,
-            approvedAt: now,
-            comment: 'เสนอจัดครูสอนแทนโดยหัวหน้ากลุ่มสาระฯ',
-          };
-        }
-        return {
-          stage,
-          approverRole: SUBSTITUTE_STAGE_ROLE[stage],
-          approverName: '',
-          approverEmail: '',
-          status: 'PENDING' as const,
-        };
-      });
+    // ครูที่ถูกมอบหมาย (substituteTeacherEmail) ต้องกดยืนยันก่อนเข้า approval chain — ยกเว้น
+    // กรณีลาป่วย (isHodProposer) ซึ่งเป็นสถานการณ์ฉุกเฉินวันเดียวกัน หัวหน้ากลุ่มสาระฯ ต้องสั่งการ
+    // ให้ครูเข้าสอนแทนได้ทันที ไม่ต้องรอยืนยันในแอพก่อน (ยืนยันจากโรงเรียนแล้ว — ต่างจากลากิจ/
+    // ไปราชการที่ครูขอเอง ซึ่งยังต้องผ่านขั้นตอนนี้เหมือนเดิม)
+    // สำหรับกรณีที่ยังต้องยืนยัน — ยกเว้น "resubmit" รายการที่ครูสอนแทน "คนเดิม" เคยกดยืนยันไปแล้ว
+    // ครั้งหนึ่ง (ถูกส่งกลับจากขั้นอนุมัติ แล้วผู้เสนอแก้ไขรายละเอียดส่งใหม่โดยไม่เปลี่ยนตัวครู —
+    // ไม่ต้องยืนยันซ้ำ) — ถ้าเปลี่ยนไปเลือกครูสอนแทนคนใหม่ (เช่น คนเดิมกดปฏิเสธ) ต้องให้คนใหม่ยืนยันเสมอ
+    const alreadyConfirmedBySubstitute =
+      !!existing?.teacherConfirmedAt &&
+      existing.substituteTeacherEmail?.toLowerCase() === payload.substituteTeacherEmail?.toLowerCase();
+    const needsTeacherConfirmation = !isHodProposer && !alreadyConfirmedBySubstitute;
 
     const { id: _ignored, ...rest } = payload;
     const assignment: SubstituteAssignment = {
       ...rest,
       id,
-      status: 'PENDING_APPROVAL',
+      status: needsTeacherConfirmation ? 'PENDING_TEACHER_CONFIRMATION' : 'PENDING_APPROVAL',
       currentApprovalStage: isHodProposer ? 'STAGE_2_ACADEMIC_HEAD' : 'STAGE_1_HEAD_OF_DEPARTMENT',
       approvalChain: chain,
       postTeachingDueAt: `${payload.date}T23:59:59`,
       isCompleted: false,
+      teacherConfirmedAt: alreadyConfirmedBySubstitute ? existing?.teacherConfirmedAt : undefined,
       rejectionReason: undefined,
       rejectedAt: undefined,
       rejectedByName: undefined,
@@ -567,10 +592,108 @@ export const useStore = create<StoreState>((set, get) => ({
     return assignment;
   },
 
+  // แลกคาบสอนสองทาง (วิธี A) — เขียน 2 document พร้อมกันแบบ atomic ผูกกันด้วย linkedSwapId
+  // ทั้งคู่เริ่มที่ PENDING_TEACHER_CONFIRMATION เสมอ (ยังไม่รองรับ resubmit คู่แลกคาบที่เคยยืนยันแล้ว
+  // — ถือเป็นคำขอใหม่ทุกครั้ง ต่างจาก proposeSubstituteAssignment เดี่ยวที่ resubmit ได้)
+  proposeSubstituteSwap: async (legA, legB) => {
+    const now = new Date().toISOString();
+    const idA = legA.id || `sub_${legA.courseId}_${legA.date}_${Date.now()}_a`;
+    const idB = legB.id || `sub_${legB.courseId}_${legB.date}_${Date.now()}_b`;
+
+    const buildLeg = (payload: typeof legA, id: string, linkedId: string): SubstituteAssignment => {
+      const proposerEmail = payload.proposedByEmail || '';
+      const proposerName = payload.proposedByName || '';
+      const isHodProposer = payload.proposedByRole === 'HEAD_OF_DEPARTMENT';
+      const chain = buildSubstituteApprovalChain(isHodProposer, proposerEmail, proposerName, now);
+      const { id: _ignored, ...rest } = payload;
+      return {
+        ...rest,
+        id,
+        // เช่นเดียวกับ proposeSubstituteAssignment — ถ้า HOD เป็นผู้เสนอ (เช่น จัดสอนแทนกรณีลาป่วย)
+        // ข้าม gate ยืนยันตัวตนไปเลย เข้าสู่การอนุมัติทันที ไม่ต้องรอครูกดยืนยัน
+        status: isHodProposer ? 'PENDING_APPROVAL' : 'PENDING_TEACHER_CONFIRMATION',
+        currentApprovalStage: isHodProposer ? 'STAGE_2_ACADEMIC_HEAD' : 'STAGE_1_HEAD_OF_DEPARTMENT',
+        approvalChain: chain,
+        postTeachingDueAt: `${payload.date}T23:59:59`,
+        isCompleted: false,
+        swapMode: 'SWAP',
+        linkedSwapId: linkedId,
+        createdAt: now,
+        updatedAt: now,
+      };
+    };
+
+    const assignmentA = buildLeg(legA, idA, idB);
+    const assignmentB = buildLeg(legB, idB, idA);
+
+    await saveSubstituteSwapPairFirestore(assignmentA, assignmentB);
+
+    set((state) => ({
+      substituteAssignments: [
+        ...state.substituteAssignments.filter(s => s.id !== idA && s.id !== idB),
+        assignmentA,
+        assignmentB,
+      ],
+    }));
+
+    return { legA: assignmentA, legB: assignmentB };
+  },
+
+  // ครูที่ถูกมอบหมาย (substituteTeacherEmail) ยืนยัน/ปฏิเสธ ก่อนเข้า approval chain 4 ขั้น
+  respondToTeacherConfirmation: async (id, decision, responder, reason) => {
+    const target = get().substituteAssignments.find(s => s.id === id);
+    if (!target) throw new Error('ไม่พบรายการจัดครูสอนแทน');
+    if (target.status !== 'PENDING_TEACHER_CONFIRMATION') {
+      throw new Error('รายการนี้ไม่ได้อยู่ในสถานะรอยืนยันจากครูสอนแทน');
+    }
+    if (target.substituteTeacherEmail?.toLowerCase() !== responder.email.toLowerCase()) {
+      throw new Error('เฉพาะครูที่ถูกมอบหมายให้สอนแทนคาบนี้เท่านั้นที่ยืนยัน/ปฏิเสธได้');
+    }
+    if (decision === 'DECLINE' && !reason?.trim()) {
+      throw new Error('การปฏิเสธต้องระบุเหตุผล');
+    }
+
+    const now = new Date().toISOString();
+    const buildPatch = (): Partial<SubstituteAssignment> =>
+      decision === 'DECLINE'
+        ? {
+            status: 'REJECTED',
+            rejectionReason: reason?.trim() || '',
+            rejectedAt: now,
+            rejectedByName: responder.name,
+            rejectedByRole: SUBSTITUTE_TEACHER_DECLINED_ROLE,
+          }
+        : { status: 'PENDING_APPROVAL', teacherConfirmedAt: now };
+
+    const patch = buildPatch();
+    const patches: { id: string; patch: Partial<SubstituteAssignment> }[] = [{ id: target.id, patch }];
+
+    // คู่แลกคาบ (SWAP) — ยืนยัน/ปฏิเสธฝั่งเดียว cascade ไปอีกฝั่งเสมอ เพราะเป็นข้อตกลงเดียวกัน
+    // (กันกรณีอีกฝั่งค้างเป็นภาระผูกพันครึ่งๆ กลางๆ โดยไม่มีใครยืนยัน)
+    if (target.swapMode === 'SWAP' && target.linkedSwapId) {
+      const linked = get().substituteAssignments.find(s => s.id === target.linkedSwapId);
+      if (linked && linked.status === 'PENDING_TEACHER_CONFIRMATION') {
+        patches.push({ id: linked.id, patch });
+      }
+    }
+
+    await updateSubstituteAssignmentsBatchFirestore(patches);
+
+    set((state) => ({
+      substituteAssignments: state.substituteAssignments.map(a => {
+        const found = patches.find(p => p.id === a.id);
+        return found ? { ...a, ...found.patch } : a;
+      }),
+    }));
+  },
+
   // อนุมัติ/ปฏิเสธ ตามลำดับขั้น — sequential, ห้ามบุคคลเดียวข้ามหลายขั้น
   decideSubstituteApproval: async (id, decision, approver, comment) => {
     const target = get().substituteAssignments.find(s => s.id === id);
     if (!target) throw new Error('ไม่พบรายการจัดครูสอนแทน');
+    if (target.status !== 'PENDING_APPROVAL') {
+      throw new Error('รายการนี้ไม่อยู่ในสถานะรออนุมัติ (อาจรอครูสอนแทนยืนยันก่อน หรือดำเนินการเสร็จแล้ว)');
+    }
 
     const stage = target.currentApprovalStage;
     if (!stage || stage === 'COMPLETED') {
@@ -637,11 +760,35 @@ export const useStore = create<StoreState>((set, get) => ({
       };
     }
 
-    await updateSubstituteAssignmentFirestore(id, patch);
+    // คู่แลกคาบ (SWAP) — ถ้าฝ่ายอนุมัติปฏิเสธฝั่งใดฝั่งหนึ่งระหว่างลำดับ 4 ขั้น cascade ไปอีกฝั่งเสมอ
+    // (กันภาระผูกพันค้างฝั่งเดียว — swap เป็นข้อตกลงแบบให้-รับพร้อมกัน ถ้าฝั่งหนึ่งไม่ผ่านอีกฝั่งก็ควรล้มด้วย)
+    const patches: { id: string; patch: Partial<SubstituteAssignment> }[] = [{ id, patch }];
+    if (decision === 'REJECT' && target.swapMode === 'SWAP' && target.linkedSwapId) {
+      const linked = get().substituteAssignments.find(s => s.id === target.linkedSwapId);
+      if (linked && linked.status !== 'REJECTED' && linked.status !== 'APPROVED') {
+        patches.push({
+          id: linked.id,
+          patch: {
+            status: 'REJECTED',
+            rejectionReason: `ยกเลิกอัตโนมัติ — อีกฝั่งของคู่แลกคาบถูกส่งกลับแก้ไข (${comment || 'ไม่ระบุเหตุผล'})`,
+            rejectedAt: decidedAt,
+            rejectedByName: approver.name,
+            rejectedByRole: approver.role,
+          },
+        });
+      }
+    }
+
+    if (patches.length > 1) {
+      await updateSubstituteAssignmentsBatchFirestore(patches);
+    } else {
+      await updateSubstituteAssignmentFirestore(id, patch);
+    }
     set((state) => ({
-      substituteAssignments: state.substituteAssignments.map(a =>
-        a.id === id ? { ...a, ...patch } : a
-      ),
+      substituteAssignments: state.substituteAssignments.map(a => {
+        const found = patches.find(p => p.id === a.id);
+        return found ? { ...a, ...found.patch } : a;
+      }),
     }));
   },
 

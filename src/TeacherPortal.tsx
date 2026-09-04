@@ -344,7 +344,14 @@ export function TeacherPortal() {
       { id: 'gps-geofence', label: '📍 พิกัดดาวเทียม & เช็คอิน (GPS Geofence)', count: 0 },
       { id: 'teaching-load', label: 'ตารางภาระงานสอน (Teaching Load)', count: 6, hideForRoles: ['SUBJECT_TEACHER'] },
       { id: 'leaderboard', label: '🏆 กระดานคะแนน Active Learning (Leaderboard)', count: Object.values(activeLearningPoints).filter(p => p > 0).length },
-      { id: 'substitutions', label: 'จัดการภาระลา & สอนแทน', count: substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.date === todayStr).length + periodSwaps.filter(ps => ps.targetEmail === user?.email && ps.status === 'PENDING_TEACHER').length },
+      {
+        id: 'substitutions',
+        label: 'จัดการภาระลา & สอนแทน',
+        count: substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.date === todayStr).length
+          + periodSwaps.filter(ps => ps.targetEmail === user?.email && ps.status === 'PENDING_TEACHER').length
+          // TASK 4 — คำขอลากิจ/แลกคาบที่รอครูท่านนี้กดยืนยัน (ไม่นับรายการที่ตัวเองเสนอเอง เช่น คาบจ่ายคืนของ TASK 3)
+          + substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.status === 'PENDING_TEACHER_CONFIRMATION' && sa.proposedByEmail !== user?.email).length,
+      },
       { id: 'records', label: 'ประวัติบันทึกหลังสอนทั้งหมด', count: postTeachingRecords.filter(r => myCourses.some(c => c.id === r.courseId)).length },
       { id: 'gradebook', label: 'สมุดบันทึกคะแนน (Gradebook)', count: 0 }
     ];

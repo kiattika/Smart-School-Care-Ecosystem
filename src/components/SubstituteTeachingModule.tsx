@@ -15,13 +15,24 @@ import {
   Layers,
   Upload,
   Paperclip,
+  Repeat,
+  Users,
+  ThumbsUp,
+  ThumbsDown,
+  Link2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useStore } from '../store';
 import { cn, isSameRoom } from '../lib/utils';
-import { UserRole, SubstituteAssignment, SubstituteApprovalStage, SUBSTITUTE_STAGE_ROLE } from '../types';
+import {
+  UserRole,
+  SubstituteAssignment,
+  SubstituteApprovalStage,
+  SUBSTITUTE_STAGE_ROLE,
+  SUBSTITUTE_TEACHER_DECLINED_ROLE,
+} from '../types';
 import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
 import { useDepartments } from '../hooks/useDepartments';
 import { uploadSubstituteWorksheet } from '../services/storageService';
@@ -157,6 +168,8 @@ export function SubstituteTeachingModule() {
   const substituteAssignments = useStore(s => s.substituteAssignments);
   const students = useStore(s => s.students);
   const proposeSubstituteAssignment = useStore(s => s.proposeSubstituteAssignment);
+  const proposeSubstituteSwap = useStore(s => s.proposeSubstituteSwap);
+  const respondToTeacherConfirmation = useStore(s => s.respondToTeacherConfirmation);
   const decideSubstituteApproval = useStore(s => s.decideSubstituteApproval);
   const completeSubstituteAssignment = useStore(s => s.completeSubstituteAssignment);
 
@@ -222,11 +235,27 @@ export function SubstituteTeachingModule() {
   const [slotWorksheetFile, setSlotWorksheetFile] = useState<Record<string, File | null>>({});
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // TASK 3 — โหมดต่อคาบ: 'COVER' (หาครูสอนแทน — ค่าเริ่มต้น) หรือ 'SWAP' (แลกคาบสอนสองทาง)
+  const [slotSwapMode, setSlotSwapMode] = useState<Record<string, 'COVER' | 'SWAP'>>({});
+  const [slotSwapPartnerEmail, setSlotSwapPartnerEmail] = useState<Record<string, string>>({});
+  // key ของคาบ "จ่ายคืน" ที่เลือก (มาจาก getRepaymentSlotsForPartner) — รูปแบบเดียวกับ slotKey
+  const [slotSwapRepaymentKey, setSlotSwapRepaymentKey] = useState<Record<string, string>>({});
+  // เก็บ DateSlot ของคาบจ่ายคืนที่เลือกจริง (ต้องใช้ตอน submit) — แยกจาก key เพราะต้องใช้ทั้ง object
+  const [slotSwapRepaymentSlot, setSlotSwapRepaymentSlot] = useState<Record<string, DateSlot | null>>({});
 
-  // --- decide modal ---
+  // --- decide modal (ขั้นอนุมัติ 4 ขั้น) ---
   const [decideTarget, setDecideTarget] = useState<SubstituteAssignment | null>(null);
   const [decideMode, setDecideMode] = useState<'APPROVE' | 'REJECT'>('APPROVE');
   const [decideComment, setDecideComment] = useState('');
+
+  // --- confirm modal (TASK 4 — ครูที่ถูกมอบหมายยืนยัน/ปฏิเสธก่อนเข้า approval chain) ---
+  const [confirmTarget, setConfirmTarget] = useState<SubstituteAssignment | null>(null);
+  const [confirmMode, setConfirmMode] = useState<'CONFIRM' | 'DECLINE'>('CONFIRM');
+  const [confirmReason, setConfirmReason] = useState('');
+
+  // --- reselect substitute modal (TASK 4 — เลือกครูสอนแทนคนใหม่ หลังคนเดิมกดปฏิเสธ) ---
+  const [reselectTarget, setReselectTarget] = useState<SubstituteAssignment | null>(null);
+  const [reselectEmail, setReselectEmail] = useState('');
 
   // --- complete modal ---
   const [completeTarget, setCompleteTarget] = useState<SubstituteAssignment | null>(null);
@@ -304,9 +333,12 @@ export function SubstituteTeachingModule() {
    * tier 2 = กลุ่มสาระเดียวกัน (ระดับอื่น) + ว่างจริง
    * tier 3 = ข้ามกลุ่มสาระ (ให้เลือกเองทั้งหมด ระบบไม่ auto-suggest ระดับนี้) — บังคับ SUPERVISION_ONLY
    */
-  const getCandidatesForSlot = (slot: DateSlot): { tier1: SubCandidate[]; tier2: SubCandidate[]; tier3: SubCandidate[] } => {
-    const deptId = effectiveDeptId;
-    const absentLower = absentEmail.toLowerCase();
+  const getCandidatesForSlot = (
+    slot: DateSlot,
+    opts?: { absentEmailOverride?: string; deptIdOverride?: string }
+  ): { tier1: SubCandidate[]; tier2: SubCandidate[]; tier3: SubCandidate[] } => {
+    const deptId = opts?.deptIdOverride ?? effectiveDeptId;
+    const absentLower = (opts?.absentEmailOverride ?? absentEmail).toLowerCase();
     const toCandidate = (t: typeof staffDirectory[number], tier: 1 | 2 | 3): SubCandidate => ({
       email: t.email,
       name: `${t.prefix || ''}${t.firstName} ${t.lastName}`.trim(),
@@ -338,6 +370,47 @@ export function SubstituteTeachingModule() {
       : [];
 
     return { tier1, tier2, tier3 };
+  };
+
+  /**
+   * วิธี A (แลกคาบสอน) — แนะนำครูที่มีตารางสอนอยู่ใน "ห้องเดียวกัน" (room ตรงกัน) กับคาบที่ขอแลก
+   * ไม่จำกัดกลุ่มสาระ (ต่างจากวิธี B) เพราะเกณฑ์คือความคุ้นเคยกับห้องเรียนนั้น ไม่ใช่วิชา
+   */
+  const getSwapPartnerCandidates = (slot: DateSlot): SubCandidate[] => {
+    const absentLower = absentEmail.toLowerCase();
+    const emails = new Set<string>();
+    schedules.forEach(s => {
+      if (isSameRoom(s.room, slot.room) && s.id !== slot.id) {
+        s.emails.forEach(e => { if (e !== absentLower) emails.add(e); });
+      }
+    });
+    return Array.from(emails).map(email => {
+      const t = staffDirectory.find(x => x.email?.toLowerCase() === email);
+      const name = t ? `${t.prefix || ''}${t.firstName} ${t.lastName}`.trim() : email;
+      // ต้องว่างจริงในคาบของ R ที่ขอลา (ไม่งั้นมาสอนแทนไม่ได้)
+      return { email: t?.email || email, name, tier: 1 as const, conflict: checkCandidateConflict(email, slot, slot.date) };
+    }).sort((a, b) => (a.conflict ? 1 : 0) - (b.conflict ? 1 : 0));
+  };
+
+  /** คาบของครู P (partner) ในอีก 14 วันข้างหน้าจากวันที่ขอแลก ที่ครู R (ผู้ขอ) ว่างจริง — ใช้เลือก "คาบจ่ายคืน"
+   *  ไม่รวมวันที่อยู่ในช่วงลาของ R เอง (rangeStart..rangeEnd) เพราะ R ไม่อยู่โรงเรียนช่วงนั้น */
+  const getRepaymentSlotsForPartner = (partnerEmail: string, fromDate: string): DateSlot[] => {
+    const out: DateSlot[] = [];
+    const partnerLower = partnerEmail.toLowerCase();
+    const start = new Date(fromDate + 'T00:00:00');
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(start); d.setDate(d.getDate() + i);
+      const dateStr = d.toISOString().split('T')[0];
+      if (dateStr >= rangeStart && dateStr <= rangeEnd) continue; // R ลาอยู่ช่วงนี้ ไปสอนแทนไม่ได้
+      const dayNum = jsDateToThaiDayNum(dateStr);
+      schedules
+        .filter(s => s.emails.includes(partnerLower) && s.day === dayNum && s.period >= 0)
+        .forEach(s => {
+          const conflict = checkCandidateConflict(absentEmail, s, dateStr); // R ต้องว่างจริงคาบนี้
+          if (!conflict) out.push({ ...s, date: dateStr });
+        });
+    }
+    return out;
   };
 
   // งานในกลุ่มสาระฯ ของ HOD (ดูจากกลุ่มสาระของครูที่ขาด หรือ departmentId ที่บันทึกไว้)
@@ -377,6 +450,19 @@ export function SubstituteTeachingModule() {
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   }, [substituteAssignments, effectiveEmail]);
 
+  // TASK 4 — รายการที่รอ "ตัวเอง" กดยืนยัน/ปฏิเสธก่อนเข้า approval chain (ไม่รวมรายการที่ตัวเองเสนอเอง —
+  // กรณีคู่แลกคาบ (SWAP) เอกสารฝั่ง "จ่ายคืน" มี substituteTeacherEmail เป็นตัวเองแต่เสนอเองไปแล้ว
+  // ถือว่ายินยอมโดยปริยาย ไม่ต้องมายืนยันซ้ำ)
+  const myPendingConfirmations = useMemo(() => {
+    return substituteAssignments
+      .filter(sa =>
+        sa.substituteTeacherEmail?.toLowerCase() === effectiveEmail &&
+        sa.status === 'PENDING_TEACHER_CONFIRMATION' &&
+        sa.proposedByEmail?.toLowerCase() !== effectiveEmail
+      )
+      .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+  }, [substituteAssignments, effectiveEmail]);
+
   const isOverdue = (sa: SubstituteAssignment) =>
     !sa.isCompleted && sa.postTeachingDueAt ? Date.now() > new Date(sa.postTeachingDueAt).getTime() : false;
 
@@ -387,6 +473,7 @@ export function SubstituteTeachingModule() {
     setAbsentEmail(''); setTriggerType('SICK_LEAVE'); setLeaveReason('');
     setRangeStart(todayStr); setRangeEnd(todayStr);
     setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({});
+    setSlotSwapMode({}); setSlotSwapPartnerEmail({}); setSlotSwapRepaymentKey({}); setSlotSwapRepaymentSlot({});
     setNotes('');
   };
 
@@ -405,8 +492,19 @@ export function SubstituteTeachingModule() {
     // ตรวจให้ครบทุกคาบก่อนเริ่มอัปโหลด/บันทึกจริง กันบันทึกครึ่งๆ กลางๆ
     for (const slot of slots) {
       const key = slotKey(slot);
-      const subEmailForSlot = slotSubEmail[key];
       const slotLabel = `${THAI_DAY_ABBREV[slot.day] || ''}${slot.period} (${slot.date})`;
+      if ((slotSwapMode[key] || 'COVER') === 'SWAP') {
+        if (!slotSwapPartnerEmail[key]) {
+          showToast('เลือกครูที่จะแลกคาบไม่ครบ', `กรุณาเลือกครูที่จะแลกคาบสำหรับคาบ ${slotLabel}`, true);
+          return;
+        }
+        if (!slotSwapRepaymentSlot[key]) {
+          showToast('เลือกคาบจ่ายคืนไม่ครบ', `กรุณาเลือกคาบของท่านที่จะไปจ่ายคืนสำหรับคาบ ${slotLabel}`, true);
+          return;
+        }
+        continue;
+      }
+      const subEmailForSlot = slotSubEmail[key];
       if (!subEmailForSlot) {
         showToast('เลือกครูสอนแทนไม่ครบ', `กรุณาเลือกครูสอนแทนสำหรับคาบ ${slotLabel}`, true);
         return;
@@ -424,6 +522,54 @@ export function SubstituteTeachingModule() {
       let successCount = 0;
       for (const slot of slots) {
         const key = slotKey(slot);
+        const scheduleStr = `${THAI_DAY_ABBREV[slot.day] || ''}${slot.period}`;
+        const leaveReasonFinal = leaveReason.trim() || (triggerType === 'SICK_LEAVE' ? 'ลาป่วย' : '');
+        const deptIdFinal = effectiveDeptId || absent.assignments?.departmentId || '';
+        const deptNameFinal = deptName(effectiveDeptId || absent.assignments?.departmentId);
+
+        if ((slotSwapMode[key] || 'COVER') === 'SWAP') {
+          // วิธี A — แลกคาบสอนสองทาง: legA = ครู P สอนแทน R คาบนี้, legB = R ไปสอนแทน P ในคาบจ่ายคืน
+          const partnerEmail = slotSwapPartnerEmail[key];
+          const partner = staffDirectory.find(s => s.email?.toLowerCase() === partnerEmail.toLowerCase());
+          const repaySlot = slotSwapRepaymentSlot[key];
+          if (!partner || !repaySlot) continue;
+          const repayScheduleStr = `${THAI_DAY_ABBREV[repaySlot.day] || ''}${repaySlot.period}`;
+
+          await proposeSubstituteSwap(
+            {
+              originalTeacherEmail: absent.email,
+              originalTeacherName: `${absent.prefix || ''}${absent.firstName} ${absent.lastName}`.trim(),
+              substituteTeacherEmail: partner.email,
+              substituteTeacherName: `${partner.prefix || ''}${partner.firstName} ${partner.lastName}`.trim(),
+              courseId: slot.id, courseCode: slot.code, courseName: slot.name,
+              room: slot.room || slot.targetClass,
+              periodName: slot.period === 0 ? 'คาบ 0 (โฮมรูม)' : `คาบ ${slot.period}`,
+              schedule: scheduleStr, date: slot.date,
+              departmentName: deptNameFinal, departmentId: deptIdFinal,
+              triggerType, leaveReason: leaveReasonFinal,
+              proposedByEmail: effectiveEmail, proposedByName: effectiveName, proposedByRole: effectiveRole,
+              notes: notes.trim(), coverageMode: 'TEACHING',
+            },
+            {
+              originalTeacherEmail: partner.email,
+              originalTeacherName: `${partner.prefix || ''}${partner.firstName} ${partner.lastName}`.trim(),
+              substituteTeacherEmail: absent.email,
+              substituteTeacherName: `${absent.prefix || ''}${absent.firstName} ${absent.lastName}`.trim(),
+              courseId: repaySlot.id, courseCode: repaySlot.code, courseName: repaySlot.name,
+              room: repaySlot.room || repaySlot.targetClass,
+              periodName: repaySlot.period === 0 ? 'คาบ 0 (โฮมรูม)' : `คาบ ${repaySlot.period}`,
+              schedule: repayScheduleStr, date: repaySlot.date,
+              departmentName: deptNameFinal, departmentId: deptIdFinal,
+              triggerType, leaveReason: `แลกคาบ — จ่ายคืนให้ ${partner.prefix || ''}${partner.firstName} ${partner.lastName}`,
+              proposedByEmail: effectiveEmail, proposedByName: effectiveName, proposedByRole: effectiveRole,
+              notes: notes.trim(), coverageMode: 'TEACHING',
+            }
+          );
+          successCount++;
+          continue;
+        }
+
+        // วิธี B — หาครูสอนแทน (ทางเดียว)
         const sub = staffDirectory.find(s => s.email?.toLowerCase() === slotSubEmail[key].toLowerCase());
         if (!sub) continue;
         const isCrossDept = sub.assignments?.departmentId !== effectiveDeptId;
@@ -438,7 +584,6 @@ export function SubstituteTeachingModule() {
           worksheetAttachmentName = uploaded.name;
         }
 
-        const scheduleStr = `${THAI_DAY_ABBREV[slot.day] || ''}${slot.period}`;
         await proposeSubstituteAssignment({
           originalTeacherEmail: absent.email,
           originalTeacherName: `${absent.prefix || ''}${absent.firstName} ${absent.lastName}`.trim(),
@@ -451,10 +596,10 @@ export function SubstituteTeachingModule() {
           periodName: slot.period === 0 ? 'คาบ 0 (โฮมรูม)' : `คาบ ${slot.period}`,
           schedule: scheduleStr,
           date: slot.date,
-          departmentName: deptName(effectiveDeptId || absent.assignments?.departmentId),
-          departmentId: effectiveDeptId || absent.assignments?.departmentId || '',
+          departmentName: deptNameFinal,
+          departmentId: deptIdFinal,
           triggerType,
-          leaveReason: leaveReason.trim() || (triggerType === 'SICK_LEAVE' ? 'ลาป่วย' : ''),
+          leaveReason: leaveReasonFinal,
           proposedByEmail: effectiveEmail,
           proposedByName: effectiveName,
           proposedByRole: effectiveRole,
@@ -468,10 +613,8 @@ export function SubstituteTeachingModule() {
       setProposeOpen(false);
       resetProposeForm();
       showToast(
-        'เสนอจัดครูสอนแทนสำเร็จ',
-        effectiveRole === 'HEAD_OF_DEPARTMENT'
-          ? `บันทึก ${successCount} คาบ — ส่งเข้าลำดับอนุมัติขั้นที่ 2 (หัวหน้าฝ่ายวิชาการและหลักสูตร) แล้ว`
-          : `บันทึก ${successCount} คาบ — ส่งรออนุมัติขั้นที่ 1 (หัวหน้ากลุ่มสาระฯ) แล้ว`
+        'ส่งคำขอสำเร็จ',
+        `บันทึก ${successCount} คาบ — รอครูสอนแทน/ครูที่แลกคาบกดยืนยันก่อนเข้าสู่ลำดับอนุมัติ 4 ขั้น`
       );
     } catch (err) {
       showToast('บันทึกไม่สำเร็จ', err instanceof Error ? err.message : String(err), true);
@@ -550,6 +693,81 @@ export function SubstituteTeachingModule() {
     }
   };
 
+  // TASK 4 — ครูที่ถูกมอบหมาย (substituteTeacherEmail) กดยืนยัน/ปฏิเสธก่อนเข้า approval chain
+  const handleConfirmResponse = async () => {
+    if (!confirmTarget) return;
+    if (confirmMode === 'DECLINE' && !confirmReason.trim()) {
+      showToast('ต้องระบุเหตุผล', 'การปฏิเสธต้องระบุเหตุผลให้ครูผู้ขอทราบ', true);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await respondToTeacherConfirmation(
+        confirmTarget.id,
+        confirmMode,
+        { email: effectiveEmail, name: effectiveName },
+        confirmReason.trim()
+      );
+      const isSwap = confirmTarget.swapMode === 'SWAP';
+      setConfirmTarget(null);
+      setConfirmReason('');
+      showToast(
+        confirmMode === 'CONFIRM' ? 'ยืนยันสำเร็จ' : 'ปฏิเสธแล้ว',
+        confirmMode === 'CONFIRM'
+          ? `รายการเข้าสู่ลำดับอนุมัติ 4 ขั้นแล้ว${isSwap ? ' (ทั้งคู่ของคาบแลก)' : ''}`
+          : `แจ้งครูผู้ขอให้เลือกครูสอนแทนคนใหม่แล้ว${isSwap ? ' (ยกเลิกทั้งคู่ของคาบแลก)' : ''}`
+      );
+    } catch (err) {
+      showToast('ดำเนินการไม่สำเร็จ', err instanceof Error ? err.message : String(err), true);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // TASK 4 — ผู้เสนอเลือกครูสอนแทนคนใหม่ หลังคนเดิมกดปฏิเสธ (ไม่ใช่ resubmit คนเดิมซ้ำ)
+  const handleReselect = async () => {
+    if (!reselectTarget || !reselectEmail) return;
+    const newSub = staffDirectory.find(s => s.email?.toLowerCase() === reselectEmail.toLowerCase());
+    if (!newSub) return;
+    setSubmitting(true);
+    try {
+      const isCrossDept = newSub.assignments?.departmentId !== reselectTarget.departmentId;
+      await proposeSubstituteAssignment({
+        id: reselectTarget.id,
+        originalTeacherEmail: reselectTarget.originalTeacherEmail,
+        originalTeacherName: reselectTarget.originalTeacherName,
+        substituteTeacherEmail: newSub.email,
+        substituteTeacherName: `${newSub.prefix || ''}${newSub.firstName} ${newSub.lastName}`.trim(),
+        courseId: reselectTarget.courseId,
+        courseCode: reselectTarget.courseCode,
+        courseName: reselectTarget.courseName,
+        room: reselectTarget.room,
+        periodName: reselectTarget.periodName,
+        schedule: reselectTarget.schedule,
+        date: reselectTarget.date,
+        departmentName: reselectTarget.departmentName,
+        departmentId: reselectTarget.departmentId,
+        triggerType: reselectTarget.triggerType,
+        leaveReason: reselectTarget.leaveReason,
+        proposedByEmail: effectiveEmail,
+        proposedByName: effectiveName,
+        proposedByRole: effectiveRole,
+        notes: reselectTarget.notes,
+        coverageMode: isCrossDept ? 'SUPERVISION_ONLY' : 'TEACHING',
+        // ครูคนใหม่ยังไม่เคยยืนยัน — ไม่พกใบงานเดิมมา ถ้าเป็นครูข้ามกลุ่มสาระต้องแนบใหม่ที่หน้ารายการ
+        worksheetAttachmentUrl: isCrossDept ? reselectTarget.worksheetAttachmentUrl : undefined,
+        worksheetAttachmentName: isCrossDept ? reselectTarget.worksheetAttachmentName : undefined,
+      });
+      setReselectTarget(null);
+      setReselectEmail('');
+      showToast('เลือกครูสอนแทนคนใหม่แล้ว', 'ส่งรอครูสอนแทนคนใหม่กดยืนยันอีกครั้ง');
+    } catch (err) {
+      showToast('ไม่สำเร็จ', err instanceof Error ? err.message : String(err), true);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const openComplete = (sa: SubstituteAssignment) => {
     setCompleteTarget(sa);
     setCSummary(''); setCProblems(''); setCSolutions('');
@@ -594,16 +812,18 @@ export function SubstituteTeachingModule() {
   // -----------------------------------------------------------------------
   const StatusBadge = ({ sa }: { sa: SubstituteAssignment }) => {
     const map: Record<string, string> = {
+      PENDING_TEACHER_CONFIRMATION: 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20',
       PENDING_ASSIGNMENT: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
       PENDING_APPROVAL: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
       APPROVED: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
       REJECTED: 'bg-red-500/10 text-red-400 border-red-500/20',
     };
     const label: Record<string, string> = {
+      PENDING_TEACHER_CONFIRMATION: 'รอครูสอนแทนยืนยัน',
       PENDING_ASSIGNMENT: 'รอจัดครู',
       PENDING_APPROVAL: sa.currentApprovalStage ? STAGE_LABEL_TH[sa.currentApprovalStage] : 'รออนุมัติ',
       APPROVED: sa.isCompleted ? 'บันทึกหลังสอนแล้ว' : 'อนุมัติครบ 4 ขั้น',
-      REJECTED: 'ส่งกลับแก้ไข',
+      REJECTED: sa.rejectedByRole === SUBSTITUTE_TEACHER_DECLINED_ROLE ? 'ครูสอนแทนปฏิเสธ' : 'ส่งกลับแก้ไข',
     };
     return (
       <span className={cn('px-2 py-1 rounded-full text-[10px] font-bold border shrink-0', map[sa.status || 'PENDING_APPROVAL'])}>
@@ -656,7 +876,21 @@ export function SubstituteTeachingModule() {
             ควบคุมชั้นเรียนอย่างเดียว (ข้ามกลุ่มสาระ)
           </span>
         )}
+        {sa.swapMode === 'SWAP' && (
+          <span className="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded text-[9px] font-bold flex items-center gap-1">
+            <Repeat className="w-2.5 h-2.5" /> แลกคาบสอน
+          </span>
+        )}
       </div>
+      {sa.swapMode === 'SWAP' && sa.linkedSwapId && (() => {
+        const linked = substituteAssignments.find(l => l.id === sa.linkedSwapId);
+        return linked ? (
+          <div className="text-[11px] text-purple-300 bg-purple-500/5 border border-purple-500/15 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+            <Link2 className="w-3 h-3 shrink-0" />
+            คู่แลกคาบ: {linked.substituteTeacherName} ไปสอนแทน {linked.originalTeacherName} · {linked.periodName} ({linked.schedule}) · {linked.date}
+          </div>
+        ) : null;
+      })()}
       {sa.worksheetAttachmentUrl ? (
         <a
           href={sa.worksheetAttachmentUrl} target="_blank" rel="noopener noreferrer"
@@ -670,6 +904,9 @@ export function SubstituteTeachingModule() {
       ) : null}
     </div>
   );
+
+  const rejectedByLabel = (role?: string) =>
+    role === SUBSTITUTE_TEACHER_DECLINED_ROLE ? 'ครูสอนแทน (ปฏิเสธการมอบหมาย)' : (ROLE_NAMES_TH[role || ''] || role || '-');
 
   const roleLabel = ROLE_NAMES_TH[effectiveRole] || effectiveRole;
   const canPropose = effectiveRole === 'HEAD_OF_DEPARTMENT';
@@ -804,6 +1041,43 @@ export function SubstituteTeachingModule() {
       <div className="max-w-7xl mx-auto px-6 mt-8 grid grid-cols-1 xl:grid-cols-3 gap-8">
         <div className="xl:col-span-2 space-y-8">
 
+          {/* TASK 4 — รายการรอให้ "ตัวเอง" กดยืนยัน/ปฏิเสธก่อนเข้า approval chain */}
+          {canSelfPropose && myPendingConfirmations.length > 0 && (
+            <section className="space-y-4">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <ThumbsUp className="w-5 h-5 text-fuchsia-400" /> คำขอรอการยืนยันจากท่าน
+                <span className="bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20 px-2 py-0.5 rounded text-[10px] font-mono animate-pulse">
+                  {myPendingConfirmations.length}
+                </span>
+              </h2>
+              <div className="space-y-4">
+                {myPendingConfirmations.map(sa => (
+                  <div key={sa.id} className="bg-[#111622] border border-fuchsia-500/30 rounded-2xl p-5 space-y-3">
+                    <div className="flex justify-between items-start">
+                      <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">{sa.departmentName}</span>
+                      <StatusBadge sa={sa} />
+                    </div>
+                    <CourseInfo sa={sa} />
+                    <div className="flex gap-2 justify-end pt-2 border-t border-slate-800/50">
+                      <button
+                        onClick={() => { setConfirmTarget(sa); setConfirmMode('DECLINE'); setConfirmReason(''); }}
+                        className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-[11px] font-bold rounded-lg flex items-center gap-1"
+                      >
+                        <ThumbsDown className="w-3.5 h-3.5" /> ปฏิเสธ
+                      </button>
+                      <button
+                        onClick={() => { setConfirmTarget(sa); setConfirmMode('CONFIRM'); setConfirmReason(''); }}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black rounded-lg flex items-center gap-1"
+                      >
+                        <ThumbsUp className="w-3.5 h-3.5" /> ยืนยันรับทราบ
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* MY OWN REQUESTS — ครูที่ขอลากิจ/ไปราชการด้วยตนเอง ติดตามสถานะคำขอของตัวเอง */}
           {canSelfPropose && (
             <section className="space-y-4">
@@ -829,15 +1103,25 @@ export function SubstituteTeachingModule() {
                       <ApprovalChain sa={sa} />
                       {sa.status === 'REJECTED' && sa.rejectionReason && (
                         <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-3 text-xs text-red-400">
-                          <div className="font-bold flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> ส่งกลับโดย {sa.rejectedByName} ({sa.rejectedByRole})</div>
+                          <div className="font-bold flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> ส่งกลับโดย {sa.rejectedByName} ({rejectedByLabel(sa.rejectedByRole)})</div>
                           <p className="italic text-[11px] mt-1">{sa.rejectionReason}</p>
-                          <button
-                            onClick={() => handleRepropose(sa)}
-                            disabled={submitting}
-                            className="mt-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg flex items-center gap-1"
-                          >
-                            <Send className="w-3 h-3" /> แก้ไขและเสนออนุมัติใหม่
-                          </button>
+                          {sa.rejectedByRole === SUBSTITUTE_TEACHER_DECLINED_ROLE ? (
+                            <button
+                              onClick={() => { setReselectTarget(sa); setReselectEmail(''); }}
+                              disabled={submitting}
+                              className="mt-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg flex items-center gap-1"
+                            >
+                              <Users className="w-3 h-3" /> เลือกครูสอนแทนคนใหม่
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleRepropose(sa)}
+                              disabled={submitting}
+                              className="mt-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg flex items-center gap-1"
+                            >
+                              <Send className="w-3 h-3" /> แก้ไขและเสนออนุมัติใหม่
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -871,15 +1155,25 @@ export function SubstituteTeachingModule() {
                       <ApprovalChain sa={sa} />
                       {sa.status === 'REJECTED' && sa.rejectionReason && (
                         <div className="bg-red-500/5 border border-red-500/20 rounded-xl p-3 text-xs text-red-400">
-                          <div className="font-bold flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> ส่งกลับโดย {sa.rejectedByName} ({sa.rejectedByRole})</div>
+                          <div className="font-bold flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> ส่งกลับโดย {sa.rejectedByName} ({rejectedByLabel(sa.rejectedByRole)})</div>
                           <p className="italic text-[11px] mt-1">{sa.rejectionReason}</p>
-                          <button
-                            onClick={() => handleRepropose(sa)}
-                            disabled={submitting}
-                            className="mt-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg flex items-center gap-1"
-                          >
-                            <Send className="w-3 h-3" /> แก้ไขและเสนออนุมัติใหม่
-                          </button>
+                          {sa.rejectedByRole === SUBSTITUTE_TEACHER_DECLINED_ROLE ? (
+                            <button
+                              onClick={() => { setReselectTarget(sa); setReselectEmail(''); }}
+                              disabled={submitting}
+                              className="mt-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg flex items-center gap-1"
+                            >
+                              <Users className="w-3 h-3" /> เลือกครูสอนแทนคนใหม่
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleRepropose(sa)}
+                              disabled={submitting}
+                              className="mt-2 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-bold rounded-lg flex items-center gap-1"
+                            >
+                              <Send className="w-3 h-3" /> แก้ไขและเสนออนุมัติใหม่
+                            </button>
+                          )}
                         </div>
                       )}
                       {sa.isCompleted && (
@@ -1068,7 +1362,11 @@ export function SubstituteTeachingModule() {
                     <label className="block text-xs font-bold text-slate-400 mb-1.5">ครูที่ลา (ในกลุ่มสาระฯ ของท่าน)</label>
                     <select
                       value={absentEmail}
-                      onChange={e => { setAbsentEmail(e.target.value); setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({}); }}
+                      onChange={e => {
+                        setAbsentEmail(e.target.value);
+                        setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({});
+                        setSlotSwapMode({}); setSlotSwapPartnerEmail({}); setSlotSwapRepaymentKey({}); setSlotSwapRepaymentSlot({});
+                      }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold"
                     >
                       <option value="">-- เลือกครูที่ลา --</option>
@@ -1111,6 +1409,7 @@ export function SubstituteTeachingModule() {
                         setRangeStart(e.target.value);
                         if (rangeEnd < e.target.value) setRangeEnd(e.target.value);
                         setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({});
+                        setSlotSwapMode({}); setSlotSwapPartnerEmail({}); setSlotSwapRepaymentKey({}); setSlotSwapRepaymentSlot({});
                       }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-mono"
                     />
@@ -1119,7 +1418,11 @@ export function SubstituteTeachingModule() {
                     <label className="block text-xs font-bold text-slate-400 mb-1.5">วันที่สิ้นสุด (ลาหลายวันติดกันได้)</label>
                     <input
                       type="date" value={rangeEnd} min={rangeStart}
-                      onChange={e => { setRangeEnd(e.target.value); setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({}); }}
+                      onChange={e => {
+                        setRangeEnd(e.target.value);
+                        setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({});
+                        setSlotSwapMode({}); setSlotSwapPartnerEmail({}); setSlotSwapRepaymentKey({}); setSlotSwapRepaymentSlot({});
+                      }}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-mono"
                     />
                   </div>
@@ -1169,60 +1472,146 @@ export function SubstituteTeachingModule() {
                               {THAI_DAY_ABBREV[slot.day]}{slot.period} · {slot.code} {slot.name} · {slot.room || slot.targetClass} · {slot.date}
                             </label>
 
-                            {checked && (
-                              <div className="mt-2 pl-6 space-y-2">
-                                <select
-                                  value={chosenEmail}
-                                  onChange={e => setSlotSubEmail(prev => ({ ...prev, [key]: e.target.value }))}
-                                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-[11px] text-white outline-none focus:border-amber-500"
-                                >
-                                  <option value="">-- เลือกครูสอนแทน --</option>
-                                  {tier1.length > 0 && (
-                                    <optgroup label="กลุ่มสาระเดียวกัน + ระดับเดียวกัน (แนะนำ)">
-                                      {tier1.map(c => (
-                                        <option key={c.email} value={c.email} disabled={!!c.conflict}>
-                                          {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                  {tier2.length > 0 && (
-                                    <optgroup label="กลุ่มสาระเดียวกัน (ระดับอื่น)">
-                                      {tier2.map(c => (
-                                        <option key={c.email} value={c.email} disabled={!!c.conflict}>
-                                          {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                  {tier3.length > 0 && (
-                                    <optgroup label="⚠️ ข้ามกลุ่มสาระ (สุดวิสัย — ควบคุมชั้นเรียนอย่างเดียว)">
-                                      {tier3.map(c => (
-                                        <option key={c.email} value={c.email} disabled={!!c.conflict}>
-                                          {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  )}
-                                </select>
+                            {checked && (() => {
+                              const mode = slotSwapMode[key] || 'COVER';
+                              const partnerCandidates = mode === 'SWAP' ? getSwapPartnerCandidates(slot) : [];
+                              const chosenPartnerEmail = slotSwapPartnerEmail[key] || '';
+                              const repaymentSlots = chosenPartnerEmail ? getRepaymentSlotsForPartner(chosenPartnerEmail, slot.date) : [];
+                              const chosenRepaymentKey = slotSwapRepaymentKey[key] || '';
 
-                                {isCrossDept && (
-                                  <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5 space-y-1.5">
-                                    <p className="text-[10px] text-amber-400 font-bold flex items-center gap-1">
-                                      <AlertCircle className="w-3 h-3 shrink-0" /> ครูข้ามกลุ่มสาระ — ควบคุมชั้นเรียนอย่างเดียว ต้องแนบใบงาน/ใบความรู้/แบบทดสอบก่อนส่งคำขอ
-                                    </p>
-                                    <label className="flex items-center gap-2 text-[10px] text-slate-300 cursor-pointer bg-slate-950 border border-slate-800 rounded-lg p-2 hover:border-amber-500/40">
-                                      <Upload className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                                      {slotWorksheetFile[key]?.name || 'แนบไฟล์ใบงาน (PDF/Word/รูปภาพ) — ไม่เกิน 10MB'}
-                                      <input
-                                        type="file" accept=".pdf,.doc,.docx,image/*" className="hidden"
-                                        onChange={e => setSlotWorksheetFile(prev => ({ ...prev, [key]: e.target.files?.[0] || null }))}
-                                      />
-                                    </label>
+                              return (
+                                <div className="mt-2 pl-6 space-y-2">
+                                  {/* TASK 3 — เลือกวิธี: หาครูสอนแทน (ทางเดียว) vs แลกคาบสอน (สองทาง) */}
+                                  <div className="inline-flex rounded-lg overflow-hidden border border-slate-800 text-[10px] font-bold">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSlotSwapMode(prev => ({ ...prev, [key]: 'COVER' }))}
+                                      className={cn('px-2.5 py-1.5', mode === 'COVER' ? 'bg-amber-600 text-white' : 'bg-slate-950 text-slate-400 hover:text-slate-200')}
+                                    >
+                                      หาครูสอนแทน
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setSlotSwapMode(prev => ({ ...prev, [key]: 'SWAP' }))}
+                                      className={cn('px-2.5 py-1.5 flex items-center gap-1', mode === 'SWAP' ? 'bg-purple-600 text-white' : 'bg-slate-950 text-slate-400 hover:text-slate-200')}
+                                    >
+                                      <Repeat className="w-3 h-3" /> แลกคาบสอน
+                                    </button>
                                   </div>
-                                )}
-                              </div>
-                            )}
+
+                                  {mode === 'COVER' ? (
+                                    <>
+                                      <select
+                                        value={chosenEmail}
+                                        onChange={e => setSlotSubEmail(prev => ({ ...prev, [key]: e.target.value }))}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-[11px] text-white outline-none focus:border-amber-500"
+                                      >
+                                        <option value="">-- เลือกครูสอนแทน --</option>
+                                        {tier1.length > 0 && (
+                                          <optgroup label="กลุ่มสาระเดียวกัน + ระดับเดียวกัน (แนะนำ)">
+                                            {tier1.map(c => (
+                                              <option key={c.email} value={c.email} disabled={!!c.conflict}>
+                                                {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                        {tier2.length > 0 && (
+                                          <optgroup label="กลุ่มสาระเดียวกัน (ระดับอื่น)">
+                                            {tier2.map(c => (
+                                              <option key={c.email} value={c.email} disabled={!!c.conflict}>
+                                                {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                        {tier3.length > 0 && (
+                                          <optgroup label="⚠️ ข้ามกลุ่มสาระ (สุดวิสัย — ควบคุมชั้นเรียนอย่างเดียว)">
+                                            {tier3.map(c => (
+                                              <option key={c.email} value={c.email} disabled={!!c.conflict}>
+                                                {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
+                                              </option>
+                                            ))}
+                                          </optgroup>
+                                        )}
+                                      </select>
+
+                                      {isCrossDept && (
+                                        <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-2.5 space-y-1.5">
+                                          <p className="text-[10px] text-amber-400 font-bold flex items-center gap-1">
+                                            <AlertCircle className="w-3 h-3 shrink-0" /> ครูข้ามกลุ่มสาระ — ควบคุมชั้นเรียนอย่างเดียว ต้องแนบใบงาน/ใบความรู้/แบบทดสอบก่อนส่งคำขอ
+                                          </p>
+                                          <label className="flex items-center gap-2 text-[10px] text-slate-300 cursor-pointer bg-slate-950 border border-slate-800 rounded-lg p-2 hover:border-amber-500/40">
+                                            <Upload className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                            {slotWorksheetFile[key]?.name || 'แนบไฟล์ใบงาน (PDF/Word/รูปภาพ) — ไม่เกิน 10MB'}
+                                            <input
+                                              type="file" accept=".pdf,.doc,.docx,image/*" className="hidden"
+                                              onChange={e => setSlotWorksheetFile(prev => ({ ...prev, [key]: e.target.files?.[0] || null }))}
+                                            />
+                                          </label>
+                                        </div>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <div className="space-y-2 bg-purple-500/5 border border-purple-500/20 rounded-lg p-2.5">
+                                      <div>
+                                        <label className="block text-[10px] font-bold text-purple-300 mb-1">
+                                          ครูที่จะแลกคาบด้วย (มีตารางสอนในห้อง {slot.room || slot.targetClass})
+                                        </label>
+                                        <select
+                                          value={chosenPartnerEmail}
+                                          onChange={e => {
+                                            setSlotSwapPartnerEmail(prev => ({ ...prev, [key]: e.target.value }));
+                                            setSlotSwapRepaymentKey(prev => ({ ...prev, [key]: '' }));
+                                            setSlotSwapRepaymentSlot(prev => ({ ...prev, [key]: null }));
+                                          }}
+                                          className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-[11px] text-white outline-none focus:border-purple-500"
+                                        >
+                                          <option value="">-- เลือกครูที่จะแลกคาบ --</option>
+                                          {partnerCandidates.map(c => (
+                                            <option key={c.email} value={c.email} disabled={!!c.conflict}>
+                                              {c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        {partnerCandidates.length === 0 && (
+                                          <p className="text-[10px] text-purple-300/70 mt-1">ไม่พบครูที่มีตารางสอนในห้องเดียวกันนี้</p>
+                                        )}
+                                      </div>
+
+                                      {chosenPartnerEmail && (
+                                        <div>
+                                          <label className="block text-[10px] font-bold text-purple-300 mb-1">
+                                            คาบของท่านที่จะไปจ่ายคืน (ต้องเป็นคาบที่ท่านว่างจริง ภายใน 14 วัน)
+                                          </label>
+                                          <select
+                                            value={chosenRepaymentKey}
+                                            onChange={e => {
+                                              const k = e.target.value;
+                                              setSlotSwapRepaymentKey(prev => ({ ...prev, [key]: k }));
+                                              const found = repaymentSlots.find(r => slotKey(r) === k) || null;
+                                              setSlotSwapRepaymentSlot(prev => ({ ...prev, [key]: found }));
+                                            }}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-[11px] text-white outline-none focus:border-purple-500"
+                                          >
+                                            <option value="">-- เลือกคาบจ่ายคืน --</option>
+                                            {repaymentSlots.map(r => (
+                                              <option key={slotKey(r)} value={slotKey(r)}>
+                                                {THAI_DAY_ABBREV[r.day]}{r.period} · {r.code} {r.name} · {r.room || r.targetClass} · {r.date}
+                                              </option>
+                                            ))}
+                                          </select>
+                                          {repaymentSlots.length === 0 && (
+                                            <p className="text-[10px] text-purple-300/70 mt-1">ไม่พบคาบของครูท่านนี้ในอีก 14 วันข้างหน้าที่ท่านว่างจริง</p>
+                                          )}
+                                        </div>
+                                      )}
+                                      <p className="text-[9px] text-purple-300/70">แลกคาบสอน = ครูทั้งสองฝ่ายสอนวิชาของตัวเองจริง (ไม่ใช่ควบคุมชั้นเรียนอย่างเดียว) และต้องรอครูที่แลกคาบยืนยันก่อนเข้าสู่การอนุมัติเช่นกัน</p>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                         );
                       })}
@@ -1247,7 +1636,7 @@ export function SubstituteTeachingModule() {
                   disabled={submitting || !absentEmail || selectedSlotKeys.size === 0}
                   className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5"
                 >
-                  <Send className="w-3.5 h-3.5" /> {submitting ? 'กำลังบันทึก...' : `เสนอเข้าลำดับอนุมัติ (${selectedSlotKeys.size} คาบ)`}
+                  <Send className="w-3.5 h-3.5" /> {submitting ? 'กำลังบันทึก...' : `ส่งคำขอ (${selectedSlotKeys.size} คาบ)`}
                 </button>
               </div>
             </motion.div>
@@ -1295,6 +1684,123 @@ export function SubstituteTeachingModule() {
             </motion.div>
           </div>
         )}
+      </AnimatePresence>
+
+      {/* CONFIRM MODAL — TASK 4: ครูที่ถูกมอบหมายยืนยัน/ปฏิเสธก่อนเข้า approval chain */}
+      <AnimatePresence>
+        {confirmTarget && (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-[#111622] border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4"
+            >
+              <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                {confirmMode === 'CONFIRM' ? <ThumbsUp className="w-5 h-5 text-emerald-400" /> : <ThumbsDown className="w-5 h-5 text-red-400" />}
+                {confirmMode === 'CONFIRM' ? 'ยืนยันรับทราบ' : 'ปฏิเสธการมอบหมาย'}
+                {confirmTarget.swapMode === 'SWAP' && <span className="text-purple-400 text-xs font-normal">(คู่แลกคาบ)</span>}
+              </h3>
+              <div className="text-xs text-slate-300 bg-slate-950/40 rounded-xl p-3 border border-slate-800/80">
+                {confirmTarget.courseCode} {confirmTarget.courseName} · {confirmTarget.room} · {confirmTarget.periodName} ({confirmTarget.schedule}) · {confirmTarget.date}<br />
+                แทนคุณครู: <span className="font-bold text-white">{confirmTarget.originalTeacherName}</span>
+                {confirmTarget.swapMode === 'SWAP' && (
+                  <p className="text-purple-300 mt-1">การยืนยัน/ปฏิเสธนี้จะมีผลกับคาบ "จ่ายคืน" ของคู่แลกคาบพร้อมกันทั้งคู่</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 mb-1.5">
+                  {confirmMode === 'CONFIRM' ? 'หมายเหตุ (ไม่บังคับ)' : 'เหตุผลที่ไม่สะดวก'} {confirmMode === 'DECLINE' && <span className="text-red-500">*</span>}
+                </label>
+                <textarea
+                  rows={3} value={confirmReason} onChange={e => setConfirmReason(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-indigo-500 font-semibold"
+                />
+              </div>
+              <div className="flex gap-2.5 justify-end">
+                <button onClick={() => setConfirmTarget(null)} className="px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400">ยกเลิก</button>
+                <button
+                  onClick={handleConfirmResponse} disabled={submitting}
+                  className={cn(
+                    'px-5 py-2 text-white rounded-xl text-xs font-extrabold disabled:opacity-50 flex items-center gap-1.5',
+                    confirmMode === 'CONFIRM' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-red-600 hover:bg-red-500'
+                  )}
+                >
+                  {submitting ? 'กำลังบันทึก...' : confirmMode === 'CONFIRM' ? 'ยืนยันรับทราบ' : 'ยืนยันการปฏิเสธ'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* RESELECT SUBSTITUTE MODAL — TASK 4: เลือกครูสอนแทนคนใหม่ หลังคนเดิมกดปฏิเสธ */}
+      <AnimatePresence>
+        {reselectTarget && (() => {
+          const originalSchedule = schedules.find(s => s.id === reselectTarget.courseId);
+          const candidates = originalSchedule
+            ? getCandidatesForSlot(
+                { ...originalSchedule, date: reselectTarget.date },
+                { absentEmailOverride: reselectTarget.originalTeacherEmail, deptIdOverride: reselectTarget.departmentId }
+              )
+            : { tier1: [], tier2: [], tier3: [] };
+          return (
+            <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-[#111622] border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4"
+              >
+                <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                  <Users className="w-5 h-5 text-amber-400" /> เลือกครูสอนแทนคนใหม่
+                </h3>
+                <div className="text-xs text-slate-300 bg-slate-950/40 rounded-xl p-3 border border-slate-800/80">
+                  {reselectTarget.courseCode} {reselectTarget.courseName} · {reselectTarget.room} · {reselectTarget.periodName} ({reselectTarget.schedule}) · {reselectTarget.date}<br />
+                  <span className="text-red-400">{reselectTarget.substituteTeacherName} ปฏิเสธการมอบหมายแล้ว</span>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1.5">ครูสอนแทนคนใหม่</label>
+                  <select
+                    value={reselectEmail} onChange={e => setReselectEmail(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-semibold"
+                  >
+                    <option value="">-- เลือกครูสอนแทน --</option>
+                    {candidates.tier1.length > 0 && (
+                      <optgroup label="กลุ่มสาระเดียวกัน + ระดับเดียวกัน (แนะนำ)">
+                        {candidates.tier1.map(c => (
+                          <option key={c.email} value={c.email} disabled={!!c.conflict}>{c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {candidates.tier2.length > 0 && (
+                      <optgroup label="กลุ่มสาระเดียวกัน (ระดับอื่น)">
+                        {candidates.tier2.map(c => (
+                          <option key={c.email} value={c.email} disabled={!!c.conflict}>{c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {candidates.tier3.length > 0 && (
+                      <optgroup label="⚠️ ข้ามกลุ่มสาระ (ควบคุมชั้นเรียนอย่างเดียว)">
+                        {candidates.tier3.map(c => (
+                          <option key={c.email} value={c.email} disabled={!!c.conflict}>{c.name} {c.conflict ? `❌ ${c.conflict}` : '✓ ว่าง'}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                  {!originalSchedule && (
+                    <p className="text-[10px] text-amber-400 mt-1">ไม่พบตารางสอนต้นฉบับของคาบนี้ — กรุณาติดต่อผู้ดูแลระบบ</p>
+                  )}
+                </div>
+                <div className="flex gap-2.5 justify-end">
+                  <button onClick={() => setReselectTarget(null)} className="px-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-semibold text-slate-400">ยกเลิก</button>
+                  <button
+                    onClick={handleReselect} disabled={submitting || !reselectEmail}
+                    className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5"
+                  >
+                    <Send className="w-3.5 h-3.5" /> {submitting ? 'กำลังบันทึก...' : 'ส่งรอครูคนใหม่ยืนยัน'}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* COMPLETE MODAL */}

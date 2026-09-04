@@ -833,6 +833,38 @@ export async function updateSubstituteAssignmentFirestore(
   }
 }
 
+/** เขียนคู่แลกคาบสอน (swapMode 'SWAP') 2 document พร้อมกันแบบ atomic — ถ้าฝั่งใดฝั่งหนึ่งล้มเหลว
+ *  ทั้งคู่จะไม่ถูกเขียนเลย กันเอกสารกำพร้า (ผูกกันด้วย linkedSwapId ที่ตั้งไว้ก่อนเรียกฟังก์ชันนี้แล้ว) */
+export async function saveSubstituteSwapPairFirestore(legA: SubstituteAssignment, legB: SubstituteAssignment): Promise<void> {
+  const collectionPath = 'substitute_assignments';
+  try {
+    const { writeBatch } = await import('firebase/firestore');
+    const batch = writeBatch(db);
+    batch.set(doc(db, collectionPath, legA.id), { ...stripUndefined(legA), updatedAt: serverTimestamp() }, { merge: true });
+    batch.set(doc(db, collectionPath, legB.id), { ...stripUndefined(legB), updatedAt: serverTimestamp() }, { merge: true });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${legA.id}+${legB.id}`);
+  }
+}
+
+/** อัปเดตหลาย document พร้อมกันแบบ atomic — ใช้ตอนยืนยัน/ปฏิเสธคู่แลกคาบที่ต้อง cascade ไปอีกฝั่ง */
+export async function updateSubstituteAssignmentsBatchFirestore(
+  patches: { id: string; patch: Partial<SubstituteAssignment> }[]
+): Promise<void> {
+  const collectionPath = 'substitute_assignments';
+  try {
+    const { writeBatch } = await import('firebase/firestore');
+    const batch = writeBatch(db);
+    patches.forEach(({ id, patch }) => {
+      batch.set(doc(db, collectionPath, id), { ...stripUndefined(patch as Record<string, any>), updatedAt: serverTimestamp() }, { merge: true });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/batch(${patches.map(p => p.id).join(',')})`);
+  }
+}
+
 export function subscribeSubstituteAssignments(onUpdate: (assignments: SubstituteAssignment[]) => void): () => void {
   const collectionPath = 'substitute_assignments';
   try {
