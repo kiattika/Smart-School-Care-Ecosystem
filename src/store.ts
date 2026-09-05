@@ -101,7 +101,6 @@ export const useStore = create<StoreState>((set, get) => ({
   courses: [],
   globalCourses: [],
   homeroomAssignments: {},
-  scheduleChangeRequests: [],
   analytics: [],
   leaveRequests: [],
   scheduleConfig: {
@@ -148,7 +147,6 @@ export const useStore = create<StoreState>((set, get) => ({
   substituteAssignments: [],
   postTeachingRecords: [],
   staffDirectory: [],
-  periodSwaps: [],
   homeVisits: [],
 
   schoolDuties: [],
@@ -382,15 +380,6 @@ export const useStore = create<StoreState>((set, get) => ({
     courses: state.courses.map(c => c.id === courseId ? { ...c, schedule: newSchedule } : c),
     globalCourses: state.globalCourses.map(c => c.courseId === courseId ? { ...c, scheduleString: newSchedule } : c)
   })),
-  submitScheduleChangeRequest: (req) => set((state) => ({
-    scheduleChangeRequests: [
-      ...state.scheduleChangeRequests,
-      { ...req, id: Date.now().toString(), status: 'PENDING', createdAt: new Date() }
-    ]
-  })),
-  updateScheduleChangeRequestStatus: (id, status) => set((state) => ({
-    scheduleChangeRequests: state.scheduleChangeRequests.map(req => req.id === id ? { ...req, status } : req)
-  })),
   markAttendanceDone: (courseId: string) => set((state) => {
     // 1. Update matching courses in state.courses
     let matchedAny = false;
@@ -503,15 +492,6 @@ export const useStore = create<StoreState>((set, get) => ({
       ]
     }));
   },
-  submitPeriodSwap: (swap) => set((state) => ({
-    periodSwaps: [
-      ...state.periodSwaps,
-      { ...swap, id: 'swap-' + Date.now(), status: 'PENDING_TEACHER' }
-    ]
-  })),
-  updatePeriodSwapStatus: (id, status) => set((state) => ({
-    periodSwaps: state.periodSwaps.map(ps => ps.id === id ? { ...ps, status } : ps)
-  })),
   assignSubstituteTeacher: (assignment) => {
     const newAss: SubstituteAssignment = { ...assignment, id: 'sub-' + Date.now() };
     saveSubstituteAssignmentFirestore(newAss).catch(err => console.warn('Firestore substitute assignment notice:', err));

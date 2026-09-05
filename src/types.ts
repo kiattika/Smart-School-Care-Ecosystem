@@ -151,18 +151,6 @@ export interface Course {
   level?: string;   // ระดับชั้น เช่น "ม.5/8" (แยกจาก room ที่เป็นห้องกายภาพ เช่น "943")
 }
 
-export interface ScheduleChangeRequest {
-  id: string;
-  courseId: string;
-  teacherName: string;
-  subjectCode: string;
-  room: string;
-  currentSchedule: string;
-  note: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  createdAt: Date;
-}
-
 export interface PostTeachingRecord {
   courseId: string;
   date: string;
@@ -176,15 +164,6 @@ export interface PostTeachingRecord {
   subjectCode?: string;
   level?: string;
   room?: string;
-}
-
-export interface PeriodSwap {
-  id: string;
-  requesterEmail: string;
-  targetEmail: string;
-  requesterCourseId: string;
-  targetCourseId: string;
-  status: 'PENDING_TEACHER' | 'PENDING_ADMIN' | 'APPROVED' | 'REJECTED';
 }
 
 export type SubstituteApprovalStage =
@@ -885,7 +864,6 @@ export interface StoreState {
   courses: Course[];
   globalCourses: GlobalCourse[];
   homeroomAssignments: Record<string, string>; // teacherEmail -> roomName
-  scheduleChangeRequests: ScheduleChangeRequest[];
   analytics: StudentAnalytics[];
   attendanceRecords: Record<string, Record<string, AttendanceStatus>>; // mapped by courseId -> studentId
   leaveRequests: LeaveRequest[];
@@ -893,7 +871,6 @@ export interface StoreState {
   schoolCheckInRecords: Record<string, { status: AttendanceStatus, time?: Date }>;
   
   postTeachingRecords: PostTeachingRecord[];
-  periodSwaps: PeriodSwap[];
   substituteAssignments: SubstituteAssignment[];
   staffDirectory: UserProfile[]; // รายชื่อบุคลากรจริงจาก Firestore 'staff' collection (real-time)
 
@@ -968,15 +945,11 @@ export interface StoreState {
   markSchoolCheckIn: (studentId: string, status: AttendanceStatus, time?: Date) => void;
   setCourses: (courses: Course[]) => void;
   updateCourseSchedule: (courseId: string, newSchedule: string) => void;
-  submitScheduleChangeRequest: (req: Omit<ScheduleChangeRequest, 'id' | 'status' | 'createdAt'>) => void;
-  updateScheduleChangeRequestStatus: (id: string, status: 'APPROVED' | 'REJECTED') => void;
   markAttendanceDone: (courseId: string) => void;
   updateStudentProfile: (studentId: string, profile: { nickname?: string; photoUrl?: string; address?: string; parentUid?: string; parentEmail?: string }) => void;
   updateMorningAttendance: (studentId: string, status: 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE', method: 'SCAN' | 'GEOFENCE' | 'MANUAL') => void;
   
   submitPostTeachingRecord: (record: PostTeachingRecord) => void;
-  submitPeriodSwap: (swap: Omit<PeriodSwap, 'id' | 'status'>) => void;
-  updatePeriodSwapStatus: (id: string, status: PeriodSwap['status']) => void;
   assignSubstituteTeacher: (assignment: Omit<SubstituteAssignment, 'id'>) => void;
   removeSubstituteAssignment: (id: string) => void;
 

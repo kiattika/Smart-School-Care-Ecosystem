@@ -11,8 +11,8 @@ import { TeacherScheduleList, SubjectPeriod } from './components/TeacherSchedule
 import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { useStore } from './store';
-import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, PeriodSwap, SubstituteAssignment, Student, LateAttendanceRequestRecord } from './types';
-import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Edit3, Sparkles, Shuffle, Calendar, ArrowUpRight, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
+import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, SubstituteAssignment, Student, LateAttendanceRequestRecord } from './types';
+import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Sparkles, Calendar, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { motion, AnimatePresence } from 'motion/react';
@@ -51,15 +51,11 @@ export function TeacherPortal() {
     activeLearningPoints,
     setCourses,
     markAttendanceDone,
-    submitScheduleChangeRequest,
     postTeachingRecords,
-    periodSwaps,
     substituteAssignments,
     studentScores,
     courseScoreSettings,
     submitPostTeachingRecord,
-    submitPeriodSwap,
-    updatePeriodSwapStatus,
     updateStudentScore,
     updateCourseScoreSetting,
     completeSubstituteAssignment
@@ -199,20 +195,7 @@ export function TeacherPortal() {
           sa.date === todayStr
         );
 
-        // 3. Is target of an approved swap for this course
-        const isSwapTarget = periodSwaps.some(ps => 
-          ps.targetCourseId === gc.courseId && 
-          isTeacherEmailMatch(ps.targetEmail, user?.email) && 
-          ps.status === 'APPROVED'
-        );
-        // OR is requester of an approved swap and now teaches the target course instead
-        const isSwapRequester = periodSwaps.some(ps =>
-          ps.requesterCourseId === gc.courseId &&
-          isTeacherEmailMatch(ps.requesterEmail, user?.email) && 
-          ps.status === 'APPROVED'
-        );
-
-        return isOriginal || isSub || isSwapTarget || isSwapRequester;
+        return isOriginal || isSub;
       })
       .map(gc => {
         // Find original course if it exists to get `attendanceTaken` status
@@ -233,11 +216,6 @@ export function TeacherPortal() {
         const isSub = substituteAssignments.some(sa => sa.courseId === gc.courseId && isTeacherEmailMatch(sa.substituteTeacherEmail, user?.email) && sa.date === todayStr);
         if (isSub) {
           roleLabel = "สอนแทน (Substitute)";
-        } else {
-          const isSwap = periodSwaps.some(ps => (ps.targetCourseId === gc.courseId || ps.requesterCourseId === gc.courseId) && ps.status === 'APPROVED');
-          if (isSwap) {
-            roleLabel = "สลับคาบเรียน (Swapped)";
-          }
         }
 
         // level = ระดับชั้น (ม.5/8); ถ้า globalCourse ไม่มี ให้ใช้ roomName ต่อเมื่อ roomName เป็นชื่อชั้นเอง
@@ -269,7 +247,7 @@ export function TeacherPortal() {
     });
 
     return uniqueCourses;
-  }, [globalCourses, user?.email, substituteAssignments, todayStr, periodSwaps, courses]);
+  }, [globalCourses, user?.email, substituteAssignments, todayStr, courses]);
 
   // รายวิชาสำหรับ "สมุดบันทึกคะแนน" — ต้องเป็นวิชาที่ครูคนนี้เป็นผู้สอนหลักจริงเท่านั้น
   // (ไม่รวมคาบสอนแทน/สลับคาบ — คนสอนแทนไม่ใช่ผู้ให้คะแนน) และจัดกลุ่มตาม "รหัสวิชา + ห้อง"
@@ -348,7 +326,6 @@ export function TeacherPortal() {
         id: 'substitutions',
         label: 'จัดการภาระลา & สอนแทน',
         count: substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.date === todayStr).length
-          + periodSwaps.filter(ps => ps.targetEmail === user?.email && ps.status === 'PENDING_TEACHER').length
           // TASK 4 — คำขอลากิจ/แลกคาบที่รอครูท่านนี้กดยืนยัน (ไม่นับรายการที่ตัวเองเสนอเอง เช่น คาบจ่ายคืนของ TASK 3)
           + substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.status === 'PENDING_TEACHER_CONFIRMATION' && sa.proposedByEmail !== user?.email).length,
       },
@@ -361,7 +338,7 @@ export function TeacherPortal() {
       if (tab.hideForRoles && tab.hideForRoles.includes(currentRole)) return false;
       return true;
     });
-  }, [user?.activeRole, myCourses.length, activeLearningPoints, substituteAssignments, user?.email, todayStr, periodSwaps, postTeachingRecords]);
+  }, [user?.activeRole, myCourses.length, activeLearningPoints, substituteAssignments, user?.email, todayStr, postTeachingRecords]);
 
   // Seamless fallback when role changes and current tab is restricted
   useEffect(() => {
@@ -432,11 +409,6 @@ export function TeacherPortal() {
     });
   }, [selectedGradebookCourseId]);
 
-  // New States for Swaps Form
-  const [swapRequesterCourseId, setSwapRequesterCourseId] = useState('');
-  const [swapTargetEmail, setSwapTargetEmail] = useState('');
-  const [swapTargetCourseId, setSwapTargetCourseId] = useState('');
-
   // Dynamic classroom layout configuration
   const courseStudents = useMemo(() => {
     const targetRoom = activeCourse?.room;
@@ -469,11 +441,6 @@ export function TeacherPortal() {
   const [lateCourse, setLateCourse] = useState<Course | null>(null);
   const [latePeriod, setLatePeriod] = useState<SubjectPeriod | null>(null);
   const [lateReason, setLateReason] = useState('');
-
-  // Schedule Request Modal
-  const [showScheduleReqModal, setShowScheduleReqModal] = useState(false);
-  const [scheduleReqCourse, setScheduleReqCourse] = useState<Course | null>(null);
-  const [scheduleReqNote, setScheduleReqNote] = useState('');
 
   // Admin Config Modal
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -568,26 +535,6 @@ export function TeacherPortal() {
     }
   };
 
-  const handleScheduleReqSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!scheduleReqCourse || !scheduleReqNote) return;
-    
-    submitScheduleChangeRequest({
-      courseId: scheduleReqCourse.id,
-      teacherName: user?.displayName || 'Unknown',
-      subjectCode: scheduleReqCourse.code,
-      room: scheduleReqCourse.room,
-      currentSchedule: scheduleReqCourse.schedule || PERIODS[scheduleReqCourse.periodIndex],
-      note: scheduleReqNote
-    });
-    
-    setShowScheduleReqModal(false);
-    setScheduleReqNote('');
-    setScheduleReqCourse(null);
-    setToast('ส่งคำร้องขอสลับตารางสอนเรียบร้อยแล้ว');
-    setTimeout(() => setToast(null), 3000);
-  };
-
   const handleRandomSelect = () => {
     if (courseStudents.length === 0) return;
     setIsShuffling(true);
@@ -645,24 +592,6 @@ export function TeacherPortal() {
     setPostTeachingCourse(null);
 
     setTimeout(() => setToast(null), 4000);
-  };
-
-  const handleSwapSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!swapRequesterCourseId || !swapTargetEmail || !swapTargetCourseId || !user?.email) return;
-
-    submitPeriodSwap({
-      requesterEmail: user.email,
-      targetEmail: swapTargetEmail,
-      requesterCourseId: swapRequesterCourseId,
-      targetCourseId: swapTargetCourseId
-    });
-
-    setToast('ส่งคำร้องขอสลับคาบเรียนไปยังเพื่อนครูแล้ว');
-    setSwapRequesterCourseId('');
-    setSwapTargetEmail('');
-    setSwapTargetCourseId('');
-    setTimeout(() => setToast(null), 3000);
   };
 
   const [isSavingAttendance, setIsSavingAttendance] = useState(false);
@@ -1253,156 +1182,7 @@ export function TeacherPortal() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Form to submit request */}
-                <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4">
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-3">
-                    <Shuffle className="w-5 h-5 text-emerald-400" /> ส่งคำร้องขอสลับภาระงานสอน
-                  </h3>
-                  
-                  <form onSubmit={handleSwapSubmit} className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-bold text-slate-300 mb-1.5">วิชาของท่านที่ต้องการแลกเปลี่ยน</label>
-                      <select
-                        required
-                        value={swapRequesterCourseId}
-                        onChange={e => setSwapRequesterCourseId(e.target.value)}
-                        className="w-full bg-[#0b0f19] border border-slate-800/80 rounded-lg p-2.5 text-sm text-slate-200 outline-none focus:border-emerald-500"
-                      >
-                        <option value="">-- เลือกวิชาของท่าน --</option>
-                        {globalCourses.filter(gc => gc.teacherEmail === user?.email).map(gc => (
-                          <option key={gc.courseId} value={gc.courseId}>{gc.code} {formatCourseTitle(gc.courseName, gc.level, gc.roomName)} - {gc.scheduleString}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-bold text-slate-300 mb-1.5">คุณครูที่ต้องการขอสลับคาบสอนด้วย</label>
-                      <select
-                        required
-                        value={swapTargetEmail}
-                        onChange={e => {
-                          setSwapTargetEmail(e.target.value);
-                          setSwapTargetCourseId('');
-                        }}
-                        className="w-full bg-[#0b0f19] border border-slate-800/80 rounded-lg p-2.5 text-sm text-slate-200 outline-none focus:border-emerald-500"
-                      >
-                        <option value="">-- เลือกคุณครู --</option>
-                        {Array.from(new Map(globalCourses.filter(gc => gc.teacherEmail !== user?.email).map(gc => [gc.teacherEmail, gc])).values()).map(gc => (
-                          <option key={gc.teacherEmail} value={gc.teacherEmail}>{gc.teacherName} ({gc.teacherEmail})</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {swapTargetEmail && (
-                      <div>
-                        <label className="block text-sm font-bold text-slate-300 mb-1.5">วิชาของเพื่อนครูที่ขอแลกเปลี่ยน</label>
-                        <select
-                          required
-                          value={swapTargetCourseId}
-                          onChange={e => setSwapTargetCourseId(e.target.value)}
-                          className="w-full bg-[#0b0f19] border border-slate-800/80 rounded-lg p-2.5 text-sm text-slate-200 outline-none focus:border-emerald-500"
-                        >
-                          <option value="">-- เลือกวิชาของเพื่อนครู --</option>
-                          {globalCourses.filter(gc => gc.teacherEmail === swapTargetEmail).map(gc => (
-                            <option key={gc.courseId} value={gc.courseId}>{gc.code} {formatCourseTitle(gc.courseName, gc.level, gc.roomName)} - {gc.scheduleString}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    <button
-                      type="submit"
-                      disabled={!swapRequesterCourseId || !swapTargetEmail || !swapTargetCourseId}
-                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold rounded-lg transition-colors shadow-lg shadow-emerald-600/20"
-                    >
-                      ยื่นคำร้องสลับคาบเรียน
-                    </button>
-                  </form>
-                </div>
-
-                <div className="space-y-6">
-                  {/* Incoming requests waiting for me */}
-                  <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4">
-                    <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-3">
-                      <ArrowUpRight className="w-5 h-5 text-blue-400 rotate-180" /> คำร้องขอสลับคาบเรียนที่ส่งถึงท่าน
-                    </h3>
-                    
-                    <div className="space-y-3">
-                      {periodSwaps.filter(ps => ps.targetEmail === user?.email && ps.status === 'PENDING_TEACHER').length === 0 ? (
-                        <div className="text-center py-6 text-xs text-slate-500">ไม่มีคำร้องสลับคาบส่งถึงท่าน</div>
-                      ) : (
-                        periodSwaps.filter(ps => ps.targetEmail === user?.email && ps.status === 'PENDING_TEACHER').map(ps => {
-                          const reqCourse = globalCourses.find(c => c.courseId === ps.requesterCourseId);
-                          const targetCourse = globalCourses.find(c => c.courseId === ps.targetCourseId);
-                          return (
-                            <div key={ps.id} className="bg-[#0b0f19] p-4 border border-slate-800/80 rounded-xl space-y-3">
-                              <div className="flex justify-between items-start">
-                                <div className="text-xs text-slate-400">จาก: <span className="text-white font-bold">{reqCourse?.teacherName}</span></div>
-                                <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[10px]">รออนุมัติ</span>
-                              </div>
-                              <p className="text-xs text-slate-300">
-                                ขอแลกคาบวิชา <span className="text-emerald-400 font-bold">{reqCourse?.courseName} ({reqCourse?.scheduleString})</span> ของเขา กับวิชา <span className="text-yellow-400 font-bold">{targetCourse?.courseName} ({targetCourse?.scheduleString})</span> ของท่าน
-                              </p>
-                              <div className="flex gap-2 justify-end">
-                                <button
-                                  onClick={() => { updatePeriodSwapStatus(ps.id, 'PENDING_ADMIN'); setToast('อนุมัติคำขอแล้ว รอวิชาการพิจารณาขั้นสุดท้าย'); setTimeout(() => setToast(null), 3000); }}
-                                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-md transition-colors"
-                                >
-                                  ยอมรับสลับคาบ (Approve)
-                                </button>
-                                <button
-                                  onClick={() => { updatePeriodSwapStatus(ps.id, 'REJECTED'); setToast('ปฏิเสธคำขอสลับคาบแล้ว'); setTimeout(() => setToast(null), 3000); }}
-                                  className="px-3 py-1 bg-red-600/15 hover:bg-red-600/20 text-red-400 border border-red-500/20 text-xs font-bold rounded-md transition-colors"
-                                >
-                                  ปฏิเสธ (Reject)
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
-                  {/* My Sent requests */}
-                  <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4">
-                    <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-3">
-                      <ArrowUpRight className="w-5 h-5 text-amber-400" /> สถานะคำร้องที่ท่านยื่นขอ
-                    </h3>
-                    
-                    <div className="space-y-3">
-                      {periodSwaps.filter(ps => ps.requesterEmail === user?.email).length === 0 ? (
-                        <div className="text-center py-6 text-xs text-slate-500">ท่านยังไม่เคยยื่นคำร้องสลับคาบ</div>
-                      ) : (
-                        periodSwaps.filter(ps => ps.requesterEmail === user?.email).map(ps => {
-                          const reqCourse = globalCourses.find(c => c.courseId === ps.requesterCourseId);
-                          const targetCourse = globalCourses.find(c => c.courseId === ps.targetCourseId);
-                          return (
-                            <div key={ps.id} className="bg-[#0b0f19] p-4 border border-slate-800/80 rounded-xl flex items-center justify-between gap-4">
-                              <div className="text-xs space-y-1">
-                                <div className="text-slate-300 font-bold">สลับ: {reqCourse?.courseName} ⇆ {targetCourse?.courseName}</div>
-                                <div className="text-slate-400">ผู้รับ: {targetCourse?.teacherName}</div>
-                              </div>
-                              <span className={cn(
-                                "px-2.5 py-1 rounded text-[10px] font-bold border",
-                                ps.status === 'PENDING_TEACHER' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                                ps.status === 'PENDING_ADMIN' ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                                ps.status === 'APPROVED' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                                "bg-red-500/10 text-red-400 border-red-500/20"
-                              )}>
-                                {ps.status === 'PENDING_TEACHER' ? 'รอครูอนุมัติ' :
-                                 ps.status === 'PENDING_ADMIN' ? 'รอแอดมินอนุมัติ' :
-                                 ps.status === 'APPROVED' ? 'อนุมัติเสร็จสมบูรณ์' : 'ปฏิเสธ'}
-                              </span>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Substitute assignments */}
+                {/* Substitute assignments */}
                   <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4">
                     <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-3">
                       <Calendar className="w-5 h-5 text-emerald-400" /> งานสอนแทนที่ท่านได้รับมอบหมาย (อนุมัติครบ 4 ขั้นแล้ว)
@@ -1464,8 +1244,6 @@ export function TeacherPortal() {
                       })()}
                     </div>
                   </div>
-                </div>
-                </div>
               </div>
             )}
 
@@ -2427,60 +2205,6 @@ export function TeacherPortal() {
         </div>
       )}
 
-      {/* Schedule Change Request Modal */}
-      {showScheduleReqModal && scheduleReqCourse && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
-          <div className="bg-[#161f30] border border-blue-500/30 rounded-xl w-full max-w-md shadow-xl overflow-hidden flex flex-col">
-            <div className="p-5 border-b border-slate-800/80 flex justify-between items-center bg-blue-500/10">
-              <h2 className="text-lg font-bold text-blue-400 flex items-center gap-2">
-                <Edit3 className="w-5 h-5" /> แจ้งขอแก้ไขตารางสอน
-              </h2>
-              <button onClick={() => setShowScheduleReqModal(false)} className="text-blue-400/60 hover:text-blue-400 transition-colors">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <form onSubmit={handleScheduleReqSubmit} className="p-6 space-y-4">
-              <div className="bg-[#0b0f19] p-4 rounded-lg border border-slate-800/80 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">วิชา:</span>
-                  <span className="font-bold text-white">{scheduleReqCourse.code} {scheduleReqCourse.name}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">ห้องเรียน:</span>
-                  <span className="font-bold text-white">{scheduleReqCourse.room}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">ตารางปัจจุบัน:</span>
-                  <span className="font-bold text-blue-400">{scheduleReqCourse.schedule || PERIODS[scheduleReqCourse.periodIndex]}</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-slate-300 mb-2">ข้อความถึงแอดมิน (โปรดระบุคาบที่ต้องการสลับ)</label>
-                <textarea 
-                  required
-                  value={scheduleReqNote}
-                  onChange={e => setScheduleReqNote(e.target.value)}
-                  placeholder="เช่น ขอสลับวิชา ค21101 ม.1/1 จาก พฤ5 ไปเป็น อ2 สัปดาห์นี้"
-                  rows={4}
-                  className="w-full bg-[#0b0f19] border border-slate-800/80 rounded-lg p-3 text-sm text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all resize-none"
-                />
-              </div>
-
-              <div className="pt-2">
-                <button 
-                  type="submit"
-                  disabled={!scheduleReqNote}
-                  className="w-full bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 text-blue-400 disabled:opacity-50 font-bold py-3 rounded-xl transition-all"
-                >
-                  ส่งคำร้องให้ผู้ดูแลระบบ
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Admin Schedule Config Simulation Modal */}
       {showConfigModal && (
