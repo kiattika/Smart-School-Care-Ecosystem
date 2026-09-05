@@ -1,3 +1,5 @@
+import { scheduleDocIdFor, primaryTeacherKey } from '../lib/scheduleSyncReplace';
+
 export type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 
 /**
@@ -560,10 +562,12 @@ export function generateScheduleDocuments(
   for (const row of courseRows) {
     if (!row.isValid || row.slots.length === 0) continue;
 
-    const cleanRoom = (row.room || row.level || 'all').replace(/[^a-zA-Z0-9]/g, '_');
+    // ใช้สูตร id เดียวกับ handleImport/computeSyncReplacePlan เสมอ (ดู scheduleSyncReplace.ts) —
+    // กันไม่ให้ ACTIVITY ของครูหลายคนที่ชื่อ+วัน-คาบตรงกัน (PLC/โฮมรูม/แนะแนว ฯลฯ) ชนกันเป็น doc เดียว
+    const teacherKey = primaryTeacherKey(row);
 
     for (const slot of row.slots) {
-      const scheduleDocId = `sch_${row.subjectCode}_${cleanRoom}_${slot.dayOfWeek}_p${slot.periodNumber}`;
+      const scheduleDocId = scheduleDocIdFor(row.subjectCode, row.room, row.level, slot.dayOfWeek, slot.periodNumber, row.subjectType, teacherKey);
 
       documents.push({
         id: scheduleDocId,

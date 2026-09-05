@@ -19,7 +19,7 @@ import {
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { writeBatch, doc, serverTimestamp, collection, getDocs, onSnapshot } from 'firebase/firestore';
-import { computeSyncReplacePlan } from '../lib/scheduleSyncReplace';
+import { computeSyncReplacePlan, scheduleDocIdFor, primaryTeacherKey } from '../lib/scheduleSyncReplace';
 import { db } from '../lib/firebase';
 import { useStore } from '../store';
 import { Student, Course, GlobalCourse, UserRole } from '../types';
@@ -869,7 +869,6 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             // COURSE Import
             if (parsedData.isTeacherLoadReport) {
               // Dedicated multi-slot expansion for Teacher Load Report (TASK 7 & TASK 8)
-              const cleanRoom = (parsedData.room || parsedData.level || 'all').replace(/[^a-zA-Z0-9]/g, '_');
               const dayThNames: Record<string, string> = {
                 monday: 'จันทร์',
                 tuesday: 'อังคาร',
@@ -880,10 +879,15 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 sunday: 'อาทิตย์'
               };
 
-              // sanitize รหัสวิชาก่อนใช้เป็นส่วนของ document id (กัน "/" ช่องว่าง ฯลฯ; \p{M} = สระ/วรรณยุกต์ไทย)
-              const safeCode = String(parsedData.subjectCode || 'X').replace(/[^\p{L}\p{N}\p{M}_-]+/gu, '_');
+              // teacherKey ต้องคำนวณตัวเดียวกับ computeSyncReplacePlan (ดู scheduleSyncReplace.ts)
+              // ไม่งั้น doc id ที่เขียนจริงกับ id ที่ใช้ตรวจ stale จะไม่ตรงกัน
+              const teacherKey = primaryTeacherKey(parsedData);
               for (const slot of (parsedData.slots || [])) {
-                const scheduleDocId = `sch_${safeCode}_${cleanRoom}_${slot.dayOfWeek}_p${slot.periodNumber}`;
+                // ROOT CAUSE FIX: แถว ACTIVITY (PLC/โฮมรูม/ลูกเสือ/แนะแนว ฯลฯ) มักไม่มีห้องเฉพาะ
+                // และครูหลายคนมักมีกิจกรรมชื่อเดียวกัน+วัน-คาบเดียวกันพร้อมกันทั้งโรงเรียน — ต้องฝัง
+                // identity ครูเข้าไปใน doc id (ผ่าน scheduleDocIdFor) ไม่งั้น batch.set({merge:true})
+                // ของครูที่ประมวลผลทีหลังในไฟล์จะทับ teacherId ของครูคนก่อนหน้าเงียบๆ ที่ id เดียวกัน
+                const scheduleDocId = scheduleDocIdFor(parsedData.subjectCode, parsedData.room, parsedData.level, slot.dayOfWeek, slot.periodNumber, parsedData.subjectType, teacherKey);
                 const scheduleRef = doc(db, 'schedules', scheduleDocId);
 
                 const schedulePayload = {
@@ -910,7 +914,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 batch.set(scheduleRef, schedulePayload, { merge: true });
 
                 const scheduleLabel = `${dayThNames[slot.dayOfWeek] || slot.dayOfWeek} คาบ ${slot.periodNumber}`;
-                const courseSlotId = `course_${safeCode}_${cleanRoom}_${slot.dayOfWeek}_p${slot.periodNumber}`;
+                // ใช้ต่อจาก scheduleDocId เสมอ (ตัด prefix "sch_" ออก) กันไม่ให้ id คู่นี้ไหลออกจากกันอีก
+                const courseSlotId = `course_${scheduleDocId.slice(4)}`;
                 const finalTeacherEmail = parsedData.matchedTeacherEmail || parsedData.teacherEmail || (parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : 'kiattisak@utd.ac.th');
 
                 newCoursesToStore.push({

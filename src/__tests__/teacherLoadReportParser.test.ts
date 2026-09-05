@@ -475,5 +475,42 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
         expect(doc.unlinkedTeacherEmail).toBe('foreigner@utd.ac.th');
       }
     });
+
+    // ROOT CAUSE (พิสูจน์แล้วด้วย Firestore Emulator จริง): PLC/โฮมรูม/ลูกเสือ/แนะแนว ฯลฯ มักไม่มี
+    // ห้องเรียนเฉพาะ และครูหลายคนมักมีกิจกรรมชื่อเดียวกัน+วัน-คาบเดียวกันพร้อมกันทั้งโรงเรียน — เดิม
+    // scheduleDocId ไม่มี identity ครู → ครูที่ถูกประมวลผลทีหลังในไฟล์ทับของครูคนก่อนหน้าเงียบๆ
+    // (ครูที่ไม่ใช่คนสุดท้ายในไฟล์เหลือคาบกิจกรรม 0 คาบเสมอ ทั้งที่ parse/match ถูกต้องทุกขั้นตอน)
+    it('ROOT CAUSE FIX: ครู 2 คนมีกิจกรรม PLC ชื่อเดียวกัน+วัน-คาบเดียวกัน (ไม่มีห้อง) → ต้องได้ doc คนละใบ ไม่ทับกัน', () => {
+      const staff = [
+        { id: 'test_admin_kiattika_001', email: 'kiattika@utd.ac.th', fullName: 'นายเกียรติศักดิ์ แก้วหล้า' },
+        { id: 'teacher-somchai-uid', email: 'somchai@utd.ac.th', fullName: 'นายสมชาย ใจดี' },
+      ];
+      const rows = [
+        // kiattika มาก่อนในไฟล์ ("ที่ 1")
+        { 'กลุ่มสาระ': 'คณิตศาสตร์', 'ที่': '1', 'ชื่อ-สกุล': 'นายเกียรติศักดิ์ แก้วหล้า', 'อีเมล์': 'kiattika@utd.ac.th',
+          'ลำดับวิชา': '1', 'รหัสวิชา': '-', 'ชื่อรายวิชา': 'PLC', 'คาบ/ห้อง': '1 / -', 'วัน-คาบที่สอน': 'พ8', 'ระดับ': 'Non-Student', 'สรุปคาบ': '1' },
+        // somchai มาทีหลัง ("ที่ 4") — กิจกรรมชื่อเดียวกัน วัน-คาบเดียวกัน ไม่มีห้องเหมือนกัน
+        { 'กลุ่มสาระ': 'วิทยาศาสตร์', 'ที่': '4', 'ชื่อ-สกุล': 'นายสมชาย ใจดี', 'อีเมล์': 'somchai@utd.ac.th',
+          'ลำดับวิชา': '1', 'รหัสวิชา': '-', 'ชื่อรายวิชา': 'PLC', 'คาบ/ห้อง': '1 / -', 'วัน-คาบที่สอน': 'พ8', 'ระดับ': 'Non-Student', 'สรุปคาบ': '1' },
+      ];
+      const { courseRows } = parseTeacherLoadReport(rows, staff);
+      expect(courseRows.every(r => r.isValid)).toBe(true);
+
+      const docs = generateScheduleDocuments(courseRows);
+      expect(docs).toHaveLength(2);
+      // เดิม (ก่อนแก้) ทั้งสอง doc จะมี id เดียวกัน → เหลือ 1 doc ใน Map/Firestore จริง
+      expect(docs[0].id).not.toBe(docs[1].id);
+
+      const kiattikaDoc = docs.find(d => d.teacherId === 'test_admin_kiattika_001');
+      const somchaiDoc = docs.find(d => d.teacherId === 'teacher-somchai-uid');
+      expect(kiattikaDoc).toBeDefined();
+      expect(somchaiDoc).toBeDefined();
+
+      // จำลอง batch.set({merge:true}) จริง: เขียนตามลำดับไฟล์ลง Map เดียวกัน (key = doc id)
+      const written = new Map<string, typeof docs[number]>();
+      for (const d of docs) written.set(d.id, d);
+      expect(written.size).toBe(2); // ต้องไม่ยุบเหลือ 1 — นี่คืออาการเดิมที่ทำให้ kiattika เหลือ 0 คาบ
+      expect(written.get(kiattikaDoc!.id)?.teacherId).toBe('test_admin_kiattika_001');
+    });
   });
 });
