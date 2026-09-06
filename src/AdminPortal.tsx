@@ -1,6 +1,6 @@
 import { cn } from "./lib/utils";
 import React, { useState } from 'react';
-import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, Mailbox, Edit3, Check, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, PanelLeft, PanelLeftClose, PanelLeftOpen, Menu, X, ChevronLeft, ChevronRight, FileSpreadsheet, ArrowRight, GraduationCap } from 'lucide-react';
+import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, PanelLeft, PanelLeftClose, PanelLeftOpen, Menu, X, ChevronLeft, ChevronRight, FileSpreadsheet, ArrowRight, GraduationCap } from 'lucide-react';
 import clsx, { ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useStore } from './store';
@@ -16,26 +16,18 @@ import { BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export function AdminPortal() {
-  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'requests' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods'>('teaching-load');
+  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods'>('teaching-load');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [bulkImportType, setBulkImportType] = useState<ImportType>('COURSE');
   const [toast, setToast] = useState<string | null>(null);
   
-  const { 
-    scheduleChangeRequests, 
-    updateScheduleChangeRequestStatus, 
-    updateCourseSchedule, 
-    courses, 
-    periodSwaps,
+  const {
     substituteAssignments,
-    updatePeriodSwapStatus,
     assignSubstituteTeacher,
     removeSubstituteAssignment,
   } = useStore();
-  
-  const [editingSchedule, setEditingSchedule] = useState<{ id: string, value: string } | null>(null);
 
   // New states for substitution assignment form
   const [subCourseId, setSubCourseId] = useState<string>('');
@@ -47,11 +39,8 @@ export function AdminPortal() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const pendingRequestsCount = scheduleChangeRequests.filter(r => r.status === 'PENDING').length;
-  const pendingAbsenceCount = periodSwaps.filter(ps => ps.status === 'PENDING_ADMIN').length;
-
   interface AdminNavItem {
-    id: 'teaching-load' | 'import' | 'requests' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods';
+    id: 'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods';
     label: string;
     fullLabel: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -64,8 +53,7 @@ export function AdminPortal() {
   const adminNavItems: AdminNavItem[] = [
     { id: 'teaching-load', label: 'ตารางภาระงานสอน', fullLabel: 'ตารางภาระงานสอนครู (Teaching Load)', icon: Layers, badge: null, color: 'text-blue-400', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
     { id: 'import', label: 'นำเข้าภาระงานสอน', fullLabel: 'นำเข้าภาระงานสอน (Import Excel)', icon: Upload, badge: null, color: 'text-blue-400', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
-    { id: 'requests', label: 'คำร้องสลับคาบสอน', fullLabel: 'คำร้องขอสลับคาบสอน (Requests)', icon: Mailbox, badge: pendingRequestsCount > 0 ? pendingRequestsCount : null, color: 'text-blue-400', badgeColor: 'bg-red-500', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
-    { id: 'absence-sub', label: 'ลาสอน & ครูสอนแทน', fullLabel: 'ลาสอน & จัดครูสอนแทน (Substitute)', icon: Clock, badge: pendingAbsenceCount > 0 ? pendingAbsenceCount : null, color: 'text-amber-400', badgeColor: 'bg-amber-500', activeStyle: 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-[inset_4px_0_0_rgba(245,158,11,1)]' },
+    { id: 'absence-sub', label: 'ลาสอน & ครูสอนแทน', fullLabel: 'ลาสอน & จัดครูสอนแทน (Substitute)', icon: Clock, badge: null, color: 'text-amber-400', badgeColor: 'bg-amber-500', activeStyle: 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-[inset_4px_0_0_rgba(245,158,11,1)]' },
     { id: 'sub-analytics', label: 'วิเคราะห์สอนแทน & PA', fullLabel: 'วิเคราะห์งานสอนแทน & PA', icon: BarChart3, badge: null, color: 'text-indigo-400', activeStyle: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-[inset_4px_0_0_rgba(99,102,241,1)]' },
     { id: 'users', label: 'จัดการสิทธิ์บุคลากร', fullLabel: 'จัดการสิทธิ์บุคลากร (User RBAC)', icon: Users, badge: null, color: 'text-blue-400', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
     { id: 'students', label: 'จัดการนักเรียน', fullLabel: 'จัดการข้อมูลนักเรียน (Student Roster)', icon: GraduationCap, badge: null, color: 'text-purple-400', activeStyle: 'bg-purple-500/10 text-purple-400 border-purple-500/20 shadow-[inset_4px_0_0_rgba(168,85,247,1)]' },
@@ -430,109 +418,6 @@ export function AdminPortal() {
                   </div>
                 </div>
               )}
-
-          {activeTab === 'requests' && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="flex justify-between items-end border-b border-white/5 pb-4">
-                <div>
-                  <h2 className="text-2xl font-bold text-white tracking-tight">Schedule Requests Inbox</h2>
-                  <p className="text-slate-400 mt-1 text-sm">จัดการคำร้องขอแก้ไขและสลับตารางสอนจากครูผู้สอน</p>
-                </div>
-              </div>
-
-              {scheduleChangeRequests.length === 0 ? (
-                <div className="text-center py-20 border border-dashed border-white/10 rounded-2xl bg-[#151921]">
-                  <Mailbox className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-                  <h3 className="text-lg font-bold text-slate-300 mb-2">ไม่มีคำร้องขอใหม่</h3>
-                  <p className="text-slate-500">ยังไม่มีการแจ้งขอสลับคาบสอนในขณะนี้</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {scheduleChangeRequests.map(req => {
-                    const course = courses.find(c => c.id === req.courseId);
-                    
-                    return (
-                      <div key={req.id} className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 transition-all">
-                        <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
-                          <div className="space-y-4 flex-1">
-                            <div>
-                              <div className="flex items-center gap-3 mb-1">
-                                <span className={cn(
-                                  "text-xs font-bold px-2 py-1 rounded",
-                                  req.status === 'PENDING' ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
-                                  req.status === 'APPROVED' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
-                                  "bg-red-500/10 text-red-400 border border-red-500/20"
-                                )}>
-                                  {req.status === 'PENDING' ? 'รออนุมัติ' : req.status === 'APPROVED' ? 'อนุมัติแล้ว' : 'ไม่อนุมัติ'}
-                                </span>
-                                <span className="text-slate-400 text-sm">
-                                  {req.createdAt ? (typeof req.createdAt === 'string' ? new Date(req.createdAt).toLocaleDateString('th-TH') : req.createdAt.toLocaleDateString?.('th-TH')) : '-'}
-                                </span>
-                              </div>
-                              <h3 className="text-lg font-bold text-white">{req.teacherName}</h3>
-                              <p className="text-slate-400">วิชา: <span className="text-slate-200">{req.subjectCode}</span> | ห้อง: <span className="text-slate-200">{req.room}</span></p>
-                            </div>
-                            
-                            <div className="bg-white/5 border border-white/10 rounded-lg p-4">
-                              <div className="text-sm font-bold text-slate-300 mb-1">หมายเหตุการขอแก้ไข:</div>
-                              <p className="text-slate-400 text-sm">"{req.note}"</p>
-                            </div>
-                          </div>
-                          
-                          <div className="w-full md:w-64 bg-slate-900 border border-white/5 rounded-xl p-4 shrink-0 flex flex-col justify-center">
-                            <div className="text-sm text-slate-400 mb-2 font-medium">ตารางสอนปัจจุบัน: <span className="font-mono text-slate-200">{course?.schedule || req.currentSchedule}</span></div>
-                            
-                            {req.status === 'PENDING' && (
-                              <div className="space-y-3">
-                                {editingSchedule?.id === req.id ? (
-                                  <div className="flex gap-2">
-                                    <input 
-                                      type="text" 
-                                      value={editingSchedule.value}
-                                      onChange={(e) => setEditingSchedule({ ...editingSchedule, value: e.target.value })}
-                                      className="w-full bg-black/50 border border-blue-500/50 rounded-lg p-2 text-sm text-white font-mono outline-none focus:ring-1 focus:ring-blue-500"
-                                      placeholder="เช่น อ2, พฤ3-4"
-                                    />
-                                    <button
-                                      onClick={() => {
-                                        updateCourseSchedule(req.courseId, editingSchedule.value);
-                                        updateScheduleChangeRequestStatus(req.id, 'APPROVED');
-                                        setEditingSchedule(null);
-                                        showToast('อัปเดตตารางสอนสำเร็จ');
-                                      }}
-                                      className="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-lg transition-colors"
-                                    >
-                                      <Check className="w-4 h-4" />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="flex gap-2">
-                                    <button
-                                      onClick={() => setEditingSchedule({ id: req.id, value: course?.schedule || req.currentSchedule })}
-                                      className="flex-1 bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
-                                    >
-                                      <Edit3 className="w-4 h-4" /> แก้ไขตาราง (Overwrite)
-                                    </button>
-                                  </div>
-                                )}
-                                
-                                <button
-                                  onClick={() => updateScheduleChangeRequestStatus(req.id, 'REJECTED')}
-                                  className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 py-2 rounded-lg text-sm font-medium transition-colors"
-                                >
-                                  ปฏิเสธ (Reject)
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
 
           {activeTab === 'absence-sub' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">

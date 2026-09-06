@@ -9,13 +9,45 @@
  * → กิจกรรมเดิมของครูจะโดนตีความว่า stale แล้วโดนลบทั้งหมด (bug "คาบกิจกรรมหายหมด")
  */
 
-/** สร้าง schedule document id ให้ตรงกับ handleImport (Teacher Load Report path) */
+/**
+ * สร้าง schedule document id ให้ตรงกับ handleImport (Teacher Load Report path)
+ *
+ * ⚠️ ROOT CAUSE (คาบกิจกรรมของครูบางคนหายไปทั้งหมดหลัง import): แถวประเภท ACTIVITY (PLC,
+ * กิจกรรมโฮมรูม, ลูกเสือ-เนตรนารี, แนะแนว ฯลฯ) มักไม่มีห้องเรียนเฉพาะ (room/level ว่างหรือ
+ * "Non-Student") และมักเป็นกิจกรรม "ชื่อเดียวกัน + วัน-คาบเดียวกัน" ของครูหลายคนพร้อมกันทั้ง
+ * โรงเรียน/กลุ่มสาระ — แต่ในรายงานภาระงานสอน แต่ละแถวคือภาระงานของครู "แต่ละคน" แยกกัน ไม่ใช่
+ * คาบเรียนร่วมห้องเดียว ถ้าไม่ฝัง identity ครูเข้าไปใน id ครูที่ถูกประมวลผลทีหลังในไฟล์จะได้ id
+ * เดียวกับครูคนก่อน แล้ว batch.set(..., {merge:true}) จะทับ teacherId/teacherIds ของครูคนก่อน
+ * หน้าเงียบๆ (พิสูจน์แล้วด้วย Firestore Emulator จริง — ครูที่ไม่ใช่คนสุดท้ายในไฟล์ที่มีกิจกรรม
+ * ชื่อเดียวกัน+วัน-คาบเดียวกัน จะเหลือคาบกิจกรรม 0 คาบเสมอ)
+ *
+ * แก้โดยฝัง teacherKey (primaryTeacherKey) เข้าไปใน id เฉพาะแถว subjectType === 'ACTIVITY'
+ * เท่านั้น — แถว MAIN ไม่แตะ (room/level ของ MAIN ระบุห้องเรียนจริงที่ไม่ชนกันข้ามครูอยู่แล้ว
+ * และมี schedule doc เก่าที่อ้างอิง id รูปแบบเดิมอยู่จริงใน production)
+ */
 export function scheduleDocIdFor(
   subjectCode: string, room: string, level: string, dayOfWeek: string, periodNumber: number,
+  subjectType?: string, teacherKey?: string,
 ): string {
   const safeCode = String(subjectCode || 'X').replace(/[^\p{L}\p{N}\p{M}_-]+/gu, '_');
   const cleanRoom = (room || level || 'all').replace(/[^a-zA-Z0-9]/g, '_');
-  return `sch_${safeCode}_${cleanRoom}_${dayOfWeek}_p${periodNumber}`;
+  const safeTeacherKey = teacherKey
+    ? String(teacherKey).replace(/[^\p{L}\p{N}\p{M}_-]+/gu, '_').slice(0, 40)
+    : '';
+  const teacherSegment = subjectType === 'ACTIVITY' && safeTeacherKey ? `_t${safeTeacherKey}` : '';
+  return `sch_${safeCode}_${cleanRoom}${teacherSegment}_${dayOfWeek}_p${periodNumber}`;
+}
+
+/**
+ * ตัวระบุครูหลักที่ใช้ฝังใน schedule doc id ของแถวกิจกรรม (ดู scheduleDocIdFor ด้านบน)
+ * ต้องเป็นตัวเดียวกันทั้งตอนคำนวณ newIds (sync/replace) และตอนเขียนจริง (handleImport)
+ * ลำดับความสำคัญ: UID จริงที่จับคู่ได้ > อีเมลที่จับคู่ได้ > อีเมลดิบจากไฟล์ > ชื่อครู
+ * (ไม่ fabricate ID ใหม่ — ใช้ identity ที่มีอยู่แล้วของครูคนนั้นเป็น key เท่านั้น)
+ */
+export function primaryTeacherKey(p: Record<string, any>): string {
+  return String(
+    p.matchedTeacherId || p.matchedTeacherEmail || p.unlinkedTeacherEmail || p.teacherEmail || p.teacherName || p.unlinkedTeacherName || ''
+  ).toLowerCase().trim();
 }
 
 /** ตัวระบุครูของ schedule doc ที่มีอยู่แล้วใน Firestore (uid / อีเมล / ชื่อ) */
@@ -73,7 +105,7 @@ export function computeSyncReplacePlan(
     const hasError = keys.some(k => teachersWithErrors.has(k));
     if (!hasError) keys.forEach(k => fullyCoveredTeacherKeys.add(k));
     for (const slot of (p.slots || [])) {
-      newIds.add(scheduleDocIdFor(p.subjectCode, p.room, p.level, slot.dayOfWeek, slot.periodNumber));
+      newIds.add(scheduleDocIdFor(p.subjectCode, p.room, p.level, slot.dayOfWeek, slot.periodNumber, p.subjectType, primaryTeacherKey(p)));
     }
   }
 

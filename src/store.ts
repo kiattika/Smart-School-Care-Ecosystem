@@ -56,7 +56,8 @@ import {
   payBillingInvoiceFirestore,
   sendParentTeacherMessageFirestore,
   bookParentAppointmentFirestore,
-  saveActiveLearningLogFirestore
+  saveActiveLearningLogFirestore,
+  updateBehaviorScoreAndTriggerAlert
 } from './services/firestoreService';
 
 const STATUS_CYCLE: AttendanceStatus[] = ['PRESENT', 'ABSENT', 'LATE', 'LEAVE'];
@@ -101,7 +102,6 @@ export const useStore = create<StoreState>((set, get) => ({
   courses: [],
   globalCourses: [],
   homeroomAssignments: {},
-  scheduleChangeRequests: [],
   analytics: [],
   leaveRequests: [],
   scheduleConfig: {
@@ -148,7 +148,6 @@ export const useStore = create<StoreState>((set, get) => ({
   substituteAssignments: [],
   postTeachingRecords: [],
   staffDirectory: [],
-  periodSwaps: [],
   homeVisits: [],
 
   schoolDuties: [],
@@ -189,93 +188,17 @@ export const useStore = create<StoreState>((set, get) => ({
     };
   }),
 
-  adjustBehaviorScore: (studentId: string, amount: number) => set((state) => {
-    let updatedAnalytics = state.analytics.map(a => {
-      if (a.studentId === studentId) {
-        return { ...a, behaviorScore: Math.max(0, Math.min(100, a.behaviorScore + amount)) };
-      }
-      return a;
-    });
-
-    const studentAnalytic = updatedAnalytics.find(a => a.studentId === studentId);
-    const newScore = studentAnalytic?.behaviorScore ?? 100;
-
-    let updatedStudents = [...state.students];
-    let updatedConferences = [...state.parentConferences];
-    let updatedNotifications = [...state.parentNotifications];
-
-    const studentIndex = updatedStudents.findIndex(s => s.studentId === studentId);
-    if (studentIndex !== -1) {
-      const studentObj = updatedStudents[studentIndex];
-      const riskLevel = newScore < 70 ? 'CRITICAL' : 'LOW';
-      updatedStudents[studentIndex] = {
-        ...studentObj,
-        ...({ riskLevel } as any)
-      };
-    }
-
-    const studentObj = state.students.find(s => s.studentId === studentId);
-    const studentName = studentObj ? studentObj.name : `นักเรียนรหัส ${studentId}`;
-    const parentUid = (studentObj as any)?.parentUid || (studentObj as any)?.parentId || `parent_${studentId}`;
-    const parentId = (studentObj as any)?.parentId || parentUid;
-
-    // Handle warning threshold (< 80)
-    if (newScore < 80) {
-      const hasWarning = updatedNotifications.some(n => n.studentId === studentId && n.type === 'warning' && n.remainingScore === newScore);
-      if (!hasWarning) {
-        updatedNotifications.push({
-          id: `notif_warn_${Date.now()}`,
-          parentUid,
-          parentId,
-          studentId,
-          studentName,
-          title: "⚠️ คะแนนพฤติกรรมเริ่มลดลง",
-          message: `แจ้งเตือนความประพฤติ: คะแนนพฤติกรรมของน้อง${studentName} ลดลงต่ำกว่าเกณฑ์เฝ้าระวัง (ปัจจุบันเหลือ ${newScore} คะแนน) กรุณาช่วยตักเตือนและติดตามอย่างใกล้ชิดค่ะ`,
-          status: 'unread',
-          createdAt: new Date(),
-          pointsDeducted: amount < 0 ? Math.abs(amount) : 0,
-          remainingScore: newScore,
-          type: 'warning'
-        });
-      }
-    }
-
-    // Handle critical threshold (< 70)
-    if (newScore < 70) {
-      const hasConf = updatedConferences.some(c => c.studentId === studentId && c.status === 'PENDING');
-      if (!hasConf) {
-        updatedConferences.push({
-          id: `conf_${Date.now()}`,
-          studentId,
-          studentName,
-          parentUid,
-          parentId,
-          status: 'PENDING',
-          title: "นัดหมายพบฝ่ายปกครอง (คะแนนต่ำกว่า 70 คะแนน)",
-          message: `เนื่องจากคะแนนพฤติกรรมคงเหลือของน้อง${studentName} อยู่ในระดับวิกฤต (ปัจจุบันเหลือ ${newScore} คะแนน) ซึ่งต่ำกว่าเกณฑ์ของโรงเรียน เพื่อดูแลช่วยเหลือนักเรียนอย่างมีประสิทธิภาพ ทางฝ่ายปกครองจึงจำเป็นต้องขอสัญญานัดหมายเพื่อพูดคุยปรับทัศนคติร่วมกัน`,
-          createdAt: new Date(),
-          remainingScore: newScore,
-          scheduledDate: null,
-          scheduledTime: null,
-          availableSlots: [
-            "วันจันทร์ 09:00 - 10:00 น.",
-            "วันอังคาร 10:30 - 11:30 น.",
-            "วันพุธ 13:00 - 14:00 น.",
-            "วันพฤหัสบดี 14:30 - 15:30 น.",
-            "วันศุกร์ 13:30 - 14:30 น."
-          ],
-          notes: ""
-        });
-      }
-    }
-
-    return {
-      analytics: updatedAnalytics,
-      students: updatedStudents,
-      parentConferences: updatedConferences,
-      parentNotifications: updatedNotifications
-    };
-  }),
+  // FIX (Task 0 — ตรวจสอบ behaviorScore): เดิมฟังก์ชันนี้แก้แค่ state.analytics (session-local,
+  // เริ่มต้นว่างเปล่าเสมอและไม่เคยมีใคร push รายการใหม่เข้าไปเลย — เป็นแค่ .map() ทับของเดิมที่ไม่มีอยู่จริง)
+  // ทำให้ปุ่ม +/- คะแนนพฤติกรรมในหน้าครูเป็นปุ่มหลอก: กดแล้วตัวเลขที่แสดงไม่เคยขยับเลยเพราะอ่านจาก
+  // analytics.find() ที่ว่างเปล่าตลอดกาลอยู่ดี — เปลี่ยนไปเรียก Firestore transaction จริง
+  // (updateBehaviorScoreAndTriggerAlert — เขียนไว้แล้วแต่ไม่เคยถูกเรียกใช้จริงมาก่อน) ซึ่งอัปเดต
+  // students/{id}.behaviorScore + riskLevel, บันทึก discipline_logs, และสร้าง parent_notifications/
+  // parent_conferences ของจริงให้เอง — ตัวเลขไหลกลับมาที่ UI ผ่าน useRealStudents() (real-time) แทน
+  adjustBehaviorScore: (studentId: string, amount: number, reason?: string) => {
+    updateBehaviorScoreAndTriggerAlert(studentId, amount, reason || 'ปรับคะแนนพฤติกรรมด่วนโดยครูผู้สอน')
+      .catch(err => console.warn('[adjustBehaviorScore] Firestore update failed:', err));
+  },
 
   submitLeaveRequest: (studentId: string, date: Date, reason: string) => set((state) => ({
     leaveRequests: [
@@ -381,15 +304,6 @@ export const useStore = create<StoreState>((set, get) => ({
   updateCourseSchedule: (courseId: string, newSchedule: string) => set((state) => ({
     courses: state.courses.map(c => c.id === courseId ? { ...c, schedule: newSchedule } : c),
     globalCourses: state.globalCourses.map(c => c.courseId === courseId ? { ...c, scheduleString: newSchedule } : c)
-  })),
-  submitScheduleChangeRequest: (req) => set((state) => ({
-    scheduleChangeRequests: [
-      ...state.scheduleChangeRequests,
-      { ...req, id: Date.now().toString(), status: 'PENDING', createdAt: new Date() }
-    ]
-  })),
-  updateScheduleChangeRequestStatus: (id, status) => set((state) => ({
-    scheduleChangeRequests: state.scheduleChangeRequests.map(req => req.id === id ? { ...req, status } : req)
   })),
   markAttendanceDone: (courseId: string) => set((state) => {
     // 1. Update matching courses in state.courses
@@ -503,15 +417,6 @@ export const useStore = create<StoreState>((set, get) => ({
       ]
     }));
   },
-  submitPeriodSwap: (swap) => set((state) => ({
-    periodSwaps: [
-      ...state.periodSwaps,
-      { ...swap, id: 'swap-' + Date.now(), status: 'PENDING_TEACHER' }
-    ]
-  })),
-  updatePeriodSwapStatus: (id, status) => set((state) => ({
-    periodSwaps: state.periodSwaps.map(ps => ps.id === id ? { ...ps, status } : ps)
-  })),
   assignSubstituteTeacher: (assignment) => {
     const newAss: SubstituteAssignment = { ...assignment, id: 'sub-' + Date.now() };
     saveSubstituteAssignmentFirestore(newAss).catch(err => console.warn('Firestore substitute assignment notice:', err));
@@ -1239,7 +1144,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }));
   },
 
-  addMeritDemeritRecord: (studentId: string, type: 'MERIT' | 'DEMERIT', points: number, category: string, description: string, teacherName: string) => set((state) => {
+  addMeritDemeritRecord: (studentId: string, type: 'MERIT' | 'DEMERIT', points: number, category: string, description: string, teacherName: string) => {
     const newRecord: MeritDemeritRecord = {
       id: `md-${Date.now()}`,
       studentId,
@@ -1253,42 +1158,21 @@ export const useStore = create<StoreState>((set, get) => ({
     };
 
     const delta = type === 'MERIT' ? Math.abs(points) : -Math.abs(points);
-    const updatedAnalytics = state.analytics.map(a => {
-      if (a.studentId === studentId) {
-        return {
-          ...a,
-          behaviorScore: Math.min(100, Math.max(0, a.behaviorScore + delta))
-        };
-      }
-      return a;
-    });
+    // FIX (Task 0 — ตรวจสอบ behaviorScore): behaviorScore ตอนนี้อัปเดตจริงผ่าน Firestore
+    // transaction เดียวกับ adjustBehaviorScore ด้านบน (updateBehaviorScoreAndTriggerAlert) —
+    // ไม่แก้ state.analytics (dead — ไม่เคยมีใครอ่านค่าที่ .map() ทับตรงนี้จริง) และไม่ push
+    // parentNotifications ปลอมที่นี่อีกต่อไป (ของจริง remainingScore ถูกต้อง ถูกสร้างใน
+    // ทรานแซกชันเดียวกันแล้ว — ของเดิม hardcode remainingScore: 95 เสมอไม่ว่าคะแนนจริงเท่าไหร่)
+    updateBehaviorScoreAndTriggerAlert(studentId, delta, `${category}: ${description} (บันทึกโดย ${teacherName})`)
+      .catch(err => console.warn('[addMeritDemeritRecord] Firestore behavior score update failed:', err));
 
-    const student = state.students.find(s => s.studentId === studentId);
-    const parentUid = (student as any)?.parentUid || (student as any)?.parentId || `parent_${studentId}`;
-    const parentId = (student as any)?.parentId || parentUid;
-
-    return {
-      meritDemeritLogs: [newRecord, ...state.meritDemeritLogs],
-      analytics: updatedAnalytics,
-      parentNotifications: [
-        {
-          id: `notif-behavior-${Date.now()}`,
-          parentUid,
-          parentId,
-          studentId,
-          studentName: student ? student.name : 'นักเรียน',
-          title: type === 'MERIT' ? `🌟 บันทึกคะแนนความดี (+${Math.abs(points)} คะแนน)` : `⚠️ แจ้งเตือนการตัดคะแนนพฤติกรรม (-${Math.abs(points)} คะแนน)`,
-          message: `${category}: ${description} (บันทึกโดย ${teacherName})`,
-          status: 'unread' as const,
-          createdAt: new Date(),
-          pointsDeducted: type === 'DEMERIT' ? Math.abs(points) : 0,
-          remainingScore: 95,
-          type: type === 'MERIT' ? 'info' as const : 'warning' as const
-        },
-        ...state.parentNotifications
-      ]
-    };
-  }),
+    // ⚠️ ยังไม่ได้แก้ในรอบนี้: meritDemeritLogs (ประวัติรายการที่แสดงในแท็บ "ประวัติ" ของ
+    // BehaviorDisciplineModule) ยังเป็น session-local เหมือนเดิม — ตัวคะแนนสะสม (behaviorScore)
+    // ที่แสดงจริงทุกหน้าตอนนี้เป็นของจริงแล้ว แต่ประวัติรายละเอียดยังไม่ sync ข้าม session/เครื่อง
+    // (ของจริงถูกเขียนไปที่ Firestore collection `discipline_logs` แล้วโดย
+    // updateBehaviorScoreAndTriggerAlert ข้างต้น — แค่ยังไม่มีจุดไหนอ่านกลับมาแสดงแบบ real-time)
+    set((state) => ({ meritDemeritLogs: [newRecord, ...state.meritDemeritLogs] }));
+  },
 
   addPortfolioItem: (item) => set((state) => {
     const newItem: PortfolioItem = {

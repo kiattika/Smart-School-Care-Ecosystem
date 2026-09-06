@@ -8,11 +8,14 @@ import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, sa
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { TeacherScheduleList, SubjectPeriod } from './components/TeacherScheduleList';
+import { computeAttendanceSummary } from './lib/attendanceSummary';
+import { computeStudentAttendanceStats, defaultAttendanceDateRange } from './lib/studentAttendanceStats';
+import { useRoomAttendanceRecords } from './hooks/useRoomAttendanceRecords';
 import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { useStore } from './store';
-import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, PeriodSwap, SubstituteAssignment, Student, LateAttendanceRequestRecord } from './types';
-import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Edit3, Sparkles, Shuffle, Calendar, ArrowUpRight, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
+import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, SubstituteAssignment, Student, LateAttendanceRequestRecord } from './types';
+import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Sparkles, Calendar, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { motion, AnimatePresence } from 'motion/react';
@@ -38,7 +41,6 @@ export function TeacherPortal() {
     user,
     currentDate,
     currentPeriod,
-    analytics,
     attendanceRecords,
     scheduleConfig,
     setCurrentPeriod,
@@ -51,15 +53,11 @@ export function TeacherPortal() {
     activeLearningPoints,
     setCourses,
     markAttendanceDone,
-    submitScheduleChangeRequest,
     postTeachingRecords,
-    periodSwaps,
     substituteAssignments,
     studentScores,
     courseScoreSettings,
     submitPostTeachingRecord,
-    submitPeriodSwap,
-    updatePeriodSwapStatus,
     updateStudentScore,
     updateCourseScoreSetting,
     completeSubstituteAssignment
@@ -141,20 +139,28 @@ export function TeacherPortal() {
   }, [myLateRequests]);
 
   // ── บันทึกการเช็คชื่อจริงของวันนี้ (attendance_records) — ใช้คำนวณ attendanceTaken แทน session-local store ──
-  const [todayAttendanceDocs, setTodayAttendanceDocs] = useState<Array<{ id: string; periodNumber: number | null; room: string }>>([]);
+  // เก็บ students + source ด้วย (ไม่ใช่แค่ id/periodNumber/room) เพื่อคำนวณ badge สรุปขาด/ลา/มาสาย
+  // แบบ real-time บนการ์ดตารางสอน — ไม่ต้องเปิด modal เช็คชื่อก่อนถึงจะเห็น
+  const [todayAttendanceDocs, setTodayAttendanceDocs] = useState<Array<{
+    id: string;
+    periodNumber: number | null;
+    room: string;
+    students: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>;
+    source?: 'HOMEROOM_DEFAULT' | 'PERIOD_OVERRIDE';
+  }>>([]);
   useEffect(() => {
     if (!isTeacherRole) { setTodayAttendanceDocs([]); return; }
     const dateStr = format(currentDate, 'yyyy-MM-dd');
     const qy = query(collection(db, 'attendance_records'), where('date', '==', dateStr));
     const unsub = onSnapshot(qy, (snap) => {
-      const rows: Array<{ id: string; periodNumber: number | null; room: string }> = [];
+      const rows: Array<{ id: string; periodNumber: number | null; room: string; students: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>; source?: 'HOMEROOM_DEFAULT' | 'PERIOD_OVERRIDE' }> = [];
       snap.forEach(d => {
         const data = d.data() as any;
         // เก็บ "ทุก" record ของวันนี้ — รวมคาบที่ไม่มี field periodNumber ด้วย
         // (โฮมรูมเขียนผ่าน useHomeroomAttendance เป็น id `${date}_${room}` ไม่มี periodNumber
         //  ถ้า drop ทิ้งตรงนี้ คาบโฮมรูมที่เช็คแล้วจะกลับไปขึ้นปุ่ม "ขอเช็คชื่อย้อนหลัง")
         const pn = (data.periodNumber !== undefined && data.periodNumber !== null) ? Number(data.periodNumber) : null;
-        rows.push({ id: d.id, periodNumber: pn, room: String(data.room || '') });
+        rows.push({ id: d.id, periodNumber: pn, room: String(data.room || ''), students: data.students || {}, source: data.source });
       });
       setTodayAttendanceDocs(rows);
     }, (err) => console.warn('[TeacherPortal] today attendance listener:', err.message));
@@ -199,20 +205,7 @@ export function TeacherPortal() {
           sa.date === todayStr
         );
 
-        // 3. Is target of an approved swap for this course
-        const isSwapTarget = periodSwaps.some(ps => 
-          ps.targetCourseId === gc.courseId && 
-          isTeacherEmailMatch(ps.targetEmail, user?.email) && 
-          ps.status === 'APPROVED'
-        );
-        // OR is requester of an approved swap and now teaches the target course instead
-        const isSwapRequester = periodSwaps.some(ps =>
-          ps.requesterCourseId === gc.courseId &&
-          isTeacherEmailMatch(ps.requesterEmail, user?.email) && 
-          ps.status === 'APPROVED'
-        );
-
-        return isOriginal || isSub || isSwapTarget || isSwapRequester;
+        return isOriginal || isSub;
       })
       .map(gc => {
         // Find original course if it exists to get `attendanceTaken` status
@@ -233,11 +226,6 @@ export function TeacherPortal() {
         const isSub = substituteAssignments.some(sa => sa.courseId === gc.courseId && isTeacherEmailMatch(sa.substituteTeacherEmail, user?.email) && sa.date === todayStr);
         if (isSub) {
           roleLabel = "สอนแทน (Substitute)";
-        } else {
-          const isSwap = periodSwaps.some(ps => (ps.targetCourseId === gc.courseId || ps.requesterCourseId === gc.courseId) && ps.status === 'APPROVED');
-          if (isSwap) {
-            roleLabel = "สลับคาบเรียน (Swapped)";
-          }
         }
 
         // level = ระดับชั้น (ม.5/8); ถ้า globalCourse ไม่มี ให้ใช้ roomName ต่อเมื่อ roomName เป็นชื่อชั้นเอง
@@ -269,7 +257,7 @@ export function TeacherPortal() {
     });
 
     return uniqueCourses;
-  }, [globalCourses, user?.email, substituteAssignments, todayStr, periodSwaps, courses]);
+  }, [globalCourses, user?.email, substituteAssignments, todayStr, courses]);
 
   // รายวิชาสำหรับ "สมุดบันทึกคะแนน" — ต้องเป็นวิชาที่ครูคนนี้เป็นผู้สอนหลักจริงเท่านั้น
   // (ไม่รวมคาบสอนแทน/สลับคาบ — คนสอนแทนไม่ใช่ผู้ให้คะแนน) และจัดกลุ่มตาม "รหัสวิชา + ห้อง"
@@ -348,7 +336,6 @@ export function TeacherPortal() {
         id: 'substitutions',
         label: 'จัดการภาระลา & สอนแทน',
         count: substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.date === todayStr).length
-          + periodSwaps.filter(ps => ps.targetEmail === user?.email && ps.status === 'PENDING_TEACHER').length
           // TASK 4 — คำขอลากิจ/แลกคาบที่รอครูท่านนี้กดยืนยัน (ไม่นับรายการที่ตัวเองเสนอเอง เช่น คาบจ่ายคืนของ TASK 3)
           + substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.status === 'PENDING_TEACHER_CONFIRMATION' && sa.proposedByEmail !== user?.email).length,
       },
@@ -361,7 +348,7 @@ export function TeacherPortal() {
       if (tab.hideForRoles && tab.hideForRoles.includes(currentRole)) return false;
       return true;
     });
-  }, [user?.activeRole, myCourses.length, activeLearningPoints, substituteAssignments, user?.email, todayStr, periodSwaps, postTeachingRecords]);
+  }, [user?.activeRole, myCourses.length, activeLearningPoints, substituteAssignments, user?.email, todayStr, postTeachingRecords]);
 
   // Seamless fallback when role changes and current tab is restricted
   useEffect(() => {
@@ -432,11 +419,6 @@ export function TeacherPortal() {
     });
   }, [selectedGradebookCourseId]);
 
-  // New States for Swaps Form
-  const [swapRequesterCourseId, setSwapRequesterCourseId] = useState('');
-  const [swapTargetEmail, setSwapTargetEmail] = useState('');
-  const [swapTargetCourseId, setSwapTargetCourseId] = useState('');
-
   // Dynamic classroom layout configuration
   const courseStudents = useMemo(() => {
     const targetRoom = activeCourse?.room;
@@ -469,11 +451,6 @@ export function TeacherPortal() {
   const [lateCourse, setLateCourse] = useState<Course | null>(null);
   const [latePeriod, setLatePeriod] = useState<SubjectPeriod | null>(null);
   const [lateReason, setLateReason] = useState('');
-
-  // Schedule Request Modal
-  const [showScheduleReqModal, setShowScheduleReqModal] = useState(false);
-  const [scheduleReqCourse, setScheduleReqCourse] = useState<Course | null>(null);
-  const [scheduleReqNote, setScheduleReqNote] = useState('');
 
   // Admin Config Modal
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -568,26 +545,6 @@ export function TeacherPortal() {
     }
   };
 
-  const handleScheduleReqSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!scheduleReqCourse || !scheduleReqNote) return;
-    
-    submitScheduleChangeRequest({
-      courseId: scheduleReqCourse.id,
-      teacherName: user?.displayName || 'Unknown',
-      subjectCode: scheduleReqCourse.code,
-      room: scheduleReqCourse.room,
-      currentSchedule: scheduleReqCourse.schedule || PERIODS[scheduleReqCourse.periodIndex],
-      note: scheduleReqNote
-    });
-    
-    setShowScheduleReqModal(false);
-    setScheduleReqNote('');
-    setScheduleReqCourse(null);
-    setToast('ส่งคำร้องขอสลับตารางสอนเรียบร้อยแล้ว');
-    setTimeout(() => setToast(null), 3000);
-  };
-
   const handleRandomSelect = () => {
     if (courseStudents.length === 0) return;
     setIsShuffling(true);
@@ -645,24 +602,6 @@ export function TeacherPortal() {
     setPostTeachingCourse(null);
 
     setTimeout(() => setToast(null), 4000);
-  };
-
-  const handleSwapSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!swapRequesterCourseId || !swapTargetEmail || !swapTargetCourseId || !user?.email) return;
-
-    submitPeriodSwap({
-      requesterEmail: user.email,
-      targetEmail: swapTargetEmail,
-      requesterCourseId: swapRequesterCourseId,
-      targetCourseId: swapTargetCourseId
-    });
-
-    setToast('ส่งคำร้องขอสลับคาบเรียนไปยังเพื่อนครูแล้ว');
-    setSwapRequesterCourseId('');
-    setSwapTargetEmail('');
-    setSwapTargetCourseId('');
-    setTimeout(() => setToast(null), 3000);
   };
 
   const [isSavingAttendance, setIsSavingAttendance] = useState(false);
@@ -735,10 +674,34 @@ export function TeacherPortal() {
     }, 1500);
   };
 
-  // Find students at risk
-  const criticalStudents = analytics.filter(a => a.subjectAttendanceRate < 60);
-  const warningStudents = analytics.filter(a => a.subjectAttendanceRate >= 60 && a.subjectAttendanceRate < 80);
-  const avgAttendance = Math.round(analytics.reduce((acc, a) => acc + a.subjectAttendanceRate, 0) / (analytics.length || 1));
+  // FIX (Task 1-2): เดิมอ่านจาก StudentAnalytics (session-local store, ว่างเปล่าเสมอ — analytics
+  // ไม่เคยมีรายการจริง) ตอนนี้คำนวณจริงจาก attendance_records ของทุกห้อง/รายวิชาที่ท่านสอน
+  // real-time ย้อนหลัง 30 วัน (ค่าเริ่มต้น ยังไม่ยืนยันจากโรงเรียน) — เกณฑ์ 2 ระดับตามที่ UI นี้
+  // ออกแบบไว้เดิม: วิกฤต < 60%, เฝ้าระวัง 60-80% (คนละเกณฑ์กับ DEFAULT_ATTENDANCE_THRESHOLD_PERCENT
+  // ตัวเดียวที่ hook ใช้เป็นค่าเริ่มต้นทั่วไป)
+  const myTaughtRooms = useMemo(
+    () => Array.from(new Set(myCourses.map(c => c.room).filter(Boolean))),
+    [myCourses]
+  );
+  const attendanceRange = useMemo(() => defaultAttendanceDateRange(30), []);
+  const { records: myRoomsAttendanceRecords } = useRoomAttendanceRecords(myTaughtRooms, attendanceRange);
+  const myTaughtStudentIds = useMemo(() => {
+    const ids = new Set<string>();
+    myCourses.forEach(c => {
+      (students || []).forEach(s => { if (isSameRoom(s.room, c.room)) ids.add(s.studentId); });
+    });
+    return Array.from(ids);
+  }, [myCourses, students]);
+  const myStudentAttendanceStats = useMemo(
+    () => myTaughtStudentIds.map(id => computeStudentAttendanceStats(myRoomsAttendanceRecords, id)),
+    [myTaughtStudentIds, myRoomsAttendanceRecords]
+  );
+  const criticalStudents = myStudentAttendanceStats.filter(a => a.attendanceRate !== null && a.attendanceRate < 60);
+  const warningStudents = myStudentAttendanceStats.filter(a => a.attendanceRate !== null && a.attendanceRate >= 60 && a.attendanceRate < 80);
+  const ratedAttendanceStudents = myStudentAttendanceStats.filter(a => a.attendanceRate !== null);
+  const avgAttendance = ratedAttendanceStudents.length > 0
+    ? Math.round(ratedAttendanceStudents.reduce((acc, a) => acc + (a.attendanceRate as number), 0) / ratedAttendanceStudents.length)
+    : 0;
 
   return (
     <div className="flex flex-col h-screen w-full bg-[#0b0d14] text-slate-100 overflow-hidden font-sans selection:bg-blue-500/30">
@@ -957,6 +920,16 @@ export function TeacherPortal() {
                   );
                   const isAttendanceTaken = firestoreChecked || (matchedCourse ? matchedCourse.attendanceTaken : false) || !!item.attendanceTaken || hasRecords;
 
+                  // สรุปขาด/ลา/มาสาย ณ ปัจจุบัน (real-time) — เห็นได้ทันทีบนการ์ดโดยไม่ต้องเปิด modal ก่อน
+                  // (ตรรกะจับคู่ record/fallback โฮมรูม ดู src/lib/attendanceSummary.ts — แยกเป็น pure function เพื่อ test ได้)
+                  const attendanceSummary = computeAttendanceSummary(
+                    todayAttendanceDocs,
+                    expectedRecordIds,
+                    item.periodNumber,
+                    attRoomCandidates,
+                    isSameRoom
+                  );
+
                   if (import.meta.env.DEV) {
                     // [DEBUG-ATT] ยังคงไว้ชั่วคราวเพื่อพิสูจน์ regression คาบ 7 หลัง emulator กลับมาใช้งานได้
                     // (ต้องเช็คชื่อคาบ 7 จริงแล้วดู log ว่า expectedRecordIds ตรงกับ todayDocs id ไหม) — ลบออกเมื่อยืนยันแล้ว
@@ -1000,7 +973,8 @@ export function TeacherPortal() {
                     studentsCount: item.studentsCount || 40,
                     type: item.type,
                     teachingPartner: item.teachingPartner,
-                    partnerCheckedAttendance: item.partnerCheckedAttendance
+                    partnerCheckedAttendance: item.partnerCheckedAttendance,
+                    attendanceSummary
                   });
                 });
               }
@@ -1253,156 +1227,7 @@ export function TeacherPortal() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Form to submit request */}
-                <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4">
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-3">
-                    <Shuffle className="w-5 h-5 text-emerald-400" /> ส่งคำร้องขอสลับภาระงานสอน
-                  </h3>
-                  
-                  <form onSubmit={handleSwapSubmit} className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-bold text-slate-300 mb-1.5">วิชาของท่านที่ต้องการแลกเปลี่ยน</label>
-                      <select
-                        required
-                        value={swapRequesterCourseId}
-                        onChange={e => setSwapRequesterCourseId(e.target.value)}
-                        className="w-full bg-[#0b0f19] border border-slate-800/80 rounded-lg p-2.5 text-sm text-slate-200 outline-none focus:border-emerald-500"
-                      >
-                        <option value="">-- เลือกวิชาของท่าน --</option>
-                        {globalCourses.filter(gc => gc.teacherEmail === user?.email).map(gc => (
-                          <option key={gc.courseId} value={gc.courseId}>{gc.code} {formatCourseTitle(gc.courseName, gc.level, gc.roomName)} - {gc.scheduleString}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-bold text-slate-300 mb-1.5">คุณครูที่ต้องการขอสลับคาบสอนด้วย</label>
-                      <select
-                        required
-                        value={swapTargetEmail}
-                        onChange={e => {
-                          setSwapTargetEmail(e.target.value);
-                          setSwapTargetCourseId('');
-                        }}
-                        className="w-full bg-[#0b0f19] border border-slate-800/80 rounded-lg p-2.5 text-sm text-slate-200 outline-none focus:border-emerald-500"
-                      >
-                        <option value="">-- เลือกคุณครู --</option>
-                        {Array.from(new Map(globalCourses.filter(gc => gc.teacherEmail !== user?.email).map(gc => [gc.teacherEmail, gc])).values()).map(gc => (
-                          <option key={gc.teacherEmail} value={gc.teacherEmail}>{gc.teacherName} ({gc.teacherEmail})</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {swapTargetEmail && (
-                      <div>
-                        <label className="block text-sm font-bold text-slate-300 mb-1.5">วิชาของเพื่อนครูที่ขอแลกเปลี่ยน</label>
-                        <select
-                          required
-                          value={swapTargetCourseId}
-                          onChange={e => setSwapTargetCourseId(e.target.value)}
-                          className="w-full bg-[#0b0f19] border border-slate-800/80 rounded-lg p-2.5 text-sm text-slate-200 outline-none focus:border-emerald-500"
-                        >
-                          <option value="">-- เลือกวิชาของเพื่อนครู --</option>
-                          {globalCourses.filter(gc => gc.teacherEmail === swapTargetEmail).map(gc => (
-                            <option key={gc.courseId} value={gc.courseId}>{gc.code} {formatCourseTitle(gc.courseName, gc.level, gc.roomName)} - {gc.scheduleString}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    <button
-                      type="submit"
-                      disabled={!swapRequesterCourseId || !swapTargetEmail || !swapTargetCourseId}
-                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold rounded-lg transition-colors shadow-lg shadow-emerald-600/20"
-                    >
-                      ยื่นคำร้องสลับคาบเรียน
-                    </button>
-                  </form>
-                </div>
-
-                <div className="space-y-6">
-                  {/* Incoming requests waiting for me */}
-                  <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4">
-                    <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-3">
-                      <ArrowUpRight className="w-5 h-5 text-blue-400 rotate-180" /> คำร้องขอสลับคาบเรียนที่ส่งถึงท่าน
-                    </h3>
-                    
-                    <div className="space-y-3">
-                      {periodSwaps.filter(ps => ps.targetEmail === user?.email && ps.status === 'PENDING_TEACHER').length === 0 ? (
-                        <div className="text-center py-6 text-xs text-slate-500">ไม่มีคำร้องสลับคาบส่งถึงท่าน</div>
-                      ) : (
-                        periodSwaps.filter(ps => ps.targetEmail === user?.email && ps.status === 'PENDING_TEACHER').map(ps => {
-                          const reqCourse = globalCourses.find(c => c.courseId === ps.requesterCourseId);
-                          const targetCourse = globalCourses.find(c => c.courseId === ps.targetCourseId);
-                          return (
-                            <div key={ps.id} className="bg-[#0b0f19] p-4 border border-slate-800/80 rounded-xl space-y-3">
-                              <div className="flex justify-between items-start">
-                                <div className="text-xs text-slate-400">จาก: <span className="text-white font-bold">{reqCourse?.teacherName}</span></div>
-                                <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-[10px]">รออนุมัติ</span>
-                              </div>
-                              <p className="text-xs text-slate-300">
-                                ขอแลกคาบวิชา <span className="text-emerald-400 font-bold">{reqCourse?.courseName} ({reqCourse?.scheduleString})</span> ของเขา กับวิชา <span className="text-yellow-400 font-bold">{targetCourse?.courseName} ({targetCourse?.scheduleString})</span> ของท่าน
-                              </p>
-                              <div className="flex gap-2 justify-end">
-                                <button
-                                  onClick={() => { updatePeriodSwapStatus(ps.id, 'PENDING_ADMIN'); setToast('อนุมัติคำขอแล้ว รอวิชาการพิจารณาขั้นสุดท้าย'); setTimeout(() => setToast(null), 3000); }}
-                                  className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-md transition-colors"
-                                >
-                                  ยอมรับสลับคาบ (Approve)
-                                </button>
-                                <button
-                                  onClick={() => { updatePeriodSwapStatus(ps.id, 'REJECTED'); setToast('ปฏิเสธคำขอสลับคาบแล้ว'); setTimeout(() => setToast(null), 3000); }}
-                                  className="px-3 py-1 bg-red-600/15 hover:bg-red-600/20 text-red-400 border border-red-500/20 text-xs font-bold rounded-md transition-colors"
-                                >
-                                  ปฏิเสธ (Reject)
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
-                  {/* My Sent requests */}
-                  <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4">
-                    <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-3">
-                      <ArrowUpRight className="w-5 h-5 text-amber-400" /> สถานะคำร้องที่ท่านยื่นขอ
-                    </h3>
-                    
-                    <div className="space-y-3">
-                      {periodSwaps.filter(ps => ps.requesterEmail === user?.email).length === 0 ? (
-                        <div className="text-center py-6 text-xs text-slate-500">ท่านยังไม่เคยยื่นคำร้องสลับคาบ</div>
-                      ) : (
-                        periodSwaps.filter(ps => ps.requesterEmail === user?.email).map(ps => {
-                          const reqCourse = globalCourses.find(c => c.courseId === ps.requesterCourseId);
-                          const targetCourse = globalCourses.find(c => c.courseId === ps.targetCourseId);
-                          return (
-                            <div key={ps.id} className="bg-[#0b0f19] p-4 border border-slate-800/80 rounded-xl flex items-center justify-between gap-4">
-                              <div className="text-xs space-y-1">
-                                <div className="text-slate-300 font-bold">สลับ: {reqCourse?.courseName} ⇆ {targetCourse?.courseName}</div>
-                                <div className="text-slate-400">ผู้รับ: {targetCourse?.teacherName}</div>
-                              </div>
-                              <span className={cn(
-                                "px-2.5 py-1 rounded text-[10px] font-bold border",
-                                ps.status === 'PENDING_TEACHER' ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                                ps.status === 'PENDING_ADMIN' ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                                ps.status === 'APPROVED' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
-                                "bg-red-500/10 text-red-400 border-red-500/20"
-                              )}>
-                                {ps.status === 'PENDING_TEACHER' ? 'รอครูอนุมัติ' :
-                                 ps.status === 'PENDING_ADMIN' ? 'รอแอดมินอนุมัติ' :
-                                 ps.status === 'APPROVED' ? 'อนุมัติเสร็จสมบูรณ์' : 'ปฏิเสธ'}
-                              </span>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Substitute assignments */}
+                {/* Substitute assignments */}
                   <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 space-y-4">
                     <h3 className="text-base font-bold text-white flex items-center gap-2 border-b border-slate-800/80 pb-3">
                       <Calendar className="w-5 h-5 text-emerald-400" /> งานสอนแทนที่ท่านได้รับมอบหมาย (อนุมัติครบ 4 ขั้นแล้ว)
@@ -1464,8 +1289,6 @@ export function TeacherPortal() {
                       })()}
                     </div>
                   </div>
-                </div>
-                </div>
               </div>
             )}
 
@@ -2037,7 +1860,7 @@ export function TeacherPortal() {
                         <div key={student?.id || a.studentId} className="p-3 bg-red-950/40 border border-red-500/50 rounded-lg shadow-[0_0_15px_rgba(239,68,68,0.2)]">
                           <div className="flex justify-between items-start mb-1">
                             <span className="text-sm font-bold text-white">{student?.name || `รหัส ${a.studentId}`}</span>
-                            <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded font-mono">{a.subjectAttendanceRate}%</span>
+                            <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded font-mono">{(a.attendanceRate ?? 0)}%</span>
                           </div>
                           <p className="text-[11px] text-red-300">ความเสี่ยงสูงเวลาเรียนไม่พอ</p>
                         </div>
@@ -2067,10 +1890,10 @@ export function TeacherPortal() {
                         <div key={student?.id || a.studentId} className="p-3 bg-amber-950/30 border border-amber-500/40 rounded-lg">
                           <div className="flex justify-between items-start mb-1">
                             <span className="text-sm text-slate-200">{student?.name || `รหัส ${a.studentId}`}</span>
-                            <span className="text-xs font-mono text-amber-400">{a.subjectAttendanceRate}%</span>
+                            <span className="text-xs font-mono text-amber-400">{(a.attendanceRate ?? 0)}%</span>
                           </div>
                           <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                            <div className="bg-amber-500 h-full" style={{ width: `${a.subjectAttendanceRate}%` }}></div>
+                            <div className="bg-amber-500 h-full" style={{ width: `${(a.attendanceRate ?? 0)}%` }}></div>
                           </div>
                         </div>
                       );
@@ -2080,7 +1903,7 @@ export function TeacherPortal() {
 
                 {/* 3. สถิติรวมห้องเรียน */}
                 <div className="p-4 bg-slate-900/50 border-t border-white/10 mt-auto">
-                  <div className="text-xs text-slate-500 mb-2">สถิติรวมห้องเรียน {activeCourse?.room}</div>
+                  <div className="text-xs text-slate-500 mb-2">สถิติรวมนักเรียนที่ท่านสอนทุกห้อง (30 วันล่าสุด)</div>
                   <div className="flex items-end gap-2">
                     <span className="text-2xl font-bold text-green-400">{avgAttendance}%</span>
                     <span className="text-xs text-slate-400 pb-1">ค่าเฉลี่ยการเข้าเรียน</span>
@@ -2168,7 +1991,7 @@ export function TeacherPortal() {
                       <div key={student?.id || a.studentId} className="p-3 bg-red-950/40 border border-red-500/50 rounded-xl">
                         <div className="flex justify-between items-start mb-1">
                           <span className="text-sm font-bold text-white">{student?.name || `รหัส ${a.studentId}`}</span>
-                          <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded font-mono">{a.subjectAttendanceRate}%</span>
+                          <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded font-mono">{(a.attendanceRate ?? 0)}%</span>
                         </div>
                         <p className="text-[11px] text-red-300">ความเสี่ยงสูงเวลาเรียนไม่พอ</p>
                       </div>
@@ -2186,10 +2009,10 @@ export function TeacherPortal() {
                       <div key={student?.id || a.studentId} className="p-3 bg-amber-950/30 border border-amber-500/40 rounded-xl">
                         <div className="flex justify-between items-start mb-1">
                           <span className="text-sm text-slate-200">{student?.name || `รหัส ${a.studentId}`}</span>
-                          <span className="text-xs font-mono text-amber-400">{a.subjectAttendanceRate}%</span>
+                          <span className="text-xs font-mono text-amber-400">{(a.attendanceRate ?? 0)}%</span>
                         </div>
                         <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-1">
-                          <div className="bg-amber-500 h-full" style={{ width: `${a.subjectAttendanceRate}%` }}></div>
+                          <div className="bg-amber-500 h-full" style={{ width: `${(a.attendanceRate ?? 0)}%` }}></div>
                         </div>
                       </div>
                     );
@@ -2259,9 +2082,9 @@ export function TeacherPortal() {
                   <span className="text-xs text-slate-400">ระดับคะแนนพฤติกรรมสะสม:</span>
                   <span className={cn(
                     "text-lg font-mono font-bold",
-                    (analytics.find(a => a.studentId === selectedStudentForScore.studentId)?.behaviorScore ?? 100) >= 100 ? "text-green-400" : "text-red-400"
+                    (selectedStudentForScore.behaviorScore ?? 100) >= 100 ? "text-green-400" : "text-red-400"
                   )}>
-                    {analytics.find(a => a.studentId === selectedStudentForScore.studentId)?.behaviorScore ?? 100} คะแนน
+                    {selectedStudentForScore.behaviorScore ?? 100} คะแนน
                   </span>
                 </div>
               </div>
@@ -2334,7 +2157,7 @@ export function TeacherPortal() {
                       key={reason}
                       onClick={() => {
                         const amt = reason.includes('ดีเยี่ยม') || reason.includes('ช่วยแนะนำ') ? 5 : -5;
-                        adjustBehaviorScore(selectedStudentForScore.studentId, amt);
+                        adjustBehaviorScore(selectedStudentForScore.studentId, amt, reason);
                         setSelectedStudentForScore(null);
                       }}
                       className="p-2 bg-[#1c1f2b] hover:bg-white/5 border border-white/5 text-slate-300 rounded-lg text-[11px] text-left transition-colors truncate"
@@ -2427,60 +2250,6 @@ export function TeacherPortal() {
         </div>
       )}
 
-      {/* Schedule Change Request Modal */}
-      {showScheduleReqModal && scheduleReqCourse && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
-          <div className="bg-[#161f30] border border-blue-500/30 rounded-xl w-full max-w-md shadow-xl overflow-hidden flex flex-col">
-            <div className="p-5 border-b border-slate-800/80 flex justify-between items-center bg-blue-500/10">
-              <h2 className="text-lg font-bold text-blue-400 flex items-center gap-2">
-                <Edit3 className="w-5 h-5" /> แจ้งขอแก้ไขตารางสอน
-              </h2>
-              <button onClick={() => setShowScheduleReqModal(false)} className="text-blue-400/60 hover:text-blue-400 transition-colors">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <form onSubmit={handleScheduleReqSubmit} className="p-6 space-y-4">
-              <div className="bg-[#0b0f19] p-4 rounded-lg border border-slate-800/80 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">วิชา:</span>
-                  <span className="font-bold text-white">{scheduleReqCourse.code} {scheduleReqCourse.name}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">ห้องเรียน:</span>
-                  <span className="font-bold text-white">{scheduleReqCourse.room}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">ตารางปัจจุบัน:</span>
-                  <span className="font-bold text-blue-400">{scheduleReqCourse.schedule || PERIODS[scheduleReqCourse.periodIndex]}</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-slate-300 mb-2">ข้อความถึงแอดมิน (โปรดระบุคาบที่ต้องการสลับ)</label>
-                <textarea 
-                  required
-                  value={scheduleReqNote}
-                  onChange={e => setScheduleReqNote(e.target.value)}
-                  placeholder="เช่น ขอสลับวิชา ค21101 ม.1/1 จาก พฤ5 ไปเป็น อ2 สัปดาห์นี้"
-                  rows={4}
-                  className="w-full bg-[#0b0f19] border border-slate-800/80 rounded-lg p-3 text-sm text-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all resize-none"
-                />
-              </div>
-
-              <div className="pt-2">
-                <button 
-                  type="submit"
-                  disabled={!scheduleReqNote}
-                  className="w-full bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 text-blue-400 disabled:opacity-50 font-bold py-3 rounded-xl transition-all"
-                >
-                  ส่งคำร้องให้ผู้ดูแลระบบ
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Admin Schedule Config Simulation Modal */}
       {showConfigModal && (

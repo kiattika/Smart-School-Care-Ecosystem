@@ -18,25 +18,23 @@ import {
   BadgeCheck
 } from 'lucide-react';
 import { useStore } from '../../store';
-import { MeritDemeritRecord } from '../../types';
+import { Student } from '../../types';
 
-export function BehaviorDisciplineModule({ studentId, isParentView = false }: { studentId: string; isParentView?: boolean }) {
-  const { 
-    meritDemeritLogs, 
-    addMeritDemeritRecord, 
-    analytics, 
-    students,
-    user 
+// FIX (Task 0 — ตรวจสอบ behaviorScore): เดิม component นี้ resolve `student` เองจาก
+// useStore().students (session-local, ว่างเปล่าเมื่อเปิดหน้าใหม่/คนละเครื่อง — บั๊กแบบเดียวกับ
+// students/courses ที่แก้ไปแล้วในหน้าอื่น) และ behaviorScore จาก StudentAnalytics (session-local
+// เช่นกัน, ไม่เคยมีข้อมูลจริง) — เปลี่ยนให้ผู้เรียก (ParentPortal/StudentPortal) ส่ง student object
+// ที่ resolve จาก useRealStudents() มาให้ตรงๆ แทน ไม่ query ซ้ำในนี้ (parent/student มีสิทธิ์อ่าน
+// students collection แบบ filtered เท่านั้นตาม firestore.rules — query ใหม่แบบไม่ filter ในนี้จะโดนปฏิเสธ)
+export function BehaviorDisciplineModule({ student, isParentView = false }: { student: Student; isParentView?: boolean }) {
+  const {
+    meritDemeritLogs,
+    addMeritDemeritRecord,
+    user
   } = useStore();
 
-  const student = students.find(s => s.studentId === studentId) || students[0];
-  const studentAnalytics = analytics.find(a => a.studentId === student.studentId) || {
-    behaviorScore: 98,
-    gpa: 3.88
-  };
-
   const logs = meritDemeritLogs.filter(l => l.studentId === student.studentId);
-  const currentScore = studentAnalytics.behaviorScore;
+  const currentScore = student.behaviorScore ?? 100;
 
   const [activeTab, setActiveTab] = useState<'logs' | 'certificate' | 'award'>('logs');
   const [certYear, setCertYear] = useState('2569');

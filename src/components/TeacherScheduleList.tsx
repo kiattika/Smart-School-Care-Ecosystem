@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { Clock, CheckCircle2, History, BookOpen, FileText, CheckCircle, Calendar, Sparkles } from 'lucide-react';
+import { Clock, CheckCircle2, History, BookOpen, FileText, CheckCircle, Calendar, Sparkles, Users } from 'lucide-react';
 import { mergeConsecutivePeriods, periodRangeLabel } from '../lib/mergeConsecutivePeriods';
 import { isNonStudentSession } from '../utils/teacherLoadReportParser';
+import { cn } from '../lib/utils';
 
 export interface SubjectPeriod {
   id: string;
@@ -27,6 +28,9 @@ export interface SubjectPeriod {
   periodNumberEnd?: number;        // คาบสุดท้ายของช่วง (ถ้ารวม)
   mergedCourseIds?: string[];      // courseId ของทุกคาบย่อยในช่วง
   mergedPeriodNumbers?: number[];  // periodNumber ของทุกคาบย่อยในช่วง
+  // สรุปขาด/ลา/มาสาย ณ ปัจจุบัน (real-time) — จาก record ของคาบนี้จริงถ้าเช็คแล้ว
+  // ไม่งั้น fallback จากค่าเริ่มต้นโฮมรูมตอนเช้า (isDefault: true) ให้ครูวิชาอื่นเห็นทันที
+  attendanceSummary?: { absent: number; leave: number; late: number; present: number; isDefault: boolean };
 }
 
 interface TeacherScheduleListProps {
@@ -155,6 +159,40 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
         className="px-4 py-2 text-xs font-bold text-blue-400 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 rounded-lg flex items-center gap-1.5 transition active:scale-95"
       >
         <BookOpen className="w-3.5 h-3.5" /> บันทึกการสอน (Lesson Log)
+      </button>
+    );
+  };
+
+  // Badge สรุปขาด/ลา/มาสาย บนการ์ดคาบสอน — เห็นได้ทันทีไม่ต้องเปิด modal เช็คชื่อก่อน
+  // กดได้เลย (เข้า modal เช็คชื่อ/แก้ไขคาบนี้) — ไม่ใช่แค่ตัวเลขเฉยๆ
+  const renderAttendanceSummaryBadge = (period: SubjectPeriod) => {
+    const s = period.attendanceSummary;
+    if (!s) return null;
+    const parts: string[] = [];
+    if (s.absent > 0) parts.push(`ขาด ${s.absent}`);
+    if (s.leave > 0) parts.push(`ลา ${s.leave}`);
+    if (s.late > 0) parts.push(`มาสาย ${s.late}`);
+    const hasIssues = parts.length > 0;
+    return (
+      <button
+        type="button"
+        id={`attendance-summary-${period.id}`}
+        onClick={(e) => { e.stopPropagation(); onTakeAttendance(period.courseId); }}
+        title={
+          (s.isDefault
+            ? 'ค่าเริ่มต้นจากการเช็คชื่อโฮมรูมตอนเช้า — '
+            : 'จากการเช็คชื่อคาบนี้จริง — ') + 'กดเพื่อเปิด/แก้ไขการเช็คชื่อ'
+        }
+        className={cn(
+          "text-[10px] font-bold px-2 py-0.5 rounded-md border flex items-center gap-1 transition hover:brightness-110 active:scale-95 cursor-pointer",
+          hasIssues
+            ? "bg-red-500/10 text-red-400 border-red-500/30"
+            : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+        )}
+      >
+        <Users className="w-3 h-3" />
+        {hasIssues ? parts.join(' · ') : 'มาครบทุกคน'}
+        {s.isDefault && <span className="opacity-70 font-normal">(ค่าเริ่มต้นโฮมรูม)</span>}
       </button>
     );
   };
@@ -315,6 +353,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                               {period.roleLabel}
                             </span>
                           )}
+                          {renderAttendanceSummaryBadge(period)}
                         </div>
                         <p className="text-xs text-slate-300 flex items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5 text-slate-400" /> 
@@ -422,6 +461,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                               {period.roleLabel}
                             </span>
                           )}
+                          {renderAttendanceSummaryBadge(period)}
                         </div>
                         <p className="text-xs text-slate-300 font-medium flex items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5 text-emerald-400" /> 
@@ -500,6 +540,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                             {period.roleLabel}
                           </span>
                         )}
+                        {renderAttendanceSummaryBadge(period)}
                       </div>
                       <p className="text-xs text-slate-300 flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5 text-emerald-400" /> 

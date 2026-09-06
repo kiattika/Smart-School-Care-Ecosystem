@@ -9,12 +9,20 @@ import {
   setDoc, 
   addDoc, 
   deleteDoc,
-  runTransaction, 
+  runTransaction,
   serverTimestamp,
   orderBy,
-  onSnapshot
+  onSnapshot,
+  increment
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import {
+  computeStudentAttendanceStats,
+  diffAttendanceStatuses,
+  roomQueryCandidates,
+  AttendanceRecordLite,
+  AttendanceStatusValue,
+} from '../lib/studentAttendanceStats';
 import { 
   StudentSelfAssessment,
   GateAttendanceRecord,
@@ -143,18 +151,88 @@ export async function getTodayScheduleByTeacher(teacherId: string, dayOfWeek: st
 }
 
 /**
+ * เขียน attendance_records + sync ตัวเลขสรุป students/{id}.attendanceStats (derived cache) คู่กัน
+ * เสมอในทรานแซกชันเดียว — attendance_records ยังเป็น source of truth เหมือนเดิม, attendanceStats
+ * เป็นแค่ cache ที่คำนวณมาจากมันเพื่อให้ Parent/Student อ่านสรุปได้โดยไม่ต้องมีสิทธิ์ query
+ * attendance_records ทั้งห้อง (rule ปัจจุบันให้อ่านเฉพาะ SUPER_ADMIN/EXECUTIVE/SUBJECT_TEACHER/
+ * HOMEROOM_TEACHER — เอกสารไม่มี field เจ้าของระดับ document ให้ scope สิทธิ์ผู้ปกครอง/นักเรียนได้)
+ *
+ * ใช้ delta sync (เทียบสถานะเก่า vs ใหม่ต่อนักเรียนที่มีอยู่แล้วใน doc นี้ ไม่ใช่ +1 เดินหน้าเรื่อยๆ)
+ * — รองรับกรณีแก้ไข attendance ย้อนหลัง/ครูเปลี่ยนสถานะนักเรียนคนเดิมซ้ำในคาบเดิมโดยไม่ทำให้ตัวเลข
+ * สะสมเพี้ยนไปจากของจริง ถ้าตัวเลขเคยเพี้ยนไปแล้วจากบั๊ก/ข้อมูลเก่าก่อนมีฟังก์ชันนี้ ใช้
+ * recomputeStudentAttendanceStats() คำนวณใหม่ทั้งหมดจาก attendance_records จริงได้เสมอ
+ */
+export async function writeAttendanceRecordWithStatsSync(
+  recordId: string,
+  students: Record<string, AttendanceStatusValue>,
+  extraFields: Record<string, any>,
+): Promise<void> {
+  const recordRef = doc(db, 'attendance_records', recordId);
+  try {
+    await runTransaction(db, async (transaction) => {
+      // อ่านก่อนเขียนเสมอ (ข้อกำหนดของ Firestore transaction) — ใช้หาสถานะ "เดิม" ของแต่ละคน
+      const existingSnap = await transaction.get(recordRef);
+      const oldStudents: Record<string, AttendanceStatusValue> =
+        existingSnap.exists() ? ((existingSnap.data() as any).students || {}) : {};
+
+      transaction.set(recordRef, {
+        id: recordId,
+        ...extraFields,
+        students,
+      }, { merge: true });
+
+      for (const delta of diffAttendanceStatuses(oldStudents, students)) {
+        const updates: Record<string, any> = { attendanceStatsUpdatedAt: serverTimestamp() };
+        if (delta.oldStatus) updates[`attendanceStats.${delta.oldStatus.toLowerCase()}`] = increment(-1);
+        if (delta.newStatus) updates[`attendanceStats.${delta.newStatus.toLowerCase()}`] = increment(1);
+        transaction.update(doc(db, 'students', delta.studentId), updates);
+      }
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `attendance_records/${recordId}`);
+  }
+}
+
+/**
  * 2. Save a daily attendance or course attendance record
  */
 export async function saveAttendanceRecord(recordData: FirestoreAttendanceRecord): Promise<void> {
-  const collectionPath = 'attendance_records';
+  const { id, students, checkedAt, ...rest } = recordData;
+  await writeAttendanceRecordWithStatsSync(id, students, {
+    ...rest,
+    checkedAt: checkedAt || serverTimestamp(),
+  });
+}
+
+/**
+ * Resync ตัวเลข students/{id}.attendanceStats ให้ตรงกับ attendance_records จริงทั้งหมด — ใช้เมื่อ
+ * สงสัยว่าตัวเลขเพี้ยน (เช่น ข้อมูลเก่าก่อนมี writeAttendanceRecordWithStatsSync, แก้ไข
+ * attendance_records ตรงๆ ผ่านเครื่องมืออื่นนอกแอป, หรือสงสัย bug) — derived cache นี้ไม่ใช่
+ * source of truth เสมอสามารถคำนวณใหม่จาก attendance_records ได้ 100% ทุกเมื่อ
+ */
+export async function recomputeStudentAttendanceStats(
+  studentId: string,
+  room: string,
+): Promise<{ present: number; absent: number; late: number; leave: number }> {
+  const candidates = roomQueryCandidates(room).slice(0, 30);
+  if (candidates.length === 0) {
+    throw new Error('recomputeStudentAttendanceStats: room ว่างเปล่า ไม่สามารถ resync ได้');
+  }
   try {
-    const recordRef = doc(db, collectionPath, recordData.id);
-    await setDoc(recordRef, {
-      ...recordData,
-      checkedAt: recordData.checkedAt || serverTimestamp(),
+    const snap = await getDocs(query(collection(db, 'attendance_records'), where('room', 'in', candidates)));
+    const records: AttendanceRecordLite[] = snap.docs.map(d => {
+      const data = d.data() as any;
+      return { date: String(data.date || ''), students: data.students || {} };
+    });
+    const stats = computeStudentAttendanceStats(records, studentId);
+    const { present, absent, late, leave } = stats;
+    await setDoc(doc(db, 'students', studentId), {
+      attendanceStats: { present, absent, late, leave },
+      attendanceStatsUpdatedAt: serverTimestamp(),
     }, { merge: true });
+    return { present, absent, late, leave };
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${recordData.id}`);
+    handleFirestoreError(error, OperationType.WRITE, `students/${studentId}.attendanceStats`);
   }
 }
 
