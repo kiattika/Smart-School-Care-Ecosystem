@@ -537,7 +537,7 @@ export function StudentPortal() {
 
         {/* 7. Parent Engagement & e-Billing */}
         {activeTab === 'parent' && (
-          <ParentEngagementServices studentId={student.studentId} />
+          <ParentEngagementServices studentId={student.studentId} student={student} isParentView={false} />
         )}
 
         {/* Self Assessment Form */}
