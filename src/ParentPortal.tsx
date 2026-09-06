@@ -74,7 +74,7 @@ export function ParentPortal() {
   }
 
   // Unpaid invoices count
-  const pendingInvoices = billingInvoices.filter(i => i.studentId === student.studentId && i.status === 'UNPAID');
+  const pendingInvoices = billingInvoices.filter(i => i.studentId === student.studentId && i.status === 'PENDING');
   const recentGateLog = gateAttendanceLogs.find(g => g.studentId === student.studentId);
 
   return (

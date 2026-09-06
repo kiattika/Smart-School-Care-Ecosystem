@@ -1176,7 +1176,167 @@ export function subscribeSDQAssessments(
 
 /**
  * Parent Engagement Persistence (Billing, Messages, Appointments)
+ *
+ * ขอบเขตงานจริง (ยืนยันจากโรงเรียน): "แจ้งค่าใช้จ่าย + ส่งใบเสร็จ เท่านั้น" ไม่ใช่ระบบบัญชีเต็มรูปแบบ
  */
+const BILLING_INVOICES_COL = 'billing_invoices';
+const BILLING_COUNTERS_COL = 'billing_counters';
+
+/** ปีการศึกษาปัจจุบัน (พ.ศ.) — namespace ของเลขที่ใบแจ้งหนี้ต่อปี (เช่น "2569") */
+export function getCurrentAcademicYear(): string {
+  return String(new Date().getFullYear() + 543);
+}
+
+/** QR mockup ผูกกับเลขที่ใบแจ้งหนี้จริง (ไม่ใช่ EMVCo PromptPay payload จริง — นอกขอบเขตงานนี้
+ *  ที่ยืนยันแค่ "แจ้งค่าใช้จ่าย + ส่งใบเสร็จ" ไม่ใช่ระบบเชื่อมธนาคารจริง — คงรูปแบบ mock เดิมที่มีอยู่
+ *  ในระบบไว้ แค่ทำให้ REF ที่ฝังในภาพตรงกับเลขที่ auditable จริงแทนเลขปลอมตายตัว) */
+function buildPromptPayQrMock(invoiceNumber: string, amount: number): string {
+  const payload = `PROMPTPAY-MOCK|REF:${invoiceNumber}|AMOUNT:${amount.toFixed(2)}`;
+  return `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(payload)}`;
+}
+
+export type CreateInvoiceInput = Pick<BillingInvoice, 'studentId' | 'title' | 'items' | 'totalAmount' | 'dueDate'> & {
+  studentUid: string | null;
+  parentUid: string | null;
+};
+
+/**
+ * สร้างใบแจ้งหนี้ 1 ใบ พร้อมออกเลขที่ auditable จริงผ่าน billing_counters/{ปีการศึกษา}
+ * FIX: เดิมไม่มีฟีเจอร์นี้อยู่เลยในระบบ (เส้นทางสร้าง→แสดง→จ่าย ใช้งานจริงไม่ได้แม้แต่ขั้นตอนเดียว)
+ * และ receiptNo เดิม (ใน payBillingInvoiceFirestore) ใช้ Math.random() — ตรวจสอบย้อนหลังไม่ได้
+ *
+ * อ่าน+เพิ่ม counter ในธุรกรรมเดียวกับการเขียนเอกสารจริงเสมอ (กันเลขซ้ำ/กระโดดข้ามจาก race
+ * condition) — pattern เดียวกับ enrollInActivity ที่พิสูจน์แล้วว่าได้ผลจริงกับระบบสมัครชุมนุม
+ */
+export async function createBillingInvoice(
+  data: CreateInvoiceInput,
+  createdBy: string,
+  firestoreDb: Firestore = db,
+): Promise<string> {
+  const academicYear = getCurrentAcademicYear();
+  const counterRef = doc(firestoreDb, BILLING_COUNTERS_COL, academicYear);
+  const invoiceId = `inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const invoiceRef = doc(firestoreDb, BILLING_INVOICES_COL, invoiceId);
+  try {
+    await runTransaction(firestoreDb, async (transaction) => {
+      // อ่านก่อนเขียนเสมอ (ข้อกำหนดของ Firestore transaction)
+      const counterSnap = await transaction.get(counterRef);
+      const nextNumber = (counterSnap.exists() ? Number((counterSnap.data() as any).lastNumber) || 0 : 0) + 1;
+      const invoiceNumber = `INV-${academicYear}-${String(nextNumber).padStart(4, '0')}`;
+
+      const payload: BillingInvoice = {
+        id: invoiceId,
+        invoiceNumber,
+        studentId: data.studentId,
+        studentUid: data.studentUid,
+        parentUid: data.parentUid,
+        title: data.title,
+        items: data.items,
+        totalAmount: data.totalAmount,
+        dueDate: data.dueDate,
+        status: 'PENDING',
+        promptPayQr: buildPromptPayQrMock(invoiceNumber, data.totalAmount),
+        createdBy,
+        createdAt: new Date().toISOString(),
+      };
+
+      transaction.set(invoiceRef, payload);
+      transaction.set(counterRef, { academicYear, lastNumber: nextNumber, updatedAt: serverTimestamp() }, { merge: true });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${BILLING_INVOICES_COL}/${invoiceId}`);
+  }
+  return invoiceId;
+}
+
+/**
+ * สร้างใบแจ้งหนี้แบบเดียวกันให้หลายนักเรียนพร้อมกัน (เช่น ค่าเทอมทั้งห้อง/ทั้งโรงเรียน) — จองเลขที่
+ * ต่อเนื่องเป็นชุดในธุรกรรมเดียวกันทั้งชุด (อ่าน counter ครั้งเดียว เพิ่มทีละ 1 ต่อคนในชุด แล้วเขียน
+ * ค่า counter สุดท้ายครั้งเดียว) แบ่งเป็นชุดละไม่เกิน 400 รายการต่อธุรกรรม (Firestore จำกัด 500
+ * การเขียนต่อธุรกรรม — เผื่อพื้นที่ไว้สำหรับ counter write) รันทีละชุดตามลำดับเพื่อความปลอดภัย
+ */
+export async function createBillingInvoicesBulk(
+  targets: { studentId: string; studentUid: string | null; parentUid: string | null }[],
+  common: Pick<BillingInvoice, 'title' | 'items' | 'totalAmount' | 'dueDate'>,
+  createdBy: string,
+  firestoreDb: Firestore = db,
+): Promise<string[]> {
+  const academicYear = getCurrentAcademicYear();
+  const counterRef = doc(firestoreDb, BILLING_COUNTERS_COL, academicYear);
+  const allIds: string[] = [];
+  const CHUNK_SIZE = 400;
+
+  for (let i = 0; i < targets.length; i += CHUNK_SIZE) {
+    const chunk = targets.slice(i, i + CHUNK_SIZE);
+    try {
+      await runTransaction(firestoreDb, async (transaction) => {
+        const counterSnap = await transaction.get(counterRef);
+        let nextNumber = counterSnap.exists() ? Number((counterSnap.data() as any).lastNumber) || 0 : 0;
+        const now = new Date().toISOString();
+
+        chunk.forEach((target, idx) => {
+          nextNumber += 1;
+          const invoiceId = `inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${idx}`;
+          const invoiceNumber = `INV-${academicYear}-${String(nextNumber).padStart(4, '0')}`;
+          const invoiceRef = doc(firestoreDb, BILLING_INVOICES_COL, invoiceId);
+          const payload: BillingInvoice = {
+            id: invoiceId,
+            invoiceNumber,
+            studentId: target.studentId,
+            studentUid: target.studentUid,
+            parentUid: target.parentUid,
+            title: common.title,
+            items: common.items,
+            totalAmount: common.totalAmount,
+            dueDate: common.dueDate,
+            status: 'PENDING',
+            promptPayQr: buildPromptPayQrMock(invoiceNumber, common.totalAmount),
+            createdBy,
+            createdAt: now,
+          };
+          transaction.set(invoiceRef, payload);
+          allIds.push(invoiceId);
+        });
+
+        transaction.set(counterRef, { academicYear, lastNumber: nextNumber, updatedAt: serverTimestamp() }, { merge: true });
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `${BILLING_INVOICES_COL} (bulk chunk starting at index ${i})`);
+    }
+  }
+  return allIds;
+}
+
+/**
+ * real-time listener ของใบแจ้งหนี้
+ *  - ไม่ระบุ filter → FINANCE_STAFF/SUPER_ADMIN เห็นทั้งโรงเรียน (rules อนุญาตอ่านทั้ง collection)
+ *  - { studentUid } → นักเรียนดูของตัวเอง (ต้อง filter ฝั่ง query ให้ผ่าน rules)
+ *  - { parentUid }  → ผู้ปกครองดูของบุตรหลาน (ต้อง filter ฝั่ง query ให้ผ่าน rules)
+ */
+export function subscribeBillingInvoices(
+  onUpdate: (invoices: BillingInvoice[]) => void,
+  filter: { studentUid?: string; parentUid?: string } = {}
+): () => void {
+  try {
+    const col = collection(db, BILLING_INVOICES_COL);
+    const clauses = [];
+    if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
+    if (filter.parentUid) clauses.push(where('parentUid', '==', filter.parentUid));
+    const ref = clauses.length > 0 ? query(col, ...clauses) : col;
+    return onSnapshot(ref, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as BillingInvoice));
+      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeBillingInvoices] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeBillingInvoices] setup error:', error);
+    return () => {};
+  }
+}
+
 export async function payBillingInvoiceFirestore(invoiceId: string, receiptNo: string): Promise<void> {
   const collectionPath = 'billing_invoices';
   try {

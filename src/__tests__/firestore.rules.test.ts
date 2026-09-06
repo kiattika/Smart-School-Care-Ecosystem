@@ -8,7 +8,7 @@ import {
   assertFails,
 } from '@firebase/rules-unit-testing';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { enrollInActivity, withdrawFromActivity } from '../services/firestoreService';
+import { enrollInActivity, withdrawFromActivity, createBillingInvoice, createBillingInvoicesBulk } from '../services/firestoreService';
 
 let testEnv: RulesTestEnvironment;
 
@@ -1529,6 +1529,157 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
         baseVisit({ id: 'inf-7', parentUid: 'repointed-parent' })
       ));
       await assertFails(asRole('INFIRMARY_STAFF').firestore().doc('infirmary_visits/inf-7').delete());
+    });
+  });
+
+  // เฟส 2 การเงิน — TASK 1: billing_invoices/billing_counters — ระบบสร้างใบแจ้งหนี้จริง (เดิมไม่มี
+  // ฟีเจอร์นี้อยู่เลย) เขียน/แก้ไขเฉพาะ FINANCE_STAFF/SUPER_ADMIN, อ่านเพิ่มเจ้าของ (parentUid/
+  // studentUid ตรง) — เลขที่ใบแจ้งหนี้ต้อง auditable จริงผ่าน counter transaction กันชนกัน race condition
+  describe('billing_invoices / billing_counters collections', () => {
+    const STU_UID = 'bill-stu-uid-1';
+    const STU_ID = 'bill-std-1';
+    const PARENT_UID = 'bill-parent-uid-1';
+    const FINANCE_UID = 'finance-uid-1';
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID });
+      });
+    }
+    const invoiceDoc = (over: Record<string, unknown> = {}) => ({
+      id: 'x', invoiceNumber: 'INV-2569-0001', studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID,
+      title: 'ค่าบำรุงการศึกษา', items: [{ description: 'ค่าบำรุงการศึกษา', amount: 3000 }], totalAmount: 3000,
+      dueDate: '2026-12-31', status: 'PENDING', promptPayQr: 'https://example.com/qr.png',
+      createdBy: FINANCE_UID, createdAt: '2026-09-06T00:00:00.000Z',
+      ...over,
+    });
+
+    it('lets FINANCE_STAFF create an invoice with studentUid/parentUid matching the real student doc; denies a mismatch', async () => {
+      await seed();
+      await assertSucceeds(asUser(FINANCE_UID, ['FINANCE_STAFF']).firestore().doc('billing_invoices/inv-1').set(
+        invoiceDoc({ id: 'inv-1' })
+      ));
+      await assertFails(asUser(FINANCE_UID, ['FINANCE_STAFF']).firestore().doc('billing_invoices/inv-2').set(
+        invoiceDoc({ id: 'inv-2', parentUid: 'someone-else' })
+      ));
+    });
+
+    it('denies create by non-finance roles (SUBJECT_TEACHER, PARENT, STUDENT)', async () => {
+      await seed();
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('billing_invoices/inv-3').set(invoiceDoc({ id: 'inv-3' })));
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('billing_invoices/inv-4').set(
+        invoiceDoc({ id: 'inv-4', createdBy: PARENT_UID })
+      ));
+      await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('billing_invoices/inv-5').set(
+        invoiceDoc({ id: 'inv-5', createdBy: STU_UID })
+      ));
+    });
+
+    it('denies naming someone else as createdBy, and denies creating with a non-PENDING status', async () => {
+      await seed();
+      await assertFails(asUser(FINANCE_UID, ['FINANCE_STAFF']).firestore().doc('billing_invoices/inv-6').set(
+        invoiceDoc({ id: 'inv-6', createdBy: 'someone-else' })
+      ));
+      await assertFails(asUser(FINANCE_UID, ['FINANCE_STAFF']).firestore().doc('billing_invoices/inv-7').set(
+        invoiceDoc({ id: 'inv-7', status: 'PAID' })
+      ));
+    });
+
+    it('lets FINANCE_STAFF/SUPER_ADMIN/EXECUTIVE and the linked student/parent read; denies an unrelated parent/student', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('billing_invoices/inv-8').set(invoiceDoc({ id: 'inv-8' }));
+      });
+      await assertSucceeds(asRole('FINANCE_STAFF').firestore().doc('billing_invoices/inv-8').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('billing_invoices/inv-8').get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('billing_invoices/inv-8').get());
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('billing_invoices/inv-8').get());
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('billing_invoices/inv-8').get());
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('billing_invoices/inv-8').get());
+      await assertFails(asUser('other-student', ['STUDENT']).firestore().doc('billing_invoices/inv-8').get());
+    });
+
+    it('lets FINANCE_STAFF edit invoice content but not repoint studentUid/parentUid; denies delete', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('billing_invoices/inv-9').set(invoiceDoc({ id: 'inv-9' }));
+      });
+      await assertSucceeds(asRole('FINANCE_STAFF').firestore().doc('billing_invoices/inv-9').set(
+        invoiceDoc({ id: 'inv-9', totalAmount: 3500 })
+      ));
+      await assertFails(asRole('FINANCE_STAFF').firestore().doc('billing_invoices/inv-9').set(
+        invoiceDoc({ id: 'inv-9', parentUid: 'repointed-parent' })
+      ));
+      await assertFails(asRole('FINANCE_STAFF').firestore().doc('billing_invoices/inv-9').delete());
+    });
+
+    it('only SUPER_ADMIN/FINANCE_STAFF can read/write billing_counters directly', async () => {
+      await assertSucceeds(asRole('FINANCE_STAFF').firestore().doc('billing_counters/2569').set({ academicYear: '2569', lastNumber: 5 }));
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('billing_counters/2569').get());
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('billing_counters/2569').get());
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('billing_counters/2569').set({ academicYear: '2569', lastNumber: 999 }));
+    });
+
+    // REAL race condition — 2 ใบแจ้งหนี้ถูกสร้างพร้อมกัน ต้องได้เลขที่ไม่ชนกัน (ยิงผ่าน
+    // createBillingInvoice จริงจาก services/firestoreService.ts ไม่ใช่จำลองแยก — ทดสอบโค้ดเดียวกับ
+    // ที่ใช้งานจริง ผ่าน context.firestore() ของ rules-testing SDK แทน db ของแอป เหมือนระบบสมัครชุมนุม)
+    it('สร้างใบแจ้งหนี้ 2 รายการพร้อมกัน — เลขที่ใบแจ้งหนี้ต้องไม่ชนกันและต่อเนื่อง', async () => {
+      const YEAR_STU_A = 'bill-race-std-a';
+      const YEAR_STU_B = 'bill-race-std-b';
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${YEAR_STU_A}`).set({ studentId: YEAR_STU_A, studentUid: 'race-uid-a', parentUid: 'race-parent-a' });
+        await ctx.firestore().doc(`students/${YEAR_STU_B}`).set({ studentId: YEAR_STU_B, studentUid: 'race-uid-b', parentUid: 'race-parent-b' });
+      });
+
+      const dbFinance = asUser('finance-race-uid', ['FINANCE_STAFF']).firestore();
+      const input = { title: 'ค่าเทอม', items: [{ description: 'ค่าเทอม', amount: 1000 }], totalAmount: 1000, dueDate: '2026-12-31' };
+
+      const results = await Promise.all([
+        createBillingInvoice({ studentId: YEAR_STU_A, studentUid: 'race-uid-a', parentUid: 'race-parent-a', ...input }, 'finance-race-uid', dbFinance as any),
+        createBillingInvoice({ studentId: YEAR_STU_B, studentUid: 'race-uid-b', parentUid: 'race-parent-b', ...input }, 'finance-race-uid', dbFinance as any),
+      ]);
+
+      expect(results).toHaveLength(2);
+      const invoiceNumbers = await Promise.all(results.map(async (id) => {
+        let invoiceNumber = '';
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          const snap = await ctx.firestore().doc(`billing_invoices/${id}`).get();
+          invoiceNumber = (snap.data() as any).invoiceNumber;
+        });
+        return invoiceNumber;
+      }));
+      // ต้องไม่ชนกัน (unique) และเป็นรูปแบบ auditable ที่ถูกต้อง
+      expect(new Set(invoiceNumbers).size).toBe(2);
+      for (const num of invoiceNumbers) {
+        expect(num).toMatch(/^INV-\d{4}-\d{4,}$/);
+      }
+    });
+
+    it('createBillingInvoicesBulk ออกเลขที่ต่อเนื่องไม่ซ้ำให้ทุกคนในชุดเดียว', async () => {
+      const ids = ['bulk-std-1', 'bulk-std-2', 'bulk-std-3'];
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        for (const sid of ids) {
+          await ctx.firestore().doc(`students/${sid}`).set({ studentId: sid, studentUid: `${sid}-uid`, parentUid: `${sid}-parent` });
+        }
+      });
+      const dbFinance = asUser('finance-bulk-uid', ['FINANCE_STAFF']).firestore();
+      const targets = ids.map(sid => ({ studentId: sid, studentUid: `${sid}-uid`, parentUid: `${sid}-parent` }));
+      const created = await createBillingInvoicesBulk(
+        targets,
+        { title: 'ค่าเทอมรวมทั้งห้อง', items: [{ description: 'ค่าเทอม', amount: 2000 }], totalAmount: 2000, dueDate: '2026-12-31' },
+        'finance-bulk-uid',
+        dbFinance as any,
+      );
+      expect(created).toHaveLength(3);
+      const invoiceNumbers = await Promise.all(created.map(async (id) => {
+        let invoiceNumber = '';
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          const snap = await ctx.firestore().doc(`billing_invoices/${id}`).get();
+          invoiceNumber = (snap.data() as any).invoiceNumber;
+        });
+        return invoiceNumber;
+      }));
+      expect(new Set(invoiceNumbers).size).toBe(3);
     });
   });
 

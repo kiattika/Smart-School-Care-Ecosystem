@@ -19,7 +19,6 @@ import {
   ReportCardTerm,
   HomeworkAssignment,
   ExamScheduleItem,
-  BillingInvoice,
   ParentTeacherMessage,
   ParentAppointment
 } from '../types';
@@ -651,40 +650,12 @@ export const INITIAL_EXAM_SCHEDULES: ExamScheduleItem[] = [
   }
 ];
 
-export const INITIAL_BILLING_INVOICES: BillingInvoice[] = [
-  {
-    id: 'inv-01',
-    studentId: '6950801',
-    invoiceNo: 'INV-2569-1-0492',
-    title: 'ใบแจ้งยอดค่าบำรุงการศึกษาและบริการ ภาคเรียนที่ 1/2569',
-    items: [
-      { description: 'เงินบำรุงการศึกษาโครงการจัดการเรียนการสอนห้องเรียนพิเศษ (SMTE)', amount: 2000 },
-      { description: 'ค่าประกันอุบัติเหตุหมู่นักเรียนประจำปีการศึกษา', amount: 350 },
-      { description: 'ค่าบำรุงระบบอินเทอร์เน็ตความเร็วสูงและการเรียนการสอนออนไลน์', amount: 400 },
-      { description: 'ค่าตรวจสุขภาพและตรวจสารชีวเคมีประจำปี', amount: 250 }
-    ],
-    totalAmount: 3000,
-    dueDate: '2026-08-31',
-    status: 'UNPAID',
-    promptPayQr: 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=00020101021229370016A000000677010111011300668198765435802TH530376454073000.006304D1B8'
-  },
-  {
-    id: 'inv-02',
-    studentId: '6950801',
-    invoiceNo: 'INV-2568-2-0881',
-    title: 'ใบแจ้งยอดค่ากิจกรรมทัศนศึกษาและการเรียนรู้นอกสถานที่ ภาคเรียนที่ 2/2568',
-    items: [
-      { description: 'ค่าพาหนะและกิจกรรมศึกษาดูงานศูนย์วิทยาศาสตร์และเทคโนโลยีแห่งชาติ', amount: 1200 },
-      { description: 'ค่าอาหารและเครื่องดื่ม', amount: 600 }
-    ],
-    totalAmount: 1800,
-    dueDate: '2025-12-15',
-    status: 'PAID',
-    promptPayQr: 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=00020101021229370016A000000677010111011300668198765435802TH530376454071800.006304A4C2',
-    paidAt: '2025-12-10 14:22 น.',
-    receiptNo: 'REC-2568-09148'
-  }
-];
+// NOTE (เฟส 2 การเงิน — TASK 1): เดิมมี INITIAL_BILLING_INVOICES มาตรง ๆ (mock array ของปลอมใช้รหัส
+// นักเรียนผี '6950801' + เลขที่ใบแจ้งหนี้ตายตัวไม่ผ่าน counter จริง) แต่ไม่มีที่ไหน import ใช้จริงเลย
+// (dead code) และหลังเปลี่ยน schema (invoiceNo→invoiceNumber, UNPAID→PENDING, เพิ่ม studentUid/
+// parentUid/createdBy/createdAt) ก็จะ type-error ทันที — ลบทิ้งเหมือนไฟล์ mock อื่นๆ ที่ตรวจแล้วว่าตาย
+// ข้อมูลจริงตอนนี้มาจาก Firestore collection billing_invoices (ดู services/firestoreService.ts:
+// createBillingInvoice/subscribeBillingInvoices)
 
 export const INITIAL_PARENT_TEACHER_MESSAGES: ParentTeacherMessage[] = [
   {

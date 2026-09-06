@@ -908,17 +908,30 @@ export interface BillingInvoiceItem {
   amount: number;
 }
 
+// ใบแจ้งหนี้ค่าใช้จ่ายนักเรียน/ผู้ปกครอง — ขอบเขตงานจริง: "แจ้งค่าใช้จ่าย + ส่งใบเสร็จ เท่านั้น"
+// invoiceNumber ต้อง auditable จริง (ออกผ่าน billing_counters/{ปีการศึกษา} ใน transaction เดียวกับ
+// การสร้างเอกสาร ดู createBillingInvoice ใน firestoreService.ts) ไม่ใช่ Math.random() แบบเดิม
 export interface BillingInvoice {
   id: string;
+  invoiceNumber: string;      // auditable, ต่อเนื่องตามปีการศึกษา เช่น "INV-2569-0001" (เดิมชื่อ invoiceNo)
   studentId: string;
-  invoiceNo: string;
+  // denormalized จาก students/{studentId}.studentUid/.parentUid ตอนสร้าง validate โดย firestore.rules
+  // ผ่าน studentField() เสมอ — ใช้ให้นักเรียนเจ้าของ+ผู้ปกครองอ่าน/จ่ายบิลของตัวเองได้จริง
+  studentUid?: string | null;
+  parentUid?: string | null;
   title: string;
   items: BillingInvoiceItem[];
   totalAmount: number;
   dueDate: string;
-  status: 'UNPAID' | 'PAID' | 'OVERDUE';
+  status: 'PENDING' | 'PAID' | 'OVERDUE';   // เดิมใช้ 'UNPAID' — เปลี่ยนชื่อให้ตรงกับที่ยืนยันจากโรงเรียน
   promptPayQr: string;
+  createdBy: string;          // Firebase Auth UID ของเจ้าหน้าที่การเงินที่สร้างใบแจ้งหนี้
+  createdAt: string;
   paidAt?: string;
+  paymentMethod?: string;      // เช่น 'PROMPTPAY_QR' — บันทึกตอนยืนยันจ่ายจริง (ดู Task 3)
+  // เลขที่ใบเสร็จ = invoiceNumber เดิมเสมอ (ตัดสินใจแล้ว — ดูเหตุผลใน commit message ของ Task 3:
+  // ระบบนี้เป็นบิล 1 ใบต่อการจ่าย 1 ครั้งเสมอ ไม่มีจ่ายบางส่วน/แยกใบเสร็จ จึงไม่จำเป็นต้องมี counter
+  // แยกชุดที่สองสำหรับใบเสร็จโดยเฉพาะ — ใช้เลขเดียวกันตลอดสายเอกสารเพื่อลด state ที่ต้อง sync)
   receiptNo?: string;
 }
 

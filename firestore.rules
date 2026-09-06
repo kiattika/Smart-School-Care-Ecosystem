@@ -300,12 +300,36 @@ service cloud.firestore {
     }
 
     // 20. Billing Invoices, Messages, and Appointments
+    // FIX (เฟส 2 การเงิน — TASK 1): เดิมไม่มีฟีเจอร์สร้างใบแจ้งหนี้อยู่เลย และ read/write เดิมเทียบ
+    // resource.data.studentId == auth.uid ตรงๆ (studentId เป็นรหัสนักเรียน 5 หลัก ไม่ใช่ Firebase
+    // Auth UID เด็ดขาด — บั๊กเดียวกับที่พบใน student_screenings_2q/phq9 มาก่อน) แก้เป็นเทียบผ่าน
+    // studentUid ที่ denormalize+validate จริงตอนสร้างแทน — เขียน/แก้ไข เฉพาะ FINANCE_STAFF/
+    // SUPER_ADMIN เท่านั้น (การชำระเงินของเจ้าของเอง ดู TASK 3 ที่จะเพิ่ม allow update แยกต่างหาก)
+    match /billing_counters/{academicYear} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF');
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF');
+    }
+
     match /billing_invoices/{invoiceId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('EXECUTIVE') || 
-                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid || resource.data.studentId == request.auth.uid));
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('FINANCE_STAFF') ||
+                     hasRole('EXECUTIVE') ||
+                     (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
+
+      // studentUid/parentUid ต้อง denormalize ตรงกับ students/{studentId} จริงเสมอ (กันเจ้าหน้าที่
+      // การเงินพิมพ์ผิดแล้วส่งบิลไปให้ผู้ปกครองคนละครอบครัวเห็น) และ createdBy ต้องเป็นผู้เขียนจริง
+      allow create: if (hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF')) &&
+                       request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__') &&
+                       request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', '__none__') &&
+                       request.resource.data.createdBy == request.auth.uid &&
+                       request.resource.data.status == 'PENDING';
+
+      // เจ้าหน้าที่การเงินแก้ไขได้เต็มที่ (เช่น ปรับยอด/กำหนดชำระ ก่อนถึงกำหนด) แต่ห้ามย้ายเจ้าของ
+      allow update: if (hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF')) &&
+                       request.resource.data.studentUid == resource.data.studentUid &&
+                       request.resource.data.parentUid == resource.data.parentUid;
+
+      allow delete: if false;
     }
 
     match /parent_teacher_messages/{msgId} {

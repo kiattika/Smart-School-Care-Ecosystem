@@ -188,7 +188,7 @@ export function ParentEngagementServices({ studentId }: { studentId: string }) {
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-                      {inv.invoiceNo}
+                      {inv.invoiceNumber}
                     </span>
                     <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
                       inv.status === 'PAID'
@@ -266,7 +266,7 @@ export function ParentEngagementServices({ studentId }: { studentId: string }) {
                   </div>
                   <QrCode className="w-40 h-40 mx-auto text-slate-900" />
                   <span className="text-[9px] text-slate-500 font-mono block mt-2">
-                    REF: {selectedInvoice.invoiceNo}
+                    REF: {selectedInvoice.invoiceNumber}
                   </span>
                 </div>
 
