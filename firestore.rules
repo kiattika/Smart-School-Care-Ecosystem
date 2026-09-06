@@ -448,6 +448,12 @@ service cloud.firestore {
                       && request.resource.data.count >= 0;
     }
 
+    // 29. House config (คณะสี) — รากฐานสำหรับระบบคะแนนถ้วยในอนาคต ยังไม่มีการคำนวณคะแนนตอนนี้
+    match /house_config/{houseId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('ACADEMIC_HEAD');
+    }
+
     // Default Deny All Catch-All for unknown paths
     match /{document=**} {
       allow read, write: if false;

@@ -1145,7 +1145,20 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
-  // 22. REAL race condition — 2 นักเรียนสมัครที่นั่งสุดท้ายพร้อมกัน ต้องมีแค่คนเดียวสำเร็จ
+  // 22. house_config (คณะสี) — รากฐานระบบคะแนนถ้วยในอนาคต
+  describe('house_config collection', () => {
+    it('lets any signed-in user read; only SUPER_ADMIN/ACADEMIC_HEAD write', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('house_config/house-red').set({ name: 'คณะสีแดง', colorHex: '#ef4444', assignmentMode: 'SINGLE_PER_ROOM' });
+      });
+      await assertSucceeds(asUser('stu-1', ['STUDENT']).firestore().doc('house_config/house-red').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('house_config/house-blue').set({ name: 'คณะสีน้ำเงิน', colorHex: '#3b82f6', assignmentMode: 'MIXED' }));
+      await assertSucceeds(asRole('ACADEMIC_HEAD').firestore().doc('house_config/house-green').set({ name: 'คณะสีเขียว', colorHex: '#22c55e', assignmentMode: 'MIXED' }));
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('house_config/house-bad').set({ name: 'x', colorHex: '#000', assignmentMode: 'MIXED' }));
+    });
+  });
+
+  // 23. REAL race condition — 2 นักเรียนสมัครที่นั่งสุดท้ายพร้อมกัน ต้องมีแค่คนเดียวสำเร็จ
   // (ยิงผ่าน enrollInActivity จริงจาก services/firestoreService.ts ไม่ใช่จำลองแยก — ทดสอบโค้ด
   // เดียวกับที่ใช้งานจริง โดยส่ง context.firestore() ของ rules-testing SDK เข้าไปแทน db ของแอป)
   describe('ELECTIVE enrollment — real race condition (Firestore transaction)', () => {

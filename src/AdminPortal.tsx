@@ -13,11 +13,12 @@ import { SubstituteTeachingAnalyticsModule } from './components/SubstituteTeachi
 import { TeachingLoadTable } from './components/TeachingLoadTable';
 import { BulkDataImportModal, ImportType } from './components/BulkDataImportModal';
 import { ElectiveActivityManagerPage } from './components/admin/ElectiveActivityManagerPage';
-import { BarChart3 } from 'lucide-react';
+import { HouseManagerPage } from './components/admin/HouseManagerPage';
+import { BarChart3, Palette } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export function AdminPortal() {
-  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods' | 'electives'>('teaching-load');
+  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods' | 'electives' | 'houses'>('teaching-load');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
@@ -41,7 +42,7 @@ export function AdminPortal() {
   };
 
   interface AdminNavItem {
-    id: 'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods' | 'electives';
+    id: 'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods' | 'electives' | 'houses';
     label: string;
     fullLabel: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -60,6 +61,7 @@ export function AdminPortal() {
     { id: 'students', label: 'จัดการนักเรียน', fullLabel: 'จัดการข้อมูลนักเรียน (Student Roster)', icon: GraduationCap, badge: null, color: 'text-purple-400', activeStyle: 'bg-purple-500/10 text-purple-400 border-purple-500/20 shadow-[inset_4px_0_0_rgba(168,85,247,1)]' },
     { id: 'periods', label: 'ตารางเวลา & กระดิ่ง', fullLabel: 'จัดการตารางเวลา & กระดิ่งคาบเรียน', icon: Bell, badge: null, color: 'text-indigo-400', activeStyle: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-[inset_4px_0_0_rgba(99,102,241,1)]' },
     { id: 'electives', label: 'จัดการชุมนุม', fullLabel: 'จัดการชุมนุม (Elective Activities)', icon: Users, badge: null, color: 'text-teal-400', activeStyle: 'bg-teal-500/10 text-teal-400 border-teal-500/20 shadow-[inset_4px_0_0_rgba(20,184,166,1)]' },
+    { id: 'houses', label: 'จัดการคณะสี', fullLabel: 'จัดการคณะสี (House)', icon: Palette, badge: null, color: 'text-rose-400', activeStyle: 'bg-rose-500/10 text-rose-400 border-rose-500/20 shadow-[inset_4px_0_0_rgba(244,63,94,1)]' },
     { id: 'settings', label: 'ปีการศึกษา & ล็อกระบบ', fullLabel: 'ตั้งค่าปีการศึกษา & ล็อกระบบ (System Lock)', icon: Settings, badge: null, color: 'text-pink-400', activeStyle: 'bg-[#ec4899]/10 text-[#ec4899] border-[#ec4899]/20 shadow-[inset_4px_0_0_rgba(236,72,153,1)]' },
   ];
 
@@ -454,6 +456,12 @@ export function AdminPortal() {
           {activeTab === 'electives' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
               <ElectiveActivityManagerPage />
+            </div>
+          )}
+
+          {activeTab === 'houses' && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <HouseManagerPage />
             </div>
           )}
 

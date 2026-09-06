@@ -14,6 +14,7 @@ import {
   orderBy,
   onSnapshot,
   increment,
+  writeBatch,
   Firestore
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
@@ -45,7 +46,8 @@ import {
   StudentPortfolioEntry,
   StudentHomeLocation,
   ElectiveActivityConfig,
-  ActivityEnrollment
+  ActivityEnrollment,
+  HouseConfig
 } from '../types';
 import { SchoolGeofenceConfig } from '../utils/geoUtils';
 
@@ -1602,6 +1604,76 @@ export function subscribeActivityEnrollmentCounts(onUpdate: (counts: Record<stri
   } catch (error) {
     console.warn('[subscribeActivityEnrollmentCounts] setup error:', error);
     return () => {};
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * House config (คณะสี) — รากฐานสำหรับระบบคะแนนถ้วยในอนาคต (ยังไม่คำนวณคะแนนถ้วยตอนนี้)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export async function saveHouseConfig(
+  house: { id?: string; name: string; colorHex: string; assignmentMode: 'SINGLE_PER_ROOM' | 'MIXED' },
+): Promise<void> {
+  const id = house.id || `house_${Date.now()}`;
+  try {
+    await setDoc(doc(db, 'house_config', id), {
+      id,
+      name: house.name,
+      colorHex: house.colorHex,
+      assignmentMode: house.assignmentMode,
+      createdAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `house_config/${id}`);
+  }
+}
+
+export async function deleteHouseConfig(id: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'house_config', id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `house_config/${id}`);
+  }
+}
+
+export function subscribeHouseConfigs(onUpdate: (houses: HouseConfig[]) => void): () => void {
+  try {
+    return onSnapshot(collection(db, 'house_config'), (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as HouseConfig)));
+    }, (err) => {
+      console.warn('[subscribeHouseConfigs] listener error:', err.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeHouseConfigs] setup error:', error);
+    return () => {};
+  }
+}
+
+/** โหมด SINGLE_PER_ROOM: assign นักเรียนทั้งห้องเข้าคณะเดียวกันในทีเดียว (batch write) */
+export async function bulkAssignHouseToRoom(room: string, houseId: string | null, studentIds: string[]): Promise<void> {
+  if (studentIds.length === 0) return;
+  try {
+    // Firestore batch จำกัด 500 การเขียนต่อ batch — แบ่งเป็นชุดกันเกิน
+    for (let i = 0; i < studentIds.length; i += 450) {
+      const chunk = studentIds.slice(i, i + 450);
+      const batch = writeBatch(db);
+      chunk.forEach(studentId => {
+        batch.update(doc(db, 'students', studentId), { houseId, updatedAt: serverTimestamp() });
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `students (bulk houseId) room=${room}`);
+  }
+}
+
+/** โหมด MIXED: assign รายบุคคล */
+export async function assignHouseToStudent(studentId: string, houseId: string | null): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'students', studentId), { houseId, updatedAt: serverTimestamp() });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `students/${studentId}.houseId`);
   }
 }
 

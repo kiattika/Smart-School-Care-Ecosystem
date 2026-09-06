@@ -59,6 +59,8 @@ export interface Student {
   // ผู้ปกครอง/นักเรียนดูได้โดยไม่ต้องมีสิทธิ์ query attendance_records ทั้งห้อง — ครู/ครูที่ปรึกษา
   // ใช้ useRoomAttendanceRecords (real-time, เลือกช่วงวันที่ได้) แทนเพราะมีสิทธิ์อ่านตรงอยู่แล้ว
   attendanceStats?: { present: number; absent: number; late: number; leave: number };
+  // คณะสี — รากฐานสำหรับระบบคะแนนถ้วยในอนาคต (ยังไม่คำนวณคะแนนถ้วยตอนนี้) ดู HouseConfig
+  houseId?: string | null;
 }
 
 /**
@@ -94,6 +96,19 @@ export interface ActivityEnrollment {
   removedAt: string | null;
   removedBy: string | null;    // UID ครูที่ถอน — null ถ้านักเรียนถอนตัวเอง
   removedReason: string | null;
+}
+
+/**
+ * คณะสี — รากฐานเท่านั้นในรอบนี้ (ยังไม่มีระบบคำนวณ/แสดงคะแนนถ้วย 3 ประเภท วิชาการ/กีฬา/คุณธรรม
+ * เพราะข้อมูลต้นทางบางส่วน เช่น ผลกีฬาคณะสี ผลสอบภายนอก ยังไม่มีที่เก็บในระบบ) — houseId บน
+ * students/{id} ต้อง query ได้สะดวกสำหรับตอนสร้างระบบคะแนนถ้วยในอนาคต
+ */
+export interface HouseConfig {
+  id: string;
+  name: string;
+  colorHex: string;
+  assignmentMode: 'SINGLE_PER_ROOM' | 'MIXED';
+  createdAt: string; // ISO
 }
 
 export interface StudentAnalytics {
