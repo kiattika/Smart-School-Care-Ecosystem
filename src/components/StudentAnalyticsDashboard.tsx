@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../store';
-import { Student, StudentAnalytics } from '../types';
+import { Student } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ResponsiveContainer, 
@@ -42,16 +42,21 @@ interface StudentAnalyticsDashboardProps {
 }
 
 export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyticsDashboardProps) {
-  const { analytics, studentScores } = useStore();
+  const { studentScores } = useStore();
   const [selectedInsightTab, setSelectedInsightTab] = useState<'all' | 'risk' | 'outstanding'>('all');
 
   // 1. Process Grade & Performance Data
   const processedStudentsData = useMemo(() => {
     return students.map((student, idx) => {
-      const studentAnalytic = analytics.find(a => a.studentId === student.studentId) || {
+      // FIX (Task 0): behaviorScore เดิมอ่านจาก StudentAnalytics (session-local store, ว่างเปล่าเสมอ
+      // เสมอ — analytics.find() ที่นี่ไม่เคยเจอจริง) ตอนนี้อ่านจาก student.behaviorScore ของจริง
+      // (มาจาก students/{id} ผ่าน useRealStudents() ที่ผู้เรียกส่ง prop `students` เข้ามา)
+      // subjectAttendanceRate ยังเป็นค่าจำลอง 90 คงที่ (ไม่ได้แก้ในรอบนี้ — อยู่นอกขอบเขต Task 0
+      // ซึ่งจำกัดเฉพาะ behaviorScore, สถิติการเข้าเรียนจริงอยู่ใน Task 1-2)
+      const studentAnalytic = {
         studentId: student.studentId,
         subjectAttendanceRate: 90,
-        behaviorScore: 100
+        behaviorScore: student.behaviorScore ?? 100
       };
 
       // Retrieve or compute grades
@@ -104,7 +109,7 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
         isAtRisk: overallAttendance < 80 || behavior < 75 || parseFloat(grade) < 2.0
       };
     });
-  }, [students, analytics, studentScores]);
+  }, [students, studentScores]);
 
   // 2. Class KPIs
   const classKPIs = useMemo(() => {

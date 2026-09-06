@@ -36,7 +36,6 @@ import { StudentAssessmentDetailModal } from './components/StudentAssessmentDeta
 export function ParentPortal() {
   const {
     user,
-    analytics,
     attendanceRecords,
     gateAttendanceLogs,
     billingInvoices,
@@ -50,8 +49,10 @@ export function ParentPortal() {
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
 
   const student = linkedStudents.find(s => s.studentId === selectedStudentId) || linkedStudents[0];
-  const studentAnalytics = student ? analytics.find(a => a.studentId === student.studentId) : null;
-  const bScore = studentAnalytics?.behaviorScore ?? 98;
+  // FIX (Task 0): เดิมอ่านจาก StudentAnalytics (session-local store, ว่างเปล่าเสมอ) → ตัวเลขที่เห็น
+  // เป็น fallback 98 ตายตัวทุกครั้ง ไม่เคยเปลี่ยนตามพฤติกรรมจริง — ตอนนี้อ่านจาก students/{id}.behaviorScore
+  // ของจริงผ่าน useRealStudents() (real-time)
+  const bScore = student?.behaviorScore ?? 100;
   const myAssessment = selfAssessments[student?.studentId || '38502'];
 
   const [activeTab, setActiveTab] = useState<
@@ -401,7 +402,7 @@ export function ParentPortal() {
 
         {/* 4. Behavior & Conduct */}
         {activeTab === 'behavior' && (
-          <BehaviorDisciplineModule studentId={student.studentId} isParentView={true} />
+          <BehaviorDisciplineModule student={student} isParentView={true} />
         )}
 
         {/* 5. Portfolio Vault & TCAS */}

@@ -2057,9 +2057,9 @@ export function TeacherPortal() {
                   <span className="text-xs text-slate-400">ระดับคะแนนพฤติกรรมสะสม:</span>
                   <span className={cn(
                     "text-lg font-mono font-bold",
-                    (analytics.find(a => a.studentId === selectedStudentForScore.studentId)?.behaviorScore ?? 100) >= 100 ? "text-green-400" : "text-red-400"
+                    (selectedStudentForScore.behaviorScore ?? 100) >= 100 ? "text-green-400" : "text-red-400"
                   )}>
-                    {analytics.find(a => a.studentId === selectedStudentForScore.studentId)?.behaviorScore ?? 100} คะแนน
+                    {selectedStudentForScore.behaviorScore ?? 100} คะแนน
                   </span>
                 </div>
               </div>
@@ -2132,7 +2132,7 @@ export function TeacherPortal() {
                       key={reason}
                       onClick={() => {
                         const amt = reason.includes('ดีเยี่ยม') || reason.includes('ช่วยแนะนำ') ? 5 : -5;
-                        adjustBehaviorScore(selectedStudentForScore.studentId, amt);
+                        adjustBehaviorScore(selectedStudentForScore.studentId, amt, reason);
                         setSelectedStudentForScore(null);
                       }}
                       className="p-2 bg-[#1c1f2b] hover:bg-white/5 border border-white/5 text-slate-300 rounded-lg text-[11px] text-left transition-colors truncate"

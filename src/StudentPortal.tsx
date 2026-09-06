@@ -43,7 +43,6 @@ import { StudentAssessmentDetailModal } from './components/StudentAssessmentDeta
 
 export function StudentPortal() {
   const {
-    analytics,
     selfAssessments,
     saveSelfAssessment
   } = useStore();
@@ -91,11 +90,9 @@ export function StudentPortal() {
     );
   }
 
-  const studentAnalytics = analytics.find(a => a.studentId === student.studentId) || {
-    behaviorScore: 98,
-    gpa: 3.88
-  };
-  const bScore = studentAnalytics.behaviorScore;
+  // FIX (Task 0): เดิมอ่านจาก StudentAnalytics (session-local store, ว่างเปล่าเสมอ) → ตัวเลขที่เห็น
+  // เป็น fallback 98 ตายตัวทุกครั้ง — ตอนนี้อ่านจาก students/{id}.behaviorScore ของจริง (real-time)
+  const bScore = student.behaviorScore ?? 100;
   const myAssessment = selfAssessments[student.studentId];
 
   // Behavior level calculation
@@ -453,7 +450,7 @@ export function StudentPortal() {
 
         {/* 4. Behavior & Conduct Certificate */}
         {activeTab === 'behavior' && (
-          <BehaviorDisciplineModule studentId={student.studentId} isParentView={false} />
+          <BehaviorDisciplineModule student={student} isParentView={false} />
         )}
 
         {/* 5. Portfolio — บันทึกผลงานเอง (Firestore + อนุมัติโดยครูที่ปรึกษา) + คลังผลงานเดิม */}

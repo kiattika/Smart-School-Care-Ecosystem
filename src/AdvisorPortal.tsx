@@ -28,7 +28,6 @@ import { motion, AnimatePresence } from 'motion/react';
 export function AdvisorPortal() {
   const {
     user,
-    analytics,
     leaveRequests,
     updateLeaveRequestStatus,
     updateStudentProfile,
@@ -406,8 +405,9 @@ export function AdvisorPortal() {
                     </div>
                   ) : (
                     myStudents.map(student => {
-                    const studentAnalytics = analytics.find(a => a.studentId === student.studentId);
-                    const bScore = studentAnalytics?.behaviorScore ?? 100;
+                    // FIX (Task 0): เดิมอ่านจาก StudentAnalytics (session-local store, ว่างเปล่าเสมอ)
+                    // ตอนนี้อ่านจาก students/{id}.behaviorScore ของจริงผ่าน useRealStudents() (real-time)
+                    const bScore = student.behaviorScore ?? 100;
                     
                     // สถานะประจำวันอ่านจากการเช็คชื่อจริง (attendance_records ของวันนี้ — merge เข้า myStudents แล้ว)
                     const morning = student.attendance.morningStatus;

@@ -50,6 +50,10 @@ export interface Student {
   parentId?: string;      // Alias/Legacy ID
   parentEmail?: string;   // อีเมลผู้ปกครอง
   studentUid?: string;    // Firebase Auth UID ของนักเรียน
+  // คะแนนพฤติกรรมสะสมจริง — เก็บที่ students/{id}.behaviorScore ใน Firestore โดยตรง
+  // (อัปเดตผ่าน updateBehaviorScoreAndTriggerAlert) ไม่ใช่ StudentAnalytics (session-local, dead)
+  behaviorScore?: number;
+  riskLevel?: 'NORMAL' | 'WARNING' | 'CRITICAL';
 }
 
 export interface StudentAnalytics {
@@ -933,7 +937,7 @@ export interface StoreState {
   setCurrentPeriod: (period: string) => void;
   cycleAttendanceStatus: (courseId: string, studentId: string) => void;
   setAttendanceStatus: (courseId: string, studentId: string, status: AttendanceStatus) => void;
-  adjustBehaviorScore: (studentId: string, amount: number) => void;
+  adjustBehaviorScore: (studentId: string, amount: number, reason?: string) => void;
   submitLeaveRequest: (studentId: string, date: Date, reason: string) => void;
   updateLeaveRequestStatus: (id: string, status: 'APPROVED' | 'REJECTED') => void;
   moveStudentSeat: (studentId: string, newSeatIndex: number | null) => void;
