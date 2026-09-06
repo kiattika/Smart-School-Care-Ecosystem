@@ -27,10 +27,12 @@ import {
   Scan,
   ShieldCheck,
   Zap,
-  HelpCircle
+  HelpCircle,
+  Users
 } from 'lucide-react';
 
 import { GateAttendanceTracker } from './components/student-parent/GateAttendanceTracker';
+import { StudentElectiveEnrollment } from './components/student-parent/StudentElectiveEnrollment';
 import { HealthMentalWellbeingModule } from './components/student-parent/HealthMentalWellbeingModule';
 import { SocioeconomicWelfareModule } from './components/student-parent/SocioeconomicWelfareModule';
 import { BehaviorDisciplineModule } from './components/student-parent/BehaviorDisciplineModule';
@@ -56,7 +58,7 @@ export function StudentPortal() {
 
   // 7 Module Tabs + Assessment + Overview
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'gate' | 'health' | 'socio' | 'behavior' | 'portfolio' | 'academic' | 'parent' | 'assessment'
+    'overview' | 'gate' | 'health' | 'socio' | 'behavior' | 'electives' | 'portfolio' | 'academic' | 'parent' | 'assessment'
   >('overview');
 
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
@@ -227,6 +229,18 @@ export function StudentPortal() {
           >
             <ShieldCheck className="w-4 h-4" />
             <span>4. ความประพฤติ & ใบรับรอง ปพ.</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('electives')}
+            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'electives'
+                ? 'bg-gradient-to-r from-teal-600 to-cyan-600 text-white shadow-lg shadow-teal-500/25'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>สมัครชุมนุม</span>
           </button>
 
           <button
@@ -499,6 +513,11 @@ export function StudentPortal() {
         {/* 4. Behavior & Conduct Certificate */}
         {activeTab === 'behavior' && (
           <BehaviorDisciplineModule student={student} isParentView={false} />
+        )}
+
+        {/* สมัครชุมนุม (Elective Activities) */}
+        {activeTab === 'electives' && (
+          <StudentElectiveEnrollment student={student} />
         )}
 
         {/* 5. Portfolio — บันทึกผลงานเอง (Firestore + อนุมัติโดยครูที่ปรึกษา) + คลังผลงานเดิม */}

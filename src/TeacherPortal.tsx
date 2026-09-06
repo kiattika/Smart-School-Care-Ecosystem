@@ -11,6 +11,9 @@ import { TeacherScheduleList, SubjectPeriod } from './components/TeacherSchedule
 import { computeAttendanceSummary } from './lib/attendanceSummary';
 import { computeStudentAttendanceStats, defaultAttendanceDateRange } from './lib/studentAttendanceStats';
 import { useRoomAttendanceRecords } from './hooks/useRoomAttendanceRecords';
+import { useElectiveActivities } from './hooks/useElectiveActivities';
+import { subscribeActiveEnrollmentsBySchedule, withdrawFromActivity } from './services/firestoreService';
+import { ActivityEnrollment } from './types';
 import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { useStore } from './store';
@@ -419,16 +422,65 @@ export function TeacherPortal() {
     });
   }, [selectedGradebookCourseId]);
 
+  // ELECTIVE (ชุมนุม/กิจกรรมตามความสนใจ — นักเรียนสมัครเอง คละห้อง) vs WHOLE_CLASS (ยกห้อง/วิชาหลัก)
+  // — กรองด้วย room เดิมใช้ไม่ได้กับ ELECTIVE เพราะนักเรียนคละห้องมาเลือกเอง (ดู elective_activities_config)
+  const { isElective } = useElectiveActivities();
+  const activeCourseIsElective = isElective(activeCourse?.code);
+  // scheduleId จริงใน collection `schedules` — courseId ที่ derive มาใช้ prefix `course_` แทน `sch_`
+  // (ดู globalCourses mapping ด้านบน: courseId = `course_${rawId.slice(4)}`) แปลงกลับตรงนี้
+  const activeCourseScheduleId = activeCourse?.id?.startsWith('course_')
+    ? `sch_${activeCourse.id.slice(7)}`
+    : (activeCourse?.id || '');
+
+  const [electiveEnrollments, setElectiveEnrollments] = useState<ActivityEnrollment[]>([]);
+  useEffect(() => {
+    if (!activeCourseIsElective || !activeCourseScheduleId) { setElectiveEnrollments([]); return; }
+    return subscribeActiveEnrollmentsBySchedule(activeCourseScheduleId, setElectiveEnrollments);
+  }, [activeCourseIsElective, activeCourseScheduleId]);
+
+  // ครูถอนชื่อนักเรียนออกจากชุมนุมของตัวเอง (ต้องระบุเหตุผล เช่น "ไม่ผ่านคัดเลือก นศท")
+  // — ที่นั่งว่างขึ้นทันที นักเรียนคนนั้นสมัครที่อื่นได้ทันที (withdrawFromActivity)
+  const [removingEnrollment, setRemovingEnrollment] = useState<ActivityEnrollment | null>(null);
+  const [removeReason, setRemoveReason] = useState('');
+  const [removeBusy, setRemoveBusy] = useState(false);
+  const handleConfirmRemoveFromElective = async () => {
+    if (!removingEnrollment || !removeReason.trim() || !user?.uid) return;
+    setRemoveBusy(true);
+    try {
+      await withdrawFromActivity({
+        scheduleId: removingEnrollment.scheduleId,
+        studentId: removingEnrollment.studentId,
+        removedBy: user.uid,
+        removedReason: removeReason.trim(),
+      });
+      setRemovingEnrollment(null);
+      setRemoveReason('');
+      setToast('ถอนชื่อนักเรียนออกจากชุมนุมแล้ว');
+      setTimeout(() => setToast(null), 3000);
+    } catch (e) {
+      setToast('ถอนไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)));
+      setTimeout(() => setToast(null), 4000);
+    } finally {
+      setRemoveBusy(false);
+    }
+  };
+
   // Dynamic classroom layout configuration
   const courseStudents = useMemo(() => {
+    if (activeCourseIsElective) {
+      // ELECTIVE: รายชื่อมาจาก activity_enrollments (สมัครจริง) ไม่ใช่กรองด้วย room
+      return electiveEnrollments
+        .map(e => (students || []).find(s => s.studentId === e.studentId))
+        .filter((s): s is Student => !!s);
+    }
     const targetRoom = activeCourse?.room;
     if (!targetRoom) return [];
 
-    return (students || []).filter(s => 
-      isSameRoom(s.room, targetRoom) || 
+    return (students || []).filter(s =>
+      isSameRoom(s.room, targetRoom) ||
       isSameRoom((s as any).className, targetRoom)
     );
-  }, [activeCourse?.room, students]);
+  }, [activeCourse?.room, students, activeCourseIsElective, electiveEnrollments]);
 
   const isM58 = isSameRoom(activeCourse?.room, 'ม.5/8');
   const layout = isM58 ? {
@@ -2030,12 +2082,40 @@ export function TeacherPortal() {
 
           {/* Main Seating Manager with Categories, Layout Templates, Locking & Random Picker */}
           <main className="flex-1 flex flex-col overflow-hidden">
+            {/* รายชื่อผู้สมัครชุมนุม (ELECTIVE) — ถอนชื่อนักเรียนที่ไม่ผ่าน/เต็มได้ ที่นั่งว่างทันที */}
+            {activeCourseIsElective && (
+              <div className="bg-teal-950/20 border-b border-teal-800/40 p-4 space-y-2 shrink-0">
+                <h4 className="text-xs font-bold text-teal-300 flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5" /> รายชื่อสมัครชุมนุม ({electiveEnrollments.length} คน)
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {electiveEnrollments.length === 0 ? (
+                    <span className="text-[11px] text-slate-500">ยังไม่มีนักเรียนสมัคร</span>
+                  ) : electiveEnrollments.map(e => {
+                    const s = (students || []).find(st => st.studentId === e.studentId);
+                    return (
+                      <span key={e.id} className="flex items-center gap-1.5 bg-slate-900/60 border border-slate-700/60 rounded-full pl-3 pr-1.5 py-1 text-[11px] text-slate-200">
+                        {s?.name || e.studentId}
+                        <button
+                          onClick={() => { setRemovingEnrollment(e); setRemoveReason(''); }}
+                          title="ถอนชื่อออกจากชุมนุม"
+                          className="text-red-400 hover:text-red-300 p-0.5 rounded-full hover:bg-red-500/10"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <ClassroomSeatingManager
               course={activeCourse}
               students={students}
               onBackToDashboard={() => { setActiveCourse(null); setRetroactiveAttendanceMode(false); }}
               onSelectStudentDetail={(s) => setAssessmentModalStudent(s)}
               attendanceOnly={retroactiveAttendanceMode}
+              overrideStudents={activeCourseIsElective ? courseStudents : undefined}
             />
           </main>
         </div>
@@ -2050,6 +2130,49 @@ export function TeacherPortal() {
       )}
         </motion.div>
       </AnimatePresence>
+
+      {/* ถอนชื่อนักเรียนออกจากชุมนุม (ELECTIVE) — ต้องระบุเหตุผล เช่น "ไม่ผ่านคัดเลือก นศท" */}
+      {removingEnrollment && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
+          <div className="bg-[#151921] border border-white/10 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-white/10 bg-red-950/30">
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <X className="w-4 h-4 text-red-400" /> ถอนชื่อออกจากชุมนุม
+              </h2>
+            </div>
+            <div className="p-5 space-y-3">
+              <p className="text-xs text-slate-300">
+                นักเรียน: <strong className="text-white">
+                  {(students || []).find(st => st.studentId === removingEnrollment.studentId)?.name || removingEnrollment.studentId}
+                </strong>
+              </p>
+              <label className="block text-xs font-bold text-slate-400">เหตุผลที่ถอน (จำเป็นต้องระบุ)</label>
+              <textarea
+                value={removeReason}
+                onChange={e => setRemoveReason(e.target.value)}
+                placeholder="เช่น ไม่ผ่านคัดเลือก นศท, ที่นั่งเต็ม"
+                rows={3}
+                className="w-full bg-[#0b0f19] border border-slate-800/80 rounded-lg p-3 text-sm text-white outline-none focus:border-red-500"
+              />
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={() => setRemovingEnrollment(null)}
+                  className="flex-1 py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-bold rounded-xl border border-white/10"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={handleConfirmRemoveFromElective}
+                  disabled={!removeReason.trim() || removeBusy}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl"
+                >
+                  {removeBusy ? 'กำลังถอน...' : 'ยืนยันถอนชื่อ'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Behavior Scoring Popup Modal */}
       {selectedStudentForScore && (

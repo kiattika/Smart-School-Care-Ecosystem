@@ -8,6 +8,7 @@ import {
   assertFails,
 } from '@firebase/rules-unit-testing';
 import { collection, getDocs, query, where } from 'firebase/firestore';
+import { enrollInActivity, withdrawFromActivity } from '../services/firestoreService';
 
 let testEnv: RulesTestEnvironment;
 
@@ -1001,6 +1002,220 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertFails(asRole('HEAD_OF_DEPARTMENT').firestore().doc('department_config/bad').set({ name: 'x' }));
       await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('department_config/bad').set({ name: 'x' }));
       await assertFails(asAnonymous().firestore().doc('department_config/bad').set({ name: 'x' }));
+    });
+  });
+
+  // 19. elective_activities_config — กำหนด subjectCode ไหนเป็นชุมนุม (ELECTIVE)
+  describe('elective_activities_config collection', () => {
+    it('lets any signed-in user read', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('elective_activities_config/ACT_CLUB').set({ subjectCode: 'ACT_CLUB', name: 'ชุมนุมคอมพิวเตอร์', capacityPerSection: 20 });
+      });
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('elective_activities_config/ACT_CLUB').get());
+      await assertSucceeds(asUser('stu-1', ['STUDENT']).firestore().doc('elective_activities_config/ACT_CLUB').get());
+    });
+    it('denies anonymous read (ต้อง signed-in)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('elective_activities_config/ACT_X').set({ subjectCode: 'ACT_X', name: 'X' });
+      });
+      await assertFails(asAnonymous().firestore().doc('elective_activities_config/ACT_X').get());
+    });
+    it('allows SUPER_ADMIN and ACADEMIC_HEAD to write; denies other roles', async () => {
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('elective_activities_config/ACT_A').set({ subjectCode: 'ACT_A', name: 'A', capacityPerSection: 10 })
+      );
+      await assertSucceeds(
+        asRole('ACADEMIC_HEAD').firestore().doc('elective_activities_config/ACT_B').set({ subjectCode: 'ACT_B', name: 'B', capacityPerSection: null })
+      );
+      await assertFails(
+        asRole('SUBJECT_TEACHER').firestore().doc('elective_activities_config/ACT_C').set({ subjectCode: 'ACT_C', name: 'C' })
+      );
+      await assertFails(
+        asRole('HEAD_OF_DEPARTMENT').firestore().doc('elective_activities_config/ACT_D').set({ subjectCode: 'ACT_D', name: 'D' })
+      );
+    });
+  });
+
+  // 20. activity_enrollments — สมัคร/ถอนชุมนุม
+  describe('activity_enrollments collection', () => {
+    const seedStudentAndSchedule = async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-e1').set({ studentId: 'std-e1', studentUid: 'stu-e1-uid', name: 'นักเรียน E1' });
+        await ctx.firestore().doc('students/std-e2').set({ studentId: 'std-e2', studentUid: 'stu-e2-uid', name: 'นักเรียน E2' });
+        await ctx.firestore().doc('schedules/sch-club-1').set({ subjectCode: 'ACT_CLUB', teacherId: 'teacher-club-uid', dayOfWeek: 'tuesday', periodNumber: 8 });
+      });
+    };
+
+    it('lets any signed-in user read (ต้องเห็นจำนวนคนสมัครเพื่อคำนวณที่นั่งเหลือ)', async () => {
+      await seedStudentAndSchedule();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('activity_enrollments/sch-club-1_std-e1').set({
+          scheduleId: 'sch-club-1', subjectCode: 'ACT_CLUB', studentId: 'std-e1', studentUid: 'stu-e1-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        });
+      });
+      await assertSucceeds(asUser('stu-e2-uid', ['STUDENT']).firestore().doc('activity_enrollments/sch-club-1_std-e1').get());
+    });
+
+    it('นักเรียนสมัคร (create) ของตัวเองเท่านั้นสำเร็จ — สมัครแทนคนอื่นถูกปฏิเสธ', async () => {
+      await seedStudentAndSchedule();
+      await assertSucceeds(
+        asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/sch-club-1_std-e1').set({
+          scheduleId: 'sch-club-1', subjectCode: 'ACT_CLUB', studentId: 'std-e1', studentUid: 'stu-e1-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        })
+      );
+      // stu-e2-uid พยายามสมัครแทน std-e1 (studentId ไม่ตรงกับ studentUid ของตัวเอง)
+      await assertFails(
+        asUser('stu-e2-uid', ['STUDENT']).firestore().doc('activity_enrollments/sch-club-1_std-e1_fake').set({
+          scheduleId: 'sch-club-1', subjectCode: 'ACT_CLUB', studentId: 'std-e1', studentUid: 'stu-e2-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        })
+      );
+    });
+
+    it('ครูที่ไม่ใช่เจ้าของ schedule นั้นถอนชื่อนักเรียนไม่ได้', async () => {
+      await seedStudentAndSchedule();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('activity_enrollments/sch-club-1_std-e1').set({
+          scheduleId: 'sch-club-1', subjectCode: 'ACT_CLUB', studentId: 'std-e1', studentUid: 'stu-e1-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        });
+      });
+      // ครูคนอื่น (ไม่ใช่ teacher-club-uid ที่ผูกกับ sch-club-1)
+      await assertFails(
+        asUser('teacher-other-uid', ['SUBJECT_TEACHER']).firestore().doc('activity_enrollments/sch-club-1_std-e1').update({
+          removedAt: new Date().toISOString(), removedBy: 'teacher-other-uid', removedReason: 'ทดสอบ',
+        })
+      );
+      // ครูเจ้าของ schedule ถอนได้จริง
+      await assertSucceeds(
+        asUser('teacher-club-uid', ['SUBJECT_TEACHER']).firestore().doc('activity_enrollments/sch-club-1_std-e1').update({
+          removedAt: new Date().toISOString(), removedBy: 'teacher-club-uid', removedReason: 'ไม่ผ่านคัดเลือก นศท',
+        })
+      );
+    });
+
+    it('นักเรียนถอนตัวเอง (removedBy ต้องเป็น null) สำเร็จ — ปลอม removedBy เป็นคนอื่นไม่ได้', async () => {
+      await seedStudentAndSchedule();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('activity_enrollments/sch-club-1_std-e1').set({
+          scheduleId: 'sch-club-1', subjectCode: 'ACT_CLUB', studentId: 'std-e1', studentUid: 'stu-e1-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        });
+      });
+      await assertFails(
+        asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/sch-club-1_std-e1').update({
+          removedAt: new Date().toISOString(), removedBy: 'someone-else-uid', removedReason: 'เปลี่ยนใจ',
+        })
+      );
+      await assertSucceeds(
+        asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/sch-club-1_std-e1').update({
+          removedAt: new Date().toISOString(), removedBy: null, removedReason: 'เปลี่ยนใจ',
+        })
+      );
+    });
+
+    it('ห้ามลบ document จริงเด็ดขาด (เก็บประวัติไว้เสมอ)', async () => {
+      await seedStudentAndSchedule();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('activity_enrollments/sch-club-1_std-e1').set({
+          scheduleId: 'sch-club-1', subjectCode: 'ACT_CLUB', studentId: 'std-e1', studentUid: 'stu-e1-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        });
+      });
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc('activity_enrollments/sch-club-1_std-e1').delete());
+      await assertFails(asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/sch-club-1_std-e1').delete());
+    });
+  });
+
+  // 21. activity_enrollment_counts — ตัวนับที่นั่งต่อ scheduleId (derived, sync คู่ enrollment)
+  describe('activity_enrollment_counts collection', () => {
+    it('lets any signed-in user read', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('activity_enrollment_counts/sch-club-1').set({ count: 5 });
+      });
+      await assertSucceeds(asUser('stu-1', ['STUDENT']).firestore().doc('activity_enrollment_counts/sch-club-1').get());
+    });
+    it('allows STUDENT/TEACHER/SUPER_ADMIN to write a valid non-negative count; denies PARENT and negative values', async () => {
+      await assertSucceeds(asUser('stu-1', ['STUDENT']).firestore().doc('activity_enrollment_counts/sch-a').set({ count: 1 }));
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('activity_enrollment_counts/sch-b').set({ count: 2 }));
+      await assertFails(asRole('PARENT').firestore().doc('activity_enrollment_counts/sch-c').set({ count: 1 }));
+      await assertFails(asUser('stu-1', ['STUDENT']).firestore().doc('activity_enrollment_counts/sch-d').set({ count: -1 }));
+    });
+  });
+
+  // 22. REAL race condition — 2 นักเรียนสมัครที่นั่งสุดท้ายพร้อมกัน ต้องมีแค่คนเดียวสำเร็จ
+  // (ยิงผ่าน enrollInActivity จริงจาก services/firestoreService.ts ไม่ใช่จำลองแยก — ทดสอบโค้ด
+  // เดียวกับที่ใช้งานจริง โดยส่ง context.firestore() ของ rules-testing SDK เข้าไปแทน db ของแอป)
+  describe('ELECTIVE enrollment — real race condition (Firestore transaction)', () => {
+    it('capacity เต็มพอดี 1 ที่นั่ง — 2 คนสมัครพร้อมกัน มีแค่ 1 คนสำเร็จ อีกคน error "เต็มแล้ว"', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-race-1').set({ studentId: 'std-race-1', studentUid: 'race-uid-1' });
+        await ctx.firestore().doc('students/std-race-2').set({ studentId: 'std-race-2', studentUid: 'race-uid-2' });
+      });
+
+      const dbA = asUser('race-uid-1', ['STUDENT']).firestore();
+      const dbB = asUser('race-uid-2', ['STUDENT']).firestore();
+
+      const results = await Promise.allSettled([
+        enrollInActivity({ scheduleId: 'sch-race-last-seat', subjectCode: 'ACT_RACE', studentId: 'std-race-1', studentUid: 'race-uid-1', capacityPerSection: 1 }, dbA as any),
+        enrollInActivity({ scheduleId: 'sch-race-last-seat', subjectCode: 'ACT_RACE', studentId: 'std-race-2', studentUid: 'race-uid-2', capacityPerSection: 1 }, dbB as any),
+      ]);
+
+      const fulfilled = results.filter(r => r.status === 'fulfilled');
+      const rejected = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].reason.message).toContain('เต็มแล้ว');
+
+      // ตัวนับที่นั่งต้องหยุดที่ 1 พอดี ไม่ใช่ 2 (ไม่ oversell)
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const counterSnap = await ctx.firestore().doc('activity_enrollment_counts/sch-race-last-seat').get();
+        expect(counterSnap.data()?.count).toBe(1);
+      });
+    });
+
+    it('ถอนตัวแล้วที่นั่งว่างขึ้นทันที ให้คนอื่นสมัครแทนได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-w1').set({ studentId: 'std-w1', studentUid: 'w-uid-1' });
+        await ctx.firestore().doc('students/std-w2').set({ studentId: 'std-w2', studentUid: 'w-uid-2' });
+      });
+      const dbW1 = asUser('w-uid-1', ['STUDENT']).firestore();
+      const dbW2 = asUser('w-uid-2', ['STUDENT']).firestore();
+
+      await enrollInActivity({ scheduleId: 'sch-withdraw-1', subjectCode: 'ACT_W', studentId: 'std-w1', studentUid: 'w-uid-1', capacityPerSection: 1 }, dbW1 as any);
+      // ที่นั่งเต็มแล้ว — คนที่ 2 สมัครไม่ได้
+      await expect(
+        enrollInActivity({ scheduleId: 'sch-withdraw-1', subjectCode: 'ACT_W', studentId: 'std-w2', studentUid: 'w-uid-2', capacityPerSection: 1 }, dbW2 as any)
+      ).rejects.toThrow('เต็มแล้ว');
+
+      // คนแรกถอนตัว
+      await withdrawFromActivity({ scheduleId: 'sch-withdraw-1', studentId: 'std-w1', removedBy: null, removedReason: null }, dbW1 as any);
+
+      // คนที่ 2 สมัครสำเร็จหลังที่นั่งว่าง
+      await expect(
+        enrollInActivity({ scheduleId: 'sch-withdraw-1', subjectCode: 'ACT_W', studentId: 'std-w2', studentUid: 'w-uid-2', capacityPerSection: 1 }, dbW2 as any)
+      ).resolves.not.toThrow();
+    });
+
+    it('นักเรียนที่ถูกครูถอน สมัครชุมนุมอื่นที่ยังว่างได้สำเร็จ', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-r1').set({ studentId: 'std-r1', studentUid: 'r-uid-1' });
+        await ctx.firestore().doc('schedules/sch-r-club-a').set({ subjectCode: 'ACT_RA', teacherId: 'teacher-ra-uid' });
+      });
+      const dbR = asUser('r-uid-1', ['STUDENT']).firestore();
+
+      await enrollInActivity({ scheduleId: 'sch-r-club-a', subjectCode: 'ACT_RA', studentId: 'std-r1', studentUid: 'r-uid-1', capacityPerSection: 5 }, dbR as any);
+
+      // ครูของ sch-r-club-a ถอนนักเรียนคนนี้ (ไม่ผ่านคัดเลือก)
+      const dbTeacher = asUser('teacher-ra-uid', ['SUBJECT_TEACHER']).firestore();
+      await withdrawFromActivity({ scheduleId: 'sch-r-club-a', studentId: 'std-r1', removedBy: 'teacher-ra-uid', removedReason: 'ไม่ผ่านคัดเลือก นศท' }, dbTeacher as any);
+
+      // นักเรียนคนเดิมสมัครชุมนุมอื่นที่ยังว่างได้
+      await expect(
+        enrollInActivity({ scheduleId: 'sch-r-club-b', subjectCode: 'ACT_RB', studentId: 'std-r1', studentUid: 'r-uid-1', capacityPerSection: 5 }, dbR as any)
+      ).resolves.not.toThrow();
     });
   });
 

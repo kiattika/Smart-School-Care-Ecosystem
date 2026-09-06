@@ -30,6 +30,17 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/students/$(sid)).data.get(key, fallback);
     }
 
+    // ครูผู้สอนของ schedule (section) นี้ — เทียบ schedules/{scheduleId}.teacherId/teacherIds
+    // ใช้ให้ครูถอนชื่อนักเรียนออกจากชุมนุม/กิจกรรม ELECTIVE ของตัวเองเท่านั้น (activity_enrollments)
+    function isTeacherOfSchedule(scheduleId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/schedules/$(scheduleId))
+        && (
+          get(/databases/$(database)/documents/schedules/$(scheduleId)).data.get('teacherId', '') == request.auth.uid ||
+          request.auth.uid in get(/databases/$(database)/documents/schedules/$(scheduleId)).data.get('teacherIds', [])
+        );
+    }
+
     // 1. Students Collection
     // อ่านทะเบียนนักเรียนได้: บุคลากรที่ต้องใช้รายชื่อทั้งโรงเรียน (ครู/ผู้บริหาร/แนะแนว/พยาบาล/การเงิน/ศึกษานิเทศก์)
     // + ผู้ปกครองอ่านได้เฉพาะบุตรหลานตัวเอง (ต้อง query where('parentUid','==', uid) เพื่อให้ list ผ่าน)
@@ -388,6 +399,53 @@ service cloud.firestore {
     match /department_config/{deptId} {
       allow read: if isSignedIn();
       allow write: if hasRole('SUPER_ADMIN');
+    }
+
+    // 27. Elective activity config — ระบุว่า subjectCode ไหนเป็นชุมนุม/กิจกรรมตามความสนใจ
+    // (ELECTIVE, สมัครเอง มีที่นั่งจำกัด) ต่างจากกิจกรรมยกห้อง (WHOLE_CLASS)
+    match /elective_activities_config/{configId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('ACADEMIC_HEAD');
+    }
+
+    // 28. Activity enrollments — การสมัคร/ถอนชุมนุมของนักเรียน (ไม่ลบ doc จริง mark removedAt แทน)
+    // read กว้าง (isSignedIn) เพราะนักเรียนต้องเห็นจำนวนที่สมัครแล้วของ "คนอื่น" ด้วยเพื่อคำนวณที่นั่ง
+    // เหลือ — ไม่ใช่ข้อมูลอ่อนไหวระดับเดียวกับสุขภาพจิต/การเงิน (แค่ว่าใครสมัครชุมนุมอะไร)
+    match /activity_enrollments/{enrollmentId} {
+      allow read: if isSignedIn();
+
+      // สมัคร: สร้าง doc ของตัวเองเท่านั้น ต้องยังไม่ถอน (removedAt/removedBy ต้องเป็น null ตอนสร้าง)
+      allow create: if hasRole('STUDENT')
+                       && request.resource.data.studentUid == request.auth.uid
+                       && request.resource.data.removedAt == null
+                       && request.resource.data.removedBy == null
+                       && studentField(request.resource.data.studentId, 'studentUid', '__none__') == request.auth.uid;
+
+      // ถอน: แก้ได้เฉพาะ removedAt/removedBy/removedReason เท่านั้น — นักเรียนถอนตัวเอง
+      // (removedBy ต้องเป็น null) หรือครูของ schedule นั้นถอน (removedBy ต้องเป็น uid ตัวเอง)
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['removedAt', 'removedBy', 'removedReason'])
+                       && (
+                         (hasRole('STUDENT') && resource.data.studentUid == request.auth.uid && request.resource.data.removedBy == null) ||
+                         (
+                           (hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER')) &&
+                           request.resource.data.removedBy == request.auth.uid &&
+                           isTeacherOfSchedule(resource.data.scheduleId)
+                         ) ||
+                         hasRole('SUPER_ADMIN')
+                       );
+
+      allow delete: if false;
+    }
+
+    // 28.1 Activity enrollment counts — ตัวนับที่นั่งต่อ scheduleId (derived, sync คู่กับ
+    // activity_enrollments เสมอในทรานแซกชันเดียวกัน — ดู enrollInActivity/withdrawFromActivity)
+    // จำเป็นเพราะ Firestore transaction อ่านได้แค่ document เดียว query ไม่ได้ ใช้ตัวนับนี้แทน
+    // การนับจริงจาก activity_enrollments เพื่อตรวจที่นั่งแบบ atomic กัน race condition
+    match /activity_enrollment_counts/{scheduleId} {
+      allow read: if isSignedIn();
+      allow write: if (hasRole('STUDENT') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER') || hasRole('SUPER_ADMIN'))
+                      && request.resource.data.count is int
+                      && request.resource.data.count >= 0;
     }
 
     // Default Deny All Catch-All for unknown paths

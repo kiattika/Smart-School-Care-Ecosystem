@@ -61,6 +61,41 @@ export interface Student {
   attendanceStats?: { present: number; absent: number; late: number; leave: number };
 }
 
+/**
+ * ตั้งค่ากิจกรรมแบบ "ตามความสนใจ" (ELECTIVE) — นักเรียนสมัครเอง มีที่นั่งจำกัด เช่น ชุมนุม
+ * ต่างจากกิจกรรม/วิชายกห้อง (WHOLE_CLASS) ที่ดึงรายชื่อจาก room ของนักเรียนตรงๆ — ถ้า subjectCode
+ * ไหนไม่มี config นี้ ถือเป็น WHOLE_CLASS โดยปริยาย (ดู TeacherPortal.tsx courseStudents)
+ *
+ * capacityPerSection ใช้ "ต่อ section" คือต่อ scheduleId หนึ่งๆ อย่างอิสระต่อกัน — ถ้ากิจกรรม
+ * เดียวสอนหลาย section (เช่น ชุมนุมคอมพิวเตอร์ 2 กลุ่ม) แต่ละ section นับที่นั่งแยกกัน คนละ 20 คน
+ * (ไม่ใช่แชร์โควตารวม 20 คนทั้งกิจกรรม) — ใช้ค่าเดียวกันทุก section ของ subjectCode นี้
+ */
+export interface ElectiveActivityConfig {
+  id: string;               // = subjectCode
+  subjectCode: string;
+  name: string;
+  capacityPerSection: number | null; // null = ไม่จำกัดที่นั่ง
+  createdBy: string;
+  createdAt: string; // ISO
+}
+
+/**
+ * การสมัคร/ถอนชุมนุม 1 รายการ — ไม่ลบ document จริงเมื่อถอน (mark removedAt แทน) เพื่อเก็บ
+ * ประวัติไว้ (ใครถอนเมื่อไหร่ เหตุผลอะไร) — id เป็น `${scheduleId}_${studentId}` กันสมัครซ้ำ
+ * section เดิม (สมัครใหม่หลังถูกถอน = set() ทับ doc เดิม, สมัคร section/subjectCode อื่น = doc ใหม่)
+ */
+export interface ActivityEnrollment {
+  id: string;
+  scheduleId: string;
+  subjectCode: string;
+  studentId: string;
+  studentUid: string;
+  enrolledAt: string; // ISO
+  removedAt: string | null;
+  removedBy: string | null;    // UID ครูที่ถอน — null ถ้านักเรียนถอนตัวเอง
+  removedReason: string | null;
+}
+
 export interface StudentAnalytics {
   studentId: string;
   subjectAttendanceRate: number; // percentage 0-100

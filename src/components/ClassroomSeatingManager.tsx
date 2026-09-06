@@ -64,6 +64,9 @@ interface ClassroomSeatingManagerProps {
   onTakeAttendance?: () => void;
   /** โหมด "เช็คชื่อย้อนหลัง" (อนุมัติแล้ว) — ทำได้แค่เช็คชื่อ ล็อกการจัดผัง/สุ่ม/ให้คะแนน */
   attendanceOnly?: boolean;
+  /** ใช้รายชื่อนี้แทนการกรองด้วย room ภายใน — สำหรับกิจกรรม ELECTIVE (ชุมนุม) ที่นักเรียนคละห้อง
+   *  มาสมัครเอง (ดู TeacherPortal.tsx courseStudents/useElectiveActivities) */
+  overrideStudents?: Student[];
 }
 
 export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = ({
@@ -72,7 +75,8 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   onBackToDashboard,
   onSelectStudentDetail,
   onTakeAttendance,
-  attendanceOnly = false
+  attendanceOnly = false,
+  overrideStudents
 }) => {
   const course: Course = propCourse || {
     id: 'course-m58-default',
@@ -100,15 +104,17 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   const courseClassId = course?.room || 'ม.5/8';
   const layoutId = `layout_${courseSubjectId}_${courseClassId.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
-  // Filter students for this course/room
+  // Filter students for this course/room — ELECTIVE (ชุมนุม) ส่ง overrideStudents มาจาก enrollment
+  // แทน เพราะนักเรียนคละห้องมาสมัครเอง กรองด้วย room ไม่ได้ (ดู TeacherPortal.tsx courseStudents)
   const courseStudents = useMemo(() => {
+    if (overrideStudents) return overrideStudents;
     const targetRoom = course?.room;
     if (!targetRoom) return [];
-    return (students || []).filter(s => 
-      isSameRoom(s.room, targetRoom) || 
+    return (students || []).filter(s =>
+      isSameRoom(s.room, targetRoom) ||
       isSameRoom((s as any).className, targetRoom)
     );
-  }, [course?.room, students]);
+  }, [course?.room, students, overrideStudents]);
 
   // 1. Dynamic Layout State
   const [layoutMeta, setLayoutMeta] = useState<SeatingLayout>({
