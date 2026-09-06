@@ -5,6 +5,8 @@ import React, { useState, useMemo } from 'react';
 import { useStore } from './store';
 import { useRealStudents } from "./hooks/useRealStudents";
 import { useHomeroomAttendance } from "./hooks/useHomeroomAttendance";
+import { useRoomAttendanceRecords } from "./hooks/useRoomAttendanceRecords";
+import { computeStudentAttendanceStats, defaultAttendanceDateRange } from "./lib/studentAttendanceStats";
 import { format } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { 
@@ -72,6 +74,12 @@ export function AdvisorPortal() {
         return { ...s, attendance: { ...s.attendance, morningStatus: merged } };
       });
   }, [myRoom, students, attendanceOverrides, hrRecord]);
+
+  // สถิติการเข้าเรียนทั้งห้อง (ขาด/ลา/มาสาย + % อัตราเข้าเรียน) — real-time จาก attendance_records
+  // จริง ย้อนหลัง 30 วัน (ค่าเริ่มต้น ยังไม่ยืนยันจากโรงเรียน) ครูที่ปรึกษามีสิทธิ์อ่านตรงอยู่แล้ว
+  // (HOMEROOM_TEACHER) จึงไม่ต้องผ่าน derived cache แบบผู้ปกครอง/นักเรียน
+  const attendanceRange = useMemo(() => defaultAttendanceDateRange(30), []);
+  const { records: roomAttendanceRecords } = useRoomAttendanceRecords(myRoom ? [myRoom] : [], attendanceRange);
 
   const handleSaveAll = async () => {
     try {
@@ -435,6 +443,9 @@ export function AdvisorPortal() {
                       DailyIcon = Activity;
                     }
 
+                    // สถิติการเข้าเรียนย้อนหลัง 30 วัน (ขาด/ลา/มาสาย + % อัตราเข้าเรียน) — real-time
+                    const attStats = computeStudentAttendanceStats(roomAttendanceRecords, student.studentId);
+
                     return (
                       <div 
                         key={student.id} 
@@ -466,6 +477,18 @@ export function AdvisorPortal() {
                             <DailyIcon className={cn("w-4 h-4", dailyStatusColor)} />
                             <div className={cn("text-[10px] font-medium leading-tight", dailyStatusColor)}>{dailyStatusText}</div>
                           </div>
+                        </div>
+
+                        {/* สถิติการเข้าเรียนย้อนหลัง 30 วัน — ไฮไลต์แดงเมื่ออัตราต่ำกว่าเกณฑ์ */}
+                        <div className={cn(
+                          "border rounded-lg p-2 flex items-center justify-between text-[10px]",
+                          attStats.isBelowThreshold ? "bg-rose-500/10 border-rose-500/30" : "bg-black/20 border-white/5"
+                        )}>
+                          <span className="text-slate-400">ขาด {attStats.absent} · ลา {attStats.leave} · สาย {attStats.late} (30 วัน)</span>
+                          <span className={cn("font-bold", attStats.isBelowThreshold ? "text-rose-400" : "text-slate-300")}>
+                            {attStats.attendanceRate !== null ? `${attStats.attendanceRate}%` : '—'}
+                            {attStats.isBelowThreshold && ' ⚠️'}
+                          </span>
                         </div>
                       </div>
                     );

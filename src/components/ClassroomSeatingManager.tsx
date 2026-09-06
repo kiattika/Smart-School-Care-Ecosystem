@@ -91,10 +91,9 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
     currentDate,
     attendanceRecords, 
     setAttendanceStatus, 
-    adjustBehaviorScore, 
+    adjustBehaviorScore,
     addActiveLearningPoints,
-    activeLearningPoints,
-    analytics
+    activeLearningPoints
   } = useStore();
 
   const courseSubjectId = course?.code || course?.id || 'default-subject';

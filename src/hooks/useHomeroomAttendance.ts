@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { useStore } from '../store';
 import { format } from 'date-fns';
+import { writeAttendanceRecordWithStatsSync } from '../services/firestoreService';
 
 export interface HomeroomAttendanceRecord {
   id: string; // "YYYY-MM-DD_Room"
@@ -114,22 +115,20 @@ export function useHomeroomAttendance(date: string, room: string) {
     const teacherName = user?.displayName || user?.email?.split('@')[0] || 'Mr.Kiattisak';
     const teacherEmail = user?.email || 'kiattisak@utd.ac.th';
 
-    const payload: HomeroomAttendanceRecord = {
-      id: docId,
-      date,
-      room,
-      checkedByEmail: teacherEmail,
-      checkedByName: teacherName,
-      checkedAt: format(new Date(), 'HH:mm'),
-      isLocked: true,
-      requestedEditBy: null,
-      source: 'HOMEROOM_DEFAULT',
-      students: studentsAttendance,
-    };
-
     try {
-      const docRef = doc(db, 'attendance_records', docId);
-      await setDoc(docRef, payload, { merge: true });
+      // เขียน attendance_records + sync students/{id}.attendanceStats (derived cache) คู่กันเสมอ
+      // ในทรานแซกชันเดียว (ดู writeAttendanceRecordWithStatsSync — กันข้อมูลไม่ตรงกันถ้าเขียน
+      // สำเร็จแค่ฝั่งเดียว)
+      await writeAttendanceRecordWithStatsSync(docId, studentsAttendance, {
+        date,
+        room,
+        checkedByEmail: teacherEmail,
+        checkedByName: teacherName,
+        checkedAt: format(new Date(), 'HH:mm'),
+        isLocked: true,
+        requestedEditBy: null,
+        source: 'HOMEROOM_DEFAULT',
+      });
 
       // 1. Sync to local state
       Object.entries(studentsAttendance).forEach(([studentId, status]) => {

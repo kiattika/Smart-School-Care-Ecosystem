@@ -54,6 +54,11 @@ export interface Student {
   // (อัปเดตผ่าน updateBehaviorScoreAndTriggerAlert) ไม่ใช่ StudentAnalytics (session-local, dead)
   behaviorScore?: number;
   riskLevel?: 'NORMAL' | 'WARNING' | 'CRITICAL';
+  // สรุปขาด/ลา/มาสาย สะสมทั้งหมด (all-time) — derived cache ที่ sync คู่กับ attendance_records
+  // เสมอ (ดู writeAttendanceRecordWithStatsSync/recomputeStudentAttendanceStats) ใช้แสดงให้
+  // ผู้ปกครอง/นักเรียนดูได้โดยไม่ต้องมีสิทธิ์ query attendance_records ทั้งห้อง — ครู/ครูที่ปรึกษา
+  // ใช้ useRoomAttendanceRecords (real-time, เลือกช่วงวันที่ได้) แทนเพราะมีสิทธิ์อ่านตรงอยู่แล้ว
+  attendanceStats?: { present: number; absent: number; late: number; leave: number };
 }
 
 export interface StudentAnalytics {

@@ -9,6 +9,8 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { TeacherScheduleList, SubjectPeriod } from './components/TeacherScheduleList';
 import { computeAttendanceSummary } from './lib/attendanceSummary';
+import { computeStudentAttendanceStats, defaultAttendanceDateRange } from './lib/studentAttendanceStats';
+import { useRoomAttendanceRecords } from './hooks/useRoomAttendanceRecords';
 import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { useStore } from './store';
@@ -39,7 +41,6 @@ export function TeacherPortal() {
     user,
     currentDate,
     currentPeriod,
-    analytics,
     attendanceRecords,
     scheduleConfig,
     setCurrentPeriod,
@@ -673,10 +674,34 @@ export function TeacherPortal() {
     }, 1500);
   };
 
-  // Find students at risk
-  const criticalStudents = analytics.filter(a => a.subjectAttendanceRate < 60);
-  const warningStudents = analytics.filter(a => a.subjectAttendanceRate >= 60 && a.subjectAttendanceRate < 80);
-  const avgAttendance = Math.round(analytics.reduce((acc, a) => acc + a.subjectAttendanceRate, 0) / (analytics.length || 1));
+  // FIX (Task 1-2): เดิมอ่านจาก StudentAnalytics (session-local store, ว่างเปล่าเสมอ — analytics
+  // ไม่เคยมีรายการจริง) ตอนนี้คำนวณจริงจาก attendance_records ของทุกห้อง/รายวิชาที่ท่านสอน
+  // real-time ย้อนหลัง 30 วัน (ค่าเริ่มต้น ยังไม่ยืนยันจากโรงเรียน) — เกณฑ์ 2 ระดับตามที่ UI นี้
+  // ออกแบบไว้เดิม: วิกฤต < 60%, เฝ้าระวัง 60-80% (คนละเกณฑ์กับ DEFAULT_ATTENDANCE_THRESHOLD_PERCENT
+  // ตัวเดียวที่ hook ใช้เป็นค่าเริ่มต้นทั่วไป)
+  const myTaughtRooms = useMemo(
+    () => Array.from(new Set(myCourses.map(c => c.room).filter(Boolean))),
+    [myCourses]
+  );
+  const attendanceRange = useMemo(() => defaultAttendanceDateRange(30), []);
+  const { records: myRoomsAttendanceRecords } = useRoomAttendanceRecords(myTaughtRooms, attendanceRange);
+  const myTaughtStudentIds = useMemo(() => {
+    const ids = new Set<string>();
+    myCourses.forEach(c => {
+      (students || []).forEach(s => { if (isSameRoom(s.room, c.room)) ids.add(s.studentId); });
+    });
+    return Array.from(ids);
+  }, [myCourses, students]);
+  const myStudentAttendanceStats = useMemo(
+    () => myTaughtStudentIds.map(id => computeStudentAttendanceStats(myRoomsAttendanceRecords, id)),
+    [myTaughtStudentIds, myRoomsAttendanceRecords]
+  );
+  const criticalStudents = myStudentAttendanceStats.filter(a => a.attendanceRate !== null && a.attendanceRate < 60);
+  const warningStudents = myStudentAttendanceStats.filter(a => a.attendanceRate !== null && a.attendanceRate >= 60 && a.attendanceRate < 80);
+  const ratedAttendanceStudents = myStudentAttendanceStats.filter(a => a.attendanceRate !== null);
+  const avgAttendance = ratedAttendanceStudents.length > 0
+    ? Math.round(ratedAttendanceStudents.reduce((acc, a) => acc + (a.attendanceRate as number), 0) / ratedAttendanceStudents.length)
+    : 0;
 
   return (
     <div className="flex flex-col h-screen w-full bg-[#0b0d14] text-slate-100 overflow-hidden font-sans selection:bg-blue-500/30">
@@ -1835,7 +1860,7 @@ export function TeacherPortal() {
                         <div key={student?.id || a.studentId} className="p-3 bg-red-950/40 border border-red-500/50 rounded-lg shadow-[0_0_15px_rgba(239,68,68,0.2)]">
                           <div className="flex justify-between items-start mb-1">
                             <span className="text-sm font-bold text-white">{student?.name || `รหัส ${a.studentId}`}</span>
-                            <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded font-mono">{a.subjectAttendanceRate}%</span>
+                            <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded font-mono">{(a.attendanceRate ?? 0)}%</span>
                           </div>
                           <p className="text-[11px] text-red-300">ความเสี่ยงสูงเวลาเรียนไม่พอ</p>
                         </div>
@@ -1865,10 +1890,10 @@ export function TeacherPortal() {
                         <div key={student?.id || a.studentId} className="p-3 bg-amber-950/30 border border-amber-500/40 rounded-lg">
                           <div className="flex justify-between items-start mb-1">
                             <span className="text-sm text-slate-200">{student?.name || `รหัส ${a.studentId}`}</span>
-                            <span className="text-xs font-mono text-amber-400">{a.subjectAttendanceRate}%</span>
+                            <span className="text-xs font-mono text-amber-400">{(a.attendanceRate ?? 0)}%</span>
                           </div>
                           <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                            <div className="bg-amber-500 h-full" style={{ width: `${a.subjectAttendanceRate}%` }}></div>
+                            <div className="bg-amber-500 h-full" style={{ width: `${(a.attendanceRate ?? 0)}%` }}></div>
                           </div>
                         </div>
                       );
@@ -1878,7 +1903,7 @@ export function TeacherPortal() {
 
                 {/* 3. สถิติรวมห้องเรียน */}
                 <div className="p-4 bg-slate-900/50 border-t border-white/10 mt-auto">
-                  <div className="text-xs text-slate-500 mb-2">สถิติรวมห้องเรียน {activeCourse?.room}</div>
+                  <div className="text-xs text-slate-500 mb-2">สถิติรวมนักเรียนที่ท่านสอนทุกห้อง (30 วันล่าสุด)</div>
                   <div className="flex items-end gap-2">
                     <span className="text-2xl font-bold text-green-400">{avgAttendance}%</span>
                     <span className="text-xs text-slate-400 pb-1">ค่าเฉลี่ยการเข้าเรียน</span>
@@ -1966,7 +1991,7 @@ export function TeacherPortal() {
                       <div key={student?.id || a.studentId} className="p-3 bg-red-950/40 border border-red-500/50 rounded-xl">
                         <div className="flex justify-between items-start mb-1">
                           <span className="text-sm font-bold text-white">{student?.name || `รหัส ${a.studentId}`}</span>
-                          <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded font-mono">{a.subjectAttendanceRate}%</span>
+                          <span className="text-xs bg-red-500 text-white px-1.5 py-0.5 rounded font-mono">{(a.attendanceRate ?? 0)}%</span>
                         </div>
                         <p className="text-[11px] text-red-300">ความเสี่ยงสูงเวลาเรียนไม่พอ</p>
                       </div>
@@ -1984,10 +2009,10 @@ export function TeacherPortal() {
                       <div key={student?.id || a.studentId} className="p-3 bg-amber-950/30 border border-amber-500/40 rounded-xl">
                         <div className="flex justify-between items-start mb-1">
                           <span className="text-sm text-slate-200">{student?.name || `รหัส ${a.studentId}`}</span>
-                          <span className="text-xs font-mono text-amber-400">{a.subjectAttendanceRate}%</span>
+                          <span className="text-xs font-mono text-amber-400">{(a.attendanceRate ?? 0)}%</span>
                         </div>
                         <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-1">
-                          <div className="bg-amber-500 h-full" style={{ width: `${a.subjectAttendanceRate}%` }}></div>
+                          <div className="bg-amber-500 h-full" style={{ width: `${(a.attendanceRate ?? 0)}%` }}></div>
                         </div>
                       </div>
                     );

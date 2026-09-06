@@ -2,6 +2,7 @@ import { cn } from "./lib/utils";
 import React, { useState } from 'react';
 import { useStore } from './store';
 import { useRealStudents } from './hooks/useRealStudents';
+import { attendanceStatsFromCounts } from './lib/studentAttendanceStats';
 import { 
   Calendar, 
   CheckCircle2, 
@@ -330,6 +331,53 @@ export function ParentPortal() {
                 </p>
               </div>
             </div>
+
+            {/* สถิติการเข้าเรียน (ขาด/ลา/มาสาย) — สะสมทั้งหมด จาก students/{id}.attendanceStats
+                (derived cache, sync คู่กับ attendance_records จริงเสมอ — ดู firestoreService.ts) */}
+            {(() => {
+              const attStats = attendanceStatsFromCounts(student.studentId, student.attendanceStats);
+              return (
+                <div className={cn(
+                  "rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl border space-y-3",
+                  attStats.isBelowThreshold ? "bg-red-950/30 border-red-800/50" : "bg-slate-900/70 border-slate-800"
+                )}>
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" /> สถิติการเข้าเรียน (สะสมทั้งหมด)
+                    </h3>
+                    {attStats.isBelowThreshold && (
+                      <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-red-500/20 text-red-300 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> อัตราเข้าเรียนต่ำกว่าเกณฑ์ {attStats.threshold}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                    <div>
+                      <div className="text-xl font-black text-emerald-400">{attStats.present}</div>
+                      <div className="text-[10px] text-slate-400">มาเรียนปกติ</div>
+                    </div>
+                    <div>
+                      <div className="text-xl font-black text-red-400">{attStats.absent}</div>
+                      <div className="text-[10px] text-slate-400">ขาด</div>
+                    </div>
+                    <div>
+                      <div className="text-xl font-black text-indigo-400">{attStats.leave}</div>
+                      <div className="text-[10px] text-slate-400">ลา</div>
+                    </div>
+                    <div>
+                      <div className="text-xl font-black text-amber-400">{attStats.late}</div>
+                      <div className="text-[10px] text-slate-400">มาสาย</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+                    <span className="text-xs text-slate-400">อัตราการเข้าเรียน (ไม่นับวันลา)</span>
+                    <span className={cn("text-lg font-black", attStats.isBelowThreshold ? "text-red-400" : "text-emerald-400")}>
+                      {attStats.attendanceRate !== null ? `${attStats.attendanceRate}%` : 'ยังไม่มีข้อมูลเช็คชื่อ'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Recent Communication & Self Assessment Detail Button */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

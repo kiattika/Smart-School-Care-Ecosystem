@@ -72,6 +72,16 @@ function mapDocToStudent(id: string, data: any): Student {
     // ทั้งที่ students/{id}.behaviorScore มีอยู่จริงใน Firestore (ตั้งต้น 100 ตอน import)
     behaviorScore: typeof data.behaviorScore === 'number' ? data.behaviorScore : 100,
     riskLevel: data.riskLevel || 'NORMAL',
+    // derived cache — sync คู่กับ attendance_records เสมอ (ดู writeAttendanceRecordWithStatsSync
+    // ใน firestoreService.ts) ไม่มีค่า = ยังไม่เคยมีการเช็คชื่อคาบไหนของนักเรียนคนนี้เลย
+    attendanceStats: data.attendanceStats
+      ? {
+          present: Number(data.attendanceStats.present) || 0,
+          absent: Number(data.attendanceStats.absent) || 0,
+          late: Number(data.attendanceStats.late) || 0,
+          leave: Number(data.attendanceStats.leave) || 0,
+        }
+      : undefined,
     homeLocation: {
       address: data.homeLocation?.address || data.address || '',
       coordinates: data.homeLocation?.coordinates || [13.7563, 100.5018],

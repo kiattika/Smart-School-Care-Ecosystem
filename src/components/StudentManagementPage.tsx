@@ -23,7 +23,8 @@ import {
   UserPlus,
   Home,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 import { 
   collection, 
@@ -34,6 +35,7 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { recomputeStudentAttendanceStats } from '../services/firestoreService';
 import { Student } from '../types';
 import { BulkDataImportModal, ImportType } from './BulkDataImportModal';
 import { isSameRoom } from '../lib/utils';
@@ -398,6 +400,26 @@ export function StudentManagementPage() {
     }
   };
 
+  // Resync สถิติการเข้าเรียนสะสม (students/{id}.attendanceStats) ให้ตรงกับ attendance_records
+  // จริงทั้งหมด — attendanceStats เป็นแค่ derived cache (ดู recomputeStudentAttendanceStats ใน
+  // firestoreService.ts) ใช้ปุ่มนี้เมื่อสงสัยว่าตัวเลขเพี้ยน (เช่น ข้อมูลเก่าก่อนมีระบบนี้)
+  const [resyncingStudentId, setResyncingStudentId] = useState<string | null>(null);
+  const handleResyncAttendance = async (student: StudentRecord) => {
+    setResyncingStudentId(student.studentId);
+    try {
+      const stats = await recomputeStudentAttendanceStats(student.studentId, student.room);
+      triggerSweetAlert(
+        'Resync สถิติการเข้าเรียนสำเร็จ',
+        `${student.fullName || student.studentId}: มา ${stats.present} · ขาด ${stats.absent} · ลา ${stats.leave} · สาย ${stats.late}`,
+        'success'
+      );
+    } catch (err) {
+      triggerToast(`❌ Resync ไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setResyncingStudentId(null);
+    }
+  };
+
   // ลบข้อมูลนักเรียน
   const handleConfirmDelete = async () => {
     if (!studentToDelete) return;
@@ -746,6 +768,14 @@ export function StudentManagementPage() {
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                             <span>แก้ไข</span>
+                          </button>
+                          <button
+                            onClick={() => handleResyncAttendance(student)}
+                            disabled={resyncingStudentId === student.studentId}
+                            className="p-1.5 bg-slate-800 hover:bg-blue-500/20 hover:text-blue-300 border border-slate-700/60 hover:border-blue-500/30 text-slate-400 rounded-lg transition-all active:scale-[0.97] disabled:opacity-50"
+                            title="Resync สถิติการเข้าเรียนสะสม จาก attendance_records จริง (ใช้เมื่อสงสัยว่าตัวเลขเพี้ยน)"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${resyncingStudentId === student.studentId ? 'animate-spin' : ''}`} />
                           </button>
                           <button
                             onClick={() => setStudentToDelete(student)}
