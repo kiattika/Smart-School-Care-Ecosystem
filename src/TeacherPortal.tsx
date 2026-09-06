@@ -8,6 +8,7 @@ import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, sa
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { TeacherScheduleList, SubjectPeriod } from './components/TeacherScheduleList';
+import { computeAttendanceSummary } from './lib/attendanceSummary';
 import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { useStore } from './store';
@@ -137,20 +138,28 @@ export function TeacherPortal() {
   }, [myLateRequests]);
 
   // ── บันทึกการเช็คชื่อจริงของวันนี้ (attendance_records) — ใช้คำนวณ attendanceTaken แทน session-local store ──
-  const [todayAttendanceDocs, setTodayAttendanceDocs] = useState<Array<{ id: string; periodNumber: number | null; room: string }>>([]);
+  // เก็บ students + source ด้วย (ไม่ใช่แค่ id/periodNumber/room) เพื่อคำนวณ badge สรุปขาด/ลา/มาสาย
+  // แบบ real-time บนการ์ดตารางสอน — ไม่ต้องเปิด modal เช็คชื่อก่อนถึงจะเห็น
+  const [todayAttendanceDocs, setTodayAttendanceDocs] = useState<Array<{
+    id: string;
+    periodNumber: number | null;
+    room: string;
+    students: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>;
+    source?: 'HOMEROOM_DEFAULT' | 'PERIOD_OVERRIDE';
+  }>>([]);
   useEffect(() => {
     if (!isTeacherRole) { setTodayAttendanceDocs([]); return; }
     const dateStr = format(currentDate, 'yyyy-MM-dd');
     const qy = query(collection(db, 'attendance_records'), where('date', '==', dateStr));
     const unsub = onSnapshot(qy, (snap) => {
-      const rows: Array<{ id: string; periodNumber: number | null; room: string }> = [];
+      const rows: Array<{ id: string; periodNumber: number | null; room: string; students: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>; source?: 'HOMEROOM_DEFAULT' | 'PERIOD_OVERRIDE' }> = [];
       snap.forEach(d => {
         const data = d.data() as any;
         // เก็บ "ทุก" record ของวันนี้ — รวมคาบที่ไม่มี field periodNumber ด้วย
         // (โฮมรูมเขียนผ่าน useHomeroomAttendance เป็น id `${date}_${room}` ไม่มี periodNumber
         //  ถ้า drop ทิ้งตรงนี้ คาบโฮมรูมที่เช็คแล้วจะกลับไปขึ้นปุ่ม "ขอเช็คชื่อย้อนหลัง")
         const pn = (data.periodNumber !== undefined && data.periodNumber !== null) ? Number(data.periodNumber) : null;
-        rows.push({ id: d.id, periodNumber: pn, room: String(data.room || '') });
+        rows.push({ id: d.id, periodNumber: pn, room: String(data.room || ''), students: data.students || {}, source: data.source });
       });
       setTodayAttendanceDocs(rows);
     }, (err) => console.warn('[TeacherPortal] today attendance listener:', err.message));
@@ -886,6 +895,16 @@ export function TeacherPortal() {
                   );
                   const isAttendanceTaken = firestoreChecked || (matchedCourse ? matchedCourse.attendanceTaken : false) || !!item.attendanceTaken || hasRecords;
 
+                  // สรุปขาด/ลา/มาสาย ณ ปัจจุบัน (real-time) — เห็นได้ทันทีบนการ์ดโดยไม่ต้องเปิด modal ก่อน
+                  // (ตรรกะจับคู่ record/fallback โฮมรูม ดู src/lib/attendanceSummary.ts — แยกเป็น pure function เพื่อ test ได้)
+                  const attendanceSummary = computeAttendanceSummary(
+                    todayAttendanceDocs,
+                    expectedRecordIds,
+                    item.periodNumber,
+                    attRoomCandidates,
+                    isSameRoom
+                  );
+
                   if (import.meta.env.DEV) {
                     // [DEBUG-ATT] ยังคงไว้ชั่วคราวเพื่อพิสูจน์ regression คาบ 7 หลัง emulator กลับมาใช้งานได้
                     // (ต้องเช็คชื่อคาบ 7 จริงแล้วดู log ว่า expectedRecordIds ตรงกับ todayDocs id ไหม) — ลบออกเมื่อยืนยันแล้ว
@@ -929,7 +948,8 @@ export function TeacherPortal() {
                     studentsCount: item.studentsCount || 40,
                     type: item.type,
                     teachingPartner: item.teachingPartner,
-                    partnerCheckedAttendance: item.partnerCheckedAttendance
+                    partnerCheckedAttendance: item.partnerCheckedAttendance,
+                    attendanceSummary
                   });
                 });
               }
