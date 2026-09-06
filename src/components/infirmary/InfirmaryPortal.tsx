@@ -55,7 +55,17 @@ export function InfirmaryPortal() {
   const [activeTab, setActiveTab] = useState<'visits' | 'inventory' | 'screening' | 'profiles'>('visits');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState<string>(students[0]?.studentId || '');
-  
+
+  // BUG FIX: useRealStudents() โหลดแบบ async — ตอน mount ครั้งแรก students มักยังว่างอยู่ (listener
+  // ยังไม่ทันส่งข้อมูลกลับมา) ทำให้ useState ด้านบนตั้งต้นเป็น '' ค้างตลอดไป (ไม่มี re-init อัตโนมัติ)
+  // แม้ dropdown จะแสดงผลเหมือนเลือกคนแรกไว้แล้ว (browser auto-select ตัวเลือกแรกเวลา value ที่ผูกไว้
+  // ไม่ตรงกับ option ไหนเลย — ไม่ได้แปลว่า state จริงมีค่า) sync state ให้ตรงกับข้อมูลจริงทันทีที่โหลดเสร็จ
+  useEffect(() => {
+    if (!selectedStudentId && students.length > 0) {
+      setSelectedStudentId(students[0].studentId);
+    }
+  }, [students, selectedStudentId]);
+
   // New visit form state
   const [showAddModal, setShowAddModal] = useState(false);
   const [symptoms, setSymptoms] = useState('');
@@ -88,18 +98,25 @@ export function InfirmaryPortal() {
 
   const handleRecordVisit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStudentId) return;
+    // BUG FIX: เดิม selectedStudentId ตั้งค่าครั้งแรกจาก useState(students[0]?.studentId || '')
+    // ตอน useRealStudents() ยังโหลดไม่เสร็จ (students=[]) จึงค้างเป็น '' ตลอดไป แม้ dropdown จะ
+    // "ดูเหมือน" เลือกคนแรกไว้แล้วหลัง students โหลดเสร็จ (เพราะ browser auto-select ตัวเลือกแรก
+    // เวลา value ที่ผูกไว้ไม่ตรงกับ option ไหนเลย) — ทำให้กด "บันทึก" ครั้งแรกไม่มีอะไรเกิดขึ้นเลย
+    // เงียบๆ (ไม่มี error, modal ไม่ปิด) จนกว่าจะเลือก dropdown ใหม่ด้วยมือ แก้โดย fallback ไป
+    // students[0] สดตอน submit เหมือน handleAddCase ใน GuidancePortal.tsx
+    const effectiveStudentId = selectedStudentId || students[0]?.studentId || '';
+    if (!effectiveStudentId) return;
     if (!user?.uid) {
       setRecordVisitError('ไม่พบบัญชีผู้ใช้ที่ล็อกอินอยู่ กรุณาเข้าสู่ระบบใหม่ก่อนบันทึก');
       return;
     }
-    const student = students.find(s => s.studentId === selectedStudentId);
+    const student = students.find(s => s.studentId === effectiveStudentId);
 
     setIsSavingVisit(true);
     setRecordVisitError(null);
     try {
       await recordInfirmaryVisitFirestore({
-        studentId: selectedStudentId,
+        studentId: effectiveStudentId,
         studentUid: student?.studentUid || null,
         parentUid: student?.parentUid || null,
         symptoms,

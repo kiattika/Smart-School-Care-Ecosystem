@@ -613,6 +613,14 @@ export interface PHQ9Screening {
 export interface SDQAssessment {
   id: string;
   studentId: string;
+  // denormalized จาก students/{studentId}.studentUid ตอนบันทึก validate โดย firestore.rules
+  // ผ่าน studentField() เสมอ (ไม่ใช่แค่ผู้เขียนระบุชื่อตัวเอง — ดู respondentUid ด้านล่าง) ใช้ให้
+  // นักเรียนเจ้าของอ่านผลประเมินของตัวเองได้ครบทั้ง 3 มุมมอง (ตนเอง/ครู/ผู้ปกครอง)
+  studentUid: string;
+  // Firebase Auth UID ของผู้กรอกจริง (ตรวจแล้วว่าเป็นนักเรียนเจ้าของ/ผู้ปกครองจริง/ครูที่ปรึกษา
+  // ห้องนั้นจริง ที่ create — ไม่ใช่แค่ self-attestation) evaluatorType/evaluatorName ข้างล่างมีอยู่แล้ว
+  // สำหรับแสดงผล "ใครกรอก" ในหน้า UI — ฟิลด์นี้เพิ่มมาเพื่อยืนยันตัวตนที่ verify ได้ ไม่ใช่แค่ชื่อที่พิมพ์เอง
+  respondentUid: string;
   evaluatorType: 'STUDENT' | 'TEACHER' | 'PARENT';
   evaluatorName: string;
   subscaleScores: {
@@ -1096,9 +1104,11 @@ export interface StoreState {
   recordGateAttendance: (studentId: string, type: 'ENTRY' | 'EXIT', method: GateAttendanceRecord['method']) => void;
   submitDetailedLeave: (request: Omit<DetailedLeaveRequest, 'id' | 'submittedAt' | 'status'>) => void;
   approveDetailedLeave: (id: string, teacherRemarks?: string) => void;
-  savePHQ9Screening: (studentId: string, answers: number[]) => void;
-  save2QScreening: (studentId: string, q1: boolean, q2: boolean) => void;
-  submitSDQAssessment: (sdq: Omit<SDQAssessment, 'id' | 'assessmentDate'>) => void;
+  // ทั้ง 3 action นี้คืน Promise ที่ resolve ก็ต่อเมื่อ Firestore เขียนสำเร็จจริง (reject ถ้า rules
+  // ปฏิเสธ/offline ฯลฯ) — ผู้เรียกต้อง await แล้วค่อยแสดง "บันทึกสำเร็จ" ห้ามโชว์ optimistic ก่อนเช็คผล
+  savePHQ9Screening: (studentId: string, answers: number[]) => Promise<void>;
+  save2QScreening: (studentId: string, q1: boolean, q2: boolean) => Promise<void>;
+  submitSDQAssessment: (sdq: Omit<SDQAssessment, 'id' | 'assessmentDate'>) => Promise<void>;
   addMeritDemeritRecord: (studentId: string, type: 'MERIT' | 'DEMERIT', points: number, category: string, description: string, teacherName: string) => void;
   addPortfolioItem: (item: Omit<PortfolioItem, 'id' | 'isVerifiedByTeacher'>) => void;
   addDigitalCertificate: (cert: Omit<DigitalCertificate, 'id'>) => void;

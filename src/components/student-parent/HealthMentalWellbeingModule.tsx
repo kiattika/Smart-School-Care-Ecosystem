@@ -21,7 +21,7 @@ import {
   GraduationCap
 } from 'lucide-react';
 import { useStore } from '../../store';
-import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits } from '../../services/firestoreService';
+import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits, subscribeSDQAssessments } from '../../services/firestoreService';
 import {
   SemesterHealthRecord,
   InfirmaryVisit,
@@ -31,7 +31,11 @@ import {
   Student
 } from '../../types';
 
-export function HealthMentalWellbeingModule({ studentId, isParentView = false }: { studentId: string; isParentView?: boolean }) {
+export function HealthMentalWellbeingModule({
+  studentId,
+  student: studentProp,
+  isParentView = false
+}: { studentId: string; student?: Student; isParentView?: boolean }) {
   const user = useStore(s => s.user);
   const {
     semesterHealthLogs,
@@ -40,7 +44,6 @@ export function HealthMentalWellbeingModule({ studentId, isParentView = false }:
     specialCareNeeds,
     twoQuestionScreenings,
     phq9Screenings,
-    sdqAssessments,
     save2QScreening,
     savePHQ9Screening,
     submitSDQAssessment,
@@ -57,6 +60,19 @@ export function HealthMentalWellbeingModule({ studentId, isParentView = false }:
     const unsubscribe = subscribeInfirmaryVisits(
       setInfirmaryVisits,
       isParentView ? { parentUid: user.uid } : { studentUid: user.uid }
+    );
+    return () => unsubscribe();
+  }, [user?.uid, isParentView]);
+
+  // ผลประเมิน SDQ — real-time เช่นกัน แทน state.sdqAssessments ของ Zustand (ไม่เคยมี listener ผูกไว้)
+  // นักเรียนเจ้าของเห็นครบ 3 มุมมอง (studentUid==ตัวเอง); ผู้ปกครองเห็นเฉพาะรายการที่ตัวเองกรอกเอง
+  // (rules ยังไม่เปิดให้เห็นมุมมองอื่นของครอบครัวเดียวกัน — ดูคำอธิบาย scope ในคำตอบ)
+  const [sdqAssessments, setSdqAssessments] = useState<SDQAssessment[]>([]);
+  useEffect(() => {
+    if (!user?.uid) { setSdqAssessments([]); return; }
+    const unsubscribe = subscribeSDQAssessments(
+      setSdqAssessments,
+      isParentView ? { respondentUid: user.uid } : { studentUid: user.uid }
     );
     return () => unsubscribe();
   }, [user?.uid, isParentView]);
@@ -81,7 +97,10 @@ export function HealthMentalWellbeingModule({ studentId, isParentView = false }:
     },
     attendance: { morningStatus: 'PRESENT', checkInMethod: 'SCAN', checkInTime: '07:45 น.' }
   };
-  const student = students.find(s => s.studentId === studentId) || students[0] || defaultStudent;
+  // ใช้ student ของจริงที่ผู้เรียก (StudentPortal/ParentPortal) ดึงมาจาก useRealStudents() ถ้าส่งมาให้
+  // แทนการค้นจาก state.students ของ Zustand (session-local ไม่เคยมี listener ผูกไว้ — ค่า studentUid/
+  // parentUid ที่ต้องใช้ยืนยันตัวตนตอนเขียน Firestore จริงจะไม่มีวันครบถ้วนถ้าพึ่ง state นี้)
+  const student = studentProp || students.find(s => s.studentId === studentId) || students[0] || defaultStudent;
   const healthLogs = semesterHealthLogs[student.studentId] || [];
   const studentIllnesses = chronicIllnesses[student.studentId] || [];
   const studentAllergies = allergies[student.studentId] || [];
@@ -114,6 +133,9 @@ export function HealthMentalWellbeingModule({ studentId, isParentView = false }:
     prosocial: 9
   });
   const [sdqSubmitSuccess, setSdqSubmitSuccess] = useState(false);
+  const [saved2QError, setSaved2QError] = useState<string | null>(null);
+  const [savedPHQError, setSavedPHQError] = useState<string | null>(null);
+  const [sdqSubmitError, setSdqSubmitError] = useState<string | null>(null);
 
   const latestHealth = healthLogs[healthLogs.length - 1] || {
     semester: '1/2569',
@@ -139,43 +161,74 @@ export function HealthMentalWellbeingModule({ studentId, isParentView = false }:
     '9. คิดทำร้ายตัวเอง หรือคิดว่าถ้าตายไปคงจะดี'
   ];
 
-  const handleSave2Q = (e: React.FormEvent) => {
+  // ทั้ง 3 handler ด้านล่างนี้ await การเขียน Firestore จริงก่อนแสดง "บันทึกสำเร็จ" เสมอ (เดิม fire-
+  // and-forget แสดงสำเร็จทันทีไม่ว่า Firestore จะรับจริงหรือไม่ — ดู savePHQ9Screening/save2QScreening/
+  // submitSDQAssessment ใน store.ts ที่แก้ให้ throw error ต่อแทนการกลืนเงียบๆ)
+  const handleSave2Q = async (e: React.FormEvent) => {
     e.preventDefault();
-    save2QScreening(student.studentId, q1, q2);
-    setSaved2QSuccess(true);
-    setTimeout(() => setSaved2QSuccess(false), 3000);
+    setSaved2QError(null);
+    try {
+      await save2QScreening(student.studentId, q1, q2);
+      setSaved2QSuccess(true);
+      setTimeout(() => setSaved2QSuccess(false), 3000);
+    } catch (err) {
+      console.error('[HealthMentalWellbeingModule] save2QScreening failed:', err);
+      setSaved2QError('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    }
   };
 
-  const handleSavePHQ9 = (e: React.FormEvent) => {
+  const handleSavePHQ9 = async (e: React.FormEvent) => {
     e.preventDefault();
-    savePHQ9Screening(student.studentId, phqAnswers);
-    setSavedPHQSuccess(true);
-    setTimeout(() => setSavedPHQSuccess(false), 3000);
+    setSavedPHQError(null);
+    try {
+      await savePHQ9Screening(student.studentId, phqAnswers);
+      setSavedPHQSuccess(true);
+      setTimeout(() => setSavedPHQSuccess(false), 3000);
+    } catch (err) {
+      console.error('[HealthMentalWellbeingModule] savePHQ9Screening failed:', err);
+      setSavedPHQError('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    }
   };
 
-  const handleSaveSDQ = (e: React.FormEvent) => {
+  const handleSaveSDQ = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSdqSubmitError(null);
+    if (!user?.uid) {
+      setSdqSubmitError('ไม่พบบัญชีผู้ใช้ที่ล็อกอินอยู่ กรุณาเข้าสู่ระบบใหม่ก่อนบันทึก');
+      return;
+    }
     const totalDifficulties = sdqScores.emotional + sdqScores.conduct + sdqScores.hyperactivity + sdqScores.peerProblems;
     let triagingStatus: SDQAssessment['triagingStatus'] = 'NORMAL';
     if (totalDifficulties >= 17) triagingStatus = 'VULNERABLE';
     else if (totalDifficulties >= 14) triagingStatus = 'AT_RISK';
 
-    submitSDQAssessment({
-      studentId: student.studentId,
-      evaluatorType: sdqEvaluator,
-      evaluatorName: sdqEvaluator === 'STUDENT' ? `${student.name} (ประเมินตนเอง)` :
-                     sdqEvaluator === 'PARENT' ? 'ผู้ปกครอง' : 'ครูกิตติศักดิ์ (ครูประจำชั้น)',
-      subscaleScores: sdqScores,
-      totalDifficultiesScore: totalDifficulties,
-      triagingStatus,
-      recommendations: [
-        `คะแนนปัญหาพฤติกรรมรวม: ${totalDifficulties}/40 (${triagingStatus === 'NORMAL' ? 'เกณฑ์ปกติ' : triagingStatus === 'AT_RISK' ? 'กลุ่มเสี่ยง' : 'กลุ่มมีปัญหา'})`,
-        `พฤติกรรมสัมพันธภาพทางสังคม (จุดแข็ง): ${sdqScores.prosocial}/10 (อยู่ในเกณฑ์ดี)`
-      ]
-    });
+    try {
+      await submitSDQAssessment({
+        studentId: student.studentId,
+        // studentUid ต้องเป็นค่าจริงของ "นักเรียน" คนนี้เสมอไม่ว่าใครเป็นคนกรอก (rules ตรวจสอบกับ
+        // students/{studentId}.studentUid จริง) — ตอนนักเรียนกรอกเอง ใช้ user.uid ตรงๆ ได้เลยเพราะ
+        // เป็นคนคนเดียวกัน (ไม่พึ่ง student.studentUid ที่อาจไม่ครบถ้วนจาก state.students เดิม)
+        studentUid: sdqEvaluator === 'STUDENT' ? user.uid : (student.studentUid || ''),
+        respondentUid: user.uid,
+        evaluatorType: sdqEvaluator,
+        evaluatorName: sdqEvaluator === 'STUDENT' ? `${student.name} (ประเมินตนเอง)` :
+                       sdqEvaluator === 'PARENT' ? (user.displayName || 'ผู้ปกครอง') :
+                       (user.displayName || 'ครูที่ปรึกษา'),
+        subscaleScores: sdqScores,
+        totalDifficultiesScore: totalDifficulties,
+        triagingStatus,
+        recommendations: [
+          `คะแนนปัญหาพฤติกรรมรวม: ${totalDifficulties}/40 (${triagingStatus === 'NORMAL' ? 'เกณฑ์ปกติ' : triagingStatus === 'AT_RISK' ? 'กลุ่มเสี่ยง' : 'กลุ่มมีปัญหา'})`,
+          `พฤติกรรมสัมพันธภาพทางสังคม (จุดแข็ง): ${sdqScores.prosocial}/10 (อยู่ในเกณฑ์ดี)`
+        ]
+      });
 
-    setSdqSubmitSuccess(true);
-    setTimeout(() => setSdqSubmitSuccess(false), 3000);
+      setSdqSubmitSuccess(true);
+      setTimeout(() => setSdqSubmitSuccess(false), 3000);
+    } catch (err) {
+      console.error('[HealthMentalWellbeingModule] submitSDQAssessment failed:', err);
+      setSdqSubmitError('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง (ตรวจสอบว่าท่านมีสิทธิ์ประเมินนักเรียนคนนี้)');
+    }
   };
 
   return (
@@ -495,6 +548,12 @@ export function HealthMentalWellbeingModule({ studentId, isParentView = false }:
                   <span>บันทึกผลการคัดกรอง 2Q เรียบร้อยแล้ว</span>
                 </div>
               )}
+              {saved2QError && (
+                <div className="p-3 mb-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>{saved2QError}</span>
+                </div>
+              )}
 
               <form onSubmit={handleSave2Q} className="space-y-4">
                 <div className="p-3.5 bg-slate-800/40 border border-slate-800 rounded-2xl space-y-2">
@@ -589,6 +648,12 @@ export function HealthMentalWellbeingModule({ studentId, isParentView = false }:
                 <div className="p-3 mb-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span>บันทึกผลการประเมิน PHQ-9 และสรุปคำแนะนำสำเร็จ</span>
+                </div>
+              )}
+              {savedPHQError && (
+                <div className="p-3 mb-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>{savedPHQError}</span>
                 </div>
               )}
 
@@ -785,19 +850,33 @@ export function HealthMentalWellbeingModule({ studentId, isParentView = false }:
             </div>
 
             {/* Quick Interactive SDQ Save */}
-            <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <Sparkles className="w-5 h-5 text-purple-400 shrink-0" />
-                <p className="text-xs text-slate-300">
-                  ต้องการปรับปรุงหรือบันทึกผลการประเมิน SDQ เพิ่มเติมในบทบาท <span className="font-bold text-purple-300">{sdqEvaluator}</span>
-                </p>
+            <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-4 space-y-3">
+              {sdqSubmitSuccess && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>บันทึกผลการประเมิน SDQ สำเร็จ</span>
+                </div>
+              )}
+              {sdqSubmitError && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>{sdqSubmitError}</span>
+                </div>
+              )}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Sparkles className="w-5 h-5 text-purple-400 shrink-0" />
+                  <p className="text-xs text-slate-300">
+                    ต้องการปรับปรุงหรือบันทึกผลการประเมิน SDQ เพิ่มเติมในบทบาท <span className="font-bold text-purple-300">{sdqEvaluator}</span>
+                  </p>
+                </div>
+                <button
+                  onClick={handleSaveSDQ}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all shadow cursor-pointer shrink-0"
+                >
+                  บันทึกการประเมิน SDQ
+                </button>
               </div>
-              <button
-                onClick={handleSaveSDQ}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all shadow cursor-pointer shrink-0"
-              >
-                บันทึกการประเมิน SDQ
-              </button>
             </div>
           </div>
         </div>

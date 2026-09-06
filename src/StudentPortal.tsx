@@ -495,7 +495,7 @@ export function StudentPortal() {
 
         {/* 2. Health & Mental Well-being */}
         {activeTab === 'health' && (
-          <HealthMentalWellbeingModule studentId={student.studentId} isParentView={false} />
+          <HealthMentalWellbeingModule studentId={student.studentId} student={student} isParentView={false} />
         )}
 
         {/* 3. Socioeconomic & Home Visit */}

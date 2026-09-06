@@ -1284,7 +1284,8 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     it('lets GUIDANCE_COUNSELOR/HOMEROOM_TEACHER/SUPER_ADMIN read; denies an unrelated signed-in user', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('student_assessments_sdq/sdq-1').set({
-          id: 'sdq-1', studentId: 'sdq-std-1', evaluatorType: 'TEACHER', evaluatorName: 'ครูทดสอบ',
+          id: 'sdq-1', studentId: 'sdq-std-1', studentUid: 'sdq-std-uid-1', respondentUid: 'teacher-uid-x',
+          evaluatorType: 'TEACHER', evaluatorName: 'ครูทดสอบ',
           subscaleScores: { emotional: 1, conduct: 1, hyperactivity: 1, peerProblems: 1, prosocial: 8 },
           totalDifficultiesScore: 4, triagingStatus: 'NORMAL', assessmentDate: '2026-09-01', recommendations: [],
         });
@@ -1293,6 +1294,118 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('student_assessments_sdq/sdq-1').get());
       await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('student_assessments_sdq/sdq-1').get());
       await assertFails(asUser('unrelated-uid', ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-1').get());
+    });
+
+    it('lets the student (studentUid match) and the respondent themselves read; denies everyone else', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_assessments_sdq/sdq-1b').set({
+          id: 'sdq-1b', studentId: 'sdq-std-1b', studentUid: 'sdq-std-uid-1b', respondentUid: 'parent-uid-1b',
+          evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครองทดสอบ',
+          subscaleScores: { emotional: 1, conduct: 1, hyperactivity: 1, peerProblems: 1, prosocial: 8 },
+          totalDifficultiesScore: 4, triagingStatus: 'NORMAL', assessmentDate: '2026-09-01', recommendations: [],
+        });
+      });
+      await assertSucceeds(asUser('sdq-std-uid-1b', ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-1b').get());
+      await assertSucceeds(asUser('parent-uid-1b', ['PARENT']).firestore().doc('student_assessments_sdq/sdq-1b').get());
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('student_assessments_sdq/sdq-1b').get());
+    });
+
+    // FIX (ยืนยันจากโรงเรียน): SDQ กรอกได้ 3 กลุ่ม (นักเรียนเอง/ผู้ปกครอง/ครูที่ปรึกษาห้องนั้นจริง)
+    // เดิม rule เช็คแค่ self-attestation (evaluatorId==auth.uid ที่ผู้เขียนใส่เอง) — ไม่ตรวจความสัมพันธ์
+    // จริงเลย ทำให้ใครก็เขียนให้เด็กคนไหนก็ได้แค่ระบุ uid ตัวเอง แก้เป็นตรวจสอบจริงผ่าน students/{id}
+    describe('create — verified respondent relationship (3 valid paths + denials)', () => {
+      const STU_UID = 'sdq2-stu-uid';
+      const STU_ID = 'sdq2-std-1';
+      const ROOM = 'ม.5/8';
+      const PARENT_UID = 'sdq2-parent-uid';
+      const HR_TEACHER_UID = 'sdq2-hr-teacher';
+
+      async function seed() {
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, room: ROOM, parentUid: PARENT_UID });
+          await ctx.firestore().doc(`staff/${HR_TEACHER_UID}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+          await ctx.firestore().doc('staff/other-hr').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+        });
+      }
+      const sdqDoc = (over: Record<string, unknown> = {}) => ({
+        id: 'x', studentId: STU_ID, studentUid: STU_UID,
+        evaluatorType: 'STUDENT', evaluatorName: 'ทดสอบ',
+        subscaleScores: { emotional: 1, conduct: 1, hyperactivity: 1, peerProblems: 1, prosocial: 8 },
+        totalDifficultiesScore: 4, triagingStatus: 'NORMAL', assessmentDate: '2026-09-01', recommendations: [],
+        ...over,
+      });
+
+      it('PATH 1: lets the student themselves create (self-eval)', async () => {
+        await seed();
+        await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-p1').set(
+          sdqDoc({ id: 'sdq-p1', respondentUid: STU_UID, evaluatorType: 'STUDENT' })
+        ));
+      });
+
+      it('PATH 2: lets the real linked parent (parentUid match) create', async () => {
+        await seed();
+        await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('student_assessments_sdq/sdq-p2').set(
+          sdqDoc({ id: 'sdq-p2', respondentUid: PARENT_UID, evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครอง' })
+        ));
+      });
+
+      it('PATH 3: lets the real homeroom teacher of that room create', async () => {
+        await seed();
+        await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_assessments_sdq/sdq-p3').set(
+          sdqDoc({ id: 'sdq-p3', respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครูที่ปรึกษา' })
+        ));
+      });
+
+      it('REGRESSION: denies a different student, a different parent, and a homeroom teacher of a different room (self-attestation alone is not enough)', async () => {
+        await seed();
+        await assertFails(asUser('other-student-uid', ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-d1').set(
+          sdqDoc({ id: 'sdq-d1', respondentUid: 'other-student-uid', evaluatorType: 'STUDENT' })
+        ));
+        await assertFails(asUser('other-parent-uid', ['PARENT']).firestore().doc('student_assessments_sdq/sdq-d2').set(
+          sdqDoc({ id: 'sdq-d2', respondentUid: 'other-parent-uid', evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครองคนอื่น' })
+        ));
+        await assertFails(asUser('other-hr', ['HOMEROOM_TEACHER']).firestore().doc('student_assessments_sdq/sdq-d3').set(
+          sdqDoc({ id: 'sdq-d3', respondentUid: 'other-hr', evaluatorType: 'TEACHER', evaluatorName: 'ครูห้องอื่น' })
+        ));
+      });
+
+      it('denies a SUBJECT_TEACHER (not a homeroom teacher at all) from creating', async () => {
+        await seed();
+        await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('student_assessments_sdq/sdq-d4').set(
+          sdqDoc({ id: 'sdq-d4', respondentUid: 'test-uid', evaluatorType: 'TEACHER', evaluatorName: 'ครูวิชาอื่น' })
+        ));
+      });
+
+      it('denies faking studentUid to a value that does not match the real student doc', async () => {
+        await seed();
+        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-d5').set(
+          sdqDoc({ id: 'sdq-d5', studentUid: 'forged-uid', respondentUid: STU_UID, evaluatorType: 'STUDENT' })
+        ));
+      });
+
+      it('denies naming someone else as respondentUid even from a legitimate relationship (self-attestation must also be honest)', async () => {
+        await seed();
+        await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('student_assessments_sdq/sdq-d6').set(
+          sdqDoc({ id: 'sdq-d6', respondentUid: 'someone-else', evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครอง' })
+        ));
+      });
+
+      it('only SUPER_ADMIN/GUIDANCE_COUNSELOR can update or delete an already-submitted assessment (not the original respondent)', async () => {
+        await seed();
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc('student_assessments_sdq/sdq-u1').set(
+            sdqDoc({ id: 'sdq-u1', respondentUid: STU_UID, evaluatorType: 'STUDENT' })
+          );
+        });
+        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-u1').set(
+          sdqDoc({ id: 'sdq-u1', respondentUid: STU_UID, evaluatorType: 'STUDENT', totalDifficultiesScore: 10 })
+        ));
+        await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc('student_assessments_sdq/sdq-u1').set(
+          sdqDoc({ id: 'sdq-u1', respondentUid: STU_UID, evaluatorType: 'STUDENT', totalDifficultiesScore: 10 })
+        ));
+        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-u1').delete());
+        await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('student_assessments_sdq/sdq-u1').delete());
+      });
     });
   });
 

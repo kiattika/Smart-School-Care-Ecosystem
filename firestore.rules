@@ -268,15 +268,35 @@ service cloud.firestore {
       allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
     }
 
+    // FIX (ยืนยันจากโรงเรียน): SDQ กรอกได้ 3 กลุ่ม — นักเรียนประเมินตนเอง/ผู้ปกครอง/ครูที่ปรึกษา
+    // ของห้องนั้นจริง (ต่างจาก 2Q/PHQ-9 ที่นักเรียนประเมินตนเองอย่างเดียว) เดิม rule เช็คแค่
+    // self-attestation (request.resource.data.evaluatorId == auth.uid) — ผู้เขียนระบุ uid ตัวเองใน
+    // เอกสารเฉยๆ ไม่เคยตรวจว่าเป็นความสัมพันธ์จริงกับนักเรียนคนนั้นเลย (ผู้ปกครอง/ครูคนไหนก็เขียนให้
+    // เด็กคนไหนก็ได้แค่ใส่ evaluatorId เป็น uid ตัวเอง) แก้เป็นตรวจสอบจริงผ่าน students/{studentId}
     match /student_assessments_sdq/{sdqId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('GUIDANCE_COUNSELOR') || 
-                     hasRole('HOMEROOM_TEACHER') || 
-                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.studentUid == request.auth.uid || resource.data.evaluatorId == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('GUIDANCE_COUNSELOR') || 
-                      hasRole('HOMEROOM_TEACHER') || 
-                      (isSignedIn() && (request.resource.data.studentId == request.auth.uid || request.resource.data.studentUid == request.auth.uid || request.resource.data.evaluatorId == request.auth.uid));
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('GUIDANCE_COUNSELOR') ||
+                     hasRole('HOMEROOM_TEACHER') ||
+                     (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.respondentUid == request.auth.uid));
+
+      // studentUid ต้อง denormalize ตรงกับ students/{studentId} จริงเสมอ (ไม่ว่าใครเป็นผู้กรอก)
+      // และ respondentUid ต้องเป็นผู้เขียนจริง แล้วผู้เขียนต้องเป็นหนึ่งใน 3 กลุ่มที่ยืนยันความสัมพันธ์
+      // จริงได้: (1) ตัวนักเรียนเอง (2) ผู้ปกครองของนักเรียนคนนั้นจริง (3) ครูที่ปรึกษาของห้องนั้นจริง
+      allow create: if hasRole('SUPER_ADMIN') ||
+                       hasRole('GUIDANCE_COUNSELOR') ||
+                       (
+                         request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__') &&
+                         request.resource.data.respondentUid == request.auth.uid &&
+                         (
+                           isSelfStudent(request.resource.data.studentId) ||
+                           (isSignedIn() && request.auth.uid == studentField(request.resource.data.studentId, 'parentUid', '__none__')) ||
+                           isHomeroomTeacherOf(studentField(request.resource.data.studentId, 'room', '__none__'))
+                         )
+                       );
+
+      // แก้ไข/ลบผลประเมินที่ส่งไปแล้ว: เฉพาะ SUPER_ADMIN/GUIDANCE_COUNSELOR เท่านั้น (ผู้กรอกเดิม
+      // แก้ย้อนหลังเองไม่ได้ — ป้องกันการแก้ผลหลังส่ง เหมือน guidance_counseling_cases/infirmary_visits)
+      allow update, delete: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
     }
 
     // 20. Billing Invoices, Messages, and Appointments

@@ -267,59 +267,12 @@ export const INITIAL_PHQ9_SCREENINGS: Record<string, PHQ9Screening> = {
   }
 };
 
-export const INITIAL_SDQ_ASSESSMENTS: SDQAssessment[] = [
-  {
-    id: 'sdq-student-01',
-    studentId: '6950801',
-    evaluatorType: 'STUDENT',
-    evaluatorName: 'นายกิตติศักดิ์ เจริญสุข (นักเรียนประเมินตนเอง)',
-    subscaleScores: {
-      emotional: 2,
-      conduct: 1,
-      hyperactivity: 2,
-      peerProblems: 1,
-      prosocial: 9
-    },
-    totalDifficultiesScore: 6,
-    triagingStatus: 'NORMAL',
-    assessmentDate: '2026-07-10',
-    recommendations: ['คะแนนปัญหาโดยรวมอยู่ในเกณฑ์ปกติ', 'จุดแข็งด้านสัมพันธภาพทางสังคม (Prosocial) อยู่ในเกณฑ์ดีเยี่ยม']
-  },
-  {
-    id: 'sdq-teacher-01',
-    studentId: '6950801',
-    evaluatorType: 'TEACHER',
-    evaluatorName: 'ครูกิตติศักดิ์ (ครูประจำชั้น ม.5/8)',
-    subscaleScores: {
-      emotional: 1,
-      conduct: 0,
-      hyperactivity: 2,
-      peerProblems: 1,
-      prosocial: 10
-    },
-    totalDifficultiesScore: 4,
-    triagingStatus: 'NORMAL',
-    assessmentDate: '2026-07-12',
-    recommendations: ['นักเรียนมีความรับผิดชอบสูง ช่วยเหลือเพื่อนในชั้นเรียนสม่ำเสมอ']
-  },
-  {
-    id: 'sdq-parent-01',
-    studentId: '6950801',
-    evaluatorType: 'PARENT',
-    evaluatorName: 'นายสมชาย เจริญสุข (ผู้ปกครอง)',
-    subscaleScores: {
-      emotional: 2,
-      conduct: 1,
-      hyperactivity: 3,
-      peerProblems: 1,
-      prosocial: 9
-    },
-    totalDifficultiesScore: 7,
-    triagingStatus: 'NORMAL',
-    assessmentDate: '2026-07-14',
-    recommendations: ['มีความสัมพันธ์ที่ดีกับคนในครอบครัว มีสมาธิในการอ่านหนังสือทบทวนบทเรียน']
-  }
-];
+// NOTE (TASK — แก้ SDQ write permission): เดิมมี INITIAL_SDQ_ASSESSMENTS มาตรง ๆ (mock array ของปลอม
+// ใช้รหัสนักเรียนผี '6950801' + ชื่อบุคคลสมมติ ตามที่ CLAUDE.md ห้ามไว้) แต่ไม่มีที่ไหน import ใช้จริง
+// เลย (dead code) และหลังเพิ่ม field studentUid/respondentUid ที่จำเป็นสำหรับ firestore.rules จริงใน
+// SDQAssessment ก็จะ type-error ทันที — ลบทิ้งเหมือน INITIAL_INFIRMARY_VISITS ด้านบน ข้อมูลจริงตอนนี้
+// มาจาก Firestore collection student_assessments_sdq (ดู services/firestoreService.ts:
+// saveSDQAssessmentFirestore/subscribeSDQAssessments)
 
 export const INITIAL_GUARDIAN_PROFILES: Record<string, GuardianBackground> = {
   '6950801': {

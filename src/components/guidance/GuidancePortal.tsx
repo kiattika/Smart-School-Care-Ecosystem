@@ -39,8 +39,13 @@ export function GuidancePortal() {
     const sdqWorstByStudent = new Map<string, 'NORMAL' | 'AT_RISK' | 'VULNERABLE'>();
     const severityRank: Record<string, number> = { NORMAL: 0, AT_RISK: 1, VULNERABLE: 2 };
     for (const sdq of sdqAssessments) {
-      const current = sdqWorstByStudent.get(sdq.studentId) || 'NORMAL';
-      if (severityRank[sdq.triagingStatus] > severityRank[current]) {
+      // BUG FIX: เดิมเช็ค "ค่าใหม่ > ค่าเดิม" อย่างเดียว โดยสมมติ default เป็น NORMAL ที่ไม่เคย set
+      // ลง map จริง — ทำให้นักเรียนที่ผล SDQ เป็น NORMAL ล้วน (ไม่เคยแย่กว่า NORMAL เลย) ไม่ถูกนับเข้า
+      // map เลยสักคน (sdqWorstByStudent.size / sdqCounts.NORMAL ค้างที่ 0 เสมอ ทั้งที่มีคนทำแบบประเมิน
+      // จริงแล้ว) แก้เป็น set ค่าเข้า map ทันทีที่เจอครั้งแรก (current === undefined) แล้วค่อยอัปเดตทับ
+      // เฉพาะตอนแย่กว่าเดิมจริงๆ
+      const current = sdqWorstByStudent.get(sdq.studentId);
+      if (current === undefined || severityRank[sdq.triagingStatus] > severityRank[current]) {
         sdqWorstByStudent.set(sdq.studentId, sdq.triagingStatus);
       }
     }

@@ -1098,6 +1098,12 @@ export async function savePostTeachingRecordFirestore(record: PostTeachingRecord
 
 /**
  * Mental Health Screenings & SDQ Persistence
+ *
+ * FIX: ทั้ง 3 ฟังก์ชันนี้เดิม catch แล้ว console.warn เงียบๆ โดยไม่ throw ต่อ — ทำให้ permission-denied
+ * จริง (เช่นตอน rules ปฏิเสธ) มองไม่เห็นจากฝั่งเรียกใช้เลย ส่วน store.ts ก็ยัง set optimistic state
+ * ต่อไปเหมือนเดิมไม่ว่าการเขียนจริงจะสำเร็จหรือไม่ ผู้ใช้เห็น "บันทึกสำเร็จ" ปลอมทั้งที่ Firestore
+ * ปฏิเสธจริง — เปลี่ยนให้ throw ต่อผ่าน handleFirestoreError (pattern เดียวกับฟังก์ชันอื่นในไฟล์นี้)
+ * เพื่อให้ store.ts รอผลจริงก่อนอัปเดต state/แสดงข้อความสำเร็จ
  */
 export async function save2QScreeningFirestore(studentId: string, screening: TwoQuestionScreening): Promise<void> {
   const collectionPath = 'student_screenings_2q';
@@ -1108,7 +1114,7 @@ export async function save2QScreeningFirestore(studentId: string, screening: Two
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.warn('[save2QScreeningFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${studentId}`);
   }
 }
 
@@ -1121,7 +1127,7 @@ export async function savePHQ9ScreeningFirestore(studentId: string, screening: P
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.warn('[savePHQ9ScreeningFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${studentId}`);
   }
 }
 
@@ -1134,7 +1140,37 @@ export async function saveSDQAssessmentFirestore(sdq: SDQAssessment): Promise<vo
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.warn('[saveSDQAssessmentFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${sdq.id}`);
+  }
+}
+
+/** real-time listener ของผลประเมิน SDQ ของนักเรียนคนเดียว — ใช้แสดง "3 มุมมอง" (ตนเอง/ครู/ผู้ปกครอง)
+ *  ใน HealthMentalWellbeingModule.tsx แทนการอ่านจาก state.sdqAssessments ของ Zustand (เดิมไม่เคยมี
+ *  listener ผูกไว้เลย ว่างเปล่าเสมอไม่ว่าจะ submit เท่าไหร่)
+ *  - { studentUid } → นักเรียนเจ้าของเห็นครบทั้ง 3 มุมมอง (rules อนุญาตผ่าน studentUid==auth.uid)
+ *  - { respondentUid } → ผู้ปกครอง/ครูเห็นเฉพาะรายการที่ตัวเองเป็นคนกรอก (rules ยังไม่เปิดให้เห็น
+ *    มุมมองอื่นของครอบครัวเดียวกัน — เป็นการตัดสินใจ scope แบบระมัดระวังไว้ก่อน ดูคำอธิบายในคำตอบ) */
+export function subscribeSDQAssessments(
+  onUpdate: (assessments: SDQAssessment[]) => void,
+  filter: { studentUid?: string; respondentUid?: string }
+): () => void {
+  try {
+    const col = collection(db, 'student_assessments_sdq');
+    const clauses = [];
+    if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
+    if (filter.respondentUid) clauses.push(where('respondentUid', '==', filter.respondentUid));
+    if (clauses.length === 0) { onUpdate([]); return () => {}; }
+    return onSnapshot(query(col, ...clauses), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as SDQAssessment));
+      list.sort((a, b) => (b.assessmentDate || '').localeCompare(a.assessmentDate || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeSDQAssessments] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeSDQAssessments] setup error:', error);
+    return () => {};
   }
 }
 

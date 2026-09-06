@@ -1057,7 +1057,11 @@ export const useStore = create<StoreState>((set, get) => ({
     });
   },
 
-  savePHQ9Screening: (studentId: string, answers: number[]) => {
+  // FIX: ทั้ง 3 action นี้เดิม fire-and-forget การเขียน Firestore จริง (.catch แค่ console.warn)
+  // แล้ว set optimistic state ทันทีไม่ว่าผลจริงจะเป็นอย่างไร — ผู้ใช้เห็น "บันทึกสำเร็จ" ปลอมทั้งที่
+  // rules ปฏิเสธจริงอยู่เบื้องหลัง เปลี่ยนเป็น await ก่อน แล้วค่อย set state/return ตอนเขียนสำเร็จจริง
+  // เท่านั้น — โยน error ต่อให้ผู้เรียก (component) จับแสดงผลจริงแทนการโชว์สำเร็จลอยๆ
+  savePHQ9Screening: async (studentId: string, answers: number[]) => {
     const totalScore = answers.reduce((acc, curr) => acc + curr, 0);
     let riskLevel: PHQ9Screening['riskLevel'] = 'NORMAL';
     let recommendation = 'สุขภาพจิตอยู่ในเกณฑ์ปกติ มีสภาวะอารมณ์ที่มั่นคง';
@@ -1085,9 +1089,9 @@ export const useStore = create<StoreState>((set, get) => ({
       recommendation,
       conductedAt: new Date().toISOString().split('T')[0]
     };
-    savePHQ9ScreeningFirestore(studentId, screening).catch(err => console.warn('Firestore PHQ-9 notice:', err));
+    await savePHQ9ScreeningFirestore(studentId, screening);
 
-    return set((state) => ({
+    set((state) => ({
       phq9Screenings: {
         ...state.phq9Screenings,
         [studentId]: screening
@@ -1095,7 +1099,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }));
   },
 
-  save2QScreening: (studentId: string, q1: boolean, q2: boolean) => {
+  save2QScreening: async (studentId: string, q1: boolean, q2: boolean) => {
     const isPositive = q1 || q2;
     const screening: TwoQuestionScreening = {
       id: `2q-${Date.now()}`,
@@ -1105,9 +1109,9 @@ export const useStore = create<StoreState>((set, get) => ({
       isPositive,
       conductedAt: new Date().toISOString().split('T')[0]
     };
-    save2QScreeningFirestore(studentId, screening).catch(err => console.warn('Firestore 2Q notice:', err));
+    await save2QScreeningFirestore(studentId, screening);
 
-    return set((state) => ({
+    set((state) => ({
       twoQuestionScreenings: {
         ...state.twoQuestionScreenings,
         [studentId]: screening
@@ -1115,15 +1119,15 @@ export const useStore = create<StoreState>((set, get) => ({
     }));
   },
 
-  submitSDQAssessment: (sdq) => {
+  submitSDQAssessment: async (sdq) => {
     const newSDQ: SDQAssessment = {
       ...sdq,
       id: `sdq-${Date.now()}`,
       assessmentDate: new Date().toISOString().split('T')[0]
     };
-    saveSDQAssessmentFirestore(newSDQ).catch(err => console.warn('Firestore SDQ notice:', err));
+    await saveSDQAssessmentFirestore(newSDQ);
 
-    return set((state) => ({
+    set((state) => ({
       sdqAssessments: [newSDQ, ...state.sdqAssessments]
     }));
   },
