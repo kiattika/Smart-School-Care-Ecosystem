@@ -1,18 +1,18 @@
-import React, { useState } from 'react';
-import { 
-  Activity, 
-  Heart, 
-  Smile, 
-  ShieldAlert, 
-  CheckCircle2, 
-  AlertCircle, 
-  Pill, 
-  Stethoscope, 
-  FileText, 
-  BarChart3, 
-  Brain, 
-  HelpCircle, 
-  Check, 
+import React, { useEffect, useState } from 'react';
+import {
+  Activity,
+  Heart,
+  Smile,
+  ShieldAlert,
+  CheckCircle2,
+  AlertCircle,
+  Pill,
+  Stethoscope,
+  FileText,
+  BarChart3,
+  Brain,
+  HelpCircle,
+  Check,
   Sparkles,
   ArrowUpRight,
   TrendingDown,
@@ -21,31 +21,45 @@ import {
   GraduationCap
 } from 'lucide-react';
 import { useStore } from '../../store';
-import { 
-  SemesterHealthRecord, 
-  InfirmaryVisit, 
-  TwoQuestionScreening, 
-  PHQ9Screening, 
+import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits } from '../../services/firestoreService';
+import {
+  SemesterHealthRecord,
+  InfirmaryVisit,
+  TwoQuestionScreening,
+  PHQ9Screening,
   SDQAssessment,
-  Student 
+  Student
 } from '../../types';
 
 export function HealthMentalWellbeingModule({ studentId, isParentView = false }: { studentId: string; isParentView?: boolean }) {
-  const { 
-    semesterHealthLogs, 
-    chronicIllnesses, 
-    allergies, 
-    specialCareNeeds, 
-    infirmaryVisits, 
-    twoQuestionScreenings, 
-    phq9Screenings, 
+  const user = useStore(s => s.user);
+  const {
+    semesterHealthLogs,
+    chronicIllnesses,
+    allergies,
+    specialCareNeeds,
+    twoQuestionScreenings,
+    phq9Screenings,
     sdqAssessments,
-    acknowledgeInfirmaryAlert,
     save2QScreening,
     savePHQ9Screening,
     submitSDQAssessment,
     students
   } = useStore();
+
+  // บันทึกห้องพยาบาล — real-time จาก Firestore (infirmary_visits) แหล่งเดียวกับที่ InfirmaryPortal.tsx
+  // เขียน (เดิมอ่านจาก state.infirmaryVisits ของ Zustand ซึ่งไม่เคยมี listener ผูกไว้เลย จึงว่างเปล่า
+  // เสมอไม่ว่า InfirmaryPortal จะบันทึกอะไรก็ตาม) — filter ตาม role: ผู้ปกครองกรองด้วย parentUid
+  // ของตัวเอง, นักเรียนกรองด้วย studentUid ของตัวเอง (ต้อง filter ฝั่ง query ให้ผ่าน firestore.rules)
+  const [infirmaryVisits, setInfirmaryVisits] = useState<InfirmaryVisit[]>([]);
+  useEffect(() => {
+    if (!user?.uid) { setInfirmaryVisits([]); return; }
+    const unsubscribe = subscribeInfirmaryVisits(
+      setInfirmaryVisits,
+      isParentView ? { parentUid: user.uid } : { studentUid: user.uid }
+    );
+    return () => unsubscribe();
+  }, [user?.uid, isParentView]);
 
   const defaultStudent: Student = {
     id: studentId || 'default-student',
@@ -437,9 +451,13 @@ export function HealthMentalWellbeingModule({ studentId, isParentView = false }:
                     )}
                   </div>
 
-                  {!visit.parentAcknowledged && (
+                  {/* rules อนุญาตให้แก้ parentAcknowledged ได้เฉพาะเจ้าของ parentUid เท่านั้น
+                      (ดู firestore.rules match /infirmary_visits) — ซ่อนปุ่มนี้ในมุมมองนักเรียน */}
+                  {!visit.parentAcknowledged && isParentView && (
                     <button
-                      onClick={() => acknowledgeInfirmaryAlert(visit.id)}
+                      onClick={() => acknowledgeInfirmaryVisit(visit.id).catch(err =>
+                        console.error('[HealthMentalWellbeingModule] acknowledgeInfirmaryVisit failed:', err)
+                      )}
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <Check className="w-3.5 h-3.5" />

@@ -1346,6 +1346,79 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
+  // infirmary_visits — บันทึกห้องพยาบาล: เขียนได้เฉพาะ INFIRMARY_STAFF/SUPER_ADMIN แต่ตั้งใจ
+  // ให้ผู้ปกครอง+นักเรียนเจ้าของอ่านได้ (ต่างจาก guidance_counseling_cases ที่ปิดไม่ให้อ่านเลย)
+  describe('infirmary_visits collection', () => {
+    const STU_UID = 'stu-uid-inf1';
+    const STU_ID = 'inf-std-1';
+    const PARENT_UID = 'parent-inf1';
+    const NURSE_UID = 'nurse-uid-1';
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID });
+      });
+    }
+    const baseVisit = (over: Record<string, unknown> = {}) => ({
+      id: 'inf-1', studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID,
+      visitDate: '2026-09-01', visitTime: '09:30 น.', symptoms: 'ปวดศีรษะ', temperature: 37.6,
+      treatment: 'นอนพัก', medicationGiven: 'พาราเซตามอล', restDurationMinutes: 30,
+      nurseUid: NURSE_UID, nurseName: 'พยาบาลทดสอบ', isUrgentAlert: false, parentAcknowledged: false,
+      createdAt: '2026-09-01T02:30:00.000Z',
+      ...over,
+    });
+
+    it('lets INFIRMARY_STAFF create a visit with studentUid/parentUid matching the real student doc; denies a mismatch', async () => {
+      await seed();
+      await assertSucceeds(asRole('INFIRMARY_STAFF').firestore().doc('infirmary_visits/inf-1').set(baseVisit()));
+      await assertFails(asRole('INFIRMARY_STAFF').firestore().doc('infirmary_visits/inf-2').set(baseVisit({ id: 'inf-2', parentUid: 'someone-else' })));
+    });
+
+    it('denies a SUBJECT_TEACHER/HOMEROOM_TEACHER from creating a visit', async () => {
+      await seed();
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('infirmary_visits/inf-3').set(baseVisit({ id: 'inf-3' })));
+      await assertFails(asRole('HOMEROOM_TEACHER').firestore().doc('infirmary_visits/inf-4').set(baseVisit({ id: 'inf-4' })));
+    });
+
+    it('lets the student and the linked parent read; denies an unrelated parent/teacher', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('infirmary_visits/inf-5').set(baseVisit({ id: 'inf-5' }));
+      });
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('infirmary_visits/inf-5').get());
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('infirmary_visits/inf-5').get());
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('infirmary_visits/inf-5').get());
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('infirmary_visits/inf-5').get());
+    });
+
+    it('lets the linked parent acknowledge (parentAcknowledged/acknowledgedAt only); denies changing other fields or an unrelated parent acknowledging', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('infirmary_visits/inf-6').set(baseVisit({ id: 'inf-6' }));
+      });
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('infirmary_visits/inf-6').set(
+        baseVisit({ id: 'inf-6', parentAcknowledged: true, acknowledgedAt: '2026-09-01T03:00:00.000Z' })
+      ));
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('infirmary_visits/inf-6').set(
+        baseVisit({ id: 'inf-6', parentAcknowledged: true, acknowledgedAt: '2026-09-01T03:00:00.000Z', symptoms: 'แก้ไขอาการ' })
+      ));
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('infirmary_visits/inf-6').set(
+        baseVisit({ id: 'inf-6', parentAcknowledged: true })
+      ));
+    });
+
+    it('denies INFIRMARY_STAFF from repointing studentUid/parentUid on update; denies deleting', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('infirmary_visits/inf-7').set(baseVisit({ id: 'inf-7' }));
+      });
+      await assertFails(asRole('INFIRMARY_STAFF').firestore().doc('infirmary_visits/inf-7').set(
+        baseVisit({ id: 'inf-7', parentUid: 'repointed-parent' })
+      ));
+      await assertFails(asRole('INFIRMARY_STAFF').firestore().doc('infirmary_visits/inf-7').delete());
+    });
+  });
+
   // 15. Default Deny Catch-All (Regression Test 5)
   describe('Default Deny Catch-All (Undeclared paths)', () => {
     it('REGRESSION: denies authenticated user with no matching role from reading or writing undeclared collections', async () => {

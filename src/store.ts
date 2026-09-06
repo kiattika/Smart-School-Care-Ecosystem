@@ -12,7 +12,6 @@ import {
   ChronicIllness,
   AllergyRecord,
   SpecialCareNeed,
-  InfirmaryVisit,
   TwoQuestionScreening,
   PHQ9Screening,
   SDQAssessment,
@@ -121,7 +120,6 @@ export const useStore = create<StoreState>((set, get) => ({
   chronicIllnesses: {},
   allergies: {},
   specialCareNeeds: {},
-  infirmaryVisits: [],
   twoQuestionScreenings: {},
   phq9Screenings: {},
   sdqAssessments: [],
@@ -1058,20 +1056,6 @@ export const useStore = create<StoreState>((set, get) => ({
       };
     });
   },
-
-  acknowledgeInfirmaryAlert: (visitId: string) => set((state) => {
-    const updated = state.infirmaryVisits.map(v => {
-      if (v.id === visitId) {
-        return {
-          ...v,
-          parentAcknowledged: true,
-          acknowledgedAt: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.'
-        };
-      }
-      return v;
-    });
-    return { infirmaryVisits: updated };
-  }),
 
   savePHQ9Screening: (studentId: string, answers: number[]) => {
     const totalScore = answers.reduce((acc, curr) => acc + curr, 0);

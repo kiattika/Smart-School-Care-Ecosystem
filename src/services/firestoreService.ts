@@ -48,7 +48,8 @@ import {
   ElectiveActivityConfig,
   ActivityEnrollment,
   HouseConfig,
-  GuidanceCounselingCase
+  GuidanceCounselingCase,
+  InfirmaryVisit
 } from '../types';
 import { SchoolGeofenceConfig } from '../utils/geoUtils';
 
@@ -1746,6 +1747,91 @@ export function subscribeGuidanceCounselingCases(
     });
   } catch (error) {
     console.warn('[subscribeGuidanceCounselingCases] setup error:', error);
+    return () => {};
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Infirmary Visits (infirmary_visits/{visitId})
+ * บันทึกการเข้ารับบริการห้องพยาบาล — เขียนได้เฉพาะ INFIRMARY_STAFF/SUPER_ADMIN แต่ตั้งใจให้
+ * "อ่านได้" โดยนักเรียนเจ้าของ + ผู้ปกครองที่ผูกไว้ (studentUid/parentUid denormalize จาก
+ * students/{studentId} จริง — validate ฝั่ง rules ผ่าน studentField() เสมอ)
+ * ── ใช้ร่วมกันทั้ง InfirmaryPortal.tsx (เขียน) และ HealthMentalWellbeingModule.tsx (อ่าน)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const INFIRMARY_COL = 'infirmary_visits';
+
+export async function recordInfirmaryVisit(
+  data: Pick<InfirmaryVisit,
+    'studentId' | 'symptoms' | 'temperature' | 'treatment' | 'medicationGiven' | 'restDurationMinutes' | 'isUrgentAlert'> &
+    { studentUid: string | null; parentUid: string | null; nurseUid: string; nurseName: string }
+): Promise<string> {
+  const id = `inf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const now = new Date();
+  const payload: InfirmaryVisit = {
+    id,
+    studentId: data.studentId,
+    studentUid: data.studentUid,
+    parentUid: data.parentUid,
+    visitDate: now.toISOString().split('T')[0],
+    visitTime: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
+    symptoms: data.symptoms,
+    temperature: data.temperature,
+    treatment: data.treatment,
+    medicationGiven: data.medicationGiven,
+    restDurationMinutes: data.restDurationMinutes,
+    nurseUid: data.nurseUid,
+    nurseName: data.nurseName,
+    isUrgentAlert: data.isUrgentAlert,
+    parentAcknowledged: false,
+    createdAt: now.toISOString(),
+  };
+  try {
+    await setDoc(doc(db, INFIRMARY_COL, id), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${INFIRMARY_COL}/${id}`);
+  }
+  return id;
+}
+
+/** ผู้ปกครองกด "รับทราบ" เอง — rules จำกัดให้แก้ได้แค่ parentAcknowledged/acknowledgedAt เท่านั้น */
+export async function acknowledgeInfirmaryVisit(visitId: string): Promise<void> {
+  try {
+    await setDoc(doc(db, INFIRMARY_COL, visitId), {
+      parentAcknowledged: true,
+      acknowledgedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${INFIRMARY_COL}/${visitId}`);
+  }
+}
+
+/**
+ * real-time listener สำหรับสถิติห้องพยาบาล
+ *  - ไม่ระบุ filter → พยาบาล/SUPER_ADMIN เห็นทั้งโรงเรียน (rules อนุญาตอ่านทั้ง collection ตาม role)
+ *  - { studentUid } → นักเรียนดูของตัวเอง (ต้อง filter ฝั่ง query ให้ผ่าน rules)
+ *  - { parentUid }  → ผู้ปกครองดูของบุตรหลาน (ต้อง filter ฝั่ง query ให้ผ่าน rules)
+ */
+export function subscribeInfirmaryVisits(
+  onUpdate: (visits: InfirmaryVisit[]) => void,
+  filter: { studentUid?: string; parentUid?: string } = {}
+): () => void {
+  try {
+    const col = collection(db, INFIRMARY_COL);
+    const clauses = [];
+    if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
+    if (filter.parentUid) clauses.push(where('parentUid', '==', filter.parentUid));
+    const ref = clauses.length > 0 ? query(col, ...clauses) : col;
+    return onSnapshot(ref, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as InfirmaryVisit));
+      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeInfirmaryVisits] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeInfirmaryVisits] setup error:', error);
     return () => {};
   }
 }

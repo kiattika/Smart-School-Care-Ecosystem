@@ -237,36 +237,12 @@ export const INITIAL_SPECIAL_CARE_NEEDS: Record<string, SpecialCareNeed[]> = {
   ]
 };
 
-export const INITIAL_INFIRMARY_VISITS: InfirmaryVisit[] = [
-  {
-    id: 'inf-01',
-    studentId: '6950801',
-    visitTime: '2026-08-19 13:45 น.',
-    symptoms: 'ปวดศีรษะ วิงเวียน มีไข้ 38.2°C หลังเรียนวิชาพละ',
-    temperature: 38.2,
-    treatment: 'เช็ดตัวลดไข้ ให้นอนพักผ่อนในห้องพยาบาล 1 คาบ',
-    medicationGiven: 'Paracetamol 500mg 1 เม็ด',
-    restDurationMinutes: 50,
-    nurseName: 'พยาบาลวิไลลักษณ์ มโนรมย์',
-    isUrgentAlert: true,
-    parentAcknowledged: true,
-    acknowledgedAt: '2026-08-19 14:10 น.'
-  },
-  {
-    id: 'inf-02',
-    studentId: '6950801',
-    visitTime: '2026-07-28 10:20 น.',
-    symptoms: 'แผลถลอกที่หัวเข่าด้านขวาจากการสะดุดล้มระหว่างเดินขึ้นบันได',
-    temperature: 36.5,
-    treatment: 'ล้างแผลด้วยน้ำเกลือ ทาเบตาดีน และปิดผ้าก๊อซสะอาด',
-    medicationGiven: 'ไม่มี',
-    restDurationMinutes: 15,
-    nurseName: 'พยาบาลวิไลลักษณ์ มโนรมย์',
-    isUrgentAlert: false,
-    parentAcknowledged: true,
-    acknowledgedAt: '2026-07-28 10:45 น.'
-  }
-];
+// NOTE (TASK 3 — เชื่อมข้อมูลห้องพยาบาลจริง): เดิมมี INITIAL_INFIRMARY_VISITS มาตรง ๆ (mock array
+// ของปลอมใช้รหัสนักเรียนผี '6950801' ตามที่ CLAUDE.md ห้ามไว้) แต่ไม่มีที่ไหน import ใช้จริงเลย
+// (dead code) และหลังเพิ่ม field studentUid/parentUid/visitDate ที่จำเป็นสำหรับ firestore.rules
+// จริงใน InfirmaryVisit ก็จะ type-error ทันที — ลบทิ้งแทนที่จะแก้ให้ตรง type เพราะเป็นข้อมูลปลอมที่
+// ไม่ได้ใช้งานอยู่แล้ว ข้อมูลจริงตอนนี้มาจาก Firestore collection infirmary_visits (ดู
+// services/firestoreService.ts: recordInfirmaryVisit/subscribeInfirmaryVisits)
 
 export const INITIAL_2Q_SCREENINGS: Record<string, TwoQuestionScreening> = {
   '6950801': {

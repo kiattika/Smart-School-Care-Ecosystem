@@ -571,16 +571,24 @@ export interface SpecialCareNeed {
 export interface InfirmaryVisit {
   id: string;
   studentId: string;
+  // denormalized จาก students/{studentId}.studentUid/.parentUid ตอนบันทึก (validate โดย
+  // firestore.rules ผ่าน studentField() เสมอ) — ใช้ให้นักเรียนเจ้าของ+ผู้ปกครองอ่านข้อมูลนี้ได้จริง
+  // ตามที่ระบบตั้งใจไว้ (ต่างจาก guidance_counseling_cases ที่ปิดไม่ให้ทั้งคู่อ่าน)
+  studentUid?: string | null;
+  parentUid?: string | null;
+  visitDate: string; // YYYY-MM-DD แยกจาก visitTime (ข้อความแสดงผล) เพื่อ query/sort ได้จริง
   visitTime: string;
   symptoms: string;
   temperature: number;
   treatment: string;
   medicationGiven: string;
   restDurationMinutes: number;
+  nurseUid?: string | null;
   nurseName: string;
   isUrgentAlert: boolean;
   parentAcknowledged: boolean;
   acknowledgedAt?: string;
+  createdAt?: string;
 }
 
 export interface TwoQuestionScreening {
@@ -973,7 +981,11 @@ export interface StoreState {
   chronicIllnesses: Record<string, ChronicIllness[]>;
   allergies: Record<string, AllergyRecord[]>;
   specialCareNeeds: Record<string, SpecialCareNeed[]>;
-  infirmaryVisits: InfirmaryVisit[];
+  // infirmaryVisits/acknowledgeInfirmaryAlert ถูกลบออก (TASK 3 — เชื่อมข้อมูลห้องพยาบาลจริง):
+  // เดิมเป็น session-local state ที่ไม่เคยมี listener ผูกไว้เลย ทำให้แยกขาดจาก InfirmaryPortal.tsx
+  // ที่เขียนลง useState ของตัวเองอีกชุดหนึ่ง — ข้อมูลจริงตอนนี้อยู่ที่ Firestore collection
+  // infirmary_visits อ่านผ่าน services/firestoreService.ts: subscribeInfirmaryVisits() โดยตรง
+  // (ดู HealthMentalWellbeingModule.tsx / InfirmaryPortal.tsx)
   twoQuestionScreenings: Record<string, TwoQuestionScreening>;
   phq9Screenings: Record<string, PHQ9Screening>;
   sdqAssessments: SDQAssessment[];
@@ -1084,7 +1096,6 @@ export interface StoreState {
   recordGateAttendance: (studentId: string, type: 'ENTRY' | 'EXIT', method: GateAttendanceRecord['method']) => void;
   submitDetailedLeave: (request: Omit<DetailedLeaveRequest, 'id' | 'submittedAt' | 'status'>) => void;
   approveDetailedLeave: (id: string, teacherRemarks?: string) => void;
-  acknowledgeInfirmaryAlert: (visitId: string) => void;
   savePHQ9Screening: (studentId: string, answers: number[]) => void;
   save2QScreening: (studentId: string, q1: boolean, q2: boolean) => void;
   submitSDQAssessment: (sdq: Omit<SDQAssessment, 'id' | 'assessmentDate'>) => void;

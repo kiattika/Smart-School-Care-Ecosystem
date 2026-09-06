@@ -1,17 +1,23 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
-import { 
-  HeartPulse, 
-  Activity, 
-  Pill, 
-  FileSpreadsheet, 
-  AlertTriangle, 
-  Search, 
-  Plus, 
-  CheckCircle, 
-  Clock, 
-  User, 
-  Calendar, 
+import {
+  recordInfirmaryVisit as recordInfirmaryVisitFirestore,
+  acknowledgeInfirmaryVisit,
+  subscribeInfirmaryVisits
+} from '../../services/firestoreService';
+import {
+  HeartPulse,
+  Activity,
+  Pill,
+  FileSpreadsheet,
+  AlertTriangle,
+  Search,
+  Plus,
+  CheckCircle,
+  Clock,
+  User,
+  Calendar,
   ShieldAlert,
   Thermometer,
   Stethoscope
@@ -19,35 +25,33 @@ import {
 import { InfirmaryVisit, SemesterHealthRecord } from '../../types';
 
 export function InfirmaryPortal() {
+  const user = useStore(s => s.user);
   const { students } = useRealStudents(); // นักเรียนจาก Firestore สด
-  const [infirmaryVisits, setInfirmaryVisits] = useState<InfirmaryVisit[]>([
-    {
-      id: 'INF-01',
-      studentId: '6950801',
-      visitTime: '09:30 น. (2026-08-20)',
-      symptoms: 'ปวดศีรษะและอ่อนเพลียเล็กน้อย',
-      temperature: 37.6,
-      treatment: 'นอนพักผ่อน ประคบเย็น',
-      medicationGiven: 'พาราเซตามอล 1 เม็ด',
-      restDurationMinutes: 30,
-      nurseName: 'นางสาวกนกวรรณ พยาบาลวิชาชีพ',
-      isUrgentAlert: false,
-      parentAcknowledged: true
+
+  // บันทึกห้องพยาบาล — real-time จาก Firestore (infirmary_visits) แทน useState mock เดิม
+  // ที่แยกขาดจาก field infirmaryVisits ของ Zustand store ที่ฝั่งผู้ปกครอง/นักเรียนอ่านอยู่
+  const [infirmaryVisits, setInfirmaryVisits] = useState<InfirmaryVisit[]>([]);
+  const [visitsLoading, setVisitsLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = subscribeInfirmaryVisits((list) => {
+      setInfirmaryVisits(list);
+      setVisitsLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const [isSavingVisit, setIsSavingVisit] = useState(false);
+  const [recordVisitError, setRecordVisitError] = useState<string | null>(null);
+
+  const acknowledgeInfirmaryAlert = async (id: string) => {
+    try {
+      await acknowledgeInfirmaryVisit(id);
+    } catch (err) {
+      console.error('[InfirmaryPortal] acknowledgeInfirmaryVisit failed:', err);
     }
-  ]);
-  
-  const recordInfirmaryVisit = (newVisit: Omit<InfirmaryVisit, 'id'>) => {
-    const created: InfirmaryVisit = {
-      ...newVisit,
-      id: `INF-0${infirmaryVisits.length + 1}`
-    };
-    setInfirmaryVisits([created, ...infirmaryVisits]);
   };
 
-  const acknowledgeInfirmaryAlert = (id: string) => {
-    setInfirmaryVisits(infirmaryVisits.map(v => v.id === id ? { ...v, parentAcknowledged: true, acknowledgedAt: new Date().toISOString() } : v));
-  };
-  
   const [activeTab, setActiveTab] = useState<'visits' | 'inventory' | 'screening' | 'profiles'>('visits');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState<string>(students[0]?.studentId || '');
@@ -82,30 +86,40 @@ export function InfirmaryPortal() {
     );
   });
 
-  const handleRecordVisit = (e: React.FormEvent) => {
+  const handleRecordVisit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedStudentId) return;
-    
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น. (' + now.toISOString().split('T')[0] + ')';
+    if (!user?.uid) {
+      setRecordVisitError('ไม่พบบัญชีผู้ใช้ที่ล็อกอินอยู่ กรุณาเข้าสู่ระบบใหม่ก่อนบันทึก');
+      return;
+    }
+    const student = students.find(s => s.studentId === selectedStudentId);
 
-    const newVisit: Omit<InfirmaryVisit, 'id'> = {
-      studentId: selectedStudentId,
-      visitTime: timeStr,
-      symptoms,
-      temperature: parseFloat(temperature) || 37.0,
-      treatment,
-      medicationGiven,
-      restDurationMinutes: Number(restDurationMinutes),
-      nurseName: 'นางสาวกนกวรรณ พยาบาลวิชาชีพ',
-      isUrgentAlert,
-      parentAcknowledged: false
-    };
-
-    recordInfirmaryVisit(newVisit);
-    setShowAddModal(false);
-    setSymptoms('');
-    setIsUrgentAlert(false);
+    setIsSavingVisit(true);
+    setRecordVisitError(null);
+    try {
+      await recordInfirmaryVisitFirestore({
+        studentId: selectedStudentId,
+        studentUid: student?.studentUid || null,
+        parentUid: student?.parentUid || null,
+        symptoms,
+        temperature: parseFloat(temperature) || 37.0,
+        treatment,
+        medicationGiven,
+        restDurationMinutes: Number(restDurationMinutes),
+        isUrgentAlert,
+        nurseUid: user.uid,
+        nurseName: user.displayName || user.email || 'เจ้าหน้าที่พยาบาล',
+      });
+      setShowAddModal(false);
+      setSymptoms('');
+      setIsUrgentAlert(false);
+    } catch (err) {
+      console.error('[InfirmaryPortal] recordInfirmaryVisit failed:', err);
+      setRecordVisitError('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsSavingVisit(false);
+    }
   };
 
   const activeStudent = students.find(s => s.studentId === selectedStudentId) || students[0];
@@ -555,6 +569,10 @@ export function InfirmaryPortal() {
                 </label>
               </div>
 
+              {recordVisitError && (
+                <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">{recordVisitError}</p>
+              )}
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
@@ -565,9 +583,10 @@ export function InfirmaryPortal() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg transition-all"
+                  disabled={isSavingVisit}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold shadow-lg transition-all"
                 >
-                  บันทึกข้อมูลและส่งแจ้งเตือน
+                  {isSavingVisit ? 'กำลังบันทึก...' : 'บันทึกข้อมูลและส่งแจ้งเตือน'}
                 </button>
               </div>
             </form>

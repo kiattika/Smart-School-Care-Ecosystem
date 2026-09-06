@@ -480,6 +480,33 @@ service cloud.firestore {
       allow update, delete: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
     }
 
+    // 31. Infirmary Visits — ห้องพยาบาล บันทึกอาการ/การรักษา ตั้งใจให้ "เห็นได้" โดยผู้ปกครองและ
+    // นักเรียนเจ้าของ (ต่างจาก guidance_counseling_cases ด้านบนที่ปิดไม่ให้อ่านเลย) —
+    // studentUid/parentUid ต้องตรงกับ students/{studentId} จริงเสมอ กันพยาบาลพิมพ์ผิดแล้วส่ง
+    // ข้อมูลไปให้ผู้ปกครองคนละครอบครัวเห็น (ดู studentField())
+    match /infirmary_visits/{visitId} {
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('INFIRMARY_STAFF') ||
+                     (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
+
+      allow create: if (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF')) &&
+                       request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__') &&
+                       request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', '__none__');
+
+      // พยาบาล/แอดมินแก้เนื้อหาได้แต่ห้ามย้ายเจ้าของ (studentUid/parentUid ต้องคงเดิม) —
+      // ผู้ปกครองเจ้าของ (parentUid ตรง) แก้ได้เฉพาะ "กดรับทราบ" (parentAcknowledged/acknowledgedAt) เท่านั้น
+      allow update: if (
+                        (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF')) &&
+                        request.resource.data.studentUid == resource.data.studentUid &&
+                        request.resource.data.parentUid == resource.data.parentUid
+                      ) || (
+                        isSignedIn() && resource.data.parentUid == request.auth.uid &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentAcknowledged', 'acknowledgedAt'])
+                      );
+
+      allow delete: if false;
+    }
+
     // Default Deny All Catch-All for unknown paths
     match /{document=**} {
       allow read, write: if false;
