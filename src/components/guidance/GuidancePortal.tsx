@@ -1,7 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
 import { useGuidanceScreenings } from '../../hooks/useGuidanceScreenings';
-import { PHQ9Screening, TwoQuestionScreening } from '../../types';
+import { PHQ9Screening, TwoQuestionScreening, GuidanceCounselingCase } from '../../types';
+import {
+  createGuidanceCounselingCase,
+  subscribeGuidanceCounselingCases,
+  updateGuidanceCounselingCaseStatus
+} from '../../services/firestoreService';
 import {
   HeartHandshake,
   Users,
@@ -18,6 +24,7 @@ import {
 } from 'lucide-react';
 
 export function GuidancePortal() {
+  const user = useStore(s => s.user);
   const { students } = useRealStudents(); // นักเรียนจาก Firestore สด
   // ผลคัดกรอง 2Q/PHQ-9/SDQ สด real-time — แทนตัวเลขที่เคย hardcode ไว้ทั้งหมดในแท็บ "sdq"
   const { twoQuestionScreenings, phq9Screenings, sdqAssessments, loading: screeningsLoading } = useGuidanceScreenings();
@@ -66,55 +73,66 @@ export function GuidancePortal() {
     return { atRiskList, sdqCounts, sdqScreenedTotal, totalStudents: students.length };
   }, [phq9Screenings, twoQuestionScreenings, sdqAssessments, students]);
 
-  // Counseling cases state (mock)
-  const [cases, setCases] = useState([
-    {
-      id: 'CS-001',
-      studentId: '6950801',
-      studentName: 'เด็กชาย กิตติคุณ สถิตการุณย์',
-      classRoom: 'ม.5/8',
-      issueType: 'ความเครียดจากการเรียนและสอบเข้ามหาวิทยาลัย',
-      severity: 'MODERATE',
-      status: 'IN_PROGRESS',
-      counselorName: 'ดร.สุดา จิตวิทยา',
-      lastSessionDate: '2026-08-18'
-    },
-    {
-      id: 'CS-002',
-      studentId: '6950805',
-      studentName: 'เด็กชาย ธน ภูมิภาค',
-      classRoom: 'ม.5/8',
-      issueType: 'ปัญหาการปรับตัวกับเพื่อนร่วมชั้น',
-      severity: 'LOW',
-      status: 'RESOLVED',
-      counselorName: 'ดร.สุดา จิตวิทยา',
-      lastSessionDate: '2026-08-10'
-    }
-  ]);
+  // เคสให้คำปรึกษา — real-time จาก Firestore (guidance_counseling_cases) แทน useState mock เดิม
+  // ข้อมูลอ่อนไหวที่สุดในระบบ (เนื้อหาการปรึกษาจิตวิทยาของผู้เยาว์) — rules อ่าน/เขียนได้เฉพาะ
+  // GUIDANCE_COUNSELOR/SUPER_ADMIN เท่านั้น role อื่นทั้งหมดจะได้ list ว่างจาก listener error
+  const [cases, setCases] = useState<GuidanceCounselingCase[]>([]);
+  const [casesLoading, setCasesLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = subscribeGuidanceCounselingCases((list) => {
+      setCases(list);
+      setCasesLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const [showAddCaseModal, setShowAddCaseModal] = useState(false);
   const [newStudentId, setNewStudentId] = useState(students[0]?.studentId || '');
   const [newIssue, setNewIssue] = useState('');
+  const [newNotes, setNewNotes] = useState('');
   const [newSeverity, setNewSeverity] = useState<'LOW' | 'MODERATE' | 'HIGH'>('MODERATE');
+  const [isSavingCase, setIsSavingCase] = useState(false);
+  const [addCaseError, setAddCaseError] = useState<string | null>(null);
 
-  const handleAddCase = (e: React.FormEvent) => {
+  const handleAddCase = async (e: React.FormEvent) => {
     e.preventDefault();
     const effectiveStudentId = newStudentId || students[0]?.studentId || '';
     const st = students.find(s => s.studentId === effectiveStudentId);
-    const newC = {
-      id: `CS-00${cases.length + 1}`,
-      studentId: effectiveStudentId,
-      studentName: st?.fullName || 'ไม่ระบุชื่อ',
-      classRoom: st?.room || 'ม.5/8',
-      issueType: newIssue,
-      severity: newSeverity,
-      status: 'IN_PROGRESS' as const,
-      counselorName: 'ดร.สุดา จิตวิทยา',
-      lastSessionDate: new Date().toISOString().split('T')[0]
-    };
-    setCases([newC, ...cases]);
-    setShowAddCaseModal(false);
-    setNewIssue('');
+    if (!user?.uid) {
+      setAddCaseError('ไม่พบบัญชีผู้ใช้ที่ล็อกอินอยู่ กรุณาเข้าสู่ระบบใหม่ก่อนบันทึกเคส');
+      return;
+    }
+    setIsSavingCase(true);
+    setAddCaseError(null);
+    try {
+      await createGuidanceCounselingCase({
+        studentId: effectiveStudentId,
+        studentName: st?.fullName || 'ไม่ระบุชื่อ',
+        classRoom: st?.room || 'ไม่ระบุห้อง',
+        category: newIssue,
+        notes: newNotes,
+        severity: newSeverity,
+        counselorUid: user.uid,
+        counselorName: user.displayName || user.email || 'ครูแนะแนว',
+      });
+      setShowAddCaseModal(false);
+      setNewIssue('');
+      setNewNotes('');
+    } catch (err) {
+      console.error('[GuidancePortal] createGuidanceCounselingCase failed:', err);
+      setAddCaseError('บันทึกเคสไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsSavingCase(false);
+    }
+  };
+
+  const handleResolveCase = async (caseId: string) => {
+    try {
+      await updateGuidanceCounselingCaseStatus(caseId, 'RESOLVED');
+    } catch (err) {
+      console.error('[GuidancePortal] updateGuidanceCounselingCaseStatus failed:', err);
+    }
   };
 
   return (
@@ -195,38 +213,52 @@ export function GuidancePortal() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4">
-              {cases.map((c) => (
-                <div key={c.id} className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                  <div className="space-y-1.5 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 bg-slate-800 text-purple-400 text-[10px] font-mono rounded font-bold">
-                        {c.id}
-                      </span>
-                      <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-300 text-[10px] font-semibold rounded border border-indigo-500/20">
-                        {c.classRoom}
-                      </span>
-                      <span className="text-xs text-slate-400 font-mono">อัปเดตล่าสุด: {c.lastSessionDate}</span>
+            {casesLoading ? (
+              <div className="text-center py-8 text-slate-500 text-xs">กำลังโหลดข้อมูลเคส...</div>
+            ) : cases.length === 0 ? (
+              <div className="text-center py-8 text-slate-500 text-xs">ยังไม่มีเคสให้คำปรึกษาที่บันทึกไว้</div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {cases.map((c) => (
+                  <div key={c.id} className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div className="space-y-1.5 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-300 text-[10px] font-semibold rounded border border-indigo-500/20">
+                          {c.classRoom}
+                        </span>
+                        <span className="text-xs text-slate-400 font-mono">อัปเดตล่าสุด: {c.lastSessionDate}</span>
+                      </div>
+                      <h4 className="text-sm font-bold text-white">{c.studentName} (ID: {c.studentId})</h4>
+                      <p className="text-xs text-slate-300"><span className="font-semibold text-white">ประเด็นให้คำปรึกษา:</span> {c.category}</p>
+                      {c.notes && (
+                        <p className="text-xs text-slate-400"><span className="font-semibold text-slate-300">บันทึก:</span> {c.notes}</p>
+                      )}
+                      <p className="text-xs text-slate-400">ผู้ให้คำปรึกษา: <span className="text-white">{c.counselorName}</span></p>
                     </div>
-                    <h4 className="text-sm font-bold text-white">{c.studentName} (ID: {c.studentId})</h4>
-                    <p className="text-xs text-slate-300"><span className="font-semibold text-white">ประเด็นให้คำปรึกษา:</span> {c.issueType}</p>
-                    <p className="text-xs text-slate-400">ผู้ให้คำปรึกษา: <span className="text-white">{c.counselorName}</span></p>
-                  </div>
 
-                  <div className="flex items-center gap-3">
-                    {c.status === 'RESOLVED' ? (
-                      <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-bold inline-flex items-center gap-1">
-                        <CheckCircle className="w-3.5 h-3.5" /> เคสสิ้นสุด/ยุติแล้ว
-                      </span>
-                    ) : (
-                      <span className="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-xl text-xs font-bold inline-flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5" /> อยู่ระหว่างดูแลต่อเนื่อง
-                      </span>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {c.status === 'RESOLVED' ? (
+                        <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-bold inline-flex items-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5" /> เคสสิ้นสุด/ยุติแล้ว
+                        </span>
+                      ) : (
+                        <>
+                          <span className="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-xl text-xs font-bold inline-flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" /> อยู่ระหว่างดูแลต่อเนื่อง
+                          </span>
+                          <button
+                            onClick={() => handleResolveCase(c.id)}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                          >
+                            ปิดเคส
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -413,6 +445,18 @@ export function GuidancePortal() {
               </div>
 
               <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">บันทึกรายละเอียดการให้คำปรึกษา (Notes)</label>
+                <textarea
+                  required
+                  value={newNotes}
+                  onChange={(e) => setNewNotes(e.target.value)}
+                  rows={3}
+                  placeholder="รายละเอียดการพูดคุย ข้อสังเกต แผนการติดตาม ฯลฯ"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white resize-none"
+                />
+              </div>
+
+              <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">ระดับความรุนแรง</label>
                 <select
                   value={newSeverity}
@@ -425,6 +469,10 @@ export function GuidancePortal() {
                 </select>
               </div>
 
+              {addCaseError && (
+                <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">{addCaseError}</p>
+              )}
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
@@ -435,9 +483,10 @@ export function GuidancePortal() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold"
+                  disabled={isSavingCase}
+                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold"
                 >
-                  บันทึกเปิดเคส
+                  {isSavingCase ? 'กำลังบันทึก...' : 'บันทึกเปิดเคส'}
                 </button>
               </div>
             </form>

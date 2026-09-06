@@ -47,7 +47,8 @@ import {
   StudentHomeLocation,
   ElectiveActivityConfig,
   ActivityEnrollment,
-  HouseConfig
+  HouseConfig,
+  GuidanceCounselingCase
 } from '../types';
 import { SchoolGeofenceConfig } from '../utils/geoUtils';
 
@@ -1674,6 +1675,78 @@ export async function assignHouseToStudent(studentId: string, houseId: string | 
     await updateDoc(doc(db, 'students', studentId), { houseId, updatedAt: serverTimestamp() });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `students/${studentId}.houseId`);
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Guidance Counseling Cases (guidance_counseling_cases/{caseId})
+ * เนื้อหาการให้คำปรึกษาจิตวิทยาของผู้เยาว์ — ข้อมูลอ่อนไหวที่สุดในระบบ อ่าน/เขียนได้เฉพาะ
+ * GUIDANCE_COUNSELOR/SUPER_ADMIN เท่านั้น (ดู firestore.rules match /guidance_counseling_cases)
+ * ต่างจาก collection สุขภาพจิตอื่นๆ ตรงที่ครูประจำชั้น/ผู้ปกครอง/นักเรียนเจ้าของเคสอ่านไม่ได้เลย
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const GUIDANCE_CASES_COL = 'guidance_counseling_cases';
+
+export async function createGuidanceCounselingCase(
+  data: Pick<GuidanceCounselingCase, 'studentId' | 'studentName' | 'classRoom' | 'category' | 'notes' | 'severity'> &
+    { counselorUid: string; counselorName: string }
+): Promise<string> {
+  const id = `case_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const now = new Date().toISOString();
+  const payload: GuidanceCounselingCase = {
+    id,
+    studentId: data.studentId,
+    studentName: data.studentName,
+    classRoom: data.classRoom,
+    counselorUid: data.counselorUid,
+    counselorName: data.counselorName,
+    category: data.category,
+    notes: data.notes,
+    severity: data.severity,
+    status: 'IN_PROGRESS',
+    createdAt: now,
+    updatedAt: now,
+    lastSessionDate: now.split('T')[0],
+  };
+  try {
+    await setDoc(doc(db, GUIDANCE_CASES_COL, id), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${GUIDANCE_CASES_COL}/${id}`);
+  }
+  return id;
+}
+
+export async function updateGuidanceCounselingCaseStatus(
+  caseId: string,
+  status: GuidanceCounselingCase['status']
+): Promise<void> {
+  try {
+    await setDoc(doc(db, GUIDANCE_CASES_COL, caseId), {
+      status,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${GUIDANCE_CASES_COL}/${caseId}`);
+  }
+}
+
+/** real-time listener — เฉพาะ GUIDANCE_COUNSELOR/SUPER_ADMIN ที่ผ่าน rules จะได้ข้อมูลจริง
+ *  role อื่นจะโดน permission-denied จาก listener error callback (คืน list ว่างแทนการพัง UI) */
+export function subscribeGuidanceCounselingCases(
+  onUpdate: (cases: GuidanceCounselingCase[]) => void
+): () => void {
+  try {
+    return onSnapshot(collection(db, GUIDANCE_CASES_COL), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as GuidanceCounselingCase));
+      list.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeGuidanceCounselingCases] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeGuidanceCounselingCases] setup error:', error);
+    return () => {};
   }
 }
 

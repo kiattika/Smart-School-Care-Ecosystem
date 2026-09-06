@@ -620,6 +620,25 @@ export interface SDQAssessment {
   recommendations: string[];
 }
 
+// เคสให้คำปรึกษาเชิงจิตวิทยาของครูแนะแนว — ข้อมูลอ่อนไหวที่สุดในระบบ (เนื้อหาการปรึกษาจิตใจของผู้เยาว์)
+// firestore.rules: อ่าน/เขียนได้เฉพาะ GUIDANCE_COUNSELOR + SUPER_ADMIN เท่านั้น — ต่างจาก collection
+// อ่อนไหวอื่นๆ ส่วนใหญ่ในระบบตรงที่ครูประจำชั้น/ผู้ปกครอง/นักเรียนเจ้าของเคส "ห้ามอ่านได้" โดยเด็ดขาด
+export interface GuidanceCounselingCase {
+  id: string;
+  studentId: string;
+  studentName: string;
+  classRoom: string;
+  counselorUid: string;   // ครูแนะแนวที่บันทึก (Firebase Auth UID จริง)
+  counselorName: string;
+  category: string;       // ประเภทเคส (เดิมเรียก issueType ในโค้ด mock)
+  notes: string;
+  severity: 'LOW' | 'MODERATE' | 'HIGH';
+  status: 'IN_PROGRESS' | 'RESOLVED';
+  createdAt: string;
+  updatedAt: string;
+  lastSessionDate: string;
+}
+
 export interface GuardianBackground {
   relation: string;
   fullName: string;

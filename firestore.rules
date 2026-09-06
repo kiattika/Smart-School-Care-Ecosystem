@@ -467,6 +467,19 @@ service cloud.firestore {
       allow write: if hasRole('SUPER_ADMIN') || hasRole('ACADEMIC_HEAD');
     }
 
+    // 30. Guidance Counseling Cases — เนื้อหาการให้คำปรึกษาจิตวิทยาของผู้เยาว์ ข้อมูลอ่อนไหวที่สุด
+    // ในระบบ ตั้งใจให้เข้มงวดกว่า collection สุขภาพจิตอื่นๆ ทุกตัว: GUIDANCE_COUNSELOR/SUPER_ADMIN
+    // เท่านั้น — ครูประจำชั้น ครูวิชาอื่น ผู้ปกครอง และตัวนักเรียนเจ้าของเคส "ห้ามอ่านได้" ทั้งหมด
+    // (ต่างจาก student_screenings_2q/phq9/student_assessments_sdq ที่ยังให้ HOMEROOM_TEACHER/
+    // self อ่านได้ — เคสนี้คือบันทึกการให้คำปรึกษาจริง ไม่ใช่แค่ผลคัดกรอง)
+    match /guidance_counseling_cases/{caseId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
+      // counselorUid ต้องตรงกับผู้เขียนจริงเสมอตอนสร้าง กันปลอมชื่อผู้บันทึก
+      allow create: if (hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR')) &&
+                       request.resource.data.counselorUid == request.auth.uid;
+      allow update, delete: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
+    }
+
     // Default Deny All Catch-All for unknown paths
     match /{document=**} {
       allow read, write: if false;

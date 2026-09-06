@@ -1296,6 +1296,56 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
+  // guidance_counseling_cases — เนื้อหาการให้คำปรึกษาจิตวิทยา ข้อมูลอ่อนไหวที่สุดในระบบ
+  // GUIDANCE_COUNSELOR/SUPER_ADMIN เท่านั้น ห้ามครูประจำชั้น/ครูวิชาอื่น/ผู้ปกครอง/นักเรียนอ่านได้เลย
+  describe('guidance_counseling_cases collection', () => {
+    const COUNSELOR_UID = 'counselor-uid-1';
+    const STU_ID = 'gc-std-1';
+
+    const baseCase = (over: Record<string, unknown> = {}) => ({
+      id: 'case-1', studentId: STU_ID, studentName: 'นักเรียนทดสอบ', classRoom: 'ม.5/8',
+      counselorUid: COUNSELOR_UID, counselorName: 'ครูแนะแนวทดสอบ', category: 'ความเครียดจากการเรียน',
+      notes: 'พูดคุยเบื้องต้น นัดติดตามสัปดาห์หน้า', severity: 'MODERATE', status: 'IN_PROGRESS',
+      createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z', lastSessionDate: '2026-09-01',
+      ...over,
+    });
+
+    it('lets GUIDANCE_COUNSELOR create a case naming themselves as counselorUid; denies naming someone else', async () => {
+      await assertSucceeds(asUser(COUNSELOR_UID, ['GUIDANCE_COUNSELOR']).firestore().doc('guidance_counseling_cases/case-1').set(baseCase()));
+      await assertFails(asUser(COUNSELOR_UID, ['GUIDANCE_COUNSELOR']).firestore().doc('guidance_counseling_cases/case-2').set(baseCase({ counselorUid: 'someone-else' })));
+    });
+
+    it('lets SUPER_ADMIN read/write; denies HOMEROOM_TEACHER, SUBJECT_TEACHER, PARENT, and the case student from reading or writing', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('guidance_counseling_cases/case-3').set(baseCase());
+      });
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('guidance_counseling_cases/case-3').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('guidance_counseling_cases/case-3').set(baseCase({ status: 'RESOLVED' })));
+
+      await assertFails(asRole('HOMEROOM_TEACHER').firestore().doc('guidance_counseling_cases/case-3').get());
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('guidance_counseling_cases/case-3').get());
+      await assertFails(asRole('PARENT').firestore().doc('guidance_counseling_cases/case-3').get());
+      await assertFails(asUser('some-student-uid', ['STUDENT']).firestore().doc('guidance_counseling_cases/case-3').get());
+
+      await assertFails(asRole('HOMEROOM_TEACHER').firestore().doc('guidance_counseling_cases/case-4').set(baseCase({ id: 'case-4' })));
+      await assertFails(asRole('PARENT').firestore().doc('guidance_counseling_cases/case-3').set(baseCase({ status: 'RESOLVED' })));
+    });
+
+    it('lets a GUIDANCE_COUNSELOR (not just the original author) update status to RESOLVED', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('guidance_counseling_cases/case-5').set(baseCase());
+      });
+      await assertSucceeds(asUser('other-counselor', ['GUIDANCE_COUNSELOR']).firestore().doc('guidance_counseling_cases/case-5').set(
+        baseCase({ status: 'RESOLVED', updatedAt: '2026-09-02T00:00:00.000Z' })
+      ));
+    });
+
+    it('REGRESSION: denies an unauthenticated user entirely', async () => {
+      await assertFails(asAnonymous().firestore().doc('guidance_counseling_cases/case-6').get());
+      await assertFails(asAnonymous().firestore().doc('guidance_counseling_cases/case-6').set(baseCase({ id: 'case-6' })));
+    });
+  });
+
   // 15. Default Deny Catch-All (Regression Test 5)
   describe('Default Deny Catch-All (Undeclared paths)', () => {
     it('REGRESSION: denies authenticated user with no matching role from reading or writing undeclared collections', async () => {
