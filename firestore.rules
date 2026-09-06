@@ -30,6 +30,13 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/students/$(sid)).data.get(key, fallback);
     }
 
+    // นักเรียนเจ้าของ sid (5 หลัก) จริง — เทียบผ่าน students/{sid}.studentUid ไม่ใช่เทียบ
+    // request.auth.uid กับ sid ตรงๆ (sid เป็นรหัสนักเรียน 5 หลัก ไม่ใช่ Firebase Auth UID เด็ดขาด
+    // เทียบตรงจะไม่มีวันจริงสำหรับนักเรียนจริงสักคน — ดู student_screenings_2q/phq9 ด้านล่าง)
+    function isSelfStudent(sid) {
+      return isSignedIn() && studentField(sid, 'studentUid', '__none__') == request.auth.uid;
+    }
+
     // ครูผู้สอนของ schedule (section) นี้ — เทียบ schedules/{scheduleId}.teacherId/teacherIds
     // ใช้ให้ครูถอนชื่อนักเรียนออกจากชุมนุม/กิจกรรม ELECTIVE ของตัวเองเท่านั้น (activity_enrollments)
     function isTeacherOfSchedule(scheduleId) {
@@ -245,14 +252,20 @@ service cloud.firestore {
     }
 
     // 19. Student Health & Mental Screenings (2Q, PHQ-9, SDQ)
+    // FIX: doc id {studentId} คือรหัสนักเรียน 5 หลัก (ดู save2QScreeningFirestore/savePHQ9ScreeningFirestore
+    // ใน firestoreService.ts) ไม่ใช่ Firebase Auth UID — isSelf(studentId) เดิมเทียบ auth.uid กับรหัส 5 หลัก
+    // ตรงๆ จึงไม่มีวันจริงเลย ทำให้นักเรียนทำแบบคัดกรองของตัวเองไม่ผ่าน rules เงียบๆ (เห็นเหมือนบันทึกสำเร็จ
+    // ฝั่ง UI เพราะ optimistic local state แต่ Firestore ปฏิเสธจริง) แก้เป็น isSelfStudent() ที่เทียบผ่าน
+    // students/{studentId}.studentUid จริงแทน — ไม่ได้เปลี่ยนว่าใครมีสิทธิ์ (ยังเป็นเจ้าของตัวเอง/
+    // ครูประจำชั้น/ครูแนะแนว/แอดมินเหมือนเดิม) แค่แก้วิธีตรวจว่า "ตัวเอง" ให้ตรงกับที่ระบบตั้งใจไว้จริง
     match /student_screenings_2q/{studentId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelf(studentId);
-      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelf(studentId);
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
     }
 
     match /student_screenings_phq9/{studentId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelf(studentId);
-      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelf(studentId);
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
     }
 
     match /student_assessments_sdq/{sdqId} {

@@ -1,25 +1,70 @@
-import React, { useState } from 'react';
-import { useStore } from '../../store';
+import React, { useMemo, useState } from 'react';
 import { useRealStudents } from '../../hooks/useRealStudents';
-import { 
-  HeartHandshake, 
-  Users, 
-  FileText, 
-  CheckCircle, 
-  Clock, 
-  Search, 
-  Plus, 
-  ShieldAlert, 
-  Award, 
-  Sparkles, 
-  Calendar 
+import { useGuidanceScreenings } from '../../hooks/useGuidanceScreenings';
+import { PHQ9Screening, TwoQuestionScreening } from '../../types';
+import {
+  HeartHandshake,
+  Users,
+  FileText,
+  CheckCircle,
+  Clock,
+  Search,
+  Plus,
+  ShieldAlert,
+  Award,
+  Sparkles,
+  Calendar,
+  AlertTriangle
 } from 'lucide-react';
 
 export function GuidancePortal() {
-  const { sdqAssessments } = useStore();
   const { students } = useRealStudents(); // นักเรียนจาก Firestore สด
+  // ผลคัดกรอง 2Q/PHQ-9/SDQ สด real-time — แทนตัวเลขที่เคย hardcode ไว้ทั้งหมดในแท็บ "sdq"
+  const { twoQuestionScreenings, phq9Screenings, sdqAssessments, loading: screeningsLoading } = useGuidanceScreenings();
   const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'tcas'>('cases');
   const [searchTerm, setSearchTerm] = useState('');
+
+  // สรุปผลคัดกรองสุขภาพจิตจากข้อมูลจริง (แทนตัวเลข hardcode เดิม 780/49/15 คน)
+  // เกณฑ์ "กลุ่มเสี่ยง": PHQ-9 riskLevel ตั้งแต่ MODERATE ขึ้นไป (คะแนน ≥10 ตามมาตรฐานกรมสุขภาพจิต
+  // ที่คำนวณไว้แล้วตอนบันทึกใน store.ts savePHQ9Screening — MILD ถือเป็น "เฝ้าระวัง" ไม่ใช่กลุ่มเสี่ยง)
+  // หรือ 2Q เป็นบวก (isPositive) หรือ SDQ triagingStatus ไม่ใช่ NORMAL (เอาผลแย่สุดต่อคนถ้ามีหลายผู้ประเมิน)
+  const screeningSummary = useMemo(() => {
+    const sdqWorstByStudent = new Map<string, 'NORMAL' | 'AT_RISK' | 'VULNERABLE'>();
+    const severityRank: Record<string, number> = { NORMAL: 0, AT_RISK: 1, VULNERABLE: 2 };
+    for (const sdq of sdqAssessments) {
+      const current = sdqWorstByStudent.get(sdq.studentId) || 'NORMAL';
+      if (severityRank[sdq.triagingStatus] > severityRank[current]) {
+        sdqWorstByStudent.set(sdq.studentId, sdq.triagingStatus);
+      }
+    }
+
+    const phq9ByStudent = new Map<string, PHQ9Screening>(phq9Screenings.map(p => [p.studentId, p]));
+    const twoQByStudent = new Map<string, TwoQuestionScreening>(twoQuestionScreenings.map(q => [q.studentId, q]));
+
+    // รวมรายชื่อนักเรียนทุกคนที่มีผลคัดกรองอย่างน้อย 1 ชุด (ไม่ใช่แค่คนที่อยู่ใน students[] สด
+    // เผื่อ listener นักเรียนยังไม่โหลด — ยังโชว์ผลคัดกรองได้ แค่ไม่มีชื่อเต็ม/ห้องประกอบ)
+    const allScreenedIds = new Set<string>([
+      ...phq9ByStudent.keys(),
+      ...twoQByStudent.keys(),
+      ...sdqWorstByStudent.keys(),
+    ]);
+
+    const atRiskList = Array.from(allScreenedIds).map(studentId => {
+      const phq9 = phq9ByStudent.get(studentId);
+      const twoQ = twoQByStudent.get(studentId);
+      const sdqWorst = sdqWorstByStudent.get(studentId) || 'NORMAL';
+      const phq9AtRisk = !!phq9 && ['MODERATE', 'SEVERE', 'VERY_SEVERE'].includes(phq9.riskLevel);
+      const isAtRisk = phq9AtRisk || !!twoQ?.isPositive || sdqWorst === 'VULNERABLE' || sdqWorst === 'AT_RISK';
+      const student = students.find(s => s.studentId === studentId);
+      return { studentId, student, phq9, twoQ, sdqWorst, isAtRisk, phq9AtRisk };
+    }).filter(r => r.isAtRisk).sort((a, b) => (b.phq9?.totalScore || 0) - (a.phq9?.totalScore || 0));
+
+    const sdqCounts = { NORMAL: 0, AT_RISK: 0, VULNERABLE: 0 };
+    for (const status of sdqWorstByStudent.values()) sdqCounts[status]++;
+    const sdqScreenedTotal = sdqWorstByStudent.size;
+
+    return { atRiskList, sdqCounts, sdqScreenedTotal, totalStudents: students.length };
+  }, [phq9Screenings, twoQuestionScreenings, sdqAssessments, students]);
 
   // Counseling cases state (mock)
   const [cases, setCases] = useState([
@@ -189,26 +234,113 @@ export function GuidancePortal() {
         {activeTab === 'sdq' && (
           <div className="space-y-4">
             <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-              <h3 className="text-base font-bold text-white">สถิติการคัดกรองสุขภาพจิตนักเรียน (SDQ & EQ) ประจำปีการศึกษา 2569</h3>
-              <p className="text-xs text-slate-400">ผลการประเมินจากนักเรียน ผู้ปกครอง และครูที่ปรึกษา</p>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h3 className="text-base font-bold text-white">สถิติการคัดกรองสุขภาพจิตนักเรียน (SDQ) ประจำปีการศึกษา 2569</h3>
+                  <p className="text-xs text-slate-400">
+                    ข้อมูลจริงแบบเรียลไทม์จากนักเรียน {screeningSummary.sdqScreenedTotal} / {screeningSummary.totalStudents} คน ที่ทำแบบประเมิน SDQ แล้ว
+                  </p>
+                </div>
+                {screeningsLoading && (
+                  <span className="text-[10px] text-slate-500 font-mono">กำลังโหลดข้อมูลสด...</span>
+                )}
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
                   <span className="text-xs text-slate-400 block font-medium">กลุ่มปกติ (Normal Range)</span>
-                  <p className="text-2xl font-black font-mono text-emerald-400">92.4%</p>
-                  <span className="text-[10px] text-emerald-400">นักเรียน 780 คน</span>
+                  <p className="text-2xl font-black font-mono text-emerald-400">
+                    {screeningSummary.sdqScreenedTotal > 0
+                      ? `${((screeningSummary.sdqCounts.NORMAL / screeningSummary.sdqScreenedTotal) * 100).toFixed(1)}%`
+                      : '—'}
+                  </p>
+                  <span className="text-[10px] text-emerald-400">นักเรียน {screeningSummary.sdqCounts.NORMAL} คน</span>
                 </div>
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-xs text-slate-400 block font-medium">กลุ่มเสี่ยง (Borderline)</span>
-                  <p className="text-2xl font-black font-mono text-amber-400">5.8%</p>
-                  <span className="text-[10px] text-amber-400">นักเรียน 49 คน (อยู่ในความดูแล)</span>
+                  <span className="text-xs text-slate-400 block font-medium">กลุ่มเสี่ยง (At Risk)</span>
+                  <p className="text-2xl font-black font-mono text-amber-400">
+                    {screeningSummary.sdqScreenedTotal > 0
+                      ? `${((screeningSummary.sdqCounts.AT_RISK / screeningSummary.sdqScreenedTotal) * 100).toFixed(1)}%`
+                      : '—'}
+                  </p>
+                  <span className="text-[10px] text-amber-400">นักเรียน {screeningSummary.sdqCounts.AT_RISK} คน (อยู่ในความดูแล)</span>
                 </div>
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-xs text-slate-400 block font-medium">กลุ่มมีปัญหา (Abnormal)</span>
-                  <p className="text-2xl font-black font-mono text-rose-400">1.8%</p>
-                  <span className="text-[10px] text-rose-400">นักเรียน 15 คน (ส่งต่อจิตแพทย์เด็กและวัยรุ่น)</span>
+                  <span className="text-xs text-slate-400 block font-medium">กลุ่มมีปัญหา (Vulnerable)</span>
+                  <p className="text-2xl font-black font-mono text-rose-400">
+                    {screeningSummary.sdqScreenedTotal > 0
+                      ? `${((screeningSummary.sdqCounts.VULNERABLE / screeningSummary.sdqScreenedTotal) * 100).toFixed(1)}%`
+                      : '—'}
+                  </p>
+                  <span className="text-[10px] text-rose-400">นักเรียน {screeningSummary.sdqCounts.VULNERABLE} คน (ส่งต่อจิตแพทย์เด็กและวัยรุ่น)</span>
                 </div>
               </div>
+            </div>
+
+            {/* รายชื่อนักเรียนกลุ่มเสี่ยงจาก PHQ-9 / 2Q / SDQ — ต้องเห็นทันทีที่มีการส่งแบบประเมินใหม่ */}
+            <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400" />
+                <h3 className="text-base font-bold text-white">รายชื่อนักเรียนกลุ่มเสี่ยงที่ต้องติดตาม ({screeningSummary.atRiskList.length} คน)</h3>
+              </div>
+              <p className="text-xs text-slate-400">
+                เกณฑ์: PHQ-9 ระดับปานกลางขึ้นไป (คะแนน ≥10) หรือผลคัดกรอง 2Q เป็นบวก หรือ SDQ อยู่ในกลุ่มเสี่ยง/มีปัญหา —
+                กรุณาให้ครูแนะแนวยืนยันความถูกต้องของเกณฑ์นี้อีกครั้งตามมาตรฐานที่โรงเรียนใช้จริง
+              </p>
+
+              {screeningSummary.atRiskList.length === 0 ? (
+                <div className="text-center py-8 text-slate-500 text-xs">ยังไม่มีนักเรียนที่เข้าเกณฑ์กลุ่มเสี่ยงในขณะนี้</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400">
+                        <th className="pb-2 font-medium">นักเรียน</th>
+                        <th className="pb-2 font-medium">PHQ-9</th>
+                        <th className="pb-2 font-medium">2Q</th>
+                        <th className="pb-2 font-medium">SDQ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {screeningSummary.atRiskList.map((row) => (
+                        <tr key={row.studentId} className="hover:bg-slate-800/30">
+                          <td className="py-2.5">
+                            <p className="font-bold text-white">{row.student?.fullName || `รหัส ${row.studentId}`}</p>
+                            <p className="text-[10px] text-slate-400 font-mono">{row.student?.room || ''} · ID: {row.studentId}</p>
+                          </td>
+                          <td className="py-2.5">
+                            {row.phq9 ? (
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                row.phq9AtRisk ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-slate-800 text-slate-300'
+                              }`}>
+                                {row.phq9.totalScore}/27 ({row.phq9.riskLevel})
+                              </span>
+                            ) : <span className="text-slate-600">—</span>}
+                          </td>
+                          <td className="py-2.5">
+                            {row.twoQ ? (
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                row.twoQ.isPositive ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-slate-800 text-slate-300'
+                              }`}>
+                                {row.twoQ.isPositive ? 'มีความเสี่ยง' : 'ปกติ'}
+                              </span>
+                            ) : <span className="text-slate-600">—</span>}
+                          </td>
+                          <td className="py-2.5">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              row.sdqWorst === 'VULNERABLE' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                              row.sdqWorst === 'AT_RISK' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                              'bg-slate-800 text-slate-300'
+                            }`}>
+                              {row.sdqWorst}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}

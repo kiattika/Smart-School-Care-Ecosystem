@@ -1232,6 +1232,70 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
+  // student_screenings_2q / student_screenings_phq9 — doc id คือรหัสนักเรียน 5 หลัก ไม่ใช่ Auth UID
+  // REGRESSION: isSelf(studentId) เดิมเทียบ auth.uid กับรหัส 5 หลักตรงๆ ไม่มีวันจริง แก้เป็น
+  // isSelfStudent() ที่เทียบผ่าน students/{studentId}.studentUid จริงแทน
+  describe('student_screenings_2q / student_screenings_phq9 collections', () => {
+    const STU_UID = 'stu-uid-scr1';
+    const STU_ID = 'scr-std-1';
+    const OTHER_UID = 'stu-uid-scr2';
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID });
+      });
+    }
+
+    it('REGRESSION: lets the real student (matched via students/{id}.studentUid) write their own 2Q/PHQ-9, denies a different signed-in student', async () => {
+      await seed();
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_screenings_2q/${STU_ID}`).set({
+        id: '2q-1', studentId: STU_ID, q1Depressed: false, q2Hopeless: true, isPositive: true, conductedAt: '2026-09-01',
+      }));
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_screenings_phq9/${STU_ID}`).set({
+        id: 'phq-1', studentId: STU_ID, answers: [2, 2, 2, 2, 2, 2, 2, 2, 2], totalScore: 18, riskLevel: 'SEVERE',
+        recommendation: 'ทดสอบ', conductedAt: '2026-09-01',
+      }));
+      await assertFails(asUser(OTHER_UID, ['STUDENT']).firestore().doc(`student_screenings_2q/${STU_ID}`).set({
+        id: '2q-2', studentId: STU_ID, q1Depressed: false, q2Hopeless: false, isPositive: false, conductedAt: '2026-09-01',
+      }));
+      await assertFails(asUser(OTHER_UID, ['STUDENT']).firestore().doc(`student_screenings_phq9/${STU_ID}`).set({
+        id: 'phq-2', studentId: STU_ID, answers: [0, 0, 0, 0, 0, 0, 0, 0, 0], totalScore: 0, riskLevel: 'NORMAL',
+        recommendation: 'ทดสอบ', conductedAt: '2026-09-01',
+      }));
+    });
+
+    it('lets GUIDANCE_COUNSELOR and HOMEROOM_TEACHER read; denies an unrelated student', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_screenings_phq9/${STU_ID}`).set({
+          id: 'phq-3', studentId: STU_ID, answers: [3, 3, 3, 3, 3, 3, 3, 3, 3], totalScore: 27, riskLevel: 'VERY_SEVERE',
+          recommendation: 'ทดสอบ', conductedAt: '2026-09-01',
+        });
+      });
+      await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
+      await assertFails(asUser(OTHER_UID, ['STUDENT']).firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
+    });
+  });
+
+  // student_assessments_sdq — read access baseline (write path ยังมีปัญหา evaluator self-check
+  // ที่ยังไม่แก้ในรอบนี้ ดูรายละเอียดในคำตอบท้ายงาน — ต้องตัดสินใจ scope เพิ่มก่อนแก้)
+  describe('student_assessments_sdq collection (read baseline)', () => {
+    it('lets GUIDANCE_COUNSELOR/HOMEROOM_TEACHER/SUPER_ADMIN read; denies an unrelated signed-in user', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_assessments_sdq/sdq-1').set({
+          id: 'sdq-1', studentId: 'sdq-std-1', evaluatorType: 'TEACHER', evaluatorName: 'ครูทดสอบ',
+          subscaleScores: { emotional: 1, conduct: 1, hyperactivity: 1, peerProblems: 1, prosocial: 8 },
+          totalDifficultiesScore: 4, triagingStatus: 'NORMAL', assessmentDate: '2026-09-01', recommendations: [],
+        });
+      });
+      await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc('student_assessments_sdq/sdq-1').get());
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('student_assessments_sdq/sdq-1').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('student_assessments_sdq/sdq-1').get());
+      await assertFails(asUser('unrelated-uid', ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-1').get());
+    });
+  });
+
   // 15. Default Deny Catch-All (Regression Test 5)
   describe('Default Deny Catch-All (Undeclared paths)', () => {
     it('REGRESSION: denies authenticated user with no matching role from reading or writing undeclared collections', async () => {
