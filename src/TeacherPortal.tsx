@@ -1,6 +1,7 @@
 import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/utils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
+import { useSchoolCalendar } from './hooks/useSchoolCalendar';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests } from './services/firestoreService';
@@ -17,7 +18,7 @@ import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } fro
 import { th } from 'date-fns/locale';
 import { useStore } from './store';
 import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, SubstituteAssignment, Student, LateAttendanceRequestRecord } from './types';
-import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Sparkles, Calendar, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
+import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Sparkles, Calendar, CalendarOff, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { motion, AnimatePresence } from 'motion/react';
@@ -110,9 +111,13 @@ export function TeacherPortal() {
     isSchedulesEmpty,
     emptySchedulesMessage,
     clearError: clearFsError,
-    updateScheduleAttendance, 
-    updatePartnerAttendance 
+    updateScheduleAttendance,
+    updatePartnerAttendance
   } = useTeacherFirestoreSchedule();
+
+  // ปฏิทินโรงเรียน (school_calendar_events) — วันหยุดพิเศษ + วันเปิด-ปิดภาคเรียน เรียกที่ระดับบนสุด
+  // ของ component เสมอ (ไม่เรียกใน IIFE ข้างล่างที่ render แบบมีเงื่อนไข — จะผิดกฎ hooks)
+  const { getStatusForDate } = useSchoolCalendar();
 
   const todayStr = format(currentDate, 'yyyy-MM-dd');
   // ครูผู้สอน/ครูประจำชั้นเท่านั้นที่มีตารางสอน + ต้องอ่าน attendance_records
@@ -886,6 +891,25 @@ export function TeacherPortal() {
                 dayLabel = `ตารางสอนวันนี้ (${dayNames[dayOfWeek]})`;
               }
               const targetDayOfWeek = targetDate.getDay(); // 1 to 5
+
+              // TASK 3: เช็ควันหยุดพิเศษ/นอกช่วงภาคเรียนจาก school_calendar_events เพิ่มเติมจากตรรกะ
+              // เสาร์-อาทิตย์เดิม (ยังใช้ควบคู่กันอยู่ ไม่ได้แทนที่) — เช็คกับ "วันที่กำลังจะแสดงตาราง"
+              // จริง (targetDate) ไม่ใช่วันนี้ตรงๆ เพราะวันเสาร์-อาทิตย์เดิมเลื่อนไปแสดงวันจันทร์อยู่แล้ว
+              // ถ้าวันจันทร์นั้นดันเป็นวันหยุดพิเศษด้วย ก็ต้องรู้เหมือนกัน
+              const targetDateStr = format(targetDate, 'yyyy-MM-dd');
+              const calStatus = getStatusForDate(targetDateStr);
+              if (calStatus.isHoliday || calStatus.isOutsideSemester) {
+                const reason = calStatus.isHoliday ? `วันหยุด: ${calStatus.holidayName}` : 'อยู่นอกภาคเรียน (ยังไม่เปิด/ปิดภาคเรียนแล้ว)';
+                return (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-8 text-center space-y-2">
+                    <CalendarOff className="w-10 h-10 text-amber-400 mx-auto" />
+                    <h3 className="text-lg font-bold text-amber-300">{reason}</h3>
+                    <p className="text-xs text-slate-400">
+                      {format(targetDate, 'd MMMM yyyy', { locale: th })} — ไม่มีการเรียนการสอนตามปกติ ไม่สามารถเช็คชื่อวันนี้ได้
+                    </p>
+                  </div>
+                );
+              }
 
               // 2. Map and filter periods specifically for targetDayOfWeek
               const rawMappedPeriods: SubjectPeriod[] = [];
