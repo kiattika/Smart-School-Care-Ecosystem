@@ -7,7 +7,7 @@ import { useStore } from './store';
 import { StaffRoleManagementPage } from './components/StaffRoleManagementPage';
 import { StudentManagementPage } from './components/StudentManagementPage';
 import { SystemSettingsAndLocksPage } from './components/SystemSettingsAndLocksPage';
-import { PeriodManagementPage } from './components/PeriodManagementPage';
+import { AdminPeriodsConfigPage } from './components/admin/AdminPeriodsConfigPage';
 import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
 import { SubstituteTeachingAnalyticsModule } from './components/SubstituteTeachingAnalyticsModule';
 import { TeachingLoadTable } from './components/TeachingLoadTable';
@@ -449,7 +449,7 @@ export function AdminPortal() {
 
           {activeTab === 'periods' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <PeriodManagementPage />
+              <AdminPeriodsConfigPage />
             </div>
           )}
 

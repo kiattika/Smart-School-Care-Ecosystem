@@ -1991,6 +1991,35 @@ export async function assignHouseToStudent(studentId: string, houseId: string | 
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
+ * Admin periods config (admin_periods_config/{periodId}) — ตารางเวลา & กระดิ่งคาบเรียนจริงที่
+ * useTeacherFirestoreSchedule.ts ใช้คำนวณเวลาเริ่ม-จบคาบจริงในหน้าครู (fsPeriods) — ก่อนหน้านี้
+ * เมนู "ตารางเวลา & กระดิ่ง" ในหน้าแอดมินเรียก PeriodManagementPage.tsx ซึ่งจริงๆ แล้วอ่าน/เขียน
+ * school_settings/periods_config คนละ collection กันเลย (ไม่มีอะไรอ่าน collection นั้นเป็นค่าหลัก)
+ * ทำให้แก้ตารางเวลาจากหน้าแอดมินแล้วไม่มีผลอะไรกับระบบจริงเลย — ฟังก์ชันชุดนี้ผูกกับ
+ * admin_periods_config ตัวจริงโดยตรงแทน (schema เดิมตาม AdminPeriodConfig ใน
+ * useTeacherFirestoreSchedule.ts: periodNumber/periodName/startTime/endTime/periodType)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export async function saveAdminPeriodConfig(
+  period: { id: string; periodNumber: number; periodName: string; startTime: string; endTime: string; periodType: string },
+  firestoreDb: Firestore = db,
+): Promise<void> {
+  try {
+    await setDoc(doc(firestoreDb, 'admin_periods_config', period.id), period, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `admin_periods_config/${period.id}`);
+  }
+}
+
+export async function deleteAdminPeriodConfig(id: string, firestoreDb: Firestore = db): Promise<void> {
+  try {
+    await deleteDoc(doc(firestoreDb, 'admin_periods_config', id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `admin_periods_config/${id}`);
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
  * Guidance Counseling Cases (guidance_counseling_cases/{caseId})
  * เนื้อหาการให้คำปรึกษาจิตวิทยาของผู้เยาว์ — ข้อมูลอ่อนไหวที่สุดในระบบ อ่าน/เขียนได้เฉพาะ
  * GUIDANCE_COUNSELOR/SUPER_ADMIN เท่านั้น (ดู firestore.rules match /guidance_counseling_cases)
