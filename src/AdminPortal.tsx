@@ -1,6 +1,6 @@
 import { cn } from "./lib/utils";
 import React, { useState } from 'react';
-import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, PanelLeft, PanelLeftClose, PanelLeftOpen, Menu, X, ChevronLeft, ChevronRight, FileSpreadsheet, ArrowRight, GraduationCap } from 'lucide-react';
+import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, PanelLeft, PanelLeftClose, PanelLeftOpen, Menu, X, ChevronLeft, ChevronRight, ArrowRight, GraduationCap } from 'lucide-react';
 import clsx, { ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useStore } from './store';
@@ -116,10 +116,6 @@ export function AdminPortal() {
               <button 
                 key={item.id}
                 onClick={() => {
-                  if (item.id === 'import') {
-                    setBulkImportType('COURSE');
-                    setIsBulkImportOpen(true);
-                  }
                   setActiveTab(item.id as any);
                   setIsMobileMenuOpen(false);
                 }}
@@ -231,13 +227,7 @@ export function AdminPortal() {
               return (
                 <button 
                   key={item.id}
-                  onClick={() => {
-                    if (item.id === 'import') {
-                      setBulkImportType('COURSE');
-                      setIsBulkImportOpen(true);
-                    }
-                    setActiveTab(item.id as any);
-                  }}
+                  onClick={() => setActiveTab(item.id as any)}
                   title={isSidebarCollapsed ? item.fullLabel : undefined}
                   className={cn(
                     "w-full flex items-center rounded-xl text-sm font-medium transition-all duration-200 relative group",
@@ -331,22 +321,9 @@ export function AdminPortal() {
 
               {activeTab === 'import' && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
-                    <div>
-                      <h2 className="text-2xl font-bold text-white tracking-tight">ระบบนำเข้าข้อมูลขนาดใหญ่ (Bulk Data Import)</h2>
-                      <p className="text-slate-400 mt-1 text-sm">นำเข้าข้อมูลบุคลากรครู, นักเรียน, และรายงานภาระงานสอนลงฐานข้อมูล Firestore</p>
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        setBulkImportType('COURSE');
-                        setIsBulkImportOpen(true);
-                      }}
-                      className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.35)] flex items-center gap-2 transition-all cursor-pointer shrink-0"
-                    >
-                      <FileSpreadsheet className="w-4 h-4" />
-                      เปิดหน้าต่างนำเข้าข้อมูล (Open Import Modal)
-                    </button>
+                  <div className="border-b border-white/5 pb-4">
+                    <h2 className="text-2xl font-bold text-white tracking-tight">ระบบนำเข้าข้อมูลขนาดใหญ่ (Bulk Data Import)</h2>
+                    <p className="text-slate-400 mt-1 text-sm">นำเข้าข้อมูลบุคลากรครู, นักเรียน, และรายงานภาระงานสอนลงฐานข้อมูล Firestore</p>
                   </div>
 
                   {/* 3 Unified Import Flow Cards */}
@@ -363,13 +340,15 @@ export function AdminPortal() {
                         </p>
                       </div>
                       <button
-                        onClick={() => {
-                          setBulkImportType('COURSE');
-                          setIsBulkImportOpen(true);
-                        }}
-                        className="mt-6 w-full py-2.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                        onClick={() => setBulkImportType('COURSE')}
+                        className={cn(
+                          "mt-6 w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer border",
+                          bulkImportType === 'COURSE'
+                            ? "bg-blue-600/40 text-blue-200 border-blue-400/60"
+                            : "bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border-blue-500/30"
+                        )}
                       >
-                        <span>นำเข้าไฟล์ตารางสอน</span>
+                        <span>{bulkImportType === 'COURSE' ? 'กำลังเลือกอยู่ — ดูฟอร์มด้านล่าง' : 'นำเข้าไฟล์ตารางสอน'}</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -386,13 +365,15 @@ export function AdminPortal() {
                         </p>
                       </div>
                       <button
-                        onClick={() => {
-                          setBulkImportType('TEACHER');
-                          setIsBulkImportOpen(true);
-                        }}
-                        className="mt-6 w-full py-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                        onClick={() => setBulkImportType('TEACHER')}
+                        className={cn(
+                          "mt-6 w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer border",
+                          bulkImportType === 'TEACHER'
+                            ? "bg-emerald-600/40 text-emerald-200 border-emerald-400/60"
+                            : "bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/30"
+                        )}
                       >
-                        <span>นำเข้ารายชื่อครู</span>
+                        <span>{bulkImportType === 'TEACHER' ? 'กำลังเลือกอยู่ — ดูฟอร์มด้านล่าง' : 'นำเข้ารายชื่อครู'}</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -409,17 +390,32 @@ export function AdminPortal() {
                         </p>
                       </div>
                       <button
-                        onClick={() => {
-                          setBulkImportType('STUDENT');
-                          setIsBulkImportOpen(true);
-                        }}
-                        className="mt-6 w-full py-2.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                        onClick={() => setBulkImportType('STUDENT')}
+                        className={cn(
+                          "mt-6 w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer border",
+                          bulkImportType === 'STUDENT'
+                            ? "bg-purple-600/40 text-purple-200 border-purple-400/60"
+                            : "bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border-purple-500/30"
+                        )}
                       >
-                        <span>นำเข้ารายชื่อนักเรียน</span>
+                        <span>{bulkImportType === 'STUDENT' ? 'กำลังเลือกอยู่ — ดูฟอร์มด้านล่าง' : 'นำเข้ารายชื่อนักเรียน'}</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
+
+                  {/* TASK 5: render เป็น section เต็มหน้าตรงนี้เลย (variant="inline") แทนที่จะเป็น
+                      popup overlay ลอย — เนื้อหา/ฟังก์ชันข้างในเหมือนเดิมทุกประการ เปลี่ยนแค่ wrapper
+                      เปลี่ยนประเภทไฟล์ที่จะนำเข้าได้จาก 3 การ์ดด้านบน (bulkImportType) */}
+                  <BulkDataImportModal
+                    isOpen={true}
+                    onClose={() => {}}
+                    initialImportType={bulkImportType}
+                    variant="inline"
+                    onImportSuccess={(type, count) => {
+                      showToast(`นำเข้าข้อมูล ${type} สำเร็จ (${count} รายการ)`);
+                    }}
+                  />
                 </div>
               )}
 
