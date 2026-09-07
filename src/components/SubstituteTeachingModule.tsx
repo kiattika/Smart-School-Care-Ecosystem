@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { DatePicker } from './shared/DatePicker';
 import {
   UserCheck,
   CheckCircle,
@@ -1403,27 +1404,27 @@ export function SubstituteTeachingModule() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-400 mb-1.5">วันที่เริ่มลา</label>
-                    <input
-                      type="date" value={rangeStart}
-                      onChange={e => {
-                        setRangeStart(e.target.value);
-                        if (rangeEnd < e.target.value) setRangeEnd(e.target.value);
+                    <DatePicker
+                      value={rangeStart}
+                      onChange={(v) => {
+                        setRangeStart(v);
+                        if (rangeEnd < v) setRangeEnd(v);
                         setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({});
                         setSlotSwapMode({}); setSlotSwapPartnerEmail({}); setSlotSwapRepaymentKey({}); setSlotSwapRepaymentSlot({});
                       }}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-mono"
+                      className="w-full flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-mono cursor-pointer"
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-slate-400 mb-1.5">วันที่สิ้นสุด (ลาหลายวันติดกันได้)</label>
-                    <input
-                      type="date" value={rangeEnd} min={rangeStart}
-                      onChange={e => {
-                        setRangeEnd(e.target.value);
+                    <DatePicker
+                      value={rangeEnd} min={rangeStart}
+                      onChange={(v) => {
+                        setRangeEnd(v);
                         setSelectedSlotKeys(new Set()); setSlotSubEmail({}); setSlotWorksheetFile({});
                         setSlotSwapMode({}); setSlotSwapPartnerEmail({}); setSlotSwapRepaymentKey({}); setSlotSwapRepaymentSlot({});
                       }}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-mono"
+                      className="w-full flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-amber-500 font-mono cursor-pointer"
                     />
                   </div>
                 </div>

@@ -2,6 +2,7 @@ import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/util
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
 import { useSchoolCalendar } from './hooks/useSchoolCalendar';
+import { DatePicker } from './components/shared/DatePicker';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests } from './services/firestoreService';
@@ -2555,11 +2556,10 @@ export function TeacherPortal() {
                   <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-300 mb-1">วันที่ทำการสอน (Teaching Date)</label>
-                      <input 
-                        type="date"
+                      <DatePicker
                         value={ptDate}
-                        onChange={(e) => setPtDate(e.target.value)}
-                        className="bg-[#161f30] border border-slate-800/80 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:border-emerald-500 outline-none"
+                        onChange={setPtDate}
+                        className="flex items-center gap-2 bg-[#161f30] border border-slate-800/80 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:border-emerald-500 outline-none cursor-pointer"
                       />
                     </div>
                     <div className="text-left sm:text-right">
