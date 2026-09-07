@@ -1,7 +1,7 @@
 import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/utils";
 import React, { useState, useEffect, useMemo } from 'react';
-import { usePeriodsConfig } from './hooks/usePeriodsConfig';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
+import { useSchoolCalendar } from './hooks/useSchoolCalendar';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests } from './services/firestoreService';
@@ -12,13 +12,13 @@ import { computeAttendanceSummary } from './lib/attendanceSummary';
 import { computeStudentAttendanceStats, defaultAttendanceDateRange } from './lib/studentAttendanceStats';
 import { useRoomAttendanceRecords } from './hooks/useRoomAttendanceRecords';
 import { useElectiveActivities } from './hooks/useElectiveActivities';
-import { subscribeActiveEnrollmentsBySchedule, withdrawFromActivity } from './services/firestoreService';
+import { subscribeActiveEnrollmentsByActivity, withdrawFromActivity } from './services/firestoreService';
 import { ActivityEnrollment } from './types';
 import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { useStore } from './store';
 import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, SubstituteAssignment, Student, LateAttendanceRequestRecord } from './types';
-import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Sparkles, Calendar, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
+import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Sparkles, Calendar, CalendarOff, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { motion, AnimatePresence } from 'motion/react';
@@ -101,9 +101,8 @@ export function TeacherPortal() {
     }
   };
 
-  const { periods: dbPeriods, error: periodsError } = usePeriodsConfig();
-  const { 
-    periods: fsPeriods, 
+  const {
+    periods: fsPeriods,
     schedules: fsSchedules, 
     loading: fsLoading, 
     error: fsError,
@@ -112,9 +111,13 @@ export function TeacherPortal() {
     isSchedulesEmpty,
     emptySchedulesMessage,
     clearError: clearFsError,
-    updateScheduleAttendance, 
-    updatePartnerAttendance 
+    updateScheduleAttendance,
+    updatePartnerAttendance
   } = useTeacherFirestoreSchedule();
+
+  // ปฏิทินโรงเรียน (school_calendar_events) — วันหยุดพิเศษ + วันเปิด-ปิดภาคเรียน เรียกที่ระดับบนสุด
+  // ของ component เสมอ (ไม่เรียกใน IIFE ข้างล่างที่ render แบบมีเงื่อนไข — จะผิดกฎ hooks)
+  const { getStatusForDate } = useSchoolCalendar();
 
   const todayStr = format(currentDate, 'yyyy-MM-dd');
   // ครูผู้สอน/ครูประจำชั้นเท่านั้นที่มีตารางสอน + ต้องอ่าน attendance_records
@@ -424,19 +427,21 @@ export function TeacherPortal() {
 
   // ELECTIVE (ชุมนุม/กิจกรรมตามความสนใจ — นักเรียนสมัครเอง คละห้อง) vs WHOLE_CLASS (ยกห้อง/วิชาหลัก)
   // — กรองด้วย room เดิมใช้ไม่ได้กับ ELECTIVE เพราะนักเรียนคละห้องมาเลือกเอง (ดู elective_activities_config)
-  const { isElective } = useElectiveActivities();
-  const activeCourseIsElective = isElective(activeCourse?.code);
-  // scheduleId จริงใน collection `schedules` — courseId ที่ derive มาใช้ prefix `course_` แทน `sch_`
-  // (ดู globalCourses mapping ด้านบน: courseId = `course_${rawId.slice(4)}`) แปลงกลับตรงนี้
-  const activeCourseScheduleId = activeCourse?.id?.startsWith('course_')
-    ? `sch_${activeCourse.id.slice(7)}`
-    : (activeCourse?.id || '');
+  //
+  // ออกแบบใหม่ (เฟส 2): ชุมนุมไม่ผูกกับ subjectCode/scheduleId ที่ import จากตารางสอนอีกต่อไป (ของเดิม
+  // ทุกคาบ "กิจกรรมชุมนุม" ของทุกครูใช้ subjectCode กลางเดียวกันหมด แยกไม่ได้ว่าใครรับผิดชอบชุมนุมไหน)
+  // — ตรวจแทนว่า (1) คาบที่กำลังสอนอยู่คือคาบ "ชุมนุม" ทั่วไปตามชื่อที่ import มาจริง (เหมือน keyword
+  // ที่ detectSubjectType ใช้จำแนก ACTIVITY) และ (2) ครูคนนี้มีชุมนุมที่ตัวเองรับผิดชอบอยู่จริงไหม —
+  // ถ้าใช่ทั้งคู่ ถือว่ากำลังสอนชุมนุมของตัวเอง ดึงรายชื่อจาก activity_enrollments ของชุมนุมนั้น
+  const { configsByTeacherUid } = useElectiveActivities();
+  const myClubConfig = user?.uid ? (configsByTeacherUid.get(user.uid)?.[0] || null) : null;
+  const activeCourseIsElective = !!myClubConfig && !!(activeCourse?.name || '').includes('ชุมนุม');
 
   const [electiveEnrollments, setElectiveEnrollments] = useState<ActivityEnrollment[]>([]);
   useEffect(() => {
-    if (!activeCourseIsElective || !activeCourseScheduleId) { setElectiveEnrollments([]); return; }
-    return subscribeActiveEnrollmentsBySchedule(activeCourseScheduleId, setElectiveEnrollments);
-  }, [activeCourseIsElective, activeCourseScheduleId]);
+    if (!activeCourseIsElective || !myClubConfig) { setElectiveEnrollments([]); return; }
+    return subscribeActiveEnrollmentsByActivity(myClubConfig.id, setElectiveEnrollments);
+  }, [activeCourseIsElective, myClubConfig?.id]);
 
   // ครูถอนชื่อนักเรียนออกจากชุมนุมของตัวเอง (ต้องระบุเหตุผล เช่น "ไม่ผ่านคัดเลือก นศท")
   // — ที่นั่งว่างขึ้นทันที นักเรียนคนนั้นสมัครที่อื่นได้ทันที (withdrawFromActivity)
@@ -448,7 +453,7 @@ export function TeacherPortal() {
     setRemoveBusy(true);
     try {
       await withdrawFromActivity({
-        scheduleId: removingEnrollment.scheduleId,
+        activityId: removingEnrollment.activityId,
         studentId: removingEnrollment.studentId,
         removedBy: user.uid,
         removedReason: removeReason.trim(),
@@ -513,11 +518,15 @@ export function TeacherPortal() {
   const parseSchedule = parseThaiSchedule;
 
   // Time Simulation Helpers
+  // FIX (ตัดสินใจตาม TASK B): เดิมมี fallback ชั้นที่ 2 ไปอ่าน dbPeriods (usePeriodsConfig →
+  // school_settings/periods_config) เงียบๆ เมื่อ admin_periods_config ว่างเปล่า — collection นั้น
+  // ไม่มีหน้าแอดมินจัดการแล้วตั้งแต่ AdminPeriodsConfigPage.tsx เปลี่ยนไปผูกกับ admin_periods_config
+  // ตรงๆ (ดู commit ก่อนหน้า) ทำให้ข้อมูลใน school_settings/periods_config อาจเป็นค่าเก่า/ผิดที่ไม่มี
+  // ใครดูแลต่อ แต่ยังถูกใช้แสดงเป็นเวลาคาบจริงแบบไม่มีการเตือนเลย — ตัดชั้นนี้ออก เหลือแค่
+  // admin_periods_config (ของจริง) → ตารางมาตรฐานในโค้ด (ค่าคงที่ที่เห็นได้ตรงๆ ไม่ใช่ store ที่ถูกทิ้งร้าง)
   const getPeriodTimes = (index: number) => {
     // 1. First try to find period configuration matching the periodNumber
-    const match = (fsPeriods && fsPeriods.length > 0)
-      ? fsPeriods.find(p => p.periodNumber === index)
-      : dbPeriods.find(p => p.periodNumber === index);
+    const match = fsPeriods.find(p => p.periodNumber === index);
 
     if (match) {
       const [sh, sm] = match.startTime.split(':').map(Number);
@@ -883,6 +892,25 @@ export function TeacherPortal() {
               }
               const targetDayOfWeek = targetDate.getDay(); // 1 to 5
 
+              // TASK 3: เช็ควันหยุดพิเศษ/นอกช่วงภาคเรียนจาก school_calendar_events เพิ่มเติมจากตรรกะ
+              // เสาร์-อาทิตย์เดิม (ยังใช้ควบคู่กันอยู่ ไม่ได้แทนที่) — เช็คกับ "วันที่กำลังจะแสดงตาราง"
+              // จริง (targetDate) ไม่ใช่วันนี้ตรงๆ เพราะวันเสาร์-อาทิตย์เดิมเลื่อนไปแสดงวันจันทร์อยู่แล้ว
+              // ถ้าวันจันทร์นั้นดันเป็นวันหยุดพิเศษด้วย ก็ต้องรู้เหมือนกัน
+              const targetDateStr = format(targetDate, 'yyyy-MM-dd');
+              const calStatus = getStatusForDate(targetDateStr);
+              if (calStatus.isHoliday || calStatus.isOutsideSemester) {
+                const reason = calStatus.isHoliday ? `วันหยุด: ${calStatus.holidayName}` : 'อยู่นอกภาคเรียน (ยังไม่เปิด/ปิดภาคเรียนแล้ว)';
+                return (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-8 text-center space-y-2">
+                    <CalendarOff className="w-10 h-10 text-amber-400 mx-auto" />
+                    <h3 className="text-lg font-bold text-amber-300">{reason}</h3>
+                    <p className="text-xs text-slate-400">
+                      {format(targetDate, 'd MMMM yyyy', { locale: th })} — ไม่มีการเรียนการสอนตามปกติ ไม่สามารถเช็คชื่อวันนี้ได้
+                    </p>
+                  </div>
+                );
+              }
+
               // 2. Map and filter periods specifically for targetDayOfWeek
               const rawMappedPeriods: SubjectPeriod[] = [];
 
@@ -1093,7 +1121,7 @@ export function TeacherPortal() {
               return (
                 <div className="space-y-4">
                   {/* Empty periods alert for regular teachers if no periods configured */}
-                  {(!fsLoading && fsPeriods.length === 0 && dbPeriods.length === 0) && (
+                  {(!fsLoading && fsPeriods.length === 0) && (
                     <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-center gap-3 text-amber-300 text-sm">
                       <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400" />
                       <span>{emptyPeriodsMessage || "ยังไม่มีการตั้งค่าคาบเรียนจากผู้ดูแลระบบ"}</span>
@@ -1109,11 +1137,11 @@ export function TeacherPortal() {
                   )}
 
                   {/* Non-blocking visible write error alert */}
-                  {(fsError || periodsError) && (
+                  {fsError && (
                     <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-4 flex items-center justify-between gap-3 text-rose-300 text-sm">
                       <div className="flex items-center gap-3">
                         <AlertOctagon className="w-5 h-5 shrink-0 text-rose-400" />
-                        <span>{fsError || periodsError}</span>
+                        <span>{fsError}</span>
                       </div>
                       {clearFsError && (
                         <button onClick={clearFsError} className="text-rose-400 hover:text-rose-200">

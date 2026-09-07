@@ -64,6 +64,12 @@ export interface BulkDataImportModalProps {
   onClose: () => void;
   initialImportType?: ImportType;
   onImportSuccess?: (type: ImportType, count: number) => void;
+  // 'modal' (ค่าเริ่มต้น) = popup overlay ลอยเหมือนเดิม ใช้ตอนเรียกจากปุ่ม "นำเข้า" ในหน้าอื่น (เช่น
+  // StaffRoleManagementPage/StudentManagementPage) ที่หน้าเดิมยังต้องอยู่ด้านหลังให้กลับไปได้
+  // 'inline' = render เป็น section เต็มหน้าปกติแทน ไม่มี fixed overlay/backdrop/X ปิด — ใช้ตอนเป็นเนื้อหา
+  // หลักของหน้าเอง (เช่นเมนู "นำเข้าภาระงานสอน" ใน AdminPortal.tsx ที่ควรแสดงแบบ routed section
+  // เหมือนเมนูอื่นๆ ไม่ใช่ popup ลอย) — เนื้อหา/ฟังก์ชันการทำงานข้างในเหมือนกันทุกประการ เปลี่ยนแค่ wrapper
+  variant?: 'modal' | 'inline';
 }
 
 export interface ValidatedRow {
@@ -99,7 +105,7 @@ function getFieldValue(normalized: Record<string, any>, candidates: string[]): s
   return '';
 }
 
-export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImportSuccess }: BulkDataImportModalProps) {
+export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImportSuccess, variant = 'modal' }: BulkDataImportModalProps) {
   const [importType, setImportType] = useState<ImportType>(initialImportType || 'STUDENT');
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -1103,11 +1109,19 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   const validCount = previewData.filter(r => r.isValid).length;
   const invalidCount = previewData.filter(r => !r.isValid).length;
 
+  const isInline = variant === 'inline';
+
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in text-slate-200">
-      <div className="bg-[#11151d] border border-white/10 rounded-2xl max-w-4xl w-full shadow-2xl flex flex-col my-8 max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200">
-        
-        {/* Modal Header */}
+    <div className={isInline
+      ? 'text-slate-200 animate-in fade-in duration-300'
+      : 'fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in text-slate-200'
+    }>
+      <div className={isInline
+        ? 'bg-[#11151d] border border-white/10 rounded-2xl w-full shadow-xl flex flex-col overflow-hidden'
+        : 'bg-[#11151d] border border-white/10 rounded-2xl max-w-4xl w-full shadow-2xl flex flex-col my-8 max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200'
+      }>
+
+        {/* Header — ไม่มีปุ่มปิด (X) ในโหมด inline เพราะไม่มี overlay ให้ปิดกลับไป (ตัวมันเองคือเนื้อหาหลักของหน้าอยู่แล้ว) */}
         <div className="p-6 border-b border-white/5 bg-[#0a0f16] flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex items-center justify-center">
@@ -1120,13 +1134,15 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               </h3>
             </div>
           </div>
-          <button 
+          {!isInline && (
+          <button
             onClick={onClose}
             disabled={isImporting}
             className="p-1.5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
+          )}
         </div>
 
         {/* Modal Body */}

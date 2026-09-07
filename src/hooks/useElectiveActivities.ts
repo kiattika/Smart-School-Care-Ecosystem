@@ -3,9 +3,9 @@ import { ElectiveActivityConfig } from '../types';
 import { subscribeElectiveActivityConfigs, subscribeActivityEnrollmentCounts } from '../services/firestoreService';
 
 /**
- * รายการ subjectCode ที่ถูกตั้งเป็น ELECTIVE (ชุมนุม/กิจกรรมตามความสนใจ) + ตัวนับที่นั่งปัจจุบัน
- * ของทุก section (scheduleId) แบบ real-time — ใช้ทั้งฝั่งแอดมิน (ตั้งค่า), นักเรียน (สมัคร/ดูที่นั่ง
- * เหลือ), และครู (เช็คว่า course ของตัวเองเป็น ELECTIVE ไหม)
+ * รายการชุมนุม/กิจกรรมตามความสนใจ (ELECTIVE) ที่แอดมินงานชุมนุมสร้างไว้ + ตัวนับที่นั่งปัจจุบัน
+ * ของแต่ละชุมนุมแบบ real-time — ใช้ทั้งฝั่งแอดมิน (ตั้งค่า), นักเรียน (สมัคร/ดูที่นั่งเหลือ), และ
+ * ครูรับผิดชอบ (เช็คว่าตัวเองรับผิดชอบชุมนุมไหนอยู่ — ดู TeacherPortal.tsx)
  */
 export function useElectiveActivities() {
   const [configs, setConfigs] = useState<ElectiveActivityConfig[]>([]);
@@ -24,20 +24,30 @@ export function useElectiveActivities() {
     return subscribeActivityEnrollmentCounts(setCounts);
   }, []);
 
-  const configBySubjectCode = useMemo(() => {
+  const configById = useMemo(() => {
     const map = new Map<string, ElectiveActivityConfig>();
-    configs.forEach(c => map.set(c.subjectCode, c));
+    configs.forEach(c => map.set(c.id, c));
     return map;
   }, [configs]);
 
-  const isElective = (subjectCode?: string | null) => !!subjectCode && configBySubjectCode.has(subjectCode);
+  // ครูรับผิดชอบ 1 คนอาจดูแลได้มากกว่า 1 ชุมนุม (ไม่บังคับ 1:1) — เผื่อกรณีนี้ไว้แม้ยังไม่มี UI
+  // เลือกเมื่อมีหลายชุมนุม (ดู TeacherPortal.tsx — ใช้ตัวแรกไปก่อนถ้ามีมากกว่า 1)
+  const configsByTeacherUid = useMemo(() => {
+    const map = new Map<string, ElectiveActivityConfig[]>();
+    configs.forEach(c => {
+      const list = map.get(c.responsibleTeacherUid) || [];
+      list.push(c);
+      map.set(c.responsibleTeacherUid, list);
+    });
+    return map;
+  }, [configs]);
 
-  const seatsRemaining = (scheduleId: string, subjectCode?: string | null): number | null => {
-    const config = subjectCode ? configBySubjectCode.get(subjectCode) : undefined;
-    if (!config || config.capacityPerSection === null) return null; // ไม่จำกัด
-    const enrolled = counts[scheduleId] || 0;
-    return Math.max(0, config.capacityPerSection - enrolled);
+  const seatsRemaining = (activityId: string): number | null => {
+    const config = configById.get(activityId);
+    if (!config) return null;
+    const enrolled = counts[activityId] || 0;
+    return Math.max(0, config.capacity - enrolled);
   };
 
-  return { configs, configBySubjectCode, counts, isElective, seatsRemaining, loading };
+  return { configs, configById, configsByTeacherUid, counts, seatsRemaining, loading };
 }

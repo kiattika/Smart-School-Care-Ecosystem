@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Palette, Plus, Trash2, Loader2, Users } from 'lucide-react';
+import { Palette, Plus, Trash2, Loader2, Users, AlertTriangle } from 'lucide-react';
 import { useHouseConfig } from '../../hooks/useHouseConfig';
 import { useRealStudents } from '../../hooks/useRealStudents';
 import { saveHouseConfig, deleteHouseConfig, bulkAssignHouseToRoom, assignHouseToStudent } from '../../services/firestoreService';
@@ -26,6 +26,10 @@ export function HouseManagerPage() {
   const [studentSearch, setStudentSearch] = useState('');
   const [studentHouseChoice, setStudentHouseChoice] = useState<Record<string, string>>({});
 
+  // ยืนยันก่อนทำจริง — ใช้ modal ในแอปเอง ไม่ใช่ window.confirm() (เดิมถ้า dialog เบราว์เซอร์ถูกปิด/
+  // หลุดโฟกัสโดยไม่ทันสังเกต ฟังก์ชันจะ return ออกทันทีเงียบๆ ไม่มี error/feedback ใดๆ เลย)
+  const [pendingConfirm, setPendingConfirm] = useState<{ message: string; onConfirm: () => void } | null>(null);
+
   const rooms = useMemo(() => {
     const roomSet = new Set<string>();
     students.forEach(s => { if (s.room) roomSet.add(s.room); });
@@ -48,19 +52,21 @@ export function HouseManagerPage() {
     }
   };
 
-  const handleDeleteHouse = async (id: string, name: string) => {
-    if (!window.confirm(`ลบคณะสี "${name}"? (นักเรียนที่ผูกคณะนี้ไว้แล้วจะยังมี houseId ค้างอยู่ ต้องย้ายคณะใหม่เอง)`)) return;
+  const doDeleteHouse = async (id: string) => {
     setBusy(id);
     try { await deleteHouseConfig(id); flash('ลบแล้ว'); }
     catch (e) { flash('ไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e))); }
     finally { setBusy(null); }
   };
 
-  const handleBulkAssignRoom = async () => {
-    if (!selectedRoom || !roomHouseId) { flash('เลือกห้องและคณะสีก่อน'); return; }
-    const roomStudentIds = students.filter(s => s.room === selectedRoom).map(s => s.studentId);
-    if (roomStudentIds.length === 0) { flash('ไม่พบนักเรียนในห้องนี้'); return; }
-    if (!window.confirm(`Assign นักเรียนทั้งหมด ${roomStudentIds.length} คนในห้อง ${selectedRoom} เข้าคณะเดียวกัน?`)) return;
+  const handleDeleteHouse = (id: string, name: string) => {
+    setPendingConfirm({
+      message: `ลบคณะสี "${name}"? (นักเรียนที่ผูกคณะนี้ไว้แล้วจะยังมี houseId ค้างอยู่ ต้องย้ายคณะใหม่เอง)`,
+      onConfirm: () => doDeleteHouse(id),
+    });
+  };
+
+  const doBulkAssignRoom = async (roomStudentIds: string[]) => {
     setBusy('bulk');
     try {
       await bulkAssignHouseToRoom(selectedRoom, roomHouseId, roomStudentIds);
@@ -70,6 +76,16 @@ export function HouseManagerPage() {
     } finally {
       setBusy(null);
     }
+  };
+
+  const handleBulkAssignRoom = () => {
+    if (!selectedRoom || !roomHouseId) { flash('เลือกห้องและคณะสีก่อน'); return; }
+    const roomStudentIds = students.filter(s => s.room === selectedRoom).map(s => s.studentId);
+    if (roomStudentIds.length === 0) { flash('ไม่พบนักเรียนในห้องนี้'); return; }
+    setPendingConfirm({
+      message: `Assign นักเรียนทั้งหมด ${roomStudentIds.length} คนในห้อง ${selectedRoom} เข้าคณะเดียวกัน?`,
+      onConfirm: () => doBulkAssignRoom(roomStudentIds),
+    });
   };
 
   const filteredStudents = useMemo(() => {
@@ -217,6 +233,36 @@ export function HouseManagerPage() {
           )}
         </div>
       </div>
+
+      {/* ยืนยันก่อนทำจริง — modal ในแอปเอง (ไม่ใช่ window.confirm() ที่ปิด/หลุดโฟกัสแล้วเงียบหาย) */}
+      {pendingConfirm && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#151921] border border-white/10 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-white/10 bg-amber-950/30">
+              <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400" /> ยืนยันการทำรายการ
+              </h2>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-300">{pendingConfirm.message}</p>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setPendingConfirm(null)}
+                  className="px-3 py-2 rounded-lg text-xs font-bold text-slate-300 hover:bg-white/5"
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  onClick={() => { const action = pendingConfirm; setPendingConfirm(null); action.onConfirm(); }}
+                  className="px-3 py-2 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500"
+                >
+                  ยืนยัน
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -50,6 +50,7 @@ export interface Student {
   parentUid?: string;     // Firebase Auth UID ของผู้ปกครอง (เชื่อมโยงตาม Security Rules)
   parentId?: string;      // Alias/Legacy ID
   parentEmail?: string;   // อีเมลผู้ปกครอง
+  email?: string;         // อีเมลนักเรียนเอง — รูปแบบ it{รหัสประจำตัว}@utd.ac.th (ต่างจาก parentEmail)
   studentUid?: string;    // Firebase Auth UID ของนักเรียน
   // คะแนนพฤติกรรมสะสมจริง — เก็บที่ students/{id}.behaviorScore ใน Firestore โดยตรง
   // (อัปเดตผ่าน updateBehaviorScoreAndTriggerAlert) ไม่ใช่ StudentAnalytics (session-local, dead)
@@ -65,37 +66,35 @@ export interface Student {
 }
 
 /**
- * ตั้งค่ากิจกรรมแบบ "ตามความสนใจ" (ELECTIVE) — นักเรียนสมัครเอง มีที่นั่งจำกัด เช่น ชุมนุม
- * ต่างจากกิจกรรม/วิชายกห้อง (WHOLE_CLASS) ที่ดึงรายชื่อจาก room ของนักเรียนตรงๆ — ถ้า subjectCode
- * ไหนไม่มี config นี้ ถือเป็น WHOLE_CLASS โดยปริยาย (ดู TeacherPortal.tsx courseStudents)
- *
- * capacityPerSection ใช้ "ต่อ section" คือต่อ scheduleId หนึ่งๆ อย่างอิสระต่อกัน — ถ้ากิจกรรม
- * เดียวสอนหลาย section (เช่น ชุมนุมคอมพิวเตอร์ 2 กลุ่ม) แต่ละ section นับที่นั่งแยกกัน คนละ 20 คน
- * (ไม่ใช่แชร์โควตารวม 20 คนทั้งกิจกรรม) — ใช้ค่าเดียวกันทุก section ของ subjectCode นี้
+ * ชุมนุม/กิจกรรมตามความสนใจ (ELECTIVE) — แอดมินงานชุมนุมสร้างชื่อ+จำนวนรับ+ครูรับผิดชอบเอง
+ * โดยตรง "ไม่ผูกกับ subjectCode ที่ import จากตารางสอนอีกต่อไป" (ออกแบบใหม่ — ของเดิมดึง
+ * subjectCode จาก schedules ซึ่งทุกคาบ "กิจกรรมชุมนุม" ของทุกครูใช้ชื่อกลางเดียวกันหมด ไม่ใช่ชื่อ
+ * ชุมนุมจริง ทำให้แยกชุมนุมจริงไม่ได้เลย) — 1 ชุมนุม = 1 ครูรับผิดชอบ = โควตาที่นั่งเดียว (ไม่มี
+ * concept "หลาย section" อีกต่อไปเหมือนของเดิมที่ผูกกับ scheduleId หลายคาบ)
  */
 export interface ElectiveActivityConfig {
-  id: string;               // = subjectCode
-  subjectCode: string;
-  name: string;
-  capacityPerSection: number | null; // null = ไม่จำกัดที่นั่ง
+  id: string;
+  name: string;                    // ชื่อชุมนุมที่แอดมินตั้งเอง เช่น "ชุมนุมคอมพิวเตอร์"
+  capacity: number;                // จำนวนรับทั้งชุมนุม
+  responsibleTeacherUid: string;   // ครูรับผิดชอบที่แอดมินกำหนด
+  responsibleTeacherName: string;
   createdBy: string;
-  createdAt: string; // ISO
+  createdAt: Timestamp;
 }
 
 /**
  * การสมัคร/ถอนชุมนุม 1 รายการ — ไม่ลบ document จริงเมื่อถอน (mark removedAt แทน) เพื่อเก็บ
- * ประวัติไว้ (ใครถอนเมื่อไหร่ เหตุผลอะไร) — id เป็น `${scheduleId}_${studentId}` กันสมัครซ้ำ
- * section เดิม (สมัครใหม่หลังถูกถอน = set() ทับ doc เดิม, สมัคร section/subjectCode อื่น = doc ใหม่)
+ * ประวัติไว้ (ใครถอนเมื่อไหร่ เหตุผลอะไร) — id เป็น `${activityId}_${studentId}` กันสมัครซ้ำ
+ * ชุมนุมเดิม (สมัครใหม่หลังถูกถอน = set() ทับ doc เดิม, สมัครชุมนุมอื่น = doc ใหม่)
  */
 export interface ActivityEnrollment {
   id: string;
-  scheduleId: string;
-  subjectCode: string;
+  activityId: string;              // อ้างอิง elective_activities_config/{id}
   studentId: string;
   studentUid: string;
   enrolledAt: string; // ISO
   removedAt: string | null;
-  removedBy: string | null;    // UID ครูที่ถอน — null ถ้านักเรียนถอนตัวเอง
+  removedBy: string | null;    // UID ครูรับผิดชอบที่ถอน — null ถ้านักเรียนถอนตัวเอง
   removedReason: string | null;
 }
 
@@ -110,6 +109,23 @@ export interface HouseConfig {
   colorHex: string;
   assignmentMode: 'SINGLE_PER_ROOM' | 'MIXED';
   createdAt: string; // ISO
+}
+
+/**
+ * ปฏิทินโรงเรียน — วันหยุดพิเศษ (HOLIDAY) และวันเปิด-ปิดภาคเรียน (SEMESTER_START/SEMESTER_END)
+ * แยกต่างหากจาก school_settings/system_locks (เก็บแค่เลขภาคเรียนปัจจุบันสำหรับล็อกคะแนน คนละเรื่องกัน)
+ * — 1 เอกสาร = 1 วัน (ถ้าวันหยุดยาวหลายวัน สร้างหลาย document แยกกัน) เพื่อให้ query "วันนี้เป็นวันหยุด
+ * ไหม" ทำได้ง่ายที่สุดด้วย where('date','==',todayStr) ตรงๆ ไม่ต้อง range query
+ */
+export interface SchoolCalendarEvent {
+  id: string;
+  date: string; // YYYY-MM-DD
+  type: 'HOLIDAY' | 'SEMESTER_START' | 'SEMESTER_END';
+  name: string; // เช่น "วันสงกรานต์", "เปิดภาคเรียนที่ 1/2569"
+  academicYear: string; // เช่น "2569"
+  semester: '1' | '2' | null;
+  createdBy: string;
+  createdAt: Timestamp;
 }
 
 export interface StudentAnalytics {

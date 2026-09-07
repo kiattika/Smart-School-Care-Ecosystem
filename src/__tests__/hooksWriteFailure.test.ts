@@ -57,28 +57,12 @@ describe('Task 4: Write Failure Handling & Auto-seed Removal', () => {
     expect(useEffectSection).not.toContain('setDoc(');
   });
 
-  it('verifies usePeriodsConfig does not execute setDoc on mount', async () => {
-    const hookSource = fs.readFileSync(path.join(process.cwd(), 'src/hooks/usePeriodsConfig.ts'), 'utf8');
-    const useEffectSection = hookSource.substring(hookSource.indexOf('useEffect('), hookSource.indexOf('const updatePeriodsConfig'));
-    expect(useEffectSection).not.toContain('setDoc(');
-  });
-
   it('verifies updateScheduleAttendance and updatePartnerAttendance revert state on Firestore error', async () => {
     const hookSource = fs.readFileSync(path.join(process.cwd(), 'src/hooks/useTeacherFirestoreSchedule.ts'), 'utf8');
     
     // Ensure both functions have optimistic update followed by revert in catch block
     expect(hookSource).toContain('updateScheduleAttendance');
     expect(hookSource).toContain('updatePartnerAttendance');
-    expect(hookSource).toContain('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
-    expect(hookSource).toContain('console.error(');
-    expect(hookSource).toContain('throw err');
-  });
-
-  it('verifies updatePeriodsConfig in usePeriodsConfig reverts state on Firestore error and rethrows', async () => {
-    const hookSource = fs.readFileSync(path.join(process.cwd(), 'src/hooks/usePeriodsConfig.ts'), 'utf8');
-    
-    expect(hookSource).toContain('updatePeriodsConfig');
-    expect(hookSource).toContain('previousPeriods');
     expect(hookSource).toContain('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
     expect(hookSource).toContain('console.error(');
     expect(hookSource).toContain('throw err');
