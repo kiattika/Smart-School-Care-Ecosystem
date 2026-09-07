@@ -35,6 +35,7 @@ import { ParentPortfolioView } from './components/portfolio/ParentPortfolioView'
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
+import { NotificationBell } from './components/notifications/NotificationBell';
 
 export function ParentPortal() {
   const {
@@ -122,6 +123,10 @@ export function ParentPortal() {
 
         {/* Child Switcher & Urgent Alerts */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
+          <div className="flex justify-end sm:order-last">
+            <NotificationBell />
+          </div>
+
           {pendingInvoices.length > 0 && (
             <div 
               onClick={() => setActiveTab('services')}
