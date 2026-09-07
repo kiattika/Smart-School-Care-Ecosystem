@@ -53,6 +53,7 @@ export interface StudentRecord {
   fullName?: string;
   name?: string;
   nickname?: string;
+  email?: string;      // อีเมลนักเรียนเอง (รูปแบบ it{รหัสประจำตัว}@utd.ac.th) — ต่างจาก parentEmail
   room: string;
   className?: string;
   grade?: string;
@@ -136,6 +137,10 @@ export function StudentManagementPage() {
             fullName: composedFullName,
             name: composedFullName,
             nickname: data.nickname || '',
+            // ยังไม่เคยมี field นี้มาก่อน — ถ้า doc เก่ายังไม่มีค่าเก็บไว้ ให้ fallback ไปตามรูปแบบ
+            // it{รหัสประจำตัว}@utd.ac.th ที่ตกลงกันไว้ เพื่อให้แถวเก่าไม่ว่างเปล่า (ค่า fallback นี้
+            // ยังไม่ถูกเขียนลง Firestore จนกว่าแอดมินจะกด "บันทึก" อีกครั้งในฟอร์มแก้ไข)
+            email: data.email || `it${sId}@utd.ac.th`,
             room: rawRoom,
             className: rawRoom,
             grade: data.grade || (rawRoom.includes('/') ? rawRoom.split('/')[0] : rawRoom),
@@ -200,6 +205,7 @@ export function StudentManagementPage() {
   const [formFirstName, setFormFirstName] = useState('');
   const [formLastName, setFormLastName] = useState('');
   const [formNickname, setFormNickname] = useState('');
+  const [formEmail, setFormEmail] = useState('');
   const [formRoom, setFormRoom] = useState('ม.5/8');
   const [formStudentNo, setFormStudentNo] = useState<number>(1);
   const [formPhotoUrl, setFormPhotoUrl] = useState('');
@@ -256,7 +262,8 @@ export function StudentManagementPage() {
         (student.studentId && student.studentId.toLowerCase().includes(sQuery)) ||
         (student.studentCode && student.studentCode.toLowerCase().includes(sQuery)) ||
         (student.parentMobile && student.parentMobile.includes(sQuery)) ||
-        (student.parentEmail && student.parentEmail.toLowerCase().includes(sQuery))
+        (student.parentEmail && student.parentEmail.toLowerCase().includes(sQuery)) ||
+        (student.email && student.email.toLowerCase().includes(sQuery))
       );
 
       // 2. Room Filter (ใช้ isSameRoom ป้องกันความคลาดเคลื่อน ม.5/8 vs M.5/8)
@@ -294,6 +301,7 @@ export function StudentManagementPage() {
     setFormFirstName('');
     setFormLastName('');
     setFormNickname('');
+    setFormEmail('');
     setFormRoom(selectedRoom !== 'ALL' ? selectedRoom : 'ม.5/8');
     setFormStudentNo(studentsList.length + 1);
     setFormPhotoUrl('');
@@ -313,6 +321,7 @@ export function StudentManagementPage() {
     setFormFirstName(student.firstName || '');
     setFormLastName(student.lastName || '');
     setFormNickname(student.nickname || '');
+    setFormEmail(student.email || '');
     setFormRoom(student.room || student.className || 'ม.5/8');
     setFormStudentNo(student.studentNo || student.studentNumber || 1);
     setFormPhotoUrl(student.photoUrl || student.avatar || '');
@@ -363,6 +372,8 @@ export function StudentManagementPage() {
         name: fullName,
         fullName: fullName,
         nickname: formNickname.trim(),
+        // ถ้าไม่ได้กรอกเอง ใช้รูปแบบ it{รหัสประจำตัว}@utd.ac.th เป็นค่าเริ่มต้น (ที่ตกลงกันไว้)
+        email: formEmail.trim() || `it${cleanId}@utd.ac.th`,
         room: formRoom.trim(),
         className: formRoom.trim(),
         grade: formRoom.includes('/') ? formRoom.split('/')[0] : formRoom,
@@ -594,6 +605,7 @@ export function StudentManagementPage() {
                 <th className="px-5 py-4">รูปถ่าย / ชื่อ-นามสกุล</th>
                 <th className="px-4 py-4 text-center">ห้องเรียน</th>
                 <th className="px-5 py-4">สถานะเชื่อมโยงผู้ปกครอง (Parent Linkage)</th>
+                <th className="px-5 py-4">อีเมลนักเรียน (Student Email)</th>
                 <th className="px-5 py-4">ข้อมูลติดต่อผู้ปกครอง</th>
                 <th className="px-5 py-4 text-right">ดำเนินการ</th>
               </tr>
@@ -734,6 +746,18 @@ export function StudentManagementPage() {
                               รอผู้ปกครองลงทะเบียนเชื่อมโยง
                             </span>
                           </div>
+                        )}
+                      </td>
+
+                      {/* อีเมลนักเรียนเอง — ต่างจากอีเมลผู้ปกครองในคอลัมน์ถัดไป */}
+                      <td className="px-5 py-4 text-xs">
+                        {student.email ? (
+                          <div className="flex items-center gap-1.5 text-slate-300">
+                            <Mail className="w-3 h-3 text-indigo-400 shrink-0" />
+                            <span className="truncate max-w-[150px] font-mono">{student.email}</span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-slate-600 italic">- ไม่ได้ระบุ -</span>
                         )}
                       </td>
 
@@ -930,6 +954,21 @@ export function StudentManagementPage() {
                       className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-slate-200 focus:border-purple-500 outline-none"
                       placeholder="เช่น กอล์ฟ"
                     />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                      อีเมลนักเรียน (Student Email)
+                    </label>
+                    <input
+                      type="email"
+                      value={formEmail}
+                      onChange={(e) => setFormEmail(e.target.value)}
+                      className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-slate-200 focus:border-purple-500 outline-none"
+                      placeholder={formStudentId ? `it${formStudentId}@utd.ac.th` : 'it{รหัสประจำตัว}@utd.ac.th'}
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      เว้นว่างได้ — ระบบจะใช้รูปแบบ it{'{'}รหัสประจำตัว{'}'}@utd.ac.th ให้อัตโนมัติ (แก้ไขได้กรณีพิมพ์ผิดตอน import)
+                    </p>
                   </div>
                   <div className="sm:col-span-2">
                     <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">

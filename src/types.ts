@@ -50,6 +50,7 @@ export interface Student {
   parentUid?: string;     // Firebase Auth UID ของผู้ปกครอง (เชื่อมโยงตาม Security Rules)
   parentId?: string;      // Alias/Legacy ID
   parentEmail?: string;   // อีเมลผู้ปกครอง
+  email?: string;         // อีเมลนักเรียนเอง — รูปแบบ it{รหัสประจำตัว}@utd.ac.th (ต่างจาก parentEmail)
   studentUid?: string;    // Firebase Auth UID ของนักเรียน
   // คะแนนพฤติกรรมสะสมจริง — เก็บที่ students/{id}.behaviorScore ใน Firestore โดยตรง
   // (อัปเดตผ่าน updateBehaviorScoreAndTriggerAlert) ไม่ใช่ StudentAnalytics (session-local, dead)
