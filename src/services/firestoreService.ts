@@ -50,7 +50,8 @@ import {
   HouseConfig,
   GuidanceCounselingCase,
   InfirmaryVisit,
-  ParentNotification
+  ParentNotification,
+  SchoolCalendarEvent
 } from '../types';
 import { SchoolGeofenceConfig } from '../utils/geoUtils';
 
@@ -2016,6 +2017,58 @@ export async function deleteAdminPeriodConfig(id: string, firestoreDb: Firestore
     await deleteDoc(doc(firestoreDb, 'admin_periods_config', id));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, `admin_periods_config/${id}`);
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * School calendar (school_calendar_events/{eventId}) — วันหยุดพิเศษ + วันเปิด-ปิดภาคเรียน
+ * แยกต่างหากจาก school_settings/system_locks (คนละเรื่องกัน — อันนั้นแค่เก็บเลขภาคเรียนปัจจุบัน
+ * สำหรับล็อกคะแนน) ใช้ตรวจ "วันนี้เป็นวันเรียนไหม" ใน TeacherPortal.tsx เป็นหลัก
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export async function saveSchoolCalendarEvent(
+  event: { id?: string; date: string; type: 'HOLIDAY' | 'SEMESTER_START' | 'SEMESTER_END'; name: string; academicYear: string; semester: '1' | '2' | null; createdBy: string },
+  firestoreDb: Firestore = db,
+): Promise<string> {
+  const ref = event.id ? doc(firestoreDb, 'school_calendar_events', event.id) : doc(collection(firestoreDb, 'school_calendar_events'));
+  try {
+    await setDoc(ref, {
+      id: ref.id,
+      date: event.date,
+      type: event.type,
+      name: event.name,
+      academicYear: event.academicYear,
+      semester: event.semester,
+      createdBy: event.createdBy,
+      createdAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `school_calendar_events/${ref.id}`);
+  }
+  return ref.id;
+}
+
+export async function deleteSchoolCalendarEvent(id: string, firestoreDb: Firestore = db): Promise<void> {
+  try {
+    await deleteDoc(doc(firestoreDb, 'school_calendar_events', id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `school_calendar_events/${id}`);
+  }
+}
+
+export function subscribeSchoolCalendarEvents(onUpdate: (events: SchoolCalendarEvent[]) => void): () => void {
+  try {
+    return onSnapshot(collection(db, 'school_calendar_events'), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as SchoolCalendarEvent));
+      list.sort((a, b) => a.date.localeCompare(b.date));
+      onUpdate(list);
+    }, (err) => {
+      console.warn('[subscribeSchoolCalendarEvents] listener error:', err.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeSchoolCalendarEvents] setup error:', error);
+    return () => {};
   }
 }
 

@@ -185,6 +185,12 @@ service cloud.firestore {
       allow write: if hasRole('SUPER_ADMIN');
     }
 
+    // 9.1 School Calendar (วันหยุดพิเศษ + วันเปิด-ปิดภาคเรียน) — แยกจาก school_settings/system_locks
+    match /school_calendar_events/{eventId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN');
+    }
+
     // 10. School Settings (periods_config, etc.)
     match /school_settings/{settingId} {
       allow read: if isSignedIn();

@@ -1159,6 +1159,41 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
+  // 22.1 school_calendar_events (วันหยุดพิเศษ + วันเปิด-ปิดภาคเรียน) — แยกจาก school_settings/
+  // system_locks (คนละเรื่องกัน) — อ่านได้ทุกคน signed-in เขียน/แก้ไข/ลบเฉพาะ SUPER_ADMIN เท่านั้น
+  describe('school_calendar_events collection', () => {
+    it('lets any signed-in user read; denies anonymous', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('school_calendar_events/ev-1').set({
+          date: '2026-04-13', type: 'HOLIDAY', name: 'วันสงกรานต์', academicYear: '2569', semester: null,
+        });
+      });
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('school_calendar_events/ev-1').get());
+      await assertSucceeds(asUser('stu-1', ['STUDENT']).firestore().doc('school_calendar_events/ev-1').get());
+      await assertFails(asAnonymous().firestore().doc('school_calendar_events/ev-1').get());
+    });
+
+    it('allows only SUPER_ADMIN to write/delete; denies every other role including ACADEMIC_HEAD', async () => {
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('school_calendar_events/ev-2').set({
+          date: '2026-04-14', type: 'HOLIDAY', name: 'วันสงกรานต์ (วันที่ 2)', academicYear: '2569', semester: null,
+        })
+      );
+      await assertFails(
+        asRole('ACADEMIC_HEAD').firestore().doc('school_calendar_events/ev-3').set({
+          date: '2026-04-15', type: 'HOLIDAY', name: 'วันสงกรานต์ (วันที่ 3)', academicYear: '2569', semester: null,
+        })
+      );
+      await assertFails(
+        asRole('SUBJECT_TEACHER').firestore().doc('school_calendar_events/ev-4').set({
+          date: '2026-05-01', type: 'HOLIDAY', name: 'วันแรงงาน', academicYear: '2569', semester: null,
+        })
+      );
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('school_calendar_events/ev-2').delete());
+      await assertFails(asRole('ACADEMIC_HEAD').firestore().doc('school_calendar_events/ev-2').delete());
+    });
+  });
+
   // 23. REAL race condition — 2 นักเรียนสมัครที่นั่งสุดท้ายพร้อมกัน ต้องมีแค่คนเดียวสำเร็จ
   // (ยิงผ่าน enrollInActivity จริงจาก services/firestoreService.ts ไม่ใช่จำลองแยก — ทดสอบโค้ด
   // เดียวกับที่ใช้งานจริง โดยส่ง context.firestore() ของ rules-testing SDK เข้าไปแทน db ของแอป)

@@ -111,6 +111,23 @@ export interface HouseConfig {
   createdAt: string; // ISO
 }
 
+/**
+ * ปฏิทินโรงเรียน — วันหยุดพิเศษ (HOLIDAY) และวันเปิด-ปิดภาคเรียน (SEMESTER_START/SEMESTER_END)
+ * แยกต่างหากจาก school_settings/system_locks (เก็บแค่เลขภาคเรียนปัจจุบันสำหรับล็อกคะแนน คนละเรื่องกัน)
+ * — 1 เอกสาร = 1 วัน (ถ้าวันหยุดยาวหลายวัน สร้างหลาย document แยกกัน) เพื่อให้ query "วันนี้เป็นวันหยุด
+ * ไหม" ทำได้ง่ายที่สุดด้วย where('date','==',todayStr) ตรงๆ ไม่ต้อง range query
+ */
+export interface SchoolCalendarEvent {
+  id: string;
+  date: string; // YYYY-MM-DD
+  type: 'HOLIDAY' | 'SEMESTER_START' | 'SEMESTER_END';
+  name: string; // เช่น "วันสงกรานต์", "เปิดภาคเรียนที่ 1/2569"
+  academicYear: string; // เช่น "2569"
+  semester: '1' | '2' | null;
+  createdBy: string;
+  createdAt: Timestamp;
+}
+
 export interface StudentAnalytics {
   studentId: string;
   subjectAttendanceRate: number; // percentage 0-100
