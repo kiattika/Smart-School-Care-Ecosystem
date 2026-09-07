@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { SchoolCalendarSection } from './admin/SchoolCalendarSection';
 import { 
   Calendar, 
   Clock, 
@@ -366,6 +367,10 @@ export function SystemSettingsAndLocksPage() {
               </button>
             </div>
           </div>
+
+          {/* 1.5 ปฏิทินโรงเรียน — วันหยุดพิเศษ + วันเปิด-ปิดภาคเรียน (school_calendar_events —
+              collection แยกจาก school_settings/system_locks ด้านบนโดยตั้งใจ ดู SchoolCalendarSection.tsx) */}
+          <SchoolCalendarSection />
 
           {/* 2. Grade Entry Time-Window Settings (ตั้งค่าเปิด-ปิดระบบกรอกเกรด) */}
           <div className="space-y-4">
