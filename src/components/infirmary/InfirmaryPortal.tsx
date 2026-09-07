@@ -119,6 +119,7 @@ export function InfirmaryPortal() {
         studentId: effectiveStudentId,
         studentUid: student?.studentUid || null,
         parentUid: student?.parentUid || null,
+        studentName: student?.fullName || effectiveStudentId,
         symptoms,
         temperature: parseFloat(temperature) || 37.0,
         treatment,

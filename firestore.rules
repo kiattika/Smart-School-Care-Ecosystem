@@ -87,13 +87,43 @@ service cloud.firestore {
     }
 
     // 4. Parent Notifications
+    // FIX (ระบบแจ้งเตือนรวมศูนย์): เดิม write เป็น role-based ล้วน (SUPER_ADMIN/HOMEROOM_TEACHER/
+    // SUBJECT_TEACHER) แต่การแจ้งเตือนหลายจุด (เช่น สแกนเข้า-ออกประตูโรงเรียน, ยื่นใบลา) ริเริ่มจาก
+    // ตัวนักเรียน/ผู้ปกครองเอง (ดู GateAttendanceTracker.tsx) — เพิ่มช่องให้ STUDENT/PARENT สร้างแจ้งเตือน
+    // ได้เฉพาะที่ parentUid ตรงกับผู้ปกครองจริงของ studentId ที่ระบุเท่านั้น (verify ผ่าน studentField()
+    // กันสร้างแจ้งเตือนส่งให้ parentUid ใครก็ได้) และเพิ่มช่องให้เจ้าของกด "อ่านแล้ว" เอง (แก้ได้แค่ status)
     match /parent_notifications/{notifId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('HOMEROOM_TEACHER') || 
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('HOMEROOM_TEACHER') ||
                      (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('HOMEROOM_TEACHER') || 
-                      hasRole('SUBJECT_TEACHER');
+
+      // FIX: ตรวจแค่ "parentUid ที่ประกาศตรงกับพ่อแม่จริงของ studentId" ไม่พอ (ใครก็ประกาศ studentId/
+      // parentUid ที่ถูกต้องของคนอื่นได้) ต้องตรวจด้วยว่า "ผู้เขียนเอง" เป็นตัวนักเรียนคนนั้นจริง
+      // (isSelfStudent) หรือเป็นผู้ปกครองจริงของนักเรียนคนนั้น (auth.uid ตรงกับ parentUid จริง) เท่านั้น
+      allow create: if hasRole('SUPER_ADMIN') ||
+                       hasRole('HOMEROOM_TEACHER') ||
+                       hasRole('SUBJECT_TEACHER') ||
+                       hasRole('INFIRMARY_STAFF') ||
+                       (
+                         request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', '__none__') &&
+                         (
+                           isSelfStudent(request.resource.data.studentId) ||
+                           (isSignedIn() && request.auth.uid == studentField(request.resource.data.studentId, 'parentUid', '__none__'))
+                         )
+                       );
+
+      // ผู้ปกครองเจ้าของกด "อ่านแล้ว"/"อ่านทั้งหมด" เอง — แก้ได้เฉพาะ field status เท่านั้น
+      allow update: if hasRole('SUPER_ADMIN') ||
+                       hasRole('HOMEROOM_TEACHER') ||
+                       hasRole('SUBJECT_TEACHER') ||
+                       (
+                         isSignedIn() &&
+                         (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid) &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                         request.resource.data.status in ['read', 'unread']
+                       );
+
+      allow delete: if hasRole('SUPER_ADMIN');
     }
 
     // 5. Parent-Teacher Conferences

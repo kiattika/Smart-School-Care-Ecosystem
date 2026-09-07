@@ -49,7 +49,8 @@ import {
   ActivityEnrollment,
   HouseConfig,
   GuidanceCounselingCase,
-  InfirmaryVisit
+  InfirmaryVisit,
+  ParentNotification
 } from '../types';
 import { SchoolGeofenceConfig } from '../utils/geoUtils';
 
@@ -383,6 +384,90 @@ export async function updateBehaviorScoreAndTriggerAlert(
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, studentsPath);
+  }
+}
+
+/**
+ * Centralized parent notifications (parent_notifications/{notifId})
+ * FIX: หลายจุดใน store.ts เดิม push แจ้งเตือนเข้า state.parentNotifications แบบ session-local
+ * ล้วนๆ (ไม่เคยเขียน Firestore) ทำให้ผู้ปกครองไม่เห็นแจ้งเตือนจริงถ้าไม่ได้อยู่ในเซสชันเบราว์เซอร์
+ * เดียวกับตอนที่เหตุการณ์เกิดขึ้น — ใช้ schema/pattern เดียวกับที่ updateBehaviorScoreAndTriggerAlert
+ * ใช้อยู่แล้วข้างบน (parentUid/parentId/studentId/studentName/title/message/status/createdAt/type)
+ */
+export type CreateParentNotificationInput = Pick<ParentNotification, 'parentUid' | 'studentId' | 'studentName' | 'title' | 'message'> &
+  Partial<Pick<ParentNotification, 'type' | 'pointsDeducted' | 'remainingScore' | 'attendanceStatus' | 'date'>>;
+
+/** เขียนแจ้งเตือนผู้ปกครอง 1 รายการ — ถ้าไม่มี parentUid จริง (นักเรียนยังไม่เชื่อมบัญชีผู้ปกครอง)
+ *  ข้ามการเขียนไปเงียบๆ แทนการ fabricate ID ปลอมแบบ `parent_${studentId}` ที่เคยเป็นมา (เขียนไปก็ไม่มี
+ *  ผู้ปกครองคนไหนอ่านได้จริงอยู่ดี เพราะไม่มี Auth UID ไหนตรงกับ ID ปลอมนั้น) */
+export async function createParentNotification(
+  data: CreateParentNotificationInput,
+  firestoreDb: Firestore = db,
+): Promise<void> {
+  if (!data.parentUid) {
+    console.warn('[createParentNotification] skipped: no real parentUid for studentId', data.studentId);
+    return;
+  }
+  const ref = doc(collection(firestoreDb, 'parent_notifications'));
+  try {
+    await setDoc(ref, {
+      id: ref.id,
+      parentUid: data.parentUid,
+      parentId: data.parentUid,
+      studentId: data.studentId,
+      studentName: data.studentName,
+      title: data.title,
+      message: data.message,
+      status: 'unread',
+      createdAt: serverTimestamp(),
+      type: data.type ?? 'info',
+      ...(data.pointsDeducted !== undefined ? { pointsDeducted: data.pointsDeducted } : {}),
+      ...(data.remainingScore !== undefined ? { remainingScore: data.remainingScore } : {}),
+      ...(data.attendanceStatus !== undefined ? { attendanceStatus: data.attendanceStatus } : {}),
+      ...(data.date !== undefined ? { date: data.date } : {}),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `parent_notifications/${ref.id}`);
+  }
+}
+
+/** ผู้ปกครองเจ้าของกด "อ่านแล้ว" เอง — rules จำกัดให้แก้ได้แค่ field status เท่านั้น */
+export async function markParentNotificationRead(notifId: string, firestoreDb: Firestore = db): Promise<void> {
+  try {
+    await updateDoc(doc(firestoreDb, 'parent_notifications', notifId), { status: 'read' });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `parent_notifications/${notifId}`);
+  }
+}
+
+/** อ่านทั้งหมด — ยิง update ทีละรายการ (ปกติมีไม่กี่สิบรายการต่อผู้ปกครอง ไม่จำเป็นต้องใช้ batch) */
+export async function markAllParentNotificationsRead(notifIds: string[], firestoreDb: Firestore = db): Promise<void> {
+  await Promise.all(notifIds.map(id => markParentNotificationRead(id, firestoreDb)));
+}
+
+/** real-time listener ของแจ้งเตือนผู้ปกครองคนเดียว เรียงใหม่สุดก่อน */
+export function subscribeParentNotifications(
+  onUpdate: (notifications: ParentNotification[]) => void,
+  parentUid: string,
+): () => void {
+  try {
+    if (!parentUid) { onUpdate([]); return () => {}; }
+    const col = collection(db, 'parent_notifications');
+    return onSnapshot(query(col, where('parentUid', '==', parentUid)), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ParentNotification));
+      list.sort((a, b) => {
+        const ta = (a.createdAt as any)?.toMillis?.() ?? 0;
+        const tb = (b.createdAt as any)?.toMillis?.() ?? 0;
+        return tb - ta;
+      });
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeParentNotifications] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeParentNotifications] setup error:', error);
+    return () => {};
   }
 }
 
@@ -1960,7 +2045,8 @@ const INFIRMARY_COL = 'infirmary_visits';
 export async function recordInfirmaryVisit(
   data: Pick<InfirmaryVisit,
     'studentId' | 'symptoms' | 'temperature' | 'treatment' | 'medicationGiven' | 'restDurationMinutes' | 'isUrgentAlert'> &
-    { studentUid: string | null; parentUid: string | null; nurseUid: string; nurseName: string }
+    { studentUid: string | null; parentUid: string | null; nurseUid: string; nurseName: string; studentName: string },
+  firestoreDb: Firestore = db,
 ): Promise<string> {
   const id = `inf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const now = new Date();
@@ -1983,7 +2069,27 @@ export async function recordInfirmaryVisit(
     createdAt: now.toISOString(),
   };
   try {
-    await setDoc(doc(db, INFIRMARY_COL, id), payload);
+    // ระบบแจ้งเตือนรวมศูนย์: เขียนแจ้งเตือนผู้ปกครองคู่กันไปในธุรกรรมเดียวกันเสมอ (ไม่ใช่ 2 การเขียน
+    // แยกอิสระที่อาจสำเร็จแค่ฝั่งเดียว) — ถ้าไม่มี parentUid จริง (ยังไม่เชื่อมบัญชี LINE) ข้ามการ
+    // แจ้งเตือนไปเงียบๆ ไม่ fabricate ID ปลอม (การบันทึกอาการยังสำเร็จตามปกติ)
+    const batch = writeBatch(firestoreDb);
+    batch.set(doc(firestoreDb, INFIRMARY_COL, id), payload);
+    if (data.parentUid) {
+      const notifRef = doc(collection(firestoreDb, 'parent_notifications'));
+      batch.set(notifRef, {
+        id: notifRef.id,
+        parentUid: data.parentUid,
+        parentId: data.parentUid,
+        studentId: data.studentId,
+        studentName: data.studentName,
+        title: data.isUrgentAlert ? '🚨 แจ้งเตือนด่วน: นักเรียนเข้าห้องพยาบาล' : '🏥 แจ้งเตือน: นักเรียนเข้าห้องพยาบาล',
+        message: `น้อง${data.studentName} เข้ารับบริการห้องพยาบาลด้วยอาการ "${data.symptoms}" เมื่อเวลา ${payload.visitTime} กรุณากดรับทราบในระบบ`,
+        status: 'unread',
+        createdAt: serverTimestamp(),
+        type: data.isUrgentAlert ? 'critical' : 'warning',
+      });
+    }
+    await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `${INFIRMARY_COL}/${id}`);
   }

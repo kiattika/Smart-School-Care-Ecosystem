@@ -56,7 +56,8 @@ import {
   sendParentTeacherMessageFirestore,
   bookParentAppointmentFirestore,
   saveActiveLearningLogFirestore,
-  updateBehaviorScoreAndTriggerAlert
+  updateBehaviorScoreAndTriggerAlert,
+  createParentNotification
 } from './services/firestoreService';
 
 const STATUS_CYCLE: AttendanceStatus[] = ['PRESENT', 'ABSENT', 'LATE', 'LEAVE'];
@@ -110,7 +111,6 @@ export const useStore = create<StoreState>((set, get) => ({
   schoolCheckInRecords: {},
   attendanceRecords: {},
   parentConferences: [],
-  parentNotifications: [],
   selfAssessments: {},
 
   // Student & Parent Extended Initial State (Clean empty arrays / objects)
@@ -792,69 +792,45 @@ export const useStore = create<StoreState>((set, get) => ({
     return { courseScoreSettings: [...state.courseScoreSettings, setting] };
   }),
 
-  scheduleConference: (conferenceId: string, date: string, time: string) => set((state) => {
+  // FIX (ระบบแจ้งเตือนรวมศูนย์): เดิม push เข้า state.parentNotifications แบบ session-local ล้วนๆ
+  // (ไม่เคยเขียน Firestore) เปลี่ยนเป็นเขียนจริงผ่าน createParentNotification() — ถ้าไม่มี parentUid
+  // จริง (นักเรียนยังไม่เชื่อมบัญชีผู้ปกครอง) ฟังก์ชันนั้นจะข้ามการเขียนไปเอง ไม่ fabricate ID ปลอม
+  // แบบ `parent_${studentId}` ที่เคยเป็นมา (เขียนไปก็ไม่มีผู้ปกครองคนไหนอ่านได้จริงอยู่ดี)
+  scheduleConference: (conferenceId: string, date: string, time: string) => {
     let studentId = '';
     let studentName = '';
-    
-    const updatedConferences = state.parentConferences.map(c => {
-      if (c.id === conferenceId) {
-        studentId = c.studentId;
-        studentName = c.studentName;
-        return {
-          ...c,
-          status: 'SCHEDULED' as const,
-          scheduledDate: date,
-          scheduledTime: time
-        };
-      }
-      return c;
+    let parentUid = '';
+
+    set((state) => {
+      const updatedConferences = state.parentConferences.map(c => {
+        if (c.id === conferenceId) {
+          studentId = c.studentId;
+          studentName = c.studentName;
+          return {
+            ...c,
+            status: 'SCHEDULED' as const,
+            scheduledDate: date,
+            scheduledTime: time
+          };
+        }
+        return c;
+      });
+
+      const student = state.students.find(s => s.studentId === studentId);
+      parentUid = (student as any)?.parentUid || (student as any)?.parentId || '';
+
+      return { parentConferences: updatedConferences };
     });
 
-    const student = state.students.find(s => s.studentId === studentId);
-    const parentUid = (student as any)?.parentUid || (student as any)?.parentId || `parent_${studentId}`;
-    const parentId = (student as any)?.parentId || parentUid;
-
-    const newNotif = {
-      id: `notif_sch_${Date.now()}`,
+    createParentNotification({
       parentUid,
-      parentId,
       studentId,
       studentName,
-      title: "🗓️ ยืนยันการนัดพบคณะกรรมการสถานศึกษาเรียบร้อยแล้ว",
+      title: '🗓️ ยืนยันการนัดพบคณะกรรมการสถานศึกษาเรียบร้อยแล้ว',
       message: `ระบบยืนยันสิทธิ์การนัดหมายพบฝ่ายปกครองของน้อง${studentName} ในวัน${date} เวลา ${time} เรียบร้อยแล้ว คณะครูและฝ่ายปกครองยินดีต้อนรับค่ะ`,
-      status: 'unread' as const,
-      createdAt: new Date(),
-      pointsDeducted: 0,
-      remainingScore: 0,
-      type: 'info' as const
-    };
-
-    console.log(`[Admin Notice] Parent of student ${studentName} scheduled meeting on ${date} at ${time}`);
-
-    return {
-      parentConferences: updatedConferences,
-      parentNotifications: [newNotif, ...state.parentNotifications]
-    };
-  }),
-
-  addMockParentNotification: (notif) => set((state) => {
-    const student = state.students.find(s => s.studentId === notif.studentId);
-    const parentUid = notif.parentUid || (student as any)?.parentUid || notif.parentId || `parent_${notif.studentId}`;
-    const parentId = notif.parentId || parentUid;
-    return {
-      parentNotifications: [
-        {
-          ...notif,
-          parentUid,
-          parentId,
-          id: `notif_${Date.now()}`,
-          status: 'unread' as const,
-          createdAt: new Date()
-        },
-        ...state.parentNotifications
-      ]
-    };
-  }),
+      type: 'info',
+    }).catch(err => console.warn('Firestore parent notification notice:', err));
+  },
 
   addActiveLearningPoints: (studentId: string, points: number, category: ActiveLearningCategory = 'GENERAL', note?: string, courseId?: string) => {
     const newLog: ActiveLearningRecord = {
@@ -912,11 +888,13 @@ export const useStore = create<StoreState>((set, get) => ({
     const dateStr = now.toISOString().split('T')[0];
     const isLate = type === 'ENTRY' && (now.getHours() > 8 || (now.getHours() === 8 && now.getMinutes() > 0));
 
-    return set((state) => {
+    let studentName = '';
+    let parentUid = '';
+
+    set((state) => {
       const student = state.students.find(s => s.studentId === studentId);
-      const studentName = student ? student.name : `นักเรียน (${studentId})`;
-      const parentUid = (student as any)?.parentUid || (student as any)?.parentId || `parent_${studentId}`;
-      const parentId = (student as any)?.parentId || parentUid;
+      studentName = student ? student.name : `นักเรียน (${studentId})`;
+      parentUid = (student as any)?.parentUid || (student as any)?.parentId || '';
 
       const newGateRecord: GateAttendanceRecord = {
         id: `gate-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -934,28 +912,21 @@ export const useStore = create<StoreState>((set, get) => ({
 
       saveGateAttendanceRecordFirestore(newGateRecord).catch(err => console.warn('Firestore gate attendance notice:', err));
 
-      const newNotification = {
-        id: `notif-gate-${Date.now()}`,
-        parentUid,
-        parentId,
-        studentId,
-        studentName,
-        title: type === 'ENTRY' ? `🔔 แจ้งเตือนการมาถึงโรงเรียน (${studentName})` : `👋 แจ้งเตือนการเดินทางออกจากโรงเรียน (${studentName})`,
-        message: type === 'ENTRY' 
-          ? `นักเรียนได้สแกนเข้าโรงเรียนผ่านประตู 1 เมื่อเวลา ${timeStr} สถานะ: ${isLate ? 'สาย' : 'ตรงเวลา'} อุณหภูมิร่างกายปกติ` 
-          : `นักเรียนได้สแกนแตะบัตรผ่านประตู 1 เดินทางออกจากโรงเรียนเมื่อเวลา ${timeStr}`,
-        status: 'unread' as const,
-        createdAt: now,
-        pointsDeducted: 0,
-        remainingScore: 100,
-        type: 'info' as const
-      };
-
       return {
-        gateAttendanceLogs: [newGateRecord, ...state.gateAttendanceLogs],
-        parentNotifications: [newNotification, ...state.parentNotifications]
+        gateAttendanceLogs: [newGateRecord, ...state.gateAttendanceLogs]
       };
     });
+
+    createParentNotification({
+      parentUid,
+      studentId,
+      studentName,
+      title: type === 'ENTRY' ? `🔔 แจ้งเตือนการมาถึงโรงเรียน (${studentName})` : `👋 แจ้งเตือนการเดินทางออกจากโรงเรียน (${studentName})`,
+      message: type === 'ENTRY'
+        ? `นักเรียนได้สแกนเข้าโรงเรียนผ่านประตู 1 เมื่อเวลา ${timeStr} สถานะ: ${isLate ? 'สาย' : 'ตรงเวลา'} อุณหภูมิร่างกายปกติ`
+        : `นักเรียนได้สแกนแตะบัตรผ่านประตู 1 เดินทางออกจากโรงเรียนเมื่อเวลา ${timeStr}`,
+      type: 'info',
+    }).catch(err => console.warn('Firestore parent notification notice:', err));
   },
 
   submitDetailedLeave: (req) => {
@@ -967,38 +938,37 @@ export const useStore = create<StoreState>((set, get) => ({
     };
     saveDetailedLeaveRequestFirestore(newLeave).catch(err => console.warn('Firestore leave request notice:', err));
 
-    return set((state) => {
+    let leaveStudentName = 'นักเรียน';
+    let leaveParentUid = '';
+
+    set((state) => {
       const student = state.students.find(s => s.studentId === req.studentId);
-      const parentUid = (student as any)?.parentUid || (student as any)?.parentId || `parent_${req.studentId}`;
-      const parentId = (student as any)?.parentId || parentUid;
+      leaveStudentName = student ? student.name : 'นักเรียน';
+      leaveParentUid = (student as any)?.parentUid || (student as any)?.parentId || '';
 
       return {
-        detailedLeaveRequests: [newLeave, ...state.detailedLeaveRequests],
-        parentNotifications: [
-          {
-            id: `notif-leave-${Date.now()}`,
-            parentUid,
-            parentId,
-            studentId: req.studentId,
-            studentName: student ? student.name : 'นักเรียน',
-            title: '📝 ยื่นใบลาออนไลน์ (e-Leave) เรียบร้อยแล้ว',
-            message: `ใบลาประเภท ${req.leaveType === 'SICK' ? 'ลาป่วย' : 'ลากิจ'} สำหรับวันที่ ${req.startDate} ถึง ${req.endDate} อยู่ระหว่างรอครูประจำชั้นตรวจสอบ`,
-            status: 'unread' as const,
-            createdAt: new Date(),
-            pointsDeducted: 0,
-            remainingScore: 100,
-            type: 'info' as const
-          },
-          ...state.parentNotifications
-        ]
+        detailedLeaveRequests: [newLeave, ...state.detailedLeaveRequests]
       };
     });
+
+    createParentNotification({
+      parentUid: leaveParentUid,
+      studentId: req.studentId,
+      studentName: leaveStudentName,
+      title: '📝 ยื่นใบลาออนไลน์ (e-Leave) เรียบร้อยแล้ว',
+      message: `ใบลาประเภท ${req.leaveType === 'SICK' ? 'ลาป่วย' : 'ลากิจ'} สำหรับวันที่ ${req.startDate} ถึง ${req.endDate} อยู่ระหว่างรอครูประจำชั้นตรวจสอบ`,
+      type: 'info',
+    }).catch(err => console.warn('Firestore parent notification notice:', err));
   },
 
   approveDetailedLeave: (id: string, teacherRemarks?: string) => {
     updateDetailedLeaveStatusFirestore(id, 'APPROVED', teacherRemarks).catch(err => console.warn('Firestore leave approval notice:', err));
 
-    return set((state) => {
+    let approvedStudentId = '';
+    let approvedStudentName = 'นักเรียน';
+    let approvedParentUid = '';
+
+    set((state) => {
       const updated = state.detailedLeaveRequests.map(l => {
         if (l.id === id) {
           return {
@@ -1014,8 +984,9 @@ export const useStore = create<StoreState>((set, get) => ({
       const targetLeave = state.detailedLeaveRequests.find(l => l.id === id);
       const studentId = targetLeave ? targetLeave.studentId : '';
       const student = state.students.find(s => s.studentId === studentId);
-      const parentUid = (student as any)?.parentUid || (student as any)?.parentId || `parent_${studentId}`;
-      const parentId = (student as any)?.parentId || parentUid;
+      approvedStudentId = studentId;
+      approvedStudentName = student ? student.name : 'นักเรียน';
+      approvedParentUid = (student as any)?.parentUid || (student as any)?.parentId || '';
 
       // Auto-update student morning status to LEAVE if applicable
       const updatedStudents = state.students.map(s => {
@@ -1035,26 +1006,20 @@ export const useStore = create<StoreState>((set, get) => ({
 
       return {
         detailedLeaveRequests: updated,
-        students: updatedStudents,
-        parentNotifications: studentId ? [
-          {
-            id: `notif-leave-approved-${Date.now()}`,
-            parentUid,
-            parentId,
-            studentId,
-            studentName: student ? student.name : 'นักเรียน',
-            title: '✅ ใบลาได้รับการอนุมัติแล้ว',
-            message: `ครูประจำชั้นได้อนุมัติใบลาของ ${student ? student.name : 'นักเรียน'} เรียบร้อยแล้ว และระบบได้บันทึกการลาในสมุดบัญชีเวลาเรียน`,
-            status: 'unread' as const,
-            createdAt: new Date(),
-            pointsDeducted: 0,
-            remainingScore: 100,
-            type: 'info' as const
-          },
-          ...state.parentNotifications
-        ] : state.parentNotifications
+        students: updatedStudents
       };
     });
+
+    if (approvedStudentId) {
+      createParentNotification({
+        parentUid: approvedParentUid,
+        studentId: approvedStudentId,
+        studentName: approvedStudentName,
+        title: '✅ ใบลาได้รับการอนุมัติแล้ว',
+        message: `ครูประจำชั้นได้อนุมัติใบลาของ ${approvedStudentName} เรียบร้อยแล้ว และระบบได้บันทึกการลาในสมุดบัญชีเวลาเรียน`,
+        type: 'info',
+      }).catch(err => console.warn('Firestore parent notification notice:', err));
+    }
   },
 
   // FIX: ทั้ง 3 action นี้เดิม fire-and-forget การเขียน Firestore จริง (.catch แค่ console.warn)

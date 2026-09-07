@@ -1,3 +1,4 @@
+import type { Timestamp } from 'firebase/firestore';
 import { UserProfile, UserRole } from './types/auth';
 
 export * from './types/auth';
@@ -401,6 +402,9 @@ export interface ParentConference {
   notes?: string;
 }
 
+// ระบบแจ้งเตือนผู้ปกครองแบบรวมศูนย์ — เขียนผ่าน createParentNotification() ใน firestoreService.ts
+// เสมอ (ห้าม push เข้า state session-local ตรงๆ อีก — ดู store.ts) createdAt เป็น Firestore Timestamp
+// จริง (เขียนด้วย serverTimestamp() เสมอ ให้ตรงกับ pattern เดิมที่ updateBehaviorScoreAndTriggerAlert ใช้)
 export interface ParentNotification {
   id: string;
   parentUid: string;
@@ -410,9 +414,9 @@ export interface ParentNotification {
   title: string;
   message: string;
   status: 'unread' | 'read';
-  createdAt: Date;
-  pointsDeducted: number;
-  remainingScore: number;
+  createdAt: Timestamp;
+  pointsDeducted?: number;
+  remainingScore?: number;
   attendanceStatus?: string;
   date?: string;
   type?: 'info' | 'warning' | 'critical';
@@ -988,7 +992,10 @@ export interface StoreState {
   courseScoreSettings: CourseScoreSetting[];
 
   parentConferences: ParentConference[];
-  parentNotifications: ParentNotification[];
+  // parentNotifications ถูกลบออก (ระบบแจ้งเตือนรวมศูนย์): เดิมเป็น session-local array ที่ไม่มี UI
+  // ไหนอ่านเลยสักที่ (write-only dead state) — ข้อมูลจริงตอนนี้อยู่ที่ Firestore collection
+  // parent_notifications อ่านผ่าน services/firestoreService.ts: subscribeParentNotifications()
+  // โดยตรงในคอมโพเนนต์ (ดู components/notifications/NotificationBell.tsx)
   selfAssessments: Record<string, StudentSelfAssessment>;
   
   // Active Learning Points & Leaderboard
@@ -1110,7 +1117,6 @@ export interface StoreState {
 
   // New Actions for Parent Engagement
   scheduleConference: (conferenceId: string, date: string, time: string) => void;
-  addMockParentNotification: (notif: Omit<ParentNotification, 'id' | 'createdAt' | 'status'>) => void;
   saveSelfAssessment: (assessment: StudentSelfAssessment) => Promise<void>;
 
   // Extended Student & Parent Module Actions

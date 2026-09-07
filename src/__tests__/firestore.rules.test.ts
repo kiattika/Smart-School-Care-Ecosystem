@@ -8,7 +8,7 @@ import {
   assertFails,
 } from '@firebase/rules-unit-testing';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { enrollInActivity, withdrawFromActivity, createBillingInvoice, createBillingInvoicesBulk } from '../services/firestoreService';
+import { enrollInActivity, withdrawFromActivity, createBillingInvoice, createBillingInvoicesBulk, recordInfirmaryVisit, createParentNotification } from '../services/firestoreService';
 
 let testEnv: RulesTestEnvironment;
 
@@ -1529,6 +1529,97 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
         baseVisit({ id: 'inf-7', parentUid: 'repointed-parent' })
       ));
       await assertFails(asRole('INFIRMARY_STAFF').firestore().doc('infirmary_visits/inf-7').delete());
+    });
+
+    // ระบบแจ้งเตือนรวมศูนย์ — TASK 1: บันทึกอาการต้องเขียนแจ้งเตือนผู้ปกครองคู่กันไปเสมอในธุรกรรมเดียวกัน
+    it('บันทึกเข้าห้องพยาบาลจริงต้องสร้าง parent_notifications คู่กันไปด้วยในธุรกรรมเดียวกัน', async () => {
+      await seed();
+      const dbNurse = asUser(NURSE_UID, ['INFIRMARY_STAFF']).firestore();
+      const visitId = await recordInfirmaryVisit({
+        studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID,
+        studentName: 'นักเรียนทดสอบ', symptoms: 'ไข้สูง', temperature: 38.5,
+        treatment: 'เช็ดตัว', medicationGiven: 'พาราเซตามอล', restDurationMinutes: 20,
+        isUrgentAlert: true, nurseUid: NURSE_UID, nurseName: 'พยาบาลทดสอบ',
+      }, dbNurse as any);
+
+      expect(visitId).toBeTruthy();
+      let notifCount = 0;
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const snap = await ctx.firestore().collection('parent_notifications').where('parentUid', '==', PARENT_UID).get();
+        notifCount = snap.size;
+      });
+      expect(notifCount).toBe(1);
+    });
+  });
+
+  // ระบบแจ้งเตือนรวมศูนย์ — TASK 1: parent_notifications เขียนได้จาก role งาน + STUDENT/PARENT ที่เขียน
+  // ให้ตัวเองเท่านั้น (verify ผ่าน studentField()); เจ้าของกด "อ่านแล้ว" เองได้ (แก้ได้แค่ status)
+  describe('parent_notifications collection', () => {
+    const STU_UID = 'notif-stu-uid-1';
+    const STU_ID = 'notif-std-1';
+    const PARENT_UID = 'notif-parent-uid-1';
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID });
+      });
+    }
+    const notifDoc = (over: Record<string, unknown> = {}) => ({
+      id: 'x', parentUid: PARENT_UID, parentId: PARENT_UID, studentId: STU_ID, studentName: 'นักเรียนทดสอบ',
+      title: 'แจ้งเตือนทดสอบ', message: 'ข้อความทดสอบ', status: 'unread', type: 'info',
+      ...over,
+    });
+
+    it('lets STUDENT/PARENT create a notification addressed to their own real parentUid; denies a forged parentUid', async () => {
+      await seed();
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('parent_notifications/n1').set(notifDoc({ id: 'n1' })));
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n2').set(notifDoc({ id: 'n2' })));
+      await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('parent_notifications/n3').set(
+        notifDoc({ id: 'n3', parentUid: 'someone-else', parentId: 'someone-else' })
+      ));
+    });
+
+    it('lets HOMEROOM_TEACHER/SUBJECT_TEACHER/SUPER_ADMIN create for any student; denies an unrelated STUDENT/PARENT', async () => {
+      await seed();
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('parent_notifications/n4').set(notifDoc({ id: 'n4' })));
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('parent_notifications/n5').set(notifDoc({ id: 'n5' })));
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('parent_notifications/n6').set(notifDoc({ id: 'n6' })));
+      await assertFails(asUser('other-student', ['STUDENT']).firestore().doc('parent_notifications/n7').set(notifDoc({ id: 'n7' })));
+    });
+
+    it('lets the linked parent mark their own notification read (status only); denies changing other fields or an unrelated parent', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('parent_notifications/n8').set(notifDoc({ id: 'n8' }));
+      });
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n8').update({ status: 'read' }));
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n8').update({ status: 'read', title: 'แก้ไขหัวข้อ' }));
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('parent_notifications/n8').update({ status: 'read' }));
+    });
+
+    it('lets the linked parent/student read; denies an unrelated parent; only SUPER_ADMIN can delete', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('parent_notifications/n9').set(notifDoc({ id: 'n9' }));
+      });
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n9').get());
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('parent_notifications/n9').get());
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n9').delete());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('parent_notifications/n9').delete());
+    });
+
+    it('createParentNotification (helper จริงที่ store.ts เรียก) ข้ามการเขียนเงียบๆ เมื่อไม่มี parentUid จริง แทนการ fabricate ID ปลอม', async () => {
+      const dbTeacher = asRole('HOMEROOM_TEACHER').firestore();
+      await expect(createParentNotification({
+        parentUid: '', studentId: 'ghost-std', studentName: 'ผี', title: 'x', message: 'y',
+      }, dbTeacher as any)).resolves.not.toThrow();
+
+      let count = 0;
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const snap = await ctx.firestore().collection('parent_notifications').where('studentId', '==', 'ghost-std').get();
+        count = snap.size;
+      });
+      expect(count).toBe(0);
     });
   });
 
