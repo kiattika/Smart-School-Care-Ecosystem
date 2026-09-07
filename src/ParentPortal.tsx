@@ -1,7 +1,9 @@
 import { cn } from "./lib/utils";
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useStore } from './store';
 import { useRealStudents } from './hooks/useRealStudents';
+import { subscribeBillingInvoices } from './services/firestoreService';
+import { BillingInvoice } from './types';
 import { attendanceStatsFromCounts } from './lib/studentAttendanceStats';
 import { 
   Calendar, 
@@ -33,18 +35,27 @@ import { ParentPortfolioView } from './components/portfolio/ParentPortfolioView'
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
+import { NotificationBell } from './components/notifications/NotificationBell';
 
 export function ParentPortal() {
   const {
     user,
     attendanceRecords,
     gateAttendanceLogs,
-    billingInvoices,
     parentTeacherMessages,
     selfAssessments
   } = useStore();
   // นักเรียนของผู้ปกครองคนนี้จาก Firestore สด — query filter ด้วย parentUid (ผ่าน firestore.rules)
   const { students: linkedStudents } = useRealStudents({ parentUid: user?.uid });
+
+  // TASK 2 (เฟส 2 การเงิน): ใบแจ้งหนี้จริงจาก Firestore แบบ real-time แทน state.billingInvoices
+  // ของ Zustand (ไม่เคยมี listener ผูกไว้เลย — ป้ายแจ้งเตือน "มียอดค้างชำระ" เดิมจึงไม่เคยขึ้นจริง)
+  const [billingInvoices, setBillingInvoices] = useState<BillingInvoice[]>([]);
+  useEffect(() => {
+    if (!user?.uid) { setBillingInvoices([]); return; }
+    const unsubscribe = subscribeBillingInvoices(setBillingInvoices, { parentUid: user.uid });
+    return () => unsubscribe();
+  }, [user?.uid]);
 
   // Selected student state (ผู้ปกครองมีบุตรหลานได้หลายคน — เริ่มที่คนแรก)
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
@@ -74,7 +85,7 @@ export function ParentPortal() {
   }
 
   // Unpaid invoices count
-  const pendingInvoices = billingInvoices.filter(i => i.studentId === student.studentId && i.status === 'UNPAID');
+  const pendingInvoices = billingInvoices.filter(i => i.studentId === student.studentId && i.status !== 'PAID');
   const recentGateLog = gateAttendanceLogs.find(g => g.studentId === student.studentId);
 
   return (
@@ -112,6 +123,10 @@ export function ParentPortal() {
 
         {/* Child Switcher & Urgent Alerts */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
+          <div className="flex justify-end sm:order-last">
+            <NotificationBell />
+          </div>
+
           {pendingInvoices.length > 0 && (
             <div 
               onClick={() => setActiveTab('services')}
@@ -440,7 +455,7 @@ export function ParentPortal() {
 
         {/* 2. Health & Mental Well-being */}
         {activeTab === 'health' && (
-          <HealthMentalWellbeingModule studentId={student.studentId} isParentView={true} />
+          <HealthMentalWellbeingModule studentId={student.studentId} student={student} isParentView={true} />
         )}
 
         {/* 3. Socioeconomic Welfare & Home Visit */}
@@ -470,7 +485,7 @@ export function ParentPortal() {
 
         {/* 7. Parent Engagement & e-Billing & Appointments */}
         {activeTab === 'services' && (
-          <ParentEngagementServices studentId={student.studentId} />
+          <ParentEngagementServices studentId={student.studentId} student={student} isParentView={true} />
         )}
 
       </div>

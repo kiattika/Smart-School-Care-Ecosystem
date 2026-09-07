@@ -13,7 +13,9 @@ import {
   serverTimestamp,
   orderBy,
   onSnapshot,
-  increment
+  increment,
+  writeBatch,
+  Firestore
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import {
@@ -42,7 +44,13 @@ import {
   UserProfile,
   LateAttendanceRequestRecord,
   StudentPortfolioEntry,
-  StudentHomeLocation
+  StudentHomeLocation,
+  ElectiveActivityConfig,
+  ActivityEnrollment,
+  HouseConfig,
+  GuidanceCounselingCase,
+  InfirmaryVisit,
+  ParentNotification
 } from '../types';
 import { SchoolGeofenceConfig } from '../utils/geoUtils';
 
@@ -275,6 +283,7 @@ export async function updateBehaviorScoreAndTriggerAlert(
       const currentScore = typeof studentData.behaviorScore === 'number' ? studentData.behaviorScore : 100;
       const studentName = studentData.fullName || studentData.name || `นักเรียนรหัส ${studentId}`;
       const parentUid = studentData.parentUid || studentData.parentId || '';
+      const studentUid = studentData.studentUid || null;
       const dateToday = new Date().toISOString().split('T')[0];
 
       // Deduct score ensuring it stays within [0, 100]
@@ -317,6 +326,7 @@ export async function updateBehaviorScoreAndTriggerAlert(
       transaction.set(notificationRef, {
         parentUid,
         parentId: parentUid,
+        studentUid,
         studentId,
         studentName,
         title: alertTitle,
@@ -334,6 +344,7 @@ export async function updateBehaviorScoreAndTriggerAlert(
         transaction.set(warningNotifRef, {
           parentUid,
           parentId: parentUid,
+          studentUid,
           studentId,
           studentName,
           title: "⚠️ คะแนนพฤติกรรมเริ่มลดลง",
@@ -376,6 +387,99 @@ export async function updateBehaviorScoreAndTriggerAlert(
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, studentsPath);
+  }
+}
+
+/**
+ * Centralized parent notifications (parent_notifications/{notifId})
+ * FIX: หลายจุดใน store.ts เดิม push แจ้งเตือนเข้า state.parentNotifications แบบ session-local
+ * ล้วนๆ (ไม่เคยเขียน Firestore) ทำให้ผู้ปกครองไม่เห็นแจ้งเตือนจริงถ้าไม่ได้อยู่ในเซสชันเบราว์เซอร์
+ * เดียวกับตอนที่เหตุการณ์เกิดขึ้น — ใช้ schema/pattern เดียวกับที่ updateBehaviorScoreAndTriggerAlert
+ * ใช้อยู่แล้วข้างบน (parentUid/parentId/studentId/studentName/title/message/status/createdAt/type)
+ */
+export type CreateParentNotificationInput = Pick<ParentNotification, 'parentUid' | 'studentId' | 'studentName' | 'title' | 'message'> &
+  Partial<Pick<ParentNotification, 'type' | 'pointsDeducted' | 'remainingScore' | 'attendanceStatus' | 'date' | 'studentUid'>>;
+
+/** เขียนแจ้งเตือนผู้ปกครอง (และนักเรียนเจ้าของ ถ้ามี studentUid) 1 รายการ — ถ้าไม่มี parentUid จริง
+ *  (นักเรียนยังไม่เชื่อมบัญชีผู้ปกครอง) ข้ามการเขียนไปเงียบๆ แทนการ fabricate ID ปลอมแบบ
+ *  `parent_${studentId}` ที่เคยเป็นมา (เขียนไปก็ไม่มีผู้ปกครองคนไหนอ่านได้จริงอยู่ดี เพราะไม่มี Auth UID
+ *  ไหนตรงกับ ID ปลอมนั้น) — เกตนี้ตั้งใจคงไว้เหมือนเดิม แม้จะมี studentUid มาด้วยก็ตาม เพราะทุกจุดที่
+ *  เรียกฟังก์ชันนี้อยู่ปัจจุบันยังถือว่า "ไม่มีผู้ปกครองเชื่อมบัญชี" เป็นกรณีข้อมูลไม่สมบูรณ์ที่ควร skip
+ *  ทั้งคู่ ไม่ใช่แค่ฝั่งผู้ปกครอง (ถ้าต้องการแยกกัน ต้องตัดสินใจ scope ใหม่แยกต่างหาก) */
+export async function createParentNotification(
+  data: CreateParentNotificationInput,
+  firestoreDb: Firestore = db,
+): Promise<void> {
+  if (!data.parentUid) {
+    console.warn('[createParentNotification] skipped: no real parentUid for studentId', data.studentId);
+    return;
+  }
+  const ref = doc(collection(firestoreDb, 'parent_notifications'));
+  try {
+    await setDoc(ref, {
+      id: ref.id,
+      parentUid: data.parentUid,
+      parentId: data.parentUid,
+      studentUid: data.studentUid ?? null,
+      studentId: data.studentId,
+      studentName: data.studentName,
+      title: data.title,
+      message: data.message,
+      status: 'unread',
+      createdAt: serverTimestamp(),
+      type: data.type ?? 'info',
+      ...(data.pointsDeducted !== undefined ? { pointsDeducted: data.pointsDeducted } : {}),
+      ...(data.remainingScore !== undefined ? { remainingScore: data.remainingScore } : {}),
+      ...(data.attendanceStatus !== undefined ? { attendanceStatus: data.attendanceStatus } : {}),
+      ...(data.date !== undefined ? { date: data.date } : {}),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `parent_notifications/${ref.id}`);
+  }
+}
+
+/** ผู้ปกครองเจ้าของกด "อ่านแล้ว" เอง — rules จำกัดให้แก้ได้แค่ field status เท่านั้น */
+export async function markParentNotificationRead(notifId: string, firestoreDb: Firestore = db): Promise<void> {
+  try {
+    await updateDoc(doc(firestoreDb, 'parent_notifications', notifId), { status: 'read' });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `parent_notifications/${notifId}`);
+  }
+}
+
+/** อ่านทั้งหมด — ยิง update ทีละรายการ (ปกติมีไม่กี่สิบรายการต่อผู้ปกครอง ไม่จำเป็นต้องใช้ batch) */
+export async function markAllParentNotificationsRead(notifIds: string[], firestoreDb: Firestore = db): Promise<void> {
+  await Promise.all(notifIds.map(id => markParentNotificationRead(id, firestoreDb)));
+}
+
+/** real-time listener ของแจ้งเตือน 1 คน เรียงใหม่สุดก่อน — ใช้ได้ทั้งฝั่งผู้ปกครอง ({parentUid}) และ
+ *  ฝั่งนักเรียนเจ้าของเอง ({studentUid}) ตาม role ของผู้ใช้ปัจจุบัน ส่งมาได้ทีละแบบเท่านั้น
+ *  (ถ้าส่งมาทั้งคู่ ใช้ parentUid ก่อน) */
+export function subscribeParentNotifications(
+  onUpdate: (notifications: ParentNotification[]) => void,
+  filter: { parentUid?: string; studentUid?: string },
+): () => void {
+  try {
+    const parentUid = filter.parentUid;
+    const studentUid = filter.studentUid;
+    if (!parentUid && !studentUid) { onUpdate([]); return () => {}; }
+    const col = collection(db, 'parent_notifications');
+    const whereClause = parentUid ? where('parentUid', '==', parentUid) : where('studentUid', '==', studentUid);
+    return onSnapshot(query(col, whereClause), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ParentNotification));
+      list.sort((a, b) => {
+        const ta = (a.createdAt as any)?.toMillis?.() ?? 0;
+        const tb = (b.createdAt as any)?.toMillis?.() ?? 0;
+        return tb - ta;
+      });
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeParentNotifications] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeParentNotifications] setup error:', error);
+    return () => {};
   }
 }
 
@@ -1091,6 +1195,12 @@ export async function savePostTeachingRecordFirestore(record: PostTeachingRecord
 
 /**
  * Mental Health Screenings & SDQ Persistence
+ *
+ * FIX: ทั้ง 3 ฟังก์ชันนี้เดิม catch แล้ว console.warn เงียบๆ โดยไม่ throw ต่อ — ทำให้ permission-denied
+ * จริง (เช่นตอน rules ปฏิเสธ) มองไม่เห็นจากฝั่งเรียกใช้เลย ส่วน store.ts ก็ยัง set optimistic state
+ * ต่อไปเหมือนเดิมไม่ว่าการเขียนจริงจะสำเร็จหรือไม่ ผู้ใช้เห็น "บันทึกสำเร็จ" ปลอมทั้งที่ Firestore
+ * ปฏิเสธจริง — เปลี่ยนให้ throw ต่อผ่าน handleFirestoreError (pattern เดียวกับฟังก์ชันอื่นในไฟล์นี้)
+ * เพื่อให้ store.ts รอผลจริงก่อนอัปเดต state/แสดงข้อความสำเร็จ
  */
 export async function save2QScreeningFirestore(studentId: string, screening: TwoQuestionScreening): Promise<void> {
   const collectionPath = 'student_screenings_2q';
@@ -1101,7 +1211,7 @@ export async function save2QScreeningFirestore(studentId: string, screening: Two
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.warn('[save2QScreeningFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${studentId}`);
   }
 }
 
@@ -1114,7 +1224,7 @@ export async function savePHQ9ScreeningFirestore(studentId: string, screening: P
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.warn('[savePHQ9ScreeningFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${studentId}`);
   }
 }
 
@@ -1127,13 +1237,203 @@ export async function saveSDQAssessmentFirestore(sdq: SDQAssessment): Promise<vo
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.warn('[saveSDQAssessmentFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${sdq.id}`);
+  }
+}
+
+/** real-time listener ของผลประเมิน SDQ ของนักเรียนคนเดียว — ใช้แสดง "3 มุมมอง" (ตนเอง/ครู/ผู้ปกครอง)
+ *  ใน HealthMentalWellbeingModule.tsx แทนการอ่านจาก state.sdqAssessments ของ Zustand (เดิมไม่เคยมี
+ *  listener ผูกไว้เลย ว่างเปล่าเสมอไม่ว่าจะ submit เท่าไหร่)
+ *  - { studentUid } → นักเรียนเจ้าของเห็นครบทั้ง 3 มุมมอง (rules อนุญาตผ่าน studentUid==auth.uid)
+ *  - { respondentUid } → ผู้ปกครอง/ครูเห็นเฉพาะรายการที่ตัวเองเป็นคนกรอก (rules ยังไม่เปิดให้เห็น
+ *    มุมมองอื่นของครอบครัวเดียวกัน — เป็นการตัดสินใจ scope แบบระมัดระวังไว้ก่อน ดูคำอธิบายในคำตอบ) */
+export function subscribeSDQAssessments(
+  onUpdate: (assessments: SDQAssessment[]) => void,
+  filter: { studentUid?: string; respondentUid?: string }
+): () => void {
+  try {
+    const col = collection(db, 'student_assessments_sdq');
+    const clauses = [];
+    if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
+    if (filter.respondentUid) clauses.push(where('respondentUid', '==', filter.respondentUid));
+    if (clauses.length === 0) { onUpdate([]); return () => {}; }
+    return onSnapshot(query(col, ...clauses), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as SDQAssessment));
+      list.sort((a, b) => (b.assessmentDate || '').localeCompare(a.assessmentDate || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeSDQAssessments] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeSDQAssessments] setup error:', error);
+    return () => {};
   }
 }
 
 /**
  * Parent Engagement Persistence (Billing, Messages, Appointments)
+ *
+ * ขอบเขตงานจริง (ยืนยันจากโรงเรียน): "แจ้งค่าใช้จ่าย + ส่งใบเสร็จ เท่านั้น" ไม่ใช่ระบบบัญชีเต็มรูปแบบ
  */
+const BILLING_INVOICES_COL = 'billing_invoices';
+const BILLING_COUNTERS_COL = 'billing_counters';
+
+/** ปีการศึกษาปัจจุบัน (พ.ศ.) — namespace ของเลขที่ใบแจ้งหนี้ต่อปี (เช่น "2569") */
+export function getCurrentAcademicYear(): string {
+  return String(new Date().getFullYear() + 543);
+}
+
+/** QR mockup ผูกกับเลขที่ใบแจ้งหนี้จริง (ไม่ใช่ EMVCo PromptPay payload จริง — นอกขอบเขตงานนี้
+ *  ที่ยืนยันแค่ "แจ้งค่าใช้จ่าย + ส่งใบเสร็จ" ไม่ใช่ระบบเชื่อมธนาคารจริง — คงรูปแบบ mock เดิมที่มีอยู่
+ *  ในระบบไว้ แค่ทำให้ REF ที่ฝังในภาพตรงกับเลขที่ auditable จริงแทนเลขปลอมตายตัว) */
+function buildPromptPayQrMock(invoiceNumber: string, amount: number): string {
+  const payload = `PROMPTPAY-MOCK|REF:${invoiceNumber}|AMOUNT:${amount.toFixed(2)}`;
+  return `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(payload)}`;
+}
+
+export type CreateInvoiceInput = Pick<BillingInvoice, 'studentId' | 'title' | 'items' | 'totalAmount' | 'dueDate'> & {
+  studentUid: string | null;
+  parentUid: string | null;
+};
+
+/**
+ * สร้างใบแจ้งหนี้ 1 ใบ พร้อมออกเลขที่ auditable จริงผ่าน billing_counters/{ปีการศึกษา}
+ * FIX: เดิมไม่มีฟีเจอร์นี้อยู่เลยในระบบ (เส้นทางสร้าง→แสดง→จ่าย ใช้งานจริงไม่ได้แม้แต่ขั้นตอนเดียว)
+ * และ receiptNo เดิม (ใน payBillingInvoiceFirestore) ใช้ Math.random() — ตรวจสอบย้อนหลังไม่ได้
+ *
+ * อ่าน+เพิ่ม counter ในธุรกรรมเดียวกับการเขียนเอกสารจริงเสมอ (กันเลขซ้ำ/กระโดดข้ามจาก race
+ * condition) — pattern เดียวกับ enrollInActivity ที่พิสูจน์แล้วว่าได้ผลจริงกับระบบสมัครชุมนุม
+ */
+export async function createBillingInvoice(
+  data: CreateInvoiceInput,
+  createdBy: string,
+  firestoreDb: Firestore = db,
+): Promise<string> {
+  const academicYear = getCurrentAcademicYear();
+  const counterRef = doc(firestoreDb, BILLING_COUNTERS_COL, academicYear);
+  const invoiceId = `inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const invoiceRef = doc(firestoreDb, BILLING_INVOICES_COL, invoiceId);
+  try {
+    await runTransaction(firestoreDb, async (transaction) => {
+      // อ่านก่อนเขียนเสมอ (ข้อกำหนดของ Firestore transaction)
+      const counterSnap = await transaction.get(counterRef);
+      const nextNumber = (counterSnap.exists() ? Number((counterSnap.data() as any).lastNumber) || 0 : 0) + 1;
+      const invoiceNumber = `INV-${academicYear}-${String(nextNumber).padStart(4, '0')}`;
+
+      const payload: BillingInvoice = {
+        id: invoiceId,
+        invoiceNumber,
+        studentId: data.studentId,
+        studentUid: data.studentUid,
+        parentUid: data.parentUid,
+        title: data.title,
+        items: data.items,
+        totalAmount: data.totalAmount,
+        dueDate: data.dueDate,
+        status: 'PENDING',
+        promptPayQr: buildPromptPayQrMock(invoiceNumber, data.totalAmount),
+        createdBy,
+        createdAt: new Date().toISOString(),
+      };
+
+      transaction.set(invoiceRef, payload);
+      transaction.set(counterRef, { academicYear, lastNumber: nextNumber, updatedAt: serverTimestamp() }, { merge: true });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${BILLING_INVOICES_COL}/${invoiceId}`);
+  }
+  return invoiceId;
+}
+
+/**
+ * สร้างใบแจ้งหนี้แบบเดียวกันให้หลายนักเรียนพร้อมกัน (เช่น ค่าเทอมทั้งห้อง/ทั้งโรงเรียน) — จองเลขที่
+ * ต่อเนื่องเป็นชุดในธุรกรรมเดียวกันทั้งชุด (อ่าน counter ครั้งเดียว เพิ่มทีละ 1 ต่อคนในชุด แล้วเขียน
+ * ค่า counter สุดท้ายครั้งเดียว) แบ่งเป็นชุดละไม่เกิน 400 รายการต่อธุรกรรม (Firestore จำกัด 500
+ * การเขียนต่อธุรกรรม — เผื่อพื้นที่ไว้สำหรับ counter write) รันทีละชุดตามลำดับเพื่อความปลอดภัย
+ */
+export async function createBillingInvoicesBulk(
+  targets: { studentId: string; studentUid: string | null; parentUid: string | null }[],
+  common: Pick<BillingInvoice, 'title' | 'items' | 'totalAmount' | 'dueDate'>,
+  createdBy: string,
+  firestoreDb: Firestore = db,
+): Promise<string[]> {
+  const academicYear = getCurrentAcademicYear();
+  const counterRef = doc(firestoreDb, BILLING_COUNTERS_COL, academicYear);
+  const allIds: string[] = [];
+  const CHUNK_SIZE = 400;
+
+  for (let i = 0; i < targets.length; i += CHUNK_SIZE) {
+    const chunk = targets.slice(i, i + CHUNK_SIZE);
+    try {
+      await runTransaction(firestoreDb, async (transaction) => {
+        const counterSnap = await transaction.get(counterRef);
+        let nextNumber = counterSnap.exists() ? Number((counterSnap.data() as any).lastNumber) || 0 : 0;
+        const now = new Date().toISOString();
+
+        chunk.forEach((target, idx) => {
+          nextNumber += 1;
+          const invoiceId = `inv_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${idx}`;
+          const invoiceNumber = `INV-${academicYear}-${String(nextNumber).padStart(4, '0')}`;
+          const invoiceRef = doc(firestoreDb, BILLING_INVOICES_COL, invoiceId);
+          const payload: BillingInvoice = {
+            id: invoiceId,
+            invoiceNumber,
+            studentId: target.studentId,
+            studentUid: target.studentUid,
+            parentUid: target.parentUid,
+            title: common.title,
+            items: common.items,
+            totalAmount: common.totalAmount,
+            dueDate: common.dueDate,
+            status: 'PENDING',
+            promptPayQr: buildPromptPayQrMock(invoiceNumber, common.totalAmount),
+            createdBy,
+            createdAt: now,
+          };
+          transaction.set(invoiceRef, payload);
+          allIds.push(invoiceId);
+        });
+
+        transaction.set(counterRef, { academicYear, lastNumber: nextNumber, updatedAt: serverTimestamp() }, { merge: true });
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `${BILLING_INVOICES_COL} (bulk chunk starting at index ${i})`);
+    }
+  }
+  return allIds;
+}
+
+/**
+ * real-time listener ของใบแจ้งหนี้
+ *  - ไม่ระบุ filter → FINANCE_STAFF/SUPER_ADMIN เห็นทั้งโรงเรียน (rules อนุญาตอ่านทั้ง collection)
+ *  - { studentUid } → นักเรียนดูของตัวเอง (ต้อง filter ฝั่ง query ให้ผ่าน rules)
+ *  - { parentUid }  → ผู้ปกครองดูของบุตรหลาน (ต้อง filter ฝั่ง query ให้ผ่าน rules)
+ */
+export function subscribeBillingInvoices(
+  onUpdate: (invoices: BillingInvoice[]) => void,
+  filter: { studentUid?: string; parentUid?: string } = {}
+): () => void {
+  try {
+    const col = collection(db, BILLING_INVOICES_COL);
+    const clauses = [];
+    if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
+    if (filter.parentUid) clauses.push(where('parentUid', '==', filter.parentUid));
+    const ref = clauses.length > 0 ? query(col, ...clauses) : col;
+    return onSnapshot(ref, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as BillingInvoice));
+      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeBillingInvoices] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeBillingInvoices] setup error:', error);
+    return () => {};
+  }
+}
+
 export async function payBillingInvoiceFirestore(invoiceId: string, receiptNo: string): Promise<void> {
   const collectionPath = 'billing_invoices';
   try {
@@ -1376,6 +1676,477 @@ export function subscribeStudentHomeLocationsByRoom(
     });
   } catch (error) {
     console.warn('[subscribeStudentHomeLocationsByRoom] Setup error:', error);
+    return () => {};
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Elective activities (ชุมนุม/กิจกรรมตามความสนใจ) — elective_activities_config +
+ * activity_enrollments + activity_enrollment_counts
+ *
+ * capacity ตรวจสอบแบบ atomic ผ่าน "ตัวนับ" แยก (activity_enrollment_counts/{scheduleId})
+ * ไม่ใช่การนับจาก activity_enrollments ตรงๆ เพราะ Firestore Transaction.get() รับได้แค่
+ * DocumentReference เดียว query ข้าม document ไม่ได้ — ตัวนับนี้ sync คู่กับ enrollment เสมอ
+ * ในทรานแซกชันเดียวกัน (อ่าน-ตรวจ-เขียนพร้อมกัน) ทำให้ 2 คนแย่งที่นั่งสุดท้ายพร้อมกัน มีแค่คนเดียว
+ * ที่ transaction สำเร็จจริง (อีกคน retry แล้วเห็นค่านับใหม่ที่เต็มแล้ว จึงถูก throw error)
+ *
+ * ทุกฟังก์ชันรับ `firestoreDb` เป็น parameter เสริม (default = db ของแอปจริง) เพื่อให้ทดสอบผ่าน
+ * Firebase Emulator จริงได้ตรงๆ (ส่ง context.firestore() จาก @firebase/rules-unit-testing เข้ามา)
+ * โดยไม่ต้องเขียนตรรกะซ้ำในเทสต์ — ดู src/__tests__/firestore.rules.test.ts
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export async function saveElectiveActivityConfig(
+  config: { subjectCode: string; name: string; capacityPerSection: number | null; createdBy: string },
+  firestoreDb: Firestore = db,
+): Promise<void> {
+  try {
+    await setDoc(doc(firestoreDb, 'elective_activities_config', config.subjectCode), {
+      id: config.subjectCode,
+      subjectCode: config.subjectCode,
+      name: config.name,
+      capacityPerSection: config.capacityPerSection,
+      createdBy: config.createdBy,
+      createdAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `elective_activities_config/${config.subjectCode}`);
+  }
+}
+
+/** ยกเลิกการเป็น ELECTIVE ของ subjectCode นี้ (กลับไปเป็น WHOLE_CLASS โดยปริยาย) —
+ *  ไม่แตะ activity_enrollments ที่มีอยู่แล้ว (เก็บประวัติไว้) */
+export async function removeElectiveActivityConfig(subjectCode: string, firestoreDb: Firestore = db): Promise<void> {
+  try {
+    await deleteDoc(doc(firestoreDb, 'elective_activities_config', subjectCode));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `elective_activities_config/${subjectCode}`);
+  }
+}
+
+export function subscribeElectiveActivityConfigs(onUpdate: (configs: ElectiveActivityConfig[]) => void): () => void {
+  try {
+    return onSnapshot(collection(db, 'elective_activities_config'), (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as ElectiveActivityConfig)));
+    }, (err) => {
+      console.warn('[subscribeElectiveActivityConfigs] listener error:', err.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeElectiveActivityConfigs] setup error:', error);
+    return () => {};
+  }
+}
+
+/** สมัครชุมนุม/กิจกรรม ELECTIVE — atomic capacity check ผ่านทรานแซกชัน (กัน race condition) */
+export async function enrollInActivity(
+  params: {
+    scheduleId: string;
+    subjectCode: string;
+    studentId: string;
+    studentUid: string;
+    capacityPerSection: number | null;
+  },
+  firestoreDb: Firestore = db,
+): Promise<void> {
+  const { scheduleId, subjectCode, studentId, studentUid, capacityPerSection } = params;
+  const enrollmentId = `${scheduleId}_${studentId}`;
+  const enrollmentRef = doc(firestoreDb, 'activity_enrollments', enrollmentId);
+  const counterRef = doc(firestoreDb, 'activity_enrollment_counts', scheduleId);
+  try {
+    await runTransaction(firestoreDb, async (transaction) => {
+      // อ่านก่อนเขียนเสมอ (ข้อกำหนดของ Firestore transaction)
+      const [enrollmentSnap, counterSnap] = await Promise.all([
+        transaction.get(enrollmentRef),
+        transaction.get(counterRef),
+      ]);
+
+      if (enrollmentSnap.exists() && !(enrollmentSnap.data() as any).removedAt) {
+        throw new Error('ENROLL_ALREADY_ACTIVE: สมัครชุมนุมนี้ไปแล้ว');
+      }
+
+      const currentCount = counterSnap.exists() ? Number((counterSnap.data() as any).count) || 0 : 0;
+      if (capacityPerSection !== null && currentCount >= capacityPerSection) {
+        throw new Error('ENROLL_FULL: ที่นั่งเต็มแล้ว');
+      }
+
+      transaction.set(enrollmentRef, {
+        id: enrollmentId,
+        scheduleId,
+        subjectCode,
+        studentId,
+        studentUid,
+        enrolledAt: serverTimestamp(),
+        removedAt: null,
+        removedBy: null,
+        removedReason: null,
+      });
+      transaction.set(counterRef, {
+        scheduleId,
+        subjectCode,
+        count: currentCount + 1,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    });
+  } catch (error) {
+    // ข้อความจาก throw ภายใน (เต็มแล้ว/สมัครไปแล้ว) ต้องส่งต่อให้ UI แสดงจริง ไม่ sanitize ทิ้ง
+    if (error instanceof Error && (error.message.startsWith('ENROLL_FULL') || error.message.startsWith('ENROLL_ALREADY_ACTIVE'))) {
+      throw new Error(error.message.split(': ').slice(1).join(': '));
+    }
+    handleFirestoreError(error, OperationType.WRITE, `activity_enrollments/${enrollmentId}`);
+  }
+}
+
+/** ถอนชุมนุม — นักเรียนถอนตัวเอง (removedBy: null) หรือครูถอน (removedBy: uid ครู) */
+export async function withdrawFromActivity(
+  params: {
+    scheduleId: string;
+    studentId: string;
+    removedBy: string | null;
+    removedReason: string | null;
+  },
+  firestoreDb: Firestore = db,
+): Promise<void> {
+  const { scheduleId, studentId, removedBy, removedReason } = params;
+  const enrollmentId = `${scheduleId}_${studentId}`;
+  const enrollmentRef = doc(firestoreDb, 'activity_enrollments', enrollmentId);
+  const counterRef = doc(firestoreDb, 'activity_enrollment_counts', scheduleId);
+  try {
+    await runTransaction(firestoreDb, async (transaction) => {
+      const [enrollmentSnap, counterSnap] = await Promise.all([
+        transaction.get(enrollmentRef),
+        transaction.get(counterRef),
+      ]);
+      if (!enrollmentSnap.exists() || (enrollmentSnap.data() as any).removedAt) {
+        throw new Error('WITHDRAW_NOT_FOUND: ไม่พบการสมัครที่ยังไม่ถูกถอน');
+      }
+      const currentCount = counterSnap.exists() ? Number((counterSnap.data() as any).count) || 0 : 0;
+
+      transaction.update(enrollmentRef, {
+        removedAt: serverTimestamp(),
+        removedBy,
+        removedReason,
+      });
+      transaction.set(counterRef, {
+        count: Math.max(0, currentCount - 1),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('WITHDRAW_NOT_FOUND')) {
+      throw new Error(error.message.split(': ').slice(1).join(': '));
+    }
+    handleFirestoreError(error, OperationType.WRITE, `activity_enrollments/${enrollmentId}`);
+  }
+}
+
+/** รายชื่อสมัครปัจจุบัน (ยังไม่ถูกถอน) ของ section หนึ่ง — real-time สำหรับหน้าครูผู้สอน */
+export function subscribeActiveEnrollmentsBySchedule(
+  scheduleId: string,
+  onUpdate: (enrollments: ActivityEnrollment[]) => void,
+): () => void {
+  try {
+    const q = query(
+      collection(db, 'activity_enrollments'),
+      where('scheduleId', '==', scheduleId),
+      where('removedAt', '==', null),
+    );
+    return onSnapshot(q, (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as ActivityEnrollment)));
+    }, (err) => {
+      console.warn('[subscribeActiveEnrollmentsBySchedule] listener error:', err.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeActiveEnrollmentsBySchedule] setup error:', error);
+    return () => {};
+  }
+}
+
+/** รายชื่อสมัครปัจจุบันของนักเรียนคนหนึ่ง ทุกชุมนุม — real-time สำหรับหน้านักเรียน */
+export function subscribeActiveEnrollmentsByStudent(
+  studentId: string,
+  onUpdate: (enrollments: ActivityEnrollment[]) => void,
+): () => void {
+  try {
+    const q = query(
+      collection(db, 'activity_enrollments'),
+      where('studentId', '==', studentId),
+      where('removedAt', '==', null),
+    );
+    return onSnapshot(q, (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as ActivityEnrollment)));
+    }, (err) => {
+      console.warn('[subscribeActiveEnrollmentsByStudent] listener error:', err.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeActiveEnrollmentsByStudent] setup error:', error);
+    return () => {};
+  }
+}
+
+/** ตัวนับที่นั่งของทุก section — real-time สำหรับแสดง "ที่นั่งเหลือ" หน้านักเรียน */
+export function subscribeActivityEnrollmentCounts(onUpdate: (counts: Record<string, number>) => void): () => void {
+  try {
+    return onSnapshot(collection(db, 'activity_enrollment_counts'), (snap) => {
+      const map: Record<string, number> = {};
+      snap.forEach(d => { map[d.id] = Number((d.data() as any).count) || 0; });
+      onUpdate(map);
+    }, (err) => {
+      console.warn('[subscribeActivityEnrollmentCounts] listener error:', err.message);
+      onUpdate({});
+    });
+  } catch (error) {
+    console.warn('[subscribeActivityEnrollmentCounts] setup error:', error);
+    return () => {};
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * House config (คณะสี) — รากฐานสำหรับระบบคะแนนถ้วยในอนาคต (ยังไม่คำนวณคะแนนถ้วยตอนนี้)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export async function saveHouseConfig(
+  house: { id?: string; name: string; colorHex: string; assignmentMode: 'SINGLE_PER_ROOM' | 'MIXED' },
+): Promise<void> {
+  const id = house.id || `house_${Date.now()}`;
+  try {
+    await setDoc(doc(db, 'house_config', id), {
+      id,
+      name: house.name,
+      colorHex: house.colorHex,
+      assignmentMode: house.assignmentMode,
+      createdAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `house_config/${id}`);
+  }
+}
+
+export async function deleteHouseConfig(id: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'house_config', id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `house_config/${id}`);
+  }
+}
+
+export function subscribeHouseConfigs(onUpdate: (houses: HouseConfig[]) => void): () => void {
+  try {
+    return onSnapshot(collection(db, 'house_config'), (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as HouseConfig)));
+    }, (err) => {
+      console.warn('[subscribeHouseConfigs] listener error:', err.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeHouseConfigs] setup error:', error);
+    return () => {};
+  }
+}
+
+/** โหมด SINGLE_PER_ROOM: assign นักเรียนทั้งห้องเข้าคณะเดียวกันในทีเดียว (batch write) */
+export async function bulkAssignHouseToRoom(room: string, houseId: string | null, studentIds: string[]): Promise<void> {
+  if (studentIds.length === 0) return;
+  try {
+    // Firestore batch จำกัด 500 การเขียนต่อ batch — แบ่งเป็นชุดกันเกิน
+    for (let i = 0; i < studentIds.length; i += 450) {
+      const chunk = studentIds.slice(i, i + 450);
+      const batch = writeBatch(db);
+      chunk.forEach(studentId => {
+        batch.update(doc(db, 'students', studentId), { houseId, updatedAt: serverTimestamp() });
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `students (bulk houseId) room=${room}`);
+  }
+}
+
+/** โหมด MIXED: assign รายบุคคล */
+export async function assignHouseToStudent(studentId: string, houseId: string | null): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'students', studentId), { houseId, updatedAt: serverTimestamp() });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `students/${studentId}.houseId`);
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Guidance Counseling Cases (guidance_counseling_cases/{caseId})
+ * เนื้อหาการให้คำปรึกษาจิตวิทยาของผู้เยาว์ — ข้อมูลอ่อนไหวที่สุดในระบบ อ่าน/เขียนได้เฉพาะ
+ * GUIDANCE_COUNSELOR/SUPER_ADMIN เท่านั้น (ดู firestore.rules match /guidance_counseling_cases)
+ * ต่างจาก collection สุขภาพจิตอื่นๆ ตรงที่ครูประจำชั้น/ผู้ปกครอง/นักเรียนเจ้าของเคสอ่านไม่ได้เลย
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const GUIDANCE_CASES_COL = 'guidance_counseling_cases';
+
+export async function createGuidanceCounselingCase(
+  data: Pick<GuidanceCounselingCase, 'studentId' | 'studentName' | 'classRoom' | 'category' | 'notes' | 'severity'> &
+    { counselorUid: string; counselorName: string }
+): Promise<string> {
+  const id = `case_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const now = new Date().toISOString();
+  const payload: GuidanceCounselingCase = {
+    id,
+    studentId: data.studentId,
+    studentName: data.studentName,
+    classRoom: data.classRoom,
+    counselorUid: data.counselorUid,
+    counselorName: data.counselorName,
+    category: data.category,
+    notes: data.notes,
+    severity: data.severity,
+    status: 'IN_PROGRESS',
+    createdAt: now,
+    updatedAt: now,
+    lastSessionDate: now.split('T')[0],
+  };
+  try {
+    await setDoc(doc(db, GUIDANCE_CASES_COL, id), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${GUIDANCE_CASES_COL}/${id}`);
+  }
+  return id;
+}
+
+export async function updateGuidanceCounselingCaseStatus(
+  caseId: string,
+  status: GuidanceCounselingCase['status']
+): Promise<void> {
+  try {
+    await setDoc(doc(db, GUIDANCE_CASES_COL, caseId), {
+      status,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${GUIDANCE_CASES_COL}/${caseId}`);
+  }
+}
+
+/** real-time listener — เฉพาะ GUIDANCE_COUNSELOR/SUPER_ADMIN ที่ผ่าน rules จะได้ข้อมูลจริง
+ *  role อื่นจะโดน permission-denied จาก listener error callback (คืน list ว่างแทนการพัง UI) */
+export function subscribeGuidanceCounselingCases(
+  onUpdate: (cases: GuidanceCounselingCase[]) => void
+): () => void {
+  try {
+    return onSnapshot(collection(db, GUIDANCE_CASES_COL), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as GuidanceCounselingCase));
+      list.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeGuidanceCounselingCases] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeGuidanceCounselingCases] setup error:', error);
+    return () => {};
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Infirmary Visits (infirmary_visits/{visitId})
+ * บันทึกการเข้ารับบริการห้องพยาบาล — เขียนได้เฉพาะ INFIRMARY_STAFF/SUPER_ADMIN แต่ตั้งใจให้
+ * "อ่านได้" โดยนักเรียนเจ้าของ + ผู้ปกครองที่ผูกไว้ (studentUid/parentUid denormalize จาก
+ * students/{studentId} จริง — validate ฝั่ง rules ผ่าน studentField() เสมอ)
+ * ── ใช้ร่วมกันทั้ง InfirmaryPortal.tsx (เขียน) และ HealthMentalWellbeingModule.tsx (อ่าน)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const INFIRMARY_COL = 'infirmary_visits';
+
+export async function recordInfirmaryVisit(
+  data: Pick<InfirmaryVisit,
+    'studentId' | 'symptoms' | 'temperature' | 'treatment' | 'medicationGiven' | 'restDurationMinutes' | 'isUrgentAlert'> &
+    { studentUid: string | null; parentUid: string | null; nurseUid: string; nurseName: string; studentName: string },
+  firestoreDb: Firestore = db,
+): Promise<string> {
+  const id = `inf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const now = new Date();
+  const payload: InfirmaryVisit = {
+    id,
+    studentId: data.studentId,
+    studentUid: data.studentUid,
+    parentUid: data.parentUid,
+    visitDate: now.toISOString().split('T')[0],
+    visitTime: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
+    symptoms: data.symptoms,
+    temperature: data.temperature,
+    treatment: data.treatment,
+    medicationGiven: data.medicationGiven,
+    restDurationMinutes: data.restDurationMinutes,
+    nurseUid: data.nurseUid,
+    nurseName: data.nurseName,
+    isUrgentAlert: data.isUrgentAlert,
+    parentAcknowledged: false,
+    createdAt: now.toISOString(),
+  };
+  try {
+    // ระบบแจ้งเตือนรวมศูนย์: เขียนแจ้งเตือนผู้ปกครองคู่กันไปในธุรกรรมเดียวกันเสมอ (ไม่ใช่ 2 การเขียน
+    // แยกอิสระที่อาจสำเร็จแค่ฝั่งเดียว) — ถ้าไม่มี parentUid จริง (ยังไม่เชื่อมบัญชี LINE) ข้ามการ
+    // แจ้งเตือนไปเงียบๆ ไม่ fabricate ID ปลอม (การบันทึกอาการยังสำเร็จตามปกติ)
+    const batch = writeBatch(firestoreDb);
+    batch.set(doc(firestoreDb, INFIRMARY_COL, id), payload);
+    if (data.parentUid) {
+      const notifRef = doc(collection(firestoreDb, 'parent_notifications'));
+      batch.set(notifRef, {
+        id: notifRef.id,
+        parentUid: data.parentUid,
+        parentId: data.parentUid,
+        studentUid: data.studentUid ?? null,
+        studentId: data.studentId,
+        studentName: data.studentName,
+        title: data.isUrgentAlert ? '🚨 แจ้งเตือนด่วน: นักเรียนเข้าห้องพยาบาล' : '🏥 แจ้งเตือน: นักเรียนเข้าห้องพยาบาล',
+        message: `น้อง${data.studentName} เข้ารับบริการห้องพยาบาลด้วยอาการ "${data.symptoms}" เมื่อเวลา ${payload.visitTime} กรุณากดรับทราบในระบบ`,
+        status: 'unread',
+        createdAt: serverTimestamp(),
+        type: data.isUrgentAlert ? 'critical' : 'warning',
+      });
+    }
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${INFIRMARY_COL}/${id}`);
+  }
+  return id;
+}
+
+/** ผู้ปกครองกด "รับทราบ" เอง — rules จำกัดให้แก้ได้แค่ parentAcknowledged/acknowledgedAt เท่านั้น */
+export async function acknowledgeInfirmaryVisit(visitId: string): Promise<void> {
+  try {
+    await setDoc(doc(db, INFIRMARY_COL, visitId), {
+      parentAcknowledged: true,
+      acknowledgedAt: new Date().toISOString(),
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${INFIRMARY_COL}/${visitId}`);
+  }
+}
+
+/**
+ * real-time listener สำหรับสถิติห้องพยาบาล
+ *  - ไม่ระบุ filter → พยาบาล/SUPER_ADMIN เห็นทั้งโรงเรียน (rules อนุญาตอ่านทั้ง collection ตาม role)
+ *  - { studentUid } → นักเรียนดูของตัวเอง (ต้อง filter ฝั่ง query ให้ผ่าน rules)
+ *  - { parentUid }  → ผู้ปกครองดูของบุตรหลาน (ต้อง filter ฝั่ง query ให้ผ่าน rules)
+ */
+export function subscribeInfirmaryVisits(
+  onUpdate: (visits: InfirmaryVisit[]) => void,
+  filter: { studentUid?: string; parentUid?: string } = {}
+): () => void {
+  try {
+    const col = collection(db, INFIRMARY_COL);
+    const clauses = [];
+    if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
+    if (filter.parentUid) clauses.push(where('parentUid', '==', filter.parentUid));
+    const ref = clauses.length > 0 ? query(col, ...clauses) : col;
+    return onSnapshot(ref, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as InfirmaryVisit));
+      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeInfirmaryVisits] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeInfirmaryVisits] setup error:', error);
     return () => {};
   }
 }

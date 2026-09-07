@@ -1,17 +1,24 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
-import { 
-  HeartPulse, 
-  Activity, 
-  Pill, 
-  FileSpreadsheet, 
-  AlertTriangle, 
-  Search, 
-  Plus, 
-  CheckCircle, 
-  Clock, 
-  User, 
-  Calendar, 
+import { StudentPicker } from '../shared/StudentPicker';
+import {
+  recordInfirmaryVisit as recordInfirmaryVisitFirestore,
+  acknowledgeInfirmaryVisit,
+  subscribeInfirmaryVisits
+} from '../../services/firestoreService';
+import {
+  HeartPulse,
+  Activity,
+  Pill,
+  FileSpreadsheet,
+  AlertTriangle,
+  Search,
+  Plus,
+  CheckCircle,
+  Clock,
+  User,
+  Calendar,
   ShieldAlert,
   Thermometer,
   Stethoscope
@@ -19,39 +26,42 @@ import {
 import { InfirmaryVisit, SemesterHealthRecord } from '../../types';
 
 export function InfirmaryPortal() {
+  const user = useStore(s => s.user);
   const { students } = useRealStudents(); // นักเรียนจาก Firestore สด
-  const [infirmaryVisits, setInfirmaryVisits] = useState<InfirmaryVisit[]>([
-    {
-      id: 'INF-01',
-      studentId: '6950801',
-      visitTime: '09:30 น. (2026-08-20)',
-      symptoms: 'ปวดศีรษะและอ่อนเพลียเล็กน้อย',
-      temperature: 37.6,
-      treatment: 'นอนพักผ่อน ประคบเย็น',
-      medicationGiven: 'พาราเซตามอล 1 เม็ด',
-      restDurationMinutes: 30,
-      nurseName: 'นางสาวกนกวรรณ พยาบาลวิชาชีพ',
-      isUrgentAlert: false,
-      parentAcknowledged: true
+
+  // บันทึกห้องพยาบาล — real-time จาก Firestore (infirmary_visits) แทน useState mock เดิม
+  // ที่แยกขาดจาก field infirmaryVisits ของ Zustand store ที่ฝั่งผู้ปกครอง/นักเรียนอ่านอยู่
+  const [infirmaryVisits, setInfirmaryVisits] = useState<InfirmaryVisit[]>([]);
+  const [visitsLoading, setVisitsLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = subscribeInfirmaryVisits((list) => {
+      setInfirmaryVisits(list);
+      setVisitsLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const [isSavingVisit, setIsSavingVisit] = useState(false);
+  const [recordVisitError, setRecordVisitError] = useState<string | null>(null);
+
+  const acknowledgeInfirmaryAlert = async (id: string) => {
+    try {
+      await acknowledgeInfirmaryVisit(id);
+    } catch (err) {
+      console.error('[InfirmaryPortal] acknowledgeInfirmaryVisit failed:', err);
     }
-  ]);
-  
-  const recordInfirmaryVisit = (newVisit: Omit<InfirmaryVisit, 'id'>) => {
-    const created: InfirmaryVisit = {
-      ...newVisit,
-      id: `INF-0${infirmaryVisits.length + 1}`
-    };
-    setInfirmaryVisits([created, ...infirmaryVisits]);
   };
 
-  const acknowledgeInfirmaryAlert = (id: string) => {
-    setInfirmaryVisits(infirmaryVisits.map(v => v.id === id ? { ...v, parentAcknowledged: true, acknowledgedAt: new Date().toISOString() } : v));
-  };
-  
   const [activeTab, setActiveTab] = useState<'visits' | 'inventory' | 'screening' | 'profiles'>('visits');
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedStudentId, setSelectedStudentId] = useState<string>(students[0]?.studentId || '');
-  
+  // เฟส 2 shared components — TASK 2: เปลี่ยนไปใช้ StudentPicker กลาง ซึ่งไม่ auto-select นักเรียน
+  // คนแรกให้ (ต้องพิมพ์ค้นหา/เลือกเองเสมอ) ตั้งใจเปลี่ยนพฤติกรรมเดิม — เดิม default เป็น students[0]
+  // เคยเป็นสาเหตุบั๊ก state ค้างว่างเงียบๆ ที่เจอมาก่อน แต่ยิ่งไปกว่านั้น การ pre-fill นักเรียนคนแรกไว้
+  // ในฟอร์ม "บันทึกการรักษา" ก็เป็นความเสี่ยงด้านความปลอดภัย (พยาบาลอาจกดบันทึกโดยลืมเปลี่ยนคนไข้)
+  // ให้เริ่มว่างเสมอ บังคับเลือกน่าเชื่อถือกว่า
+  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
+
   // New visit form state
   const [showAddModal, setShowAddModal] = useState(false);
   const [symptoms, setSymptoms] = useState('');
@@ -82,30 +92,44 @@ export function InfirmaryPortal() {
     );
   });
 
-  const handleRecordVisit = (e: React.FormEvent) => {
+  const handleRecordVisit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStudentId) return;
-    
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น. (' + now.toISOString().split('T')[0] + ')';
+    if (!selectedStudentId) {
+      setRecordVisitError('กรุณาเลือกนักเรียนก่อนบันทึก');
+      return;
+    }
+    if (!user?.uid) {
+      setRecordVisitError('ไม่พบบัญชีผู้ใช้ที่ล็อกอินอยู่ กรุณาเข้าสู่ระบบใหม่ก่อนบันทึก');
+      return;
+    }
+    const student = students.find(s => s.studentId === selectedStudentId);
 
-    const newVisit: Omit<InfirmaryVisit, 'id'> = {
-      studentId: selectedStudentId,
-      visitTime: timeStr,
-      symptoms,
-      temperature: parseFloat(temperature) || 37.0,
-      treatment,
-      medicationGiven,
-      restDurationMinutes: Number(restDurationMinutes),
-      nurseName: 'นางสาวกนกวรรณ พยาบาลวิชาชีพ',
-      isUrgentAlert,
-      parentAcknowledged: false
-    };
-
-    recordInfirmaryVisit(newVisit);
-    setShowAddModal(false);
-    setSymptoms('');
-    setIsUrgentAlert(false);
+    setIsSavingVisit(true);
+    setRecordVisitError(null);
+    try {
+      await recordInfirmaryVisitFirestore({
+        studentId: selectedStudentId,
+        studentUid: student?.studentUid || null,
+        parentUid: student?.parentUid || null,
+        studentName: student?.fullName || selectedStudentId,
+        symptoms,
+        temperature: parseFloat(temperature) || 37.0,
+        treatment,
+        medicationGiven,
+        restDurationMinutes: Number(restDurationMinutes),
+        isUrgentAlert,
+        nurseUid: user.uid,
+        nurseName: user.displayName || user.email || 'เจ้าหน้าที่พยาบาล',
+      });
+      setShowAddModal(false);
+      setSymptoms('');
+      setIsUrgentAlert(false);
+    } catch (err) {
+      console.error('[InfirmaryPortal] recordInfirmaryVisit failed:', err);
+      setRecordVisitError('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsSavingVisit(false);
+    }
   };
 
   const activeStudent = students.find(s => s.studentId === selectedStudentId) || students[0];
@@ -355,16 +379,8 @@ export function InfirmaryPortal() {
                   <h3 className="text-base font-bold text-white">บันทึกตรวจสุขภาพและวัคซีนประจำปี 2569</h3>
                   <p className="text-xs text-slate-400">ข้อมูลน้ำหนัก ส่วนสูง ดัชนีมวลกาย (BMI) และการได้รับวัคซีนป้องกันโรค</p>
                 </div>
-                <div className="flex gap-2">
-                  <select
-                    value={selectedStudentId}
-                    onChange={(e) => setSelectedStudentId(e.target.value)}
-                    className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white"
-                  >
-                    {students.map(s => (
-                      <option key={s.studentId} value={s.studentId}>{s.fullName} ({s.studentId})</option>
-                    ))}
-                  </select>
+                <div className="w-64">
+                  <StudentPicker mode="single" students={students} value={selectedStudentId} onSelect={setSelectedStudentId} />
                 </div>
               </div>
 
@@ -405,15 +421,9 @@ export function InfirmaryPortal() {
                   <h3 className="text-base font-bold text-white">ข้อมูลโรคประจำตัว อาการแพ้ยา และภาวะดูแลพิเศษ</h3>
                   <p className="text-xs text-slate-400">เชื่อมโยงข้อมูลสุขภาพจากฐานข้อมูลนักเรียนเพื่อความปลอดภัยสูงสุดระหว่างอยู่โรงเรียน</p>
                 </div>
-                <select
-                  value={selectedStudentId}
-                  onChange={(e) => setSelectedStudentId(e.target.value)}
-                  className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white"
-                >
-                  {students.map(s => (
-                    <option key={s.studentId} value={s.studentId}>{s.fullName}</option>
-                  ))}
-                </select>
+                <div className="w-64">
+                  <StudentPicker mode="single" students={students} value={selectedStudentId} onSelect={setSelectedStudentId} />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
@@ -475,17 +485,7 @@ export function InfirmaryPortal() {
             <form onSubmit={handleRecordVisit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">เลือกนักเรียน</label>
-                <select
-                  value={selectedStudentId}
-                  onChange={(e) => setSelectedStudentId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                >
-                  {students.map(s => (
-                    <option key={s.studentId} value={s.studentId}>
-                      เลขที่ {s.studentNo} - {s.fullName} ({s.studentId})
-                    </option>
-                  ))}
-                </select>
+                <StudentPicker mode="single" students={students} value={selectedStudentId} onSelect={setSelectedStudentId} />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -555,6 +555,10 @@ export function InfirmaryPortal() {
                 </label>
               </div>
 
+              {recordVisitError && (
+                <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">{recordVisitError}</p>
+              )}
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
@@ -565,9 +569,10 @@ export function InfirmaryPortal() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg transition-all"
+                  disabled={isSavingVisit}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold shadow-lg transition-all"
                 >
-                  บันทึกข้อมูลและส่งแจ้งเตือน
+                  {isSavingVisit ? 'กำลังบันทึก...' : 'บันทึกข้อมูลและส่งแจ้งเตือน'}
                 </button>
               </div>
             </form>

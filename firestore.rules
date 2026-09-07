@@ -30,6 +30,24 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/students/$(sid)).data.get(key, fallback);
     }
 
+    // นักเรียนเจ้าของ sid (5 หลัก) จริง — เทียบผ่าน students/{sid}.studentUid ไม่ใช่เทียบ
+    // request.auth.uid กับ sid ตรงๆ (sid เป็นรหัสนักเรียน 5 หลัก ไม่ใช่ Firebase Auth UID เด็ดขาด
+    // เทียบตรงจะไม่มีวันจริงสำหรับนักเรียนจริงสักคน — ดู student_screenings_2q/phq9 ด้านล่าง)
+    function isSelfStudent(sid) {
+      return isSignedIn() && studentField(sid, 'studentUid', '__none__') == request.auth.uid;
+    }
+
+    // ครูผู้สอนของ schedule (section) นี้ — เทียบ schedules/{scheduleId}.teacherId/teacherIds
+    // ใช้ให้ครูถอนชื่อนักเรียนออกจากชุมนุม/กิจกรรม ELECTIVE ของตัวเองเท่านั้น (activity_enrollments)
+    function isTeacherOfSchedule(scheduleId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/schedules/$(scheduleId))
+        && (
+          get(/databases/$(database)/documents/schedules/$(scheduleId)).data.get('teacherId', '') == request.auth.uid ||
+          request.auth.uid in get(/databases/$(database)/documents/schedules/$(scheduleId)).data.get('teacherIds', [])
+        );
+    }
+
     // 1. Students Collection
     // อ่านทะเบียนนักเรียนได้: บุคลากรที่ต้องใช้รายชื่อทั้งโรงเรียน (ครู/ผู้บริหาร/แนะแนว/พยาบาล/การเงิน/ศึกษานิเทศก์)
     // + ผู้ปกครองอ่านได้เฉพาะบุตรหลานตัวเอง (ต้อง query where('parentUid','==', uid) เพื่อให้ list ผ่าน)
@@ -69,13 +87,59 @@ service cloud.firestore {
     }
 
     // 4. Parent Notifications
+    // FIX (ระบบแจ้งเตือนรวมศูนย์): เดิม write เป็น role-based ล้วน (SUPER_ADMIN/HOMEROOM_TEACHER/
+    // SUBJECT_TEACHER) แต่การแจ้งเตือนหลายจุด (เช่น สแกนเข้า-ออกประตูโรงเรียน, ยื่นใบลา) ริเริ่มจาก
+    // ตัวนักเรียน/ผู้ปกครองเอง (ดู GateAttendanceTracker.tsx) — เพิ่มช่องให้ STUDENT/PARENT สร้างแจ้งเตือน
+    // ได้เฉพาะที่ parentUid ตรงกับผู้ปกครองจริงของ studentId ที่ระบุเท่านั้น (verify ผ่าน studentField()
+    // กันสร้างแจ้งเตือนส่งให้ parentUid ใครก็ได้) และเพิ่มช่องให้เจ้าของกด "อ่านแล้ว" เอง (แก้ได้แค่ status)
     match /parent_notifications/{notifId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('HOMEROOM_TEACHER') || 
-                     (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('HOMEROOM_TEACHER') || 
-                      hasRole('SUBJECT_TEACHER');
+      // TASK: เพิ่ม studentUid ให้นักเรียนเจ้าของเรื่องอ่านแจ้งเตือนของตัวเองได้ด้วย (เดิมอ่านได้เฉพาะ
+      // ผู้ปกครองที่ผูกไว้ผ่าน parentUid/parentId เท่านั้น) — ไม่กระทบ scope เดิมของผู้ปกครองเลย เป็นการ
+      // เพิ่มเงื่อนไข OR ใหม่เท่านั้น
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('HOMEROOM_TEACHER') ||
+                     (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid)) ||
+                     (isSignedIn() && resource.data.studentUid == request.auth.uid);
+
+      // FIX: ตรวจแค่ "parentUid ที่ประกาศตรงกับพ่อแม่จริงของ studentId" ไม่พอ (ใครก็ประกาศ studentId/
+      // parentUid ที่ถูกต้องของคนอื่นได้) ต้องตรวจด้วยว่า "ผู้เขียนเอง" เป็นตัวนักเรียนคนนั้นจริง
+      // (isSelfStudent) หรือเป็นผู้ปกครองจริงของนักเรียนคนนั้น (auth.uid ตรงกับ parentUid จริง) เท่านั้น
+      // TASK: studentUid ถ้าใส่มาด้วย ต้องตรงกับค่าจริงจาก students/{studentId}.studentUid เท่านั้น
+      // (ห้ามประกาศ studentUid ของคนอื่นเพื่อแอบให้คนอื่นอ่านแจ้งเตือนได้ — ใช้กับทุก branch รวม role-based)
+      allow create: if (
+                       !('studentUid' in request.resource.data) ||
+                       request.resource.data.studentUid == null ||
+                       request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__')
+                     ) && (
+                       hasRole('SUPER_ADMIN') ||
+                       hasRole('HOMEROOM_TEACHER') ||
+                       hasRole('SUBJECT_TEACHER') ||
+                       hasRole('INFIRMARY_STAFF') ||
+                       (
+                         request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', '__none__') &&
+                         (
+                           isSelfStudent(request.resource.data.studentId) ||
+                           (isSignedIn() && request.auth.uid == studentField(request.resource.data.studentId, 'parentUid', '__none__'))
+                         )
+                       )
+                     );
+
+      // ผู้ปกครอง หรือ นักเรียนเจ้าของเรื่องเอง กด "อ่านแล้ว"/"อ่านทั้งหมด" เอง — แก้ได้เฉพาะ field status เท่านั้น
+      allow update: if hasRole('SUPER_ADMIN') ||
+                       hasRole('HOMEROOM_TEACHER') ||
+                       hasRole('SUBJECT_TEACHER') ||
+                       (
+                         isSignedIn() &&
+                         (
+                           resource.data.parentUid == request.auth.uid ||
+                           resource.data.parentId == request.auth.uid ||
+                           resource.data.studentUid == request.auth.uid
+                         ) &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                         request.resource.data.status in ['read', 'unread']
+                       );
+
+      allow delete: if hasRole('SUPER_ADMIN');
     }
 
     // 5. Parent-Teacher Conferences
@@ -234,34 +298,84 @@ service cloud.firestore {
     }
 
     // 19. Student Health & Mental Screenings (2Q, PHQ-9, SDQ)
+    // FIX: doc id {studentId} คือรหัสนักเรียน 5 หลัก (ดู save2QScreeningFirestore/savePHQ9ScreeningFirestore
+    // ใน firestoreService.ts) ไม่ใช่ Firebase Auth UID — isSelf(studentId) เดิมเทียบ auth.uid กับรหัส 5 หลัก
+    // ตรงๆ จึงไม่มีวันจริงเลย ทำให้นักเรียนทำแบบคัดกรองของตัวเองไม่ผ่าน rules เงียบๆ (เห็นเหมือนบันทึกสำเร็จ
+    // ฝั่ง UI เพราะ optimistic local state แต่ Firestore ปฏิเสธจริง) แก้เป็น isSelfStudent() ที่เทียบผ่าน
+    // students/{studentId}.studentUid จริงแทน — ไม่ได้เปลี่ยนว่าใครมีสิทธิ์ (ยังเป็นเจ้าของตัวเอง/
+    // ครูประจำชั้น/ครูแนะแนว/แอดมินเหมือนเดิม) แค่แก้วิธีตรวจว่า "ตัวเอง" ให้ตรงกับที่ระบบตั้งใจไว้จริง
     match /student_screenings_2q/{studentId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelf(studentId);
-      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelf(studentId);
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
     }
 
     match /student_screenings_phq9/{studentId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelf(studentId);
-      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelf(studentId);
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
     }
 
+    // FIX (ยืนยันจากโรงเรียน): SDQ กรอกได้ 3 กลุ่ม — นักเรียนประเมินตนเอง/ผู้ปกครอง/ครูที่ปรึกษา
+    // ของห้องนั้นจริง (ต่างจาก 2Q/PHQ-9 ที่นักเรียนประเมินตนเองอย่างเดียว) เดิม rule เช็คแค่
+    // self-attestation (request.resource.data.evaluatorId == auth.uid) — ผู้เขียนระบุ uid ตัวเองใน
+    // เอกสารเฉยๆ ไม่เคยตรวจว่าเป็นความสัมพันธ์จริงกับนักเรียนคนนั้นเลย (ผู้ปกครอง/ครูคนไหนก็เขียนให้
+    // เด็กคนไหนก็ได้แค่ใส่ evaluatorId เป็น uid ตัวเอง) แก้เป็นตรวจสอบจริงผ่าน students/{studentId}
     match /student_assessments_sdq/{sdqId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('GUIDANCE_COUNSELOR') || 
-                     hasRole('HOMEROOM_TEACHER') || 
-                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.studentUid == request.auth.uid || resource.data.evaluatorId == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('GUIDANCE_COUNSELOR') || 
-                      hasRole('HOMEROOM_TEACHER') || 
-                      (isSignedIn() && (request.resource.data.studentId == request.auth.uid || request.resource.data.studentUid == request.auth.uid || request.resource.data.evaluatorId == request.auth.uid));
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('GUIDANCE_COUNSELOR') ||
+                     hasRole('HOMEROOM_TEACHER') ||
+                     (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.respondentUid == request.auth.uid));
+
+      // studentUid ต้อง denormalize ตรงกับ students/{studentId} จริงเสมอ (ไม่ว่าใครเป็นผู้กรอก)
+      // และ respondentUid ต้องเป็นผู้เขียนจริง แล้วผู้เขียนต้องเป็นหนึ่งใน 3 กลุ่มที่ยืนยันความสัมพันธ์
+      // จริงได้: (1) ตัวนักเรียนเอง (2) ผู้ปกครองของนักเรียนคนนั้นจริง (3) ครูที่ปรึกษาของห้องนั้นจริง
+      allow create: if hasRole('SUPER_ADMIN') ||
+                       hasRole('GUIDANCE_COUNSELOR') ||
+                       (
+                         request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__') &&
+                         request.resource.data.respondentUid == request.auth.uid &&
+                         (
+                           isSelfStudent(request.resource.data.studentId) ||
+                           (isSignedIn() && request.auth.uid == studentField(request.resource.data.studentId, 'parentUid', '__none__')) ||
+                           isHomeroomTeacherOf(studentField(request.resource.data.studentId, 'room', '__none__'))
+                         )
+                       );
+
+      // แก้ไข/ลบผลประเมินที่ส่งไปแล้ว: เฉพาะ SUPER_ADMIN/GUIDANCE_COUNSELOR เท่านั้น (ผู้กรอกเดิม
+      // แก้ย้อนหลังเองไม่ได้ — ป้องกันการแก้ผลหลังส่ง เหมือน guidance_counseling_cases/infirmary_visits)
+      allow update, delete: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
     }
 
     // 20. Billing Invoices, Messages, and Appointments
+    // FIX (เฟส 2 การเงิน — TASK 1): เดิมไม่มีฟีเจอร์สร้างใบแจ้งหนี้อยู่เลย และ read/write เดิมเทียบ
+    // resource.data.studentId == auth.uid ตรงๆ (studentId เป็นรหัสนักเรียน 5 หลัก ไม่ใช่ Firebase
+    // Auth UID เด็ดขาด — บั๊กเดียวกับที่พบใน student_screenings_2q/phq9 มาก่อน) แก้เป็นเทียบผ่าน
+    // studentUid ที่ denormalize+validate จริงตอนสร้างแทน — เขียน/แก้ไข เฉพาะ FINANCE_STAFF/
+    // SUPER_ADMIN เท่านั้น (การชำระเงินของเจ้าของเอง ดู TASK 3 ที่จะเพิ่ม allow update แยกต่างหาก)
+    match /billing_counters/{academicYear} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF');
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF');
+    }
+
     match /billing_invoices/{invoiceId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('EXECUTIVE') || 
-                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid || resource.data.studentId == request.auth.uid));
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('FINANCE_STAFF') ||
+                     hasRole('EXECUTIVE') ||
+                     (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
+
+      // studentUid/parentUid ต้อง denormalize ตรงกับ students/{studentId} จริงเสมอ (กันเจ้าหน้าที่
+      // การเงินพิมพ์ผิดแล้วส่งบิลไปให้ผู้ปกครองคนละครอบครัวเห็น) และ createdBy ต้องเป็นผู้เขียนจริง
+      allow create: if (hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF')) &&
+                       request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__') &&
+                       request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', '__none__') &&
+                       request.resource.data.createdBy == request.auth.uid &&
+                       request.resource.data.status == 'PENDING';
+
+      // เจ้าหน้าที่การเงินแก้ไขได้เต็มที่ (เช่น ปรับยอด/กำหนดชำระ ก่อนถึงกำหนด) แต่ห้ามย้ายเจ้าของ
+      allow update: if (hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF')) &&
+                       request.resource.data.studentUid == resource.data.studentUid &&
+                       request.resource.data.parentUid == resource.data.parentUid;
+
+      allow delete: if false;
     }
 
     match /parent_teacher_messages/{msgId} {
@@ -388,6 +502,99 @@ service cloud.firestore {
     match /department_config/{deptId} {
       allow read: if isSignedIn();
       allow write: if hasRole('SUPER_ADMIN');
+    }
+
+    // 27. Elective activity config — ระบุว่า subjectCode ไหนเป็นชุมนุม/กิจกรรมตามความสนใจ
+    // (ELECTIVE, สมัครเอง มีที่นั่งจำกัด) ต่างจากกิจกรรมยกห้อง (WHOLE_CLASS)
+    match /elective_activities_config/{configId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('ACADEMIC_HEAD');
+    }
+
+    // 28. Activity enrollments — การสมัคร/ถอนชุมนุมของนักเรียน (ไม่ลบ doc จริง mark removedAt แทน)
+    // read กว้าง (isSignedIn) เพราะนักเรียนต้องเห็นจำนวนที่สมัครแล้วของ "คนอื่น" ด้วยเพื่อคำนวณที่นั่ง
+    // เหลือ — ไม่ใช่ข้อมูลอ่อนไหวระดับเดียวกับสุขภาพจิต/การเงิน (แค่ว่าใครสมัครชุมนุมอะไร)
+    match /activity_enrollments/{enrollmentId} {
+      allow read: if isSignedIn();
+
+      // สมัคร: สร้าง doc ของตัวเองเท่านั้น ต้องยังไม่ถอน (removedAt/removedBy ต้องเป็น null ตอนสร้าง)
+      allow create: if hasRole('STUDENT')
+                       && request.resource.data.studentUid == request.auth.uid
+                       && request.resource.data.removedAt == null
+                       && request.resource.data.removedBy == null
+                       && studentField(request.resource.data.studentId, 'studentUid', '__none__') == request.auth.uid;
+
+      // ถอน: แก้ได้เฉพาะ removedAt/removedBy/removedReason เท่านั้น — นักเรียนถอนตัวเอง
+      // (removedBy ต้องเป็น null) หรือครูของ schedule นั้นถอน (removedBy ต้องเป็น uid ตัวเอง)
+      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['removedAt', 'removedBy', 'removedReason'])
+                       && (
+                         (hasRole('STUDENT') && resource.data.studentUid == request.auth.uid && request.resource.data.removedBy == null) ||
+                         (
+                           (hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER')) &&
+                           request.resource.data.removedBy == request.auth.uid &&
+                           isTeacherOfSchedule(resource.data.scheduleId)
+                         ) ||
+                         hasRole('SUPER_ADMIN')
+                       );
+
+      allow delete: if false;
+    }
+
+    // 28.1 Activity enrollment counts — ตัวนับที่นั่งต่อ scheduleId (derived, sync คู่กับ
+    // activity_enrollments เสมอในทรานแซกชันเดียวกัน — ดู enrollInActivity/withdrawFromActivity)
+    // จำเป็นเพราะ Firestore transaction อ่านได้แค่ document เดียว query ไม่ได้ ใช้ตัวนับนี้แทน
+    // การนับจริงจาก activity_enrollments เพื่อตรวจที่นั่งแบบ atomic กัน race condition
+    match /activity_enrollment_counts/{scheduleId} {
+      allow read: if isSignedIn();
+      allow write: if (hasRole('STUDENT') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER') || hasRole('SUPER_ADMIN'))
+                      && request.resource.data.count is int
+                      && request.resource.data.count >= 0;
+    }
+
+    // 29. House config (คณะสี) — รากฐานสำหรับระบบคะแนนถ้วยในอนาคต ยังไม่มีการคำนวณคะแนนตอนนี้
+    match /house_config/{houseId} {
+      allow read: if isSignedIn();
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('ACADEMIC_HEAD');
+    }
+
+    // 30. Guidance Counseling Cases — เนื้อหาการให้คำปรึกษาจิตวิทยาของผู้เยาว์ ข้อมูลอ่อนไหวที่สุด
+    // ในระบบ ตั้งใจให้เข้มงวดกว่า collection สุขภาพจิตอื่นๆ ทุกตัว: GUIDANCE_COUNSELOR/SUPER_ADMIN
+    // เท่านั้น — ครูประจำชั้น ครูวิชาอื่น ผู้ปกครอง และตัวนักเรียนเจ้าของเคส "ห้ามอ่านได้" ทั้งหมด
+    // (ต่างจาก student_screenings_2q/phq9/student_assessments_sdq ที่ยังให้ HOMEROOM_TEACHER/
+    // self อ่านได้ — เคสนี้คือบันทึกการให้คำปรึกษาจริง ไม่ใช่แค่ผลคัดกรอง)
+    match /guidance_counseling_cases/{caseId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
+      // counselorUid ต้องตรงกับผู้เขียนจริงเสมอตอนสร้าง กันปลอมชื่อผู้บันทึก
+      allow create: if (hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR')) &&
+                       request.resource.data.counselorUid == request.auth.uid;
+      allow update, delete: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
+    }
+
+    // 31. Infirmary Visits — ห้องพยาบาล บันทึกอาการ/การรักษา ตั้งใจให้ "เห็นได้" โดยผู้ปกครองและ
+    // นักเรียนเจ้าของ (ต่างจาก guidance_counseling_cases ด้านบนที่ปิดไม่ให้อ่านเลย) —
+    // studentUid/parentUid ต้องตรงกับ students/{studentId} จริงเสมอ กันพยาบาลพิมพ์ผิดแล้วส่ง
+    // ข้อมูลไปให้ผู้ปกครองคนละครอบครัวเห็น (ดู studentField())
+    match /infirmary_visits/{visitId} {
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('INFIRMARY_STAFF') ||
+                     (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
+
+      allow create: if (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF')) &&
+                       request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__') &&
+                       request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', '__none__');
+
+      // พยาบาล/แอดมินแก้เนื้อหาได้แต่ห้ามย้ายเจ้าของ (studentUid/parentUid ต้องคงเดิม) —
+      // ผู้ปกครองเจ้าของ (parentUid ตรง) แก้ได้เฉพาะ "กดรับทราบ" (parentAcknowledged/acknowledgedAt) เท่านั้น
+      allow update: if (
+                        (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF')) &&
+                        request.resource.data.studentUid == resource.data.studentUid &&
+                        request.resource.data.parentUid == resource.data.parentUid
+                      ) || (
+                        isSignedIn() && resource.data.parentUid == request.auth.uid &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['parentAcknowledged', 'acknowledgedAt'])
+                      );
+
+      allow delete: if false;
     }
 
     // Default Deny All Catch-All for unknown paths

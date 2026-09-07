@@ -1,3 +1,4 @@
+import type { Timestamp } from 'firebase/firestore';
 import { UserProfile, UserRole } from './types/auth';
 
 export * from './types/auth';
@@ -59,6 +60,56 @@ export interface Student {
   // ผู้ปกครอง/นักเรียนดูได้โดยไม่ต้องมีสิทธิ์ query attendance_records ทั้งห้อง — ครู/ครูที่ปรึกษา
   // ใช้ useRoomAttendanceRecords (real-time, เลือกช่วงวันที่ได้) แทนเพราะมีสิทธิ์อ่านตรงอยู่แล้ว
   attendanceStats?: { present: number; absent: number; late: number; leave: number };
+  // คณะสี — รากฐานสำหรับระบบคะแนนถ้วยในอนาคต (ยังไม่คำนวณคะแนนถ้วยตอนนี้) ดู HouseConfig
+  houseId?: string | null;
+}
+
+/**
+ * ตั้งค่ากิจกรรมแบบ "ตามความสนใจ" (ELECTIVE) — นักเรียนสมัครเอง มีที่นั่งจำกัด เช่น ชุมนุม
+ * ต่างจากกิจกรรม/วิชายกห้อง (WHOLE_CLASS) ที่ดึงรายชื่อจาก room ของนักเรียนตรงๆ — ถ้า subjectCode
+ * ไหนไม่มี config นี้ ถือเป็น WHOLE_CLASS โดยปริยาย (ดู TeacherPortal.tsx courseStudents)
+ *
+ * capacityPerSection ใช้ "ต่อ section" คือต่อ scheduleId หนึ่งๆ อย่างอิสระต่อกัน — ถ้ากิจกรรม
+ * เดียวสอนหลาย section (เช่น ชุมนุมคอมพิวเตอร์ 2 กลุ่ม) แต่ละ section นับที่นั่งแยกกัน คนละ 20 คน
+ * (ไม่ใช่แชร์โควตารวม 20 คนทั้งกิจกรรม) — ใช้ค่าเดียวกันทุก section ของ subjectCode นี้
+ */
+export interface ElectiveActivityConfig {
+  id: string;               // = subjectCode
+  subjectCode: string;
+  name: string;
+  capacityPerSection: number | null; // null = ไม่จำกัดที่นั่ง
+  createdBy: string;
+  createdAt: string; // ISO
+}
+
+/**
+ * การสมัคร/ถอนชุมนุม 1 รายการ — ไม่ลบ document จริงเมื่อถอน (mark removedAt แทน) เพื่อเก็บ
+ * ประวัติไว้ (ใครถอนเมื่อไหร่ เหตุผลอะไร) — id เป็น `${scheduleId}_${studentId}` กันสมัครซ้ำ
+ * section เดิม (สมัครใหม่หลังถูกถอน = set() ทับ doc เดิม, สมัคร section/subjectCode อื่น = doc ใหม่)
+ */
+export interface ActivityEnrollment {
+  id: string;
+  scheduleId: string;
+  subjectCode: string;
+  studentId: string;
+  studentUid: string;
+  enrolledAt: string; // ISO
+  removedAt: string | null;
+  removedBy: string | null;    // UID ครูที่ถอน — null ถ้านักเรียนถอนตัวเอง
+  removedReason: string | null;
+}
+
+/**
+ * คณะสี — รากฐานเท่านั้นในรอบนี้ (ยังไม่มีระบบคำนวณ/แสดงคะแนนถ้วย 3 ประเภท วิชาการ/กีฬา/คุณธรรม
+ * เพราะข้อมูลต้นทางบางส่วน เช่น ผลกีฬาคณะสี ผลสอบภายนอก ยังไม่มีที่เก็บในระบบ) — houseId บน
+ * students/{id} ต้อง query ได้สะดวกสำหรับตอนสร้างระบบคะแนนถ้วยในอนาคต
+ */
+export interface HouseConfig {
+  id: string;
+  name: string;
+  colorHex: string;
+  assignmentMode: 'SINGLE_PER_ROOM' | 'MIXED';
+  createdAt: string; // ISO
 }
 
 export interface StudentAnalytics {
@@ -351,18 +402,22 @@ export interface ParentConference {
   notes?: string;
 }
 
+// ระบบแจ้งเตือนผู้ปกครองแบบรวมศูนย์ — เขียนผ่าน createParentNotification() ใน firestoreService.ts
+// เสมอ (ห้าม push เข้า state session-local ตรงๆ อีก — ดู store.ts) createdAt เป็น Firestore Timestamp
+// จริง (เขียนด้วย serverTimestamp() เสมอ ให้ตรงกับ pattern เดิมที่ updateBehaviorScoreAndTriggerAlert ใช้)
 export interface ParentNotification {
   id: string;
   parentUid: string;
   parentId?: string;
+  studentUid?: string | null; // denormalized จาก students/{studentId}.studentUid — ให้นักเรียนเจ้าของอ่านได้เอง
   studentId: string;
   studentName: string;
   title: string;
   message: string;
   status: 'unread' | 'read';
-  createdAt: Date;
-  pointsDeducted: number;
-  remainingScore: number;
+  createdAt: Timestamp;
+  pointsDeducted?: number;
+  remainingScore?: number;
   attendanceStatus?: string;
   date?: string;
   type?: 'info' | 'warning' | 'critical';
@@ -521,16 +576,24 @@ export interface SpecialCareNeed {
 export interface InfirmaryVisit {
   id: string;
   studentId: string;
+  // denormalized จาก students/{studentId}.studentUid/.parentUid ตอนบันทึก (validate โดย
+  // firestore.rules ผ่าน studentField() เสมอ) — ใช้ให้นักเรียนเจ้าของ+ผู้ปกครองอ่านข้อมูลนี้ได้จริง
+  // ตามที่ระบบตั้งใจไว้ (ต่างจาก guidance_counseling_cases ที่ปิดไม่ให้ทั้งคู่อ่าน)
+  studentUid?: string | null;
+  parentUid?: string | null;
+  visitDate: string; // YYYY-MM-DD แยกจาก visitTime (ข้อความแสดงผล) เพื่อ query/sort ได้จริง
   visitTime: string;
   symptoms: string;
   temperature: number;
   treatment: string;
   medicationGiven: string;
   restDurationMinutes: number;
+  nurseUid?: string | null;
   nurseName: string;
   isUrgentAlert: boolean;
   parentAcknowledged: boolean;
   acknowledgedAt?: string;
+  createdAt?: string;
 }
 
 export interface TwoQuestionScreening {
@@ -555,6 +618,14 @@ export interface PHQ9Screening {
 export interface SDQAssessment {
   id: string;
   studentId: string;
+  // denormalized จาก students/{studentId}.studentUid ตอนบันทึก validate โดย firestore.rules
+  // ผ่าน studentField() เสมอ (ไม่ใช่แค่ผู้เขียนระบุชื่อตัวเอง — ดู respondentUid ด้านล่าง) ใช้ให้
+  // นักเรียนเจ้าของอ่านผลประเมินของตัวเองได้ครบทั้ง 3 มุมมอง (ตนเอง/ครู/ผู้ปกครอง)
+  studentUid: string;
+  // Firebase Auth UID ของผู้กรอกจริง (ตรวจแล้วว่าเป็นนักเรียนเจ้าของ/ผู้ปกครองจริง/ครูที่ปรึกษา
+  // ห้องนั้นจริง ที่ create — ไม่ใช่แค่ self-attestation) evaluatorType/evaluatorName ข้างล่างมีอยู่แล้ว
+  // สำหรับแสดงผล "ใครกรอก" ในหน้า UI — ฟิลด์นี้เพิ่มมาเพื่อยืนยันตัวตนที่ verify ได้ ไม่ใช่แค่ชื่อที่พิมพ์เอง
+  respondentUid: string;
   evaluatorType: 'STUDENT' | 'TEACHER' | 'PARENT';
   evaluatorName: string;
   subscaleScores: {
@@ -568,6 +639,25 @@ export interface SDQAssessment {
   triagingStatus: 'NORMAL' | 'AT_RISK' | 'VULNERABLE';
   assessmentDate: string;
   recommendations: string[];
+}
+
+// เคสให้คำปรึกษาเชิงจิตวิทยาของครูแนะแนว — ข้อมูลอ่อนไหวที่สุดในระบบ (เนื้อหาการปรึกษาจิตใจของผู้เยาว์)
+// firestore.rules: อ่าน/เขียนได้เฉพาะ GUIDANCE_COUNSELOR + SUPER_ADMIN เท่านั้น — ต่างจาก collection
+// อ่อนไหวอื่นๆ ส่วนใหญ่ในระบบตรงที่ครูประจำชั้น/ผู้ปกครอง/นักเรียนเจ้าของเคส "ห้ามอ่านได้" โดยเด็ดขาด
+export interface GuidanceCounselingCase {
+  id: string;
+  studentId: string;
+  studentName: string;
+  classRoom: string;
+  counselorUid: string;   // ครูแนะแนวที่บันทึก (Firebase Auth UID จริง)
+  counselorName: string;
+  category: string;       // ประเภทเคส (เดิมเรียก issueType ในโค้ด mock)
+  notes: string;
+  severity: 'LOW' | 'MODERATE' | 'HIGH';
+  status: 'IN_PROGRESS' | 'RESOLVED';
+  createdAt: string;
+  updatedAt: string;
+  lastSessionDate: string;
 }
 
 export interface GuardianBackground {
@@ -823,17 +913,30 @@ export interface BillingInvoiceItem {
   amount: number;
 }
 
+// ใบแจ้งหนี้ค่าใช้จ่ายนักเรียน/ผู้ปกครอง — ขอบเขตงานจริง: "แจ้งค่าใช้จ่าย + ส่งใบเสร็จ เท่านั้น"
+// invoiceNumber ต้อง auditable จริง (ออกผ่าน billing_counters/{ปีการศึกษา} ใน transaction เดียวกับ
+// การสร้างเอกสาร ดู createBillingInvoice ใน firestoreService.ts) ไม่ใช่ Math.random() แบบเดิม
 export interface BillingInvoice {
   id: string;
+  invoiceNumber: string;      // auditable, ต่อเนื่องตามปีการศึกษา เช่น "INV-2569-0001" (เดิมชื่อ invoiceNo)
   studentId: string;
-  invoiceNo: string;
+  // denormalized จาก students/{studentId}.studentUid/.parentUid ตอนสร้าง validate โดย firestore.rules
+  // ผ่าน studentField() เสมอ — ใช้ให้นักเรียนเจ้าของ+ผู้ปกครองอ่าน/จ่ายบิลของตัวเองได้จริง
+  studentUid?: string | null;
+  parentUid?: string | null;
   title: string;
   items: BillingInvoiceItem[];
   totalAmount: number;
   dueDate: string;
-  status: 'UNPAID' | 'PAID' | 'OVERDUE';
+  status: 'PENDING' | 'PAID' | 'OVERDUE';   // เดิมใช้ 'UNPAID' — เปลี่ยนชื่อให้ตรงกับที่ยืนยันจากโรงเรียน
   promptPayQr: string;
+  createdBy: string;          // Firebase Auth UID ของเจ้าหน้าที่การเงินที่สร้างใบแจ้งหนี้
+  createdAt: string;
   paidAt?: string;
+  paymentMethod?: string;      // เช่น 'PROMPTPAY_QR' — บันทึกตอนยืนยันจ่ายจริง (ดู Task 3)
+  // เลขที่ใบเสร็จ = invoiceNumber เดิมเสมอ (ตัดสินใจแล้ว — ดูเหตุผลใน commit message ของ Task 3:
+  // ระบบนี้เป็นบิล 1 ใบต่อการจ่าย 1 ครั้งเสมอ ไม่มีจ่ายบางส่วน/แยกใบเสร็จ จึงไม่จำเป็นต้องมี counter
+  // แยกชุดที่สองสำหรับใบเสร็จโดยเฉพาะ — ใช้เลขเดียวกันตลอดสายเอกสารเพื่อลด state ที่ต้อง sync)
   receiptNo?: string;
 }
 
@@ -890,7 +993,10 @@ export interface StoreState {
   courseScoreSettings: CourseScoreSetting[];
 
   parentConferences: ParentConference[];
-  parentNotifications: ParentNotification[];
+  // parentNotifications ถูกลบออก (ระบบแจ้งเตือนรวมศูนย์): เดิมเป็น session-local array ที่ไม่มี UI
+  // ไหนอ่านเลยสักที่ (write-only dead state) — ข้อมูลจริงตอนนี้อยู่ที่ Firestore collection
+  // parent_notifications อ่านผ่าน services/firestoreService.ts: subscribeParentNotifications()
+  // โดยตรงในคอมโพเนนต์ (ดู components/notifications/NotificationBell.tsx)
   selfAssessments: Record<string, StudentSelfAssessment>;
   
   // Active Learning Points & Leaderboard
@@ -904,7 +1010,11 @@ export interface StoreState {
   chronicIllnesses: Record<string, ChronicIllness[]>;
   allergies: Record<string, AllergyRecord[]>;
   specialCareNeeds: Record<string, SpecialCareNeed[]>;
-  infirmaryVisits: InfirmaryVisit[];
+  // infirmaryVisits/acknowledgeInfirmaryAlert ถูกลบออก (TASK 3 — เชื่อมข้อมูลห้องพยาบาลจริง):
+  // เดิมเป็น session-local state ที่ไม่เคยมี listener ผูกไว้เลย ทำให้แยกขาดจาก InfirmaryPortal.tsx
+  // ที่เขียนลง useState ของตัวเองอีกชุดหนึ่ง — ข้อมูลจริงตอนนี้อยู่ที่ Firestore collection
+  // infirmary_visits อ่านผ่าน services/firestoreService.ts: subscribeInfirmaryVisits() โดยตรง
+  // (ดู HealthMentalWellbeingModule.tsx / InfirmaryPortal.tsx)
   twoQuestionScreenings: Record<string, TwoQuestionScreening>;
   phq9Screenings: Record<string, PHQ9Screening>;
   sdqAssessments: SDQAssessment[];
@@ -1008,17 +1118,17 @@ export interface StoreState {
 
   // New Actions for Parent Engagement
   scheduleConference: (conferenceId: string, date: string, time: string) => void;
-  addMockParentNotification: (notif: Omit<ParentNotification, 'id' | 'createdAt' | 'status'>) => void;
   saveSelfAssessment: (assessment: StudentSelfAssessment) => Promise<void>;
 
   // Extended Student & Parent Module Actions
   recordGateAttendance: (studentId: string, type: 'ENTRY' | 'EXIT', method: GateAttendanceRecord['method']) => void;
   submitDetailedLeave: (request: Omit<DetailedLeaveRequest, 'id' | 'submittedAt' | 'status'>) => void;
   approveDetailedLeave: (id: string, teacherRemarks?: string) => void;
-  acknowledgeInfirmaryAlert: (visitId: string) => void;
-  savePHQ9Screening: (studentId: string, answers: number[]) => void;
-  save2QScreening: (studentId: string, q1: boolean, q2: boolean) => void;
-  submitSDQAssessment: (sdq: Omit<SDQAssessment, 'id' | 'assessmentDate'>) => void;
+  // ทั้ง 3 action นี้คืน Promise ที่ resolve ก็ต่อเมื่อ Firestore เขียนสำเร็จจริง (reject ถ้า rules
+  // ปฏิเสธ/offline ฯลฯ) — ผู้เรียกต้อง await แล้วค่อยแสดง "บันทึกสำเร็จ" ห้ามโชว์ optimistic ก่อนเช็คผล
+  savePHQ9Screening: (studentId: string, answers: number[]) => Promise<void>;
+  save2QScreening: (studentId: string, q1: boolean, q2: boolean) => Promise<void>;
+  submitSDQAssessment: (sdq: Omit<SDQAssessment, 'id' | 'assessmentDate'>) => Promise<void>;
   addMeritDemeritRecord: (studentId: string, type: 'MERIT' | 'DEMERIT', points: number, category: string, description: string, teacherName: string) => void;
   addPortfolioItem: (item: Omit<PortfolioItem, 'id' | 'isVerifiedByTeacher'>) => void;
   addDigitalCertificate: (cert: Omit<DigitalCertificate, 'id'>) => void;

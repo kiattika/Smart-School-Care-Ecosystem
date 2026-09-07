@@ -1,75 +1,149 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
-import { 
-  HeartHandshake, 
-  Users, 
-  FileText, 
-  CheckCircle, 
-  Clock, 
-  Search, 
-  Plus, 
-  ShieldAlert, 
-  Award, 
-  Sparkles, 
-  Calendar 
+import { useGuidanceScreenings } from '../../hooks/useGuidanceScreenings';
+import { StudentPicker } from '../shared/StudentPicker';
+import { PHQ9Screening, TwoQuestionScreening, GuidanceCounselingCase } from '../../types';
+import {
+  createGuidanceCounselingCase,
+  subscribeGuidanceCounselingCases,
+  updateGuidanceCounselingCaseStatus
+} from '../../services/firestoreService';
+import {
+  HeartHandshake,
+  Users,
+  FileText,
+  CheckCircle,
+  Clock,
+  Search,
+  Plus,
+  ShieldAlert,
+  Award,
+  Sparkles,
+  Calendar,
+  AlertTriangle
 } from 'lucide-react';
 
 export function GuidancePortal() {
-  const { sdqAssessments } = useStore();
+  const user = useStore(s => s.user);
   const { students } = useRealStudents(); // นักเรียนจาก Firestore สด
+  // ผลคัดกรอง 2Q/PHQ-9/SDQ สด real-time — แทนตัวเลขที่เคย hardcode ไว้ทั้งหมดในแท็บ "sdq"
+  const { twoQuestionScreenings, phq9Screenings, sdqAssessments, loading: screeningsLoading } = useGuidanceScreenings();
   const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'tcas'>('cases');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Counseling cases state (mock)
-  const [cases, setCases] = useState([
-    {
-      id: 'CS-001',
-      studentId: '6950801',
-      studentName: 'เด็กชาย กิตติคุณ สถิตการุณย์',
-      classRoom: 'ม.5/8',
-      issueType: 'ความเครียดจากการเรียนและสอบเข้ามหาวิทยาลัย',
-      severity: 'MODERATE',
-      status: 'IN_PROGRESS',
-      counselorName: 'ดร.สุดา จิตวิทยา',
-      lastSessionDate: '2026-08-18'
-    },
-    {
-      id: 'CS-002',
-      studentId: '6950805',
-      studentName: 'เด็กชาย ธน ภูมิภาค',
-      classRoom: 'ม.5/8',
-      issueType: 'ปัญหาการปรับตัวกับเพื่อนร่วมชั้น',
-      severity: 'LOW',
-      status: 'RESOLVED',
-      counselorName: 'ดร.สุดา จิตวิทยา',
-      lastSessionDate: '2026-08-10'
+  // สรุปผลคัดกรองสุขภาพจิตจากข้อมูลจริง (แทนตัวเลข hardcode เดิม 780/49/15 คน)
+  // เกณฑ์ "กลุ่มเสี่ยง": PHQ-9 riskLevel ตั้งแต่ MODERATE ขึ้นไป (คะแนน ≥10 ตามมาตรฐานกรมสุขภาพจิต
+  // ที่คำนวณไว้แล้วตอนบันทึกใน store.ts savePHQ9Screening — MILD ถือเป็น "เฝ้าระวัง" ไม่ใช่กลุ่มเสี่ยง)
+  // หรือ 2Q เป็นบวก (isPositive) หรือ SDQ triagingStatus ไม่ใช่ NORMAL (เอาผลแย่สุดต่อคนถ้ามีหลายผู้ประเมิน)
+  const screeningSummary = useMemo(() => {
+    const sdqWorstByStudent = new Map<string, 'NORMAL' | 'AT_RISK' | 'VULNERABLE'>();
+    const severityRank: Record<string, number> = { NORMAL: 0, AT_RISK: 1, VULNERABLE: 2 };
+    for (const sdq of sdqAssessments) {
+      // BUG FIX: เดิมเช็ค "ค่าใหม่ > ค่าเดิม" อย่างเดียว โดยสมมติ default เป็น NORMAL ที่ไม่เคย set
+      // ลง map จริง — ทำให้นักเรียนที่ผล SDQ เป็น NORMAL ล้วน (ไม่เคยแย่กว่า NORMAL เลย) ไม่ถูกนับเข้า
+      // map เลยสักคน (sdqWorstByStudent.size / sdqCounts.NORMAL ค้างที่ 0 เสมอ ทั้งที่มีคนทำแบบประเมิน
+      // จริงแล้ว) แก้เป็น set ค่าเข้า map ทันทีที่เจอครั้งแรก (current === undefined) แล้วค่อยอัปเดตทับ
+      // เฉพาะตอนแย่กว่าเดิมจริงๆ
+      const current = sdqWorstByStudent.get(sdq.studentId);
+      if (current === undefined || severityRank[sdq.triagingStatus] > severityRank[current]) {
+        sdqWorstByStudent.set(sdq.studentId, sdq.triagingStatus);
+      }
     }
-  ]);
+
+    const phq9ByStudent = new Map<string, PHQ9Screening>(phq9Screenings.map(p => [p.studentId, p]));
+    const twoQByStudent = new Map<string, TwoQuestionScreening>(twoQuestionScreenings.map(q => [q.studentId, q]));
+
+    // รวมรายชื่อนักเรียนทุกคนที่มีผลคัดกรองอย่างน้อย 1 ชุด (ไม่ใช่แค่คนที่อยู่ใน students[] สด
+    // เผื่อ listener นักเรียนยังไม่โหลด — ยังโชว์ผลคัดกรองได้ แค่ไม่มีชื่อเต็ม/ห้องประกอบ)
+    const allScreenedIds = new Set<string>([
+      ...phq9ByStudent.keys(),
+      ...twoQByStudent.keys(),
+      ...sdqWorstByStudent.keys(),
+    ]);
+
+    const atRiskList = Array.from(allScreenedIds).map(studentId => {
+      const phq9 = phq9ByStudent.get(studentId);
+      const twoQ = twoQByStudent.get(studentId);
+      const sdqWorst = sdqWorstByStudent.get(studentId) || 'NORMAL';
+      const phq9AtRisk = !!phq9 && ['MODERATE', 'SEVERE', 'VERY_SEVERE'].includes(phq9.riskLevel);
+      const isAtRisk = phq9AtRisk || !!twoQ?.isPositive || sdqWorst === 'VULNERABLE' || sdqWorst === 'AT_RISK';
+      const student = students.find(s => s.studentId === studentId);
+      return { studentId, student, phq9, twoQ, sdqWorst, isAtRisk, phq9AtRisk };
+    }).filter(r => r.isAtRisk).sort((a, b) => (b.phq9?.totalScore || 0) - (a.phq9?.totalScore || 0));
+
+    const sdqCounts = { NORMAL: 0, AT_RISK: 0, VULNERABLE: 0 };
+    for (const status of sdqWorstByStudent.values()) sdqCounts[status]++;
+    const sdqScreenedTotal = sdqWorstByStudent.size;
+
+    return { atRiskList, sdqCounts, sdqScreenedTotal, totalStudents: students.length };
+  }, [phq9Screenings, twoQuestionScreenings, sdqAssessments, students]);
+
+  // เคสให้คำปรึกษา — real-time จาก Firestore (guidance_counseling_cases) แทน useState mock เดิม
+  // ข้อมูลอ่อนไหวที่สุดในระบบ (เนื้อหาการปรึกษาจิตวิทยาของผู้เยาว์) — rules อ่าน/เขียนได้เฉพาะ
+  // GUIDANCE_COUNSELOR/SUPER_ADMIN เท่านั้น role อื่นทั้งหมดจะได้ list ว่างจาก listener error
+  const [cases, setCases] = useState<GuidanceCounselingCase[]>([]);
+  const [casesLoading, setCasesLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = subscribeGuidanceCounselingCases((list) => {
+      setCases(list);
+      setCasesLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const [showAddCaseModal, setShowAddCaseModal] = useState(false);
-  const [newStudentId, setNewStudentId] = useState(students[0]?.studentId || '');
+  // เฟส 2 shared components — TASK 2: เปลี่ยนไปใช้ StudentPicker กลาง ไม่ auto-select นักเรียนคนแรกอีกต่อไป
+  // (เดิม default เป็น students[0] เคยเป็นความเสี่ยงบันทึกเคสผิดคนถ้าครูแนะแนวลืมเปลี่ยน)
+  const [newStudentId, setNewStudentId] = useState('');
   const [newIssue, setNewIssue] = useState('');
+  const [newNotes, setNewNotes] = useState('');
   const [newSeverity, setNewSeverity] = useState<'LOW' | 'MODERATE' | 'HIGH'>('MODERATE');
+  const [isSavingCase, setIsSavingCase] = useState(false);
+  const [addCaseError, setAddCaseError] = useState<string | null>(null);
 
-  const handleAddCase = (e: React.FormEvent) => {
+  const handleAddCase = async (e: React.FormEvent) => {
     e.preventDefault();
-    const effectiveStudentId = newStudentId || students[0]?.studentId || '';
-    const st = students.find(s => s.studentId === effectiveStudentId);
-    const newC = {
-      id: `CS-00${cases.length + 1}`,
-      studentId: effectiveStudentId,
-      studentName: st?.fullName || 'ไม่ระบุชื่อ',
-      classRoom: st?.room || 'ม.5/8',
-      issueType: newIssue,
-      severity: newSeverity,
-      status: 'IN_PROGRESS' as const,
-      counselorName: 'ดร.สุดา จิตวิทยา',
-      lastSessionDate: new Date().toISOString().split('T')[0]
-    };
-    setCases([newC, ...cases]);
-    setShowAddCaseModal(false);
-    setNewIssue('');
+    if (!newStudentId) {
+      setAddCaseError('กรุณาเลือกนักเรียนก่อนบันทึกเคส');
+      return;
+    }
+    const st = students.find(s => s.studentId === newStudentId);
+    if (!user?.uid) {
+      setAddCaseError('ไม่พบบัญชีผู้ใช้ที่ล็อกอินอยู่ กรุณาเข้าสู่ระบบใหม่ก่อนบันทึกเคส');
+      return;
+    }
+    setIsSavingCase(true);
+    setAddCaseError(null);
+    try {
+      await createGuidanceCounselingCase({
+        studentId: newStudentId,
+        studentName: st?.fullName || 'ไม่ระบุชื่อ',
+        classRoom: st?.room || 'ไม่ระบุห้อง',
+        category: newIssue,
+        notes: newNotes,
+        severity: newSeverity,
+        counselorUid: user.uid,
+        counselorName: user.displayName || user.email || 'ครูแนะแนว',
+      });
+      setShowAddCaseModal(false);
+      setNewIssue('');
+      setNewNotes('');
+    } catch (err) {
+      console.error('[GuidancePortal] createGuidanceCounselingCase failed:', err);
+      setAddCaseError('บันทึกเคสไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsSavingCase(false);
+    }
+  };
+
+  const handleResolveCase = async (caseId: string) => {
+    try {
+      await updateGuidanceCounselingCaseStatus(caseId, 'RESOLVED');
+    } catch (err) {
+      console.error('[GuidancePortal] updateGuidanceCounselingCaseStatus failed:', err);
+    }
   };
 
   return (
@@ -150,38 +224,52 @@ export function GuidancePortal() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4">
-              {cases.map((c) => (
-                <div key={c.id} className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                  <div className="space-y-1.5 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 bg-slate-800 text-purple-400 text-[10px] font-mono rounded font-bold">
-                        {c.id}
-                      </span>
-                      <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-300 text-[10px] font-semibold rounded border border-indigo-500/20">
-                        {c.classRoom}
-                      </span>
-                      <span className="text-xs text-slate-400 font-mono">อัปเดตล่าสุด: {c.lastSessionDate}</span>
+            {casesLoading ? (
+              <div className="text-center py-8 text-slate-500 text-xs">กำลังโหลดข้อมูลเคส...</div>
+            ) : cases.length === 0 ? (
+              <div className="text-center py-8 text-slate-500 text-xs">ยังไม่มีเคสให้คำปรึกษาที่บันทึกไว้</div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {cases.map((c) => (
+                  <div key={c.id} className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div className="space-y-1.5 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-300 text-[10px] font-semibold rounded border border-indigo-500/20">
+                          {c.classRoom}
+                        </span>
+                        <span className="text-xs text-slate-400 font-mono">อัปเดตล่าสุด: {c.lastSessionDate}</span>
+                      </div>
+                      <h4 className="text-sm font-bold text-white">{c.studentName} (ID: {c.studentId})</h4>
+                      <p className="text-xs text-slate-300"><span className="font-semibold text-white">ประเด็นให้คำปรึกษา:</span> {c.category}</p>
+                      {c.notes && (
+                        <p className="text-xs text-slate-400"><span className="font-semibold text-slate-300">บันทึก:</span> {c.notes}</p>
+                      )}
+                      <p className="text-xs text-slate-400">ผู้ให้คำปรึกษา: <span className="text-white">{c.counselorName}</span></p>
                     </div>
-                    <h4 className="text-sm font-bold text-white">{c.studentName} (ID: {c.studentId})</h4>
-                    <p className="text-xs text-slate-300"><span className="font-semibold text-white">ประเด็นให้คำปรึกษา:</span> {c.issueType}</p>
-                    <p className="text-xs text-slate-400">ผู้ให้คำปรึกษา: <span className="text-white">{c.counselorName}</span></p>
-                  </div>
 
-                  <div className="flex items-center gap-3">
-                    {c.status === 'RESOLVED' ? (
-                      <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-bold inline-flex items-center gap-1">
-                        <CheckCircle className="w-3.5 h-3.5" /> เคสสิ้นสุด/ยุติแล้ว
-                      </span>
-                    ) : (
-                      <span className="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-xl text-xs font-bold inline-flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5" /> อยู่ระหว่างดูแลต่อเนื่อง
-                      </span>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {c.status === 'RESOLVED' ? (
+                        <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-bold inline-flex items-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5" /> เคสสิ้นสุด/ยุติแล้ว
+                        </span>
+                      ) : (
+                        <>
+                          <span className="px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-xl text-xs font-bold inline-flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" /> อยู่ระหว่างดูแลต่อเนื่อง
+                          </span>
+                          <button
+                            onClick={() => handleResolveCase(c.id)}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                          >
+                            ปิดเคส
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -189,26 +277,113 @@ export function GuidancePortal() {
         {activeTab === 'sdq' && (
           <div className="space-y-4">
             <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-              <h3 className="text-base font-bold text-white">สถิติการคัดกรองสุขภาพจิตนักเรียน (SDQ & EQ) ประจำปีการศึกษา 2569</h3>
-              <p className="text-xs text-slate-400">ผลการประเมินจากนักเรียน ผู้ปกครอง และครูที่ปรึกษา</p>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h3 className="text-base font-bold text-white">สถิติการคัดกรองสุขภาพจิตนักเรียน (SDQ) ประจำปีการศึกษา 2569</h3>
+                  <p className="text-xs text-slate-400">
+                    ข้อมูลจริงแบบเรียลไทม์จากนักเรียน {screeningSummary.sdqScreenedTotal} / {screeningSummary.totalStudents} คน ที่ทำแบบประเมิน SDQ แล้ว
+                  </p>
+                </div>
+                {screeningsLoading && (
+                  <span className="text-[10px] text-slate-500 font-mono">กำลังโหลดข้อมูลสด...</span>
+                )}
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
                   <span className="text-xs text-slate-400 block font-medium">กลุ่มปกติ (Normal Range)</span>
-                  <p className="text-2xl font-black font-mono text-emerald-400">92.4%</p>
-                  <span className="text-[10px] text-emerald-400">นักเรียน 780 คน</span>
+                  <p className="text-2xl font-black font-mono text-emerald-400">
+                    {screeningSummary.sdqScreenedTotal > 0
+                      ? `${((screeningSummary.sdqCounts.NORMAL / screeningSummary.sdqScreenedTotal) * 100).toFixed(1)}%`
+                      : '—'}
+                  </p>
+                  <span className="text-[10px] text-emerald-400">นักเรียน {screeningSummary.sdqCounts.NORMAL} คน</span>
                 </div>
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-xs text-slate-400 block font-medium">กลุ่มเสี่ยง (Borderline)</span>
-                  <p className="text-2xl font-black font-mono text-amber-400">5.8%</p>
-                  <span className="text-[10px] text-amber-400">นักเรียน 49 คน (อยู่ในความดูแล)</span>
+                  <span className="text-xs text-slate-400 block font-medium">กลุ่มเสี่ยง (At Risk)</span>
+                  <p className="text-2xl font-black font-mono text-amber-400">
+                    {screeningSummary.sdqScreenedTotal > 0
+                      ? `${((screeningSummary.sdqCounts.AT_RISK / screeningSummary.sdqScreenedTotal) * 100).toFixed(1)}%`
+                      : '—'}
+                  </p>
+                  <span className="text-[10px] text-amber-400">นักเรียน {screeningSummary.sdqCounts.AT_RISK} คน (อยู่ในความดูแล)</span>
                 </div>
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-xs text-slate-400 block font-medium">กลุ่มมีปัญหา (Abnormal)</span>
-                  <p className="text-2xl font-black font-mono text-rose-400">1.8%</p>
-                  <span className="text-[10px] text-rose-400">นักเรียน 15 คน (ส่งต่อจิตแพทย์เด็กและวัยรุ่น)</span>
+                  <span className="text-xs text-slate-400 block font-medium">กลุ่มมีปัญหา (Vulnerable)</span>
+                  <p className="text-2xl font-black font-mono text-rose-400">
+                    {screeningSummary.sdqScreenedTotal > 0
+                      ? `${((screeningSummary.sdqCounts.VULNERABLE / screeningSummary.sdqScreenedTotal) * 100).toFixed(1)}%`
+                      : '—'}
+                  </p>
+                  <span className="text-[10px] text-rose-400">นักเรียน {screeningSummary.sdqCounts.VULNERABLE} คน (ส่งต่อจิตแพทย์เด็กและวัยรุ่น)</span>
                 </div>
               </div>
+            </div>
+
+            {/* รายชื่อนักเรียนกลุ่มเสี่ยงจาก PHQ-9 / 2Q / SDQ — ต้องเห็นทันทีที่มีการส่งแบบประเมินใหม่ */}
+            <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400" />
+                <h3 className="text-base font-bold text-white">รายชื่อนักเรียนกลุ่มเสี่ยงที่ต้องติดตาม ({screeningSummary.atRiskList.length} คน)</h3>
+              </div>
+              <p className="text-xs text-slate-400">
+                เกณฑ์: PHQ-9 ระดับปานกลางขึ้นไป (คะแนน ≥10) หรือผลคัดกรอง 2Q เป็นบวก หรือ SDQ อยู่ในกลุ่มเสี่ยง/มีปัญหา —
+                กรุณาให้ครูแนะแนวยืนยันความถูกต้องของเกณฑ์นี้อีกครั้งตามมาตรฐานที่โรงเรียนใช้จริง
+              </p>
+
+              {screeningSummary.atRiskList.length === 0 ? (
+                <div className="text-center py-8 text-slate-500 text-xs">ยังไม่มีนักเรียนที่เข้าเกณฑ์กลุ่มเสี่ยงในขณะนี้</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-slate-400">
+                        <th className="pb-2 font-medium">นักเรียน</th>
+                        <th className="pb-2 font-medium">PHQ-9</th>
+                        <th className="pb-2 font-medium">2Q</th>
+                        <th className="pb-2 font-medium">SDQ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {screeningSummary.atRiskList.map((row) => (
+                        <tr key={row.studentId} className="hover:bg-slate-800/30">
+                          <td className="py-2.5">
+                            <p className="font-bold text-white">{row.student?.fullName || `รหัส ${row.studentId}`}</p>
+                            <p className="text-[10px] text-slate-400 font-mono">{row.student?.room || ''} · ID: {row.studentId}</p>
+                          </td>
+                          <td className="py-2.5">
+                            {row.phq9 ? (
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                row.phq9AtRisk ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-slate-800 text-slate-300'
+                              }`}>
+                                {row.phq9.totalScore}/27 ({row.phq9.riskLevel})
+                              </span>
+                            ) : <span className="text-slate-600">—</span>}
+                          </td>
+                          <td className="py-2.5">
+                            {row.twoQ ? (
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                row.twoQ.isPositive ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-slate-800 text-slate-300'
+                              }`}>
+                                {row.twoQ.isPositive ? 'มีความเสี่ยง' : 'ปกติ'}
+                              </span>
+                            ) : <span className="text-slate-600">—</span>}
+                          </td>
+                          <td className="py-2.5">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              row.sdqWorst === 'VULNERABLE' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                              row.sdqWorst === 'AT_RISK' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                              'bg-slate-800 text-slate-300'
+                            }`}>
+                              {row.sdqWorst}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -256,16 +431,7 @@ export function GuidancePortal() {
             <form onSubmit={handleAddCase} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">เลือกนักเรียน</label>
-                <select
-                  value={newStudentId || students[0]?.studentId || ''}
-                  onChange={(e) => setNewStudentId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                >
-                  {students.length === 0 && <option value="">— ยังไม่มีข้อมูลนักเรียน —</option>}
-                  {students.map(s => (
-                    <option key={s.studentId} value={s.studentId}>{s.fullName} ({s.studentId})</option>
-                  ))}
-                </select>
+                <StudentPicker mode="single" students={students} value={newStudentId} onSelect={setNewStudentId} />
               </div>
 
               <div>
@@ -277,6 +443,18 @@ export function GuidancePortal() {
                   onChange={(e) => setNewIssue(e.target.value)}
                   placeholder="เช่น ความเครียดเรื่องเกรดเฉลี่ย / ปัญหาครอบครัว"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">บันทึกรายละเอียดการให้คำปรึกษา (Notes)</label>
+                <textarea
+                  required
+                  value={newNotes}
+                  onChange={(e) => setNewNotes(e.target.value)}
+                  rows={3}
+                  placeholder="รายละเอียดการพูดคุย ข้อสังเกต แผนการติดตาม ฯลฯ"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white resize-none"
                 />
               </div>
 
@@ -293,6 +471,10 @@ export function GuidancePortal() {
                 </select>
               </div>
 
+              {addCaseError && (
+                <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">{addCaseError}</p>
+              )}
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
@@ -303,9 +485,10 @@ export function GuidancePortal() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold"
+                  disabled={isSavingCase}
+                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold"
                 >
-                  บันทึกเปิดเคส
+                  {isSavingCase ? 'กำลังบันทึก...' : 'บันทึกเปิดเคส'}
                 </button>
               </div>
             </form>

@@ -1,35 +1,40 @@
-import React, { useState } from 'react';
-import { 
-  CreditCard, 
-  MessageSquare, 
-  Calendar, 
-  QrCode, 
-  CheckCircle2, 
-  Download, 
-  Upload, 
-  Send, 
-  Video, 
-  MapPin, 
-  Clock, 
-  Receipt, 
-  Check, 
+import React, { useEffect, useState } from 'react';
+import {
+  CreditCard,
+  MessageSquare,
+  Calendar,
+  QrCode,
+  CheckCircle2,
+  Download,
+  Upload,
+  Send,
+  Video,
+  MapPin,
+  Clock,
+  Receipt,
+  Check,
   Sparkles,
   Phone,
   User,
   ShieldCheck
 } from 'lucide-react';
 import { useStore } from '../../store';
+import { subscribeBillingInvoices } from '../../services/firestoreService';
 import { BillingInvoice, ParentTeacherMessage, ParentAppointment, Student } from '../../types';
 
-export function ParentEngagementServices({ studentId }: { studentId: string }) {
-  const { 
-    billingInvoices, 
-    payBillingInvoice, 
-    parentTeacherMessages, 
-    sendParentTeacherMessage, 
-    parentAppointments, 
+export function ParentEngagementServices({
+  studentId,
+  student: studentProp,
+  isParentView = false
+}: { studentId: string; student?: Student; isParentView?: boolean }) {
+  const user = useStore(s => s.user);
+  const {
+    payBillingInvoice,
+    parentTeacherMessages,
+    sendParentTeacherMessage,
+    parentAppointments,
     bookParentAppointment,
-    students 
+    students
   } = useStore();
 
   const defaultStudent: Student = {
@@ -52,8 +57,28 @@ export function ParentEngagementServices({ studentId }: { studentId: string }) {
     },
     attendance: { morningStatus: 'PRESENT', checkInMethod: 'SCAN', checkInTime: '07:45 น.' }
   };
-  const student = students.find(s => s.studentId === studentId) || students[0] || defaultStudent;
+  // ใช้ student ของจริงที่ผู้เรียก (StudentPortal/ParentPortal) ดึงมาจาก useRealStudents() ถ้าส่งมาให้
+  // แทนการค้นจาก state.students ของ Zustand (session-local ไม่เคยมี listener ผูกไว้ — ค่า studentUid/
+  // parentUid ที่ต้องใช้กรอง query ใบแจ้งหนี้จริงจะไม่มีวันครบถ้วนถ้าพึ่ง state นี้)
+  const student = studentProp || students.find(s => s.studentId === studentId) || students[0] || defaultStudent;
+
+  // TASK 2 (เฟส 2 การเงิน): ใบแจ้งหนี้จริงจาก Firestore แบบ real-time แทน state.billingInvoices
+  // ของ Zustand (ไม่เคยมี listener ผูกไว้เลย — ผู้ปกครองเขียนจ่ายเงินได้จริงแต่ไม่เคยเห็นยอดที่ต้องจ่าย)
+  // กรองตาม role: ผู้ปกครองกรองด้วย parentUid ของตัวเอง, นักเรียนกรองด้วย studentUid ของตัวเอง
+  const [billingInvoices, setBillingInvoices] = useState<BillingInvoice[]>([]);
+  useEffect(() => {
+    if (!user?.uid) { setBillingInvoices([]); return; }
+    const unsubscribe = subscribeBillingInvoices(
+      setBillingInvoices,
+      isParentView ? { parentUid: user.uid } : { studentUid: user.uid }
+    );
+    return () => unsubscribe();
+  }, [user?.uid, isParentView]);
+
   const invoices = billingInvoices.filter(i => i.studentId === student.studentId);
+  // TASK 2: แยกรายการค้างชำระ (PENDING/OVERDUE) ออกจากที่จ่ายแล้วให้ชัดเจน
+  const unpaidInvoices = invoices.filter(i => i.status !== 'PAID');
+  const paidInvoices = invoices.filter(i => i.status === 'PAID');
   const messages = parentTeacherMessages.filter(m => m.studentId === student.studentId);
   const appointments = parentAppointments.filter(a => a.studentId === student.studentId);
 
@@ -179,59 +204,53 @@ export function ParentEngagementServices({ studentId }: { studentId: string }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {invoices.map((inv) => (
-              <div
-                key={inv.id}
-                className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-4 flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-                      {inv.invoiceNo}
-                    </span>
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-                      inv.status === 'PAID'
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                        : 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
-                    }`}>
-                      {inv.status === 'PAID' ? '✅ ชำระเงินเรียบร้อยแล้ว' : '⏳ รอการชำระเงิน'}
-                    </span>
-                  </div>
-
-                  <h4 className="text-base font-bold text-white mb-2">{inv.title}</h4>
-
-                  <div className="space-y-1.5 text-xs bg-slate-800/40 p-3 rounded-2xl border border-slate-800">
-                    {inv.items.map((item, idx) => (
-                      <div key={idx} className="flex justify-between text-slate-300">
-                        <span>{item.description || (item as any).name || 'รายการ'}</span>
-                        <span className="font-mono">฿{(item.amount || 0).toLocaleString()}</span>
+          {/* TASK 2: แยกรายการค้างชำระ (PENDING/OVERDUE) ออกจากประวัติที่จ่ายแล้วให้ชัดเจน */}
+          <div className="space-y-3">
+            <h4 className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" /> รายการค้างชำระ ({unpaidInvoices.length})
+            </h4>
+            {unpaidInvoices.length === 0 ? (
+              <div className="text-center py-6 text-slate-500 text-xs bg-slate-900/40 border border-slate-800 rounded-2xl">
+                ไม่มีรายการค้างชำระในขณะนี้
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {unpaidInvoices.map((inv) => (
+                  <div
+                    key={inv.id}
+                    className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-4 flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                          {inv.invoiceNumber}
+                        </span>
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
+                          inv.status === 'OVERDUE'
+                            ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                            : 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
+                        }`}>
+                          {inv.status === 'OVERDUE' ? '⚠️ เกินกำหนดชำระ' : '⏳ รอการชำระเงิน'}
+                        </span>
                       </div>
-                    ))}
-                    <div className="pt-2 border-t border-slate-700/60 flex justify-between font-bold text-sm text-white">
-                      <span>ยอดรวมทั้งสิ้น:</span>
-                      <span className="text-emerald-400 font-black">฿{(inv.totalAmount ?? (inv as any).amount ?? 0).toLocaleString()}</span>
+
+                      <h4 className="text-base font-bold text-white mb-2">{inv.title}</h4>
+
+                      <div className="space-y-1.5 text-xs bg-slate-800/40 p-3 rounded-2xl border border-slate-800">
+                        {inv.items.map((item, idx) => (
+                          <div key={idx} className="flex justify-between text-slate-300">
+                            <span>{item.description || (item as any).name || 'รายการ'}</span>
+                            <span className="font-mono">฿{(item.amount || 0).toLocaleString()}</span>
+                          </div>
+                        ))}
+                        <div className="pt-2 border-t border-slate-700/60 flex justify-between font-bold text-sm text-white">
+                          <span>ยอดรวมทั้งสิ้น:</span>
+                          <span className="text-emerald-400 font-black">฿{inv.totalAmount.toLocaleString()}</span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
 
-                <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  {inv.status === 'PAID' ? (
-                    <>
-                      <div className="text-[11px] text-slate-400">
-                        <span>ชำระเมื่อ: {inv.paidAt}</span>
-                        <p className="text-emerald-400 font-mono">เลขที่ใบเสร็จ: {inv.receiptNo}</p>
-                      </div>
-                      <button 
-                        onClick={() => alert(`ดาวน์โหลดใบเสร็จรับเงินอิเล็กทรอนิกส์ ${inv.receiptNo}`)}
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border border-slate-700 transition-all cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>ใบเสร็จ e-Receipt</span>
-                      </button>
-                    </>
-                  ) : (
-                    <>
+                    <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                       <span className="text-[11px] text-amber-400">กำหนดชำระภายใน: {inv.dueDate}</span>
                       <button
                         onClick={() => setSelectedInvoice(inv)}
@@ -240,11 +259,71 @@ export function ParentEngagementServices({ studentId }: { studentId: string }) {
                         <QrCode className="w-3.5 h-3.5" />
                         <span>ชำระผ่าน PromptPay QR</span>
                       </button>
-                    </>
-                  )}
-                </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <h4 className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5" /> ประวัติการชำระเงิน ({paidInvoices.length})
+            </h4>
+            {paidInvoices.length === 0 ? (
+              <div className="text-center py-6 text-slate-500 text-xs bg-slate-900/40 border border-slate-800 rounded-2xl">
+                ยังไม่มีประวัติการชำระเงิน
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {paidInvoices.map((inv) => (
+                  <div
+                    key={inv.id}
+                    className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-4 flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                          {inv.invoiceNumber}
+                        </span>
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold border bg-emerald-500/10 border-emerald-500/30 text-emerald-400">
+                          ✅ ชำระเงินเรียบร้อยแล้ว
+                        </span>
+                      </div>
+
+                      <h4 className="text-base font-bold text-white mb-2">{inv.title}</h4>
+
+                      <div className="space-y-1.5 text-xs bg-slate-800/40 p-3 rounded-2xl border border-slate-800">
+                        {inv.items.map((item, idx) => (
+                          <div key={idx} className="flex justify-between text-slate-300">
+                            <span>{item.description || (item as any).name || 'รายการ'}</span>
+                            <span className="font-mono">฿{(item.amount || 0).toLocaleString()}</span>
+                          </div>
+                        ))}
+                        <div className="pt-2 border-t border-slate-700/60 flex justify-between font-bold text-sm text-white">
+                          <span>ยอดรวมทั้งสิ้น:</span>
+                          <span className="text-emerald-400 font-black">฿{inv.totalAmount.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                      <div className="text-[11px] text-slate-400">
+                        <span>ชำระเมื่อ: {inv.paidAt}</span>
+                        <p className="text-emerald-400 font-mono">เลขที่ใบเสร็จ: {inv.receiptNo}</p>
+                      </div>
+                      <button
+                        onClick={() => alert(`ดาวน์โหลดใบเสร็จรับเงินอิเล็กทรอนิกส์ ${inv.receiptNo}`)}
+                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border border-slate-700 transition-all cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>ใบเสร็จ e-Receipt</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* PromptPay QR Payment Modal */}
@@ -266,7 +345,7 @@ export function ParentEngagementServices({ studentId }: { studentId: string }) {
                   </div>
                   <QrCode className="w-40 h-40 mx-auto text-slate-900" />
                   <span className="text-[9px] text-slate-500 font-mono block mt-2">
-                    REF: {selectedInvoice.invoiceNo}
+                    REF: {selectedInvoice.invoiceNumber}
                   </span>
                 </div>
 

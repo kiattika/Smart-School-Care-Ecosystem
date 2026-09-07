@@ -19,7 +19,6 @@ import {
   ReportCardTerm,
   HomeworkAssignment,
   ExamScheduleItem,
-  BillingInvoice,
   ParentTeacherMessage,
   ParentAppointment
 } from '../types';
@@ -237,36 +236,12 @@ export const INITIAL_SPECIAL_CARE_NEEDS: Record<string, SpecialCareNeed[]> = {
   ]
 };
 
-export const INITIAL_INFIRMARY_VISITS: InfirmaryVisit[] = [
-  {
-    id: 'inf-01',
-    studentId: '6950801',
-    visitTime: '2026-08-19 13:45 น.',
-    symptoms: 'ปวดศีรษะ วิงเวียน มีไข้ 38.2°C หลังเรียนวิชาพละ',
-    temperature: 38.2,
-    treatment: 'เช็ดตัวลดไข้ ให้นอนพักผ่อนในห้องพยาบาล 1 คาบ',
-    medicationGiven: 'Paracetamol 500mg 1 เม็ด',
-    restDurationMinutes: 50,
-    nurseName: 'พยาบาลวิไลลักษณ์ มโนรมย์',
-    isUrgentAlert: true,
-    parentAcknowledged: true,
-    acknowledgedAt: '2026-08-19 14:10 น.'
-  },
-  {
-    id: 'inf-02',
-    studentId: '6950801',
-    visitTime: '2026-07-28 10:20 น.',
-    symptoms: 'แผลถลอกที่หัวเข่าด้านขวาจากการสะดุดล้มระหว่างเดินขึ้นบันได',
-    temperature: 36.5,
-    treatment: 'ล้างแผลด้วยน้ำเกลือ ทาเบตาดีน และปิดผ้าก๊อซสะอาด',
-    medicationGiven: 'ไม่มี',
-    restDurationMinutes: 15,
-    nurseName: 'พยาบาลวิไลลักษณ์ มโนรมย์',
-    isUrgentAlert: false,
-    parentAcknowledged: true,
-    acknowledgedAt: '2026-07-28 10:45 น.'
-  }
-];
+// NOTE (TASK 3 — เชื่อมข้อมูลห้องพยาบาลจริง): เดิมมี INITIAL_INFIRMARY_VISITS มาตรง ๆ (mock array
+// ของปลอมใช้รหัสนักเรียนผี '6950801' ตามที่ CLAUDE.md ห้ามไว้) แต่ไม่มีที่ไหน import ใช้จริงเลย
+// (dead code) และหลังเพิ่ม field studentUid/parentUid/visitDate ที่จำเป็นสำหรับ firestore.rules
+// จริงใน InfirmaryVisit ก็จะ type-error ทันที — ลบทิ้งแทนที่จะแก้ให้ตรง type เพราะเป็นข้อมูลปลอมที่
+// ไม่ได้ใช้งานอยู่แล้ว ข้อมูลจริงตอนนี้มาจาก Firestore collection infirmary_visits (ดู
+// services/firestoreService.ts: recordInfirmaryVisit/subscribeInfirmaryVisits)
 
 export const INITIAL_2Q_SCREENINGS: Record<string, TwoQuestionScreening> = {
   '6950801': {
@@ -291,59 +266,12 @@ export const INITIAL_PHQ9_SCREENINGS: Record<string, PHQ9Screening> = {
   }
 };
 
-export const INITIAL_SDQ_ASSESSMENTS: SDQAssessment[] = [
-  {
-    id: 'sdq-student-01',
-    studentId: '6950801',
-    evaluatorType: 'STUDENT',
-    evaluatorName: 'นายกิตติศักดิ์ เจริญสุข (นักเรียนประเมินตนเอง)',
-    subscaleScores: {
-      emotional: 2,
-      conduct: 1,
-      hyperactivity: 2,
-      peerProblems: 1,
-      prosocial: 9
-    },
-    totalDifficultiesScore: 6,
-    triagingStatus: 'NORMAL',
-    assessmentDate: '2026-07-10',
-    recommendations: ['คะแนนปัญหาโดยรวมอยู่ในเกณฑ์ปกติ', 'จุดแข็งด้านสัมพันธภาพทางสังคม (Prosocial) อยู่ในเกณฑ์ดีเยี่ยม']
-  },
-  {
-    id: 'sdq-teacher-01',
-    studentId: '6950801',
-    evaluatorType: 'TEACHER',
-    evaluatorName: 'ครูกิตติศักดิ์ (ครูประจำชั้น ม.5/8)',
-    subscaleScores: {
-      emotional: 1,
-      conduct: 0,
-      hyperactivity: 2,
-      peerProblems: 1,
-      prosocial: 10
-    },
-    totalDifficultiesScore: 4,
-    triagingStatus: 'NORMAL',
-    assessmentDate: '2026-07-12',
-    recommendations: ['นักเรียนมีความรับผิดชอบสูง ช่วยเหลือเพื่อนในชั้นเรียนสม่ำเสมอ']
-  },
-  {
-    id: 'sdq-parent-01',
-    studentId: '6950801',
-    evaluatorType: 'PARENT',
-    evaluatorName: 'นายสมชาย เจริญสุข (ผู้ปกครอง)',
-    subscaleScores: {
-      emotional: 2,
-      conduct: 1,
-      hyperactivity: 3,
-      peerProblems: 1,
-      prosocial: 9
-    },
-    totalDifficultiesScore: 7,
-    triagingStatus: 'NORMAL',
-    assessmentDate: '2026-07-14',
-    recommendations: ['มีความสัมพันธ์ที่ดีกับคนในครอบครัว มีสมาธิในการอ่านหนังสือทบทวนบทเรียน']
-  }
-];
+// NOTE (TASK — แก้ SDQ write permission): เดิมมี INITIAL_SDQ_ASSESSMENTS มาตรง ๆ (mock array ของปลอม
+// ใช้รหัสนักเรียนผี '6950801' + ชื่อบุคคลสมมติ ตามที่ CLAUDE.md ห้ามไว้) แต่ไม่มีที่ไหน import ใช้จริง
+// เลย (dead code) และหลังเพิ่ม field studentUid/respondentUid ที่จำเป็นสำหรับ firestore.rules จริงใน
+// SDQAssessment ก็จะ type-error ทันที — ลบทิ้งเหมือน INITIAL_INFIRMARY_VISITS ด้านบน ข้อมูลจริงตอนนี้
+// มาจาก Firestore collection student_assessments_sdq (ดู services/firestoreService.ts:
+// saveSDQAssessmentFirestore/subscribeSDQAssessments)
 
 export const INITIAL_GUARDIAN_PROFILES: Record<string, GuardianBackground> = {
   '6950801': {
@@ -722,40 +650,12 @@ export const INITIAL_EXAM_SCHEDULES: ExamScheduleItem[] = [
   }
 ];
 
-export const INITIAL_BILLING_INVOICES: BillingInvoice[] = [
-  {
-    id: 'inv-01',
-    studentId: '6950801',
-    invoiceNo: 'INV-2569-1-0492',
-    title: 'ใบแจ้งยอดค่าบำรุงการศึกษาและบริการ ภาคเรียนที่ 1/2569',
-    items: [
-      { description: 'เงินบำรุงการศึกษาโครงการจัดการเรียนการสอนห้องเรียนพิเศษ (SMTE)', amount: 2000 },
-      { description: 'ค่าประกันอุบัติเหตุหมู่นักเรียนประจำปีการศึกษา', amount: 350 },
-      { description: 'ค่าบำรุงระบบอินเทอร์เน็ตความเร็วสูงและการเรียนการสอนออนไลน์', amount: 400 },
-      { description: 'ค่าตรวจสุขภาพและตรวจสารชีวเคมีประจำปี', amount: 250 }
-    ],
-    totalAmount: 3000,
-    dueDate: '2026-08-31',
-    status: 'UNPAID',
-    promptPayQr: 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=00020101021229370016A000000677010111011300668198765435802TH530376454073000.006304D1B8'
-  },
-  {
-    id: 'inv-02',
-    studentId: '6950801',
-    invoiceNo: 'INV-2568-2-0881',
-    title: 'ใบแจ้งยอดค่ากิจกรรมทัศนศึกษาและการเรียนรู้นอกสถานที่ ภาคเรียนที่ 2/2568',
-    items: [
-      { description: 'ค่าพาหนะและกิจกรรมศึกษาดูงานศูนย์วิทยาศาสตร์และเทคโนโลยีแห่งชาติ', amount: 1200 },
-      { description: 'ค่าอาหารและเครื่องดื่ม', amount: 600 }
-    ],
-    totalAmount: 1800,
-    dueDate: '2025-12-15',
-    status: 'PAID',
-    promptPayQr: 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=00020101021229370016A000000677010111011300668198765435802TH530376454071800.006304A4C2',
-    paidAt: '2025-12-10 14:22 น.',
-    receiptNo: 'REC-2568-09148'
-  }
-];
+// NOTE (เฟส 2 การเงิน — TASK 1): เดิมมี INITIAL_BILLING_INVOICES มาตรง ๆ (mock array ของปลอมใช้รหัส
+// นักเรียนผี '6950801' + เลขที่ใบแจ้งหนี้ตายตัวไม่ผ่าน counter จริง) แต่ไม่มีที่ไหน import ใช้จริงเลย
+// (dead code) และหลังเปลี่ยน schema (invoiceNo→invoiceNumber, UNPAID→PENDING, เพิ่ม studentUid/
+// parentUid/createdBy/createdAt) ก็จะ type-error ทันที — ลบทิ้งเหมือนไฟล์ mock อื่นๆ ที่ตรวจแล้วว่าตาย
+// ข้อมูลจริงตอนนี้มาจาก Firestore collection billing_invoices (ดู services/firestoreService.ts:
+// createBillingInvoice/subscribeBillingInvoices)
 
 export const INITIAL_PARENT_TEACHER_MESSAGES: ParentTeacherMessage[] = [
   {

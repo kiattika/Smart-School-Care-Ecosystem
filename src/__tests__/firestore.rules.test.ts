@@ -8,6 +8,7 @@ import {
   assertFails,
 } from '@firebase/rules-unit-testing';
 import { collection, getDocs, query, where } from 'firebase/firestore';
+import { enrollInActivity, withdrawFromActivity, createBillingInvoice, createBillingInvoicesBulk, recordInfirmaryVisit, createParentNotification } from '../services/firestoreService';
 
 let testEnv: RulesTestEnvironment;
 
@@ -1001,6 +1002,809 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertFails(asRole('HEAD_OF_DEPARTMENT').firestore().doc('department_config/bad').set({ name: 'x' }));
       await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('department_config/bad').set({ name: 'x' }));
       await assertFails(asAnonymous().firestore().doc('department_config/bad').set({ name: 'x' }));
+    });
+  });
+
+  // 19. elective_activities_config — กำหนด subjectCode ไหนเป็นชุมนุม (ELECTIVE)
+  describe('elective_activities_config collection', () => {
+    it('lets any signed-in user read', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('elective_activities_config/ACT_CLUB').set({ subjectCode: 'ACT_CLUB', name: 'ชุมนุมคอมพิวเตอร์', capacityPerSection: 20 });
+      });
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('elective_activities_config/ACT_CLUB').get());
+      await assertSucceeds(asUser('stu-1', ['STUDENT']).firestore().doc('elective_activities_config/ACT_CLUB').get());
+    });
+    it('denies anonymous read (ต้อง signed-in)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('elective_activities_config/ACT_X').set({ subjectCode: 'ACT_X', name: 'X' });
+      });
+      await assertFails(asAnonymous().firestore().doc('elective_activities_config/ACT_X').get());
+    });
+    it('allows SUPER_ADMIN and ACADEMIC_HEAD to write; denies other roles', async () => {
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('elective_activities_config/ACT_A').set({ subjectCode: 'ACT_A', name: 'A', capacityPerSection: 10 })
+      );
+      await assertSucceeds(
+        asRole('ACADEMIC_HEAD').firestore().doc('elective_activities_config/ACT_B').set({ subjectCode: 'ACT_B', name: 'B', capacityPerSection: null })
+      );
+      await assertFails(
+        asRole('SUBJECT_TEACHER').firestore().doc('elective_activities_config/ACT_C').set({ subjectCode: 'ACT_C', name: 'C' })
+      );
+      await assertFails(
+        asRole('HEAD_OF_DEPARTMENT').firestore().doc('elective_activities_config/ACT_D').set({ subjectCode: 'ACT_D', name: 'D' })
+      );
+    });
+  });
+
+  // 20. activity_enrollments — สมัคร/ถอนชุมนุม
+  describe('activity_enrollments collection', () => {
+    const seedStudentAndSchedule = async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-e1').set({ studentId: 'std-e1', studentUid: 'stu-e1-uid', name: 'นักเรียน E1' });
+        await ctx.firestore().doc('students/std-e2').set({ studentId: 'std-e2', studentUid: 'stu-e2-uid', name: 'นักเรียน E2' });
+        await ctx.firestore().doc('schedules/sch-club-1').set({ subjectCode: 'ACT_CLUB', teacherId: 'teacher-club-uid', dayOfWeek: 'tuesday', periodNumber: 8 });
+      });
+    };
+
+    it('lets any signed-in user read (ต้องเห็นจำนวนคนสมัครเพื่อคำนวณที่นั่งเหลือ)', async () => {
+      await seedStudentAndSchedule();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('activity_enrollments/sch-club-1_std-e1').set({
+          scheduleId: 'sch-club-1', subjectCode: 'ACT_CLUB', studentId: 'std-e1', studentUid: 'stu-e1-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        });
+      });
+      await assertSucceeds(asUser('stu-e2-uid', ['STUDENT']).firestore().doc('activity_enrollments/sch-club-1_std-e1').get());
+    });
+
+    it('นักเรียนสมัคร (create) ของตัวเองเท่านั้นสำเร็จ — สมัครแทนคนอื่นถูกปฏิเสธ', async () => {
+      await seedStudentAndSchedule();
+      await assertSucceeds(
+        asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/sch-club-1_std-e1').set({
+          scheduleId: 'sch-club-1', subjectCode: 'ACT_CLUB', studentId: 'std-e1', studentUid: 'stu-e1-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        })
+      );
+      // stu-e2-uid พยายามสมัครแทน std-e1 (studentId ไม่ตรงกับ studentUid ของตัวเอง)
+      await assertFails(
+        asUser('stu-e2-uid', ['STUDENT']).firestore().doc('activity_enrollments/sch-club-1_std-e1_fake').set({
+          scheduleId: 'sch-club-1', subjectCode: 'ACT_CLUB', studentId: 'std-e1', studentUid: 'stu-e2-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        })
+      );
+    });
+
+    it('ครูที่ไม่ใช่เจ้าของ schedule นั้นถอนชื่อนักเรียนไม่ได้', async () => {
+      await seedStudentAndSchedule();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('activity_enrollments/sch-club-1_std-e1').set({
+          scheduleId: 'sch-club-1', subjectCode: 'ACT_CLUB', studentId: 'std-e1', studentUid: 'stu-e1-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        });
+      });
+      // ครูคนอื่น (ไม่ใช่ teacher-club-uid ที่ผูกกับ sch-club-1)
+      await assertFails(
+        asUser('teacher-other-uid', ['SUBJECT_TEACHER']).firestore().doc('activity_enrollments/sch-club-1_std-e1').update({
+          removedAt: new Date().toISOString(), removedBy: 'teacher-other-uid', removedReason: 'ทดสอบ',
+        })
+      );
+      // ครูเจ้าของ schedule ถอนได้จริง
+      await assertSucceeds(
+        asUser('teacher-club-uid', ['SUBJECT_TEACHER']).firestore().doc('activity_enrollments/sch-club-1_std-e1').update({
+          removedAt: new Date().toISOString(), removedBy: 'teacher-club-uid', removedReason: 'ไม่ผ่านคัดเลือก นศท',
+        })
+      );
+    });
+
+    it('นักเรียนถอนตัวเอง (removedBy ต้องเป็น null) สำเร็จ — ปลอม removedBy เป็นคนอื่นไม่ได้', async () => {
+      await seedStudentAndSchedule();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('activity_enrollments/sch-club-1_std-e1').set({
+          scheduleId: 'sch-club-1', subjectCode: 'ACT_CLUB', studentId: 'std-e1', studentUid: 'stu-e1-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        });
+      });
+      await assertFails(
+        asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/sch-club-1_std-e1').update({
+          removedAt: new Date().toISOString(), removedBy: 'someone-else-uid', removedReason: 'เปลี่ยนใจ',
+        })
+      );
+      await assertSucceeds(
+        asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/sch-club-1_std-e1').update({
+          removedAt: new Date().toISOString(), removedBy: null, removedReason: 'เปลี่ยนใจ',
+        })
+      );
+    });
+
+    it('ห้ามลบ document จริงเด็ดขาด (เก็บประวัติไว้เสมอ)', async () => {
+      await seedStudentAndSchedule();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('activity_enrollments/sch-club-1_std-e1').set({
+          scheduleId: 'sch-club-1', subjectCode: 'ACT_CLUB', studentId: 'std-e1', studentUid: 'stu-e1-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        });
+      });
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc('activity_enrollments/sch-club-1_std-e1').delete());
+      await assertFails(asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/sch-club-1_std-e1').delete());
+    });
+  });
+
+  // 21. activity_enrollment_counts — ตัวนับที่นั่งต่อ scheduleId (derived, sync คู่ enrollment)
+  describe('activity_enrollment_counts collection', () => {
+    it('lets any signed-in user read', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('activity_enrollment_counts/sch-club-1').set({ count: 5 });
+      });
+      await assertSucceeds(asUser('stu-1', ['STUDENT']).firestore().doc('activity_enrollment_counts/sch-club-1').get());
+    });
+    it('allows STUDENT/TEACHER/SUPER_ADMIN to write a valid non-negative count; denies PARENT and negative values', async () => {
+      await assertSucceeds(asUser('stu-1', ['STUDENT']).firestore().doc('activity_enrollment_counts/sch-a').set({ count: 1 }));
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('activity_enrollment_counts/sch-b').set({ count: 2 }));
+      await assertFails(asRole('PARENT').firestore().doc('activity_enrollment_counts/sch-c').set({ count: 1 }));
+      await assertFails(asUser('stu-1', ['STUDENT']).firestore().doc('activity_enrollment_counts/sch-d').set({ count: -1 }));
+    });
+  });
+
+  // 22. house_config (คณะสี) — รากฐานระบบคะแนนถ้วยในอนาคต
+  describe('house_config collection', () => {
+    it('lets any signed-in user read; only SUPER_ADMIN/ACADEMIC_HEAD write', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('house_config/house-red').set({ name: 'คณะสีแดง', colorHex: '#ef4444', assignmentMode: 'SINGLE_PER_ROOM' });
+      });
+      await assertSucceeds(asUser('stu-1', ['STUDENT']).firestore().doc('house_config/house-red').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('house_config/house-blue').set({ name: 'คณะสีน้ำเงิน', colorHex: '#3b82f6', assignmentMode: 'MIXED' }));
+      await assertSucceeds(asRole('ACADEMIC_HEAD').firestore().doc('house_config/house-green').set({ name: 'คณะสีเขียว', colorHex: '#22c55e', assignmentMode: 'MIXED' }));
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('house_config/house-bad').set({ name: 'x', colorHex: '#000', assignmentMode: 'MIXED' }));
+    });
+  });
+
+  // 23. REAL race condition — 2 นักเรียนสมัครที่นั่งสุดท้ายพร้อมกัน ต้องมีแค่คนเดียวสำเร็จ
+  // (ยิงผ่าน enrollInActivity จริงจาก services/firestoreService.ts ไม่ใช่จำลองแยก — ทดสอบโค้ด
+  // เดียวกับที่ใช้งานจริง โดยส่ง context.firestore() ของ rules-testing SDK เข้าไปแทน db ของแอป)
+  describe('ELECTIVE enrollment — real race condition (Firestore transaction)', () => {
+    it('capacity เต็มพอดี 1 ที่นั่ง — 2 คนสมัครพร้อมกัน มีแค่ 1 คนสำเร็จ อีกคน error "เต็มแล้ว"', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-race-1').set({ studentId: 'std-race-1', studentUid: 'race-uid-1' });
+        await ctx.firestore().doc('students/std-race-2').set({ studentId: 'std-race-2', studentUid: 'race-uid-2' });
+      });
+
+      const dbA = asUser('race-uid-1', ['STUDENT']).firestore();
+      const dbB = asUser('race-uid-2', ['STUDENT']).firestore();
+
+      const results = await Promise.allSettled([
+        enrollInActivity({ scheduleId: 'sch-race-last-seat', subjectCode: 'ACT_RACE', studentId: 'std-race-1', studentUid: 'race-uid-1', capacityPerSection: 1 }, dbA as any),
+        enrollInActivity({ scheduleId: 'sch-race-last-seat', subjectCode: 'ACT_RACE', studentId: 'std-race-2', studentUid: 'race-uid-2', capacityPerSection: 1 }, dbB as any),
+      ]);
+
+      const fulfilled = results.filter(r => r.status === 'fulfilled');
+      const rejected = results.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].reason.message).toContain('เต็มแล้ว');
+
+      // ตัวนับที่นั่งต้องหยุดที่ 1 พอดี ไม่ใช่ 2 (ไม่ oversell)
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const counterSnap = await ctx.firestore().doc('activity_enrollment_counts/sch-race-last-seat').get();
+        expect(counterSnap.data()?.count).toBe(1);
+      });
+    });
+
+    it('ถอนตัวแล้วที่นั่งว่างขึ้นทันที ให้คนอื่นสมัครแทนได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-w1').set({ studentId: 'std-w1', studentUid: 'w-uid-1' });
+        await ctx.firestore().doc('students/std-w2').set({ studentId: 'std-w2', studentUid: 'w-uid-2' });
+      });
+      const dbW1 = asUser('w-uid-1', ['STUDENT']).firestore();
+      const dbW2 = asUser('w-uid-2', ['STUDENT']).firestore();
+
+      await enrollInActivity({ scheduleId: 'sch-withdraw-1', subjectCode: 'ACT_W', studentId: 'std-w1', studentUid: 'w-uid-1', capacityPerSection: 1 }, dbW1 as any);
+      // ที่นั่งเต็มแล้ว — คนที่ 2 สมัครไม่ได้
+      await expect(
+        enrollInActivity({ scheduleId: 'sch-withdraw-1', subjectCode: 'ACT_W', studentId: 'std-w2', studentUid: 'w-uid-2', capacityPerSection: 1 }, dbW2 as any)
+      ).rejects.toThrow('เต็มแล้ว');
+
+      // คนแรกถอนตัว
+      await withdrawFromActivity({ scheduleId: 'sch-withdraw-1', studentId: 'std-w1', removedBy: null, removedReason: null }, dbW1 as any);
+
+      // คนที่ 2 สมัครสำเร็จหลังที่นั่งว่าง
+      await expect(
+        enrollInActivity({ scheduleId: 'sch-withdraw-1', subjectCode: 'ACT_W', studentId: 'std-w2', studentUid: 'w-uid-2', capacityPerSection: 1 }, dbW2 as any)
+      ).resolves.not.toThrow();
+    });
+
+    it('นักเรียนที่ถูกครูถอน สมัครชุมนุมอื่นที่ยังว่างได้สำเร็จ', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-r1').set({ studentId: 'std-r1', studentUid: 'r-uid-1' });
+        await ctx.firestore().doc('schedules/sch-r-club-a').set({ subjectCode: 'ACT_RA', teacherId: 'teacher-ra-uid' });
+      });
+      const dbR = asUser('r-uid-1', ['STUDENT']).firestore();
+
+      await enrollInActivity({ scheduleId: 'sch-r-club-a', subjectCode: 'ACT_RA', studentId: 'std-r1', studentUid: 'r-uid-1', capacityPerSection: 5 }, dbR as any);
+
+      // ครูของ sch-r-club-a ถอนนักเรียนคนนี้ (ไม่ผ่านคัดเลือก)
+      const dbTeacher = asUser('teacher-ra-uid', ['SUBJECT_TEACHER']).firestore();
+      await withdrawFromActivity({ scheduleId: 'sch-r-club-a', studentId: 'std-r1', removedBy: 'teacher-ra-uid', removedReason: 'ไม่ผ่านคัดเลือก นศท' }, dbTeacher as any);
+
+      // นักเรียนคนเดิมสมัครชุมนุมอื่นที่ยังว่างได้
+      await expect(
+        enrollInActivity({ scheduleId: 'sch-r-club-b', subjectCode: 'ACT_RB', studentId: 'std-r1', studentUid: 'r-uid-1', capacityPerSection: 5 }, dbR as any)
+      ).resolves.not.toThrow();
+    });
+  });
+
+  // student_screenings_2q / student_screenings_phq9 — doc id คือรหัสนักเรียน 5 หลัก ไม่ใช่ Auth UID
+  // REGRESSION: isSelf(studentId) เดิมเทียบ auth.uid กับรหัส 5 หลักตรงๆ ไม่มีวันจริง แก้เป็น
+  // isSelfStudent() ที่เทียบผ่าน students/{studentId}.studentUid จริงแทน
+  describe('student_screenings_2q / student_screenings_phq9 collections', () => {
+    const STU_UID = 'stu-uid-scr1';
+    const STU_ID = 'scr-std-1';
+    const OTHER_UID = 'stu-uid-scr2';
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID });
+      });
+    }
+
+    it('REGRESSION: lets the real student (matched via students/{id}.studentUid) write their own 2Q/PHQ-9, denies a different signed-in student', async () => {
+      await seed();
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_screenings_2q/${STU_ID}`).set({
+        id: '2q-1', studentId: STU_ID, q1Depressed: false, q2Hopeless: true, isPositive: true, conductedAt: '2026-09-01',
+      }));
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_screenings_phq9/${STU_ID}`).set({
+        id: 'phq-1', studentId: STU_ID, answers: [2, 2, 2, 2, 2, 2, 2, 2, 2], totalScore: 18, riskLevel: 'SEVERE',
+        recommendation: 'ทดสอบ', conductedAt: '2026-09-01',
+      }));
+      await assertFails(asUser(OTHER_UID, ['STUDENT']).firestore().doc(`student_screenings_2q/${STU_ID}`).set({
+        id: '2q-2', studentId: STU_ID, q1Depressed: false, q2Hopeless: false, isPositive: false, conductedAt: '2026-09-01',
+      }));
+      await assertFails(asUser(OTHER_UID, ['STUDENT']).firestore().doc(`student_screenings_phq9/${STU_ID}`).set({
+        id: 'phq-2', studentId: STU_ID, answers: [0, 0, 0, 0, 0, 0, 0, 0, 0], totalScore: 0, riskLevel: 'NORMAL',
+        recommendation: 'ทดสอบ', conductedAt: '2026-09-01',
+      }));
+    });
+
+    it('lets GUIDANCE_COUNSELOR and HOMEROOM_TEACHER read; denies an unrelated student', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_screenings_phq9/${STU_ID}`).set({
+          id: 'phq-3', studentId: STU_ID, answers: [3, 3, 3, 3, 3, 3, 3, 3, 3], totalScore: 27, riskLevel: 'VERY_SEVERE',
+          recommendation: 'ทดสอบ', conductedAt: '2026-09-01',
+        });
+      });
+      await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
+      await assertFails(asUser(OTHER_UID, ['STUDENT']).firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
+    });
+  });
+
+  // student_assessments_sdq — read access baseline (write path ยังมีปัญหา evaluator self-check
+  // ที่ยังไม่แก้ในรอบนี้ ดูรายละเอียดในคำตอบท้ายงาน — ต้องตัดสินใจ scope เพิ่มก่อนแก้)
+  describe('student_assessments_sdq collection (read baseline)', () => {
+    it('lets GUIDANCE_COUNSELOR/HOMEROOM_TEACHER/SUPER_ADMIN read; denies an unrelated signed-in user', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_assessments_sdq/sdq-1').set({
+          id: 'sdq-1', studentId: 'sdq-std-1', studentUid: 'sdq-std-uid-1', respondentUid: 'teacher-uid-x',
+          evaluatorType: 'TEACHER', evaluatorName: 'ครูทดสอบ',
+          subscaleScores: { emotional: 1, conduct: 1, hyperactivity: 1, peerProblems: 1, prosocial: 8 },
+          totalDifficultiesScore: 4, triagingStatus: 'NORMAL', assessmentDate: '2026-09-01', recommendations: [],
+        });
+      });
+      await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc('student_assessments_sdq/sdq-1').get());
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('student_assessments_sdq/sdq-1').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('student_assessments_sdq/sdq-1').get());
+      await assertFails(asUser('unrelated-uid', ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-1').get());
+    });
+
+    it('lets the student (studentUid match) and the respondent themselves read; denies everyone else', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_assessments_sdq/sdq-1b').set({
+          id: 'sdq-1b', studentId: 'sdq-std-1b', studentUid: 'sdq-std-uid-1b', respondentUid: 'parent-uid-1b',
+          evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครองทดสอบ',
+          subscaleScores: { emotional: 1, conduct: 1, hyperactivity: 1, peerProblems: 1, prosocial: 8 },
+          totalDifficultiesScore: 4, triagingStatus: 'NORMAL', assessmentDate: '2026-09-01', recommendations: [],
+        });
+      });
+      await assertSucceeds(asUser('sdq-std-uid-1b', ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-1b').get());
+      await assertSucceeds(asUser('parent-uid-1b', ['PARENT']).firestore().doc('student_assessments_sdq/sdq-1b').get());
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('student_assessments_sdq/sdq-1b').get());
+    });
+
+    // FIX (ยืนยันจากโรงเรียน): SDQ กรอกได้ 3 กลุ่ม (นักเรียนเอง/ผู้ปกครอง/ครูที่ปรึกษาห้องนั้นจริง)
+    // เดิม rule เช็คแค่ self-attestation (evaluatorId==auth.uid ที่ผู้เขียนใส่เอง) — ไม่ตรวจความสัมพันธ์
+    // จริงเลย ทำให้ใครก็เขียนให้เด็กคนไหนก็ได้แค่ระบุ uid ตัวเอง แก้เป็นตรวจสอบจริงผ่าน students/{id}
+    describe('create — verified respondent relationship (3 valid paths + denials)', () => {
+      const STU_UID = 'sdq2-stu-uid';
+      const STU_ID = 'sdq2-std-1';
+      const ROOM = 'ม.5/8';
+      const PARENT_UID = 'sdq2-parent-uid';
+      const HR_TEACHER_UID = 'sdq2-hr-teacher';
+
+      async function seed() {
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, room: ROOM, parentUid: PARENT_UID });
+          await ctx.firestore().doc(`staff/${HR_TEACHER_UID}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+          await ctx.firestore().doc('staff/other-hr').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+        });
+      }
+      const sdqDoc = (over: Record<string, unknown> = {}) => ({
+        id: 'x', studentId: STU_ID, studentUid: STU_UID,
+        evaluatorType: 'STUDENT', evaluatorName: 'ทดสอบ',
+        subscaleScores: { emotional: 1, conduct: 1, hyperactivity: 1, peerProblems: 1, prosocial: 8 },
+        totalDifficultiesScore: 4, triagingStatus: 'NORMAL', assessmentDate: '2026-09-01', recommendations: [],
+        ...over,
+      });
+
+      it('PATH 1: lets the student themselves create (self-eval)', async () => {
+        await seed();
+        await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-p1').set(
+          sdqDoc({ id: 'sdq-p1', respondentUid: STU_UID, evaluatorType: 'STUDENT' })
+        ));
+      });
+
+      it('PATH 2: lets the real linked parent (parentUid match) create', async () => {
+        await seed();
+        await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('student_assessments_sdq/sdq-p2').set(
+          sdqDoc({ id: 'sdq-p2', respondentUid: PARENT_UID, evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครอง' })
+        ));
+      });
+
+      it('PATH 3: lets the real homeroom teacher of that room create', async () => {
+        await seed();
+        await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_assessments_sdq/sdq-p3').set(
+          sdqDoc({ id: 'sdq-p3', respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครูที่ปรึกษา' })
+        ));
+      });
+
+      it('REGRESSION: denies a different student, a different parent, and a homeroom teacher of a different room (self-attestation alone is not enough)', async () => {
+        await seed();
+        await assertFails(asUser('other-student-uid', ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-d1').set(
+          sdqDoc({ id: 'sdq-d1', respondentUid: 'other-student-uid', evaluatorType: 'STUDENT' })
+        ));
+        await assertFails(asUser('other-parent-uid', ['PARENT']).firestore().doc('student_assessments_sdq/sdq-d2').set(
+          sdqDoc({ id: 'sdq-d2', respondentUid: 'other-parent-uid', evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครองคนอื่น' })
+        ));
+        await assertFails(asUser('other-hr', ['HOMEROOM_TEACHER']).firestore().doc('student_assessments_sdq/sdq-d3').set(
+          sdqDoc({ id: 'sdq-d3', respondentUid: 'other-hr', evaluatorType: 'TEACHER', evaluatorName: 'ครูห้องอื่น' })
+        ));
+      });
+
+      it('denies a SUBJECT_TEACHER (not a homeroom teacher at all) from creating', async () => {
+        await seed();
+        await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('student_assessments_sdq/sdq-d4').set(
+          sdqDoc({ id: 'sdq-d4', respondentUid: 'test-uid', evaluatorType: 'TEACHER', evaluatorName: 'ครูวิชาอื่น' })
+        ));
+      });
+
+      it('denies faking studentUid to a value that does not match the real student doc', async () => {
+        await seed();
+        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-d5').set(
+          sdqDoc({ id: 'sdq-d5', studentUid: 'forged-uid', respondentUid: STU_UID, evaluatorType: 'STUDENT' })
+        ));
+      });
+
+      it('denies naming someone else as respondentUid even from a legitimate relationship (self-attestation must also be honest)', async () => {
+        await seed();
+        await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('student_assessments_sdq/sdq-d6').set(
+          sdqDoc({ id: 'sdq-d6', respondentUid: 'someone-else', evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครอง' })
+        ));
+      });
+
+      it('only SUPER_ADMIN/GUIDANCE_COUNSELOR can update or delete an already-submitted assessment (not the original respondent)', async () => {
+        await seed();
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc('student_assessments_sdq/sdq-u1').set(
+            sdqDoc({ id: 'sdq-u1', respondentUid: STU_UID, evaluatorType: 'STUDENT' })
+          );
+        });
+        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-u1').set(
+          sdqDoc({ id: 'sdq-u1', respondentUid: STU_UID, evaluatorType: 'STUDENT', totalDifficultiesScore: 10 })
+        ));
+        await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc('student_assessments_sdq/sdq-u1').set(
+          sdqDoc({ id: 'sdq-u1', respondentUid: STU_UID, evaluatorType: 'STUDENT', totalDifficultiesScore: 10 })
+        ));
+        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-u1').delete());
+        await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('student_assessments_sdq/sdq-u1').delete());
+      });
+    });
+  });
+
+  // guidance_counseling_cases — เนื้อหาการให้คำปรึกษาจิตวิทยา ข้อมูลอ่อนไหวที่สุดในระบบ
+  // GUIDANCE_COUNSELOR/SUPER_ADMIN เท่านั้น ห้ามครูประจำชั้น/ครูวิชาอื่น/ผู้ปกครอง/นักเรียนอ่านได้เลย
+  describe('guidance_counseling_cases collection', () => {
+    const COUNSELOR_UID = 'counselor-uid-1';
+    const STU_ID = 'gc-std-1';
+
+    const baseCase = (over: Record<string, unknown> = {}) => ({
+      id: 'case-1', studentId: STU_ID, studentName: 'นักเรียนทดสอบ', classRoom: 'ม.5/8',
+      counselorUid: COUNSELOR_UID, counselorName: 'ครูแนะแนวทดสอบ', category: 'ความเครียดจากการเรียน',
+      notes: 'พูดคุยเบื้องต้น นัดติดตามสัปดาห์หน้า', severity: 'MODERATE', status: 'IN_PROGRESS',
+      createdAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z', lastSessionDate: '2026-09-01',
+      ...over,
+    });
+
+    it('lets GUIDANCE_COUNSELOR create a case naming themselves as counselorUid; denies naming someone else', async () => {
+      await assertSucceeds(asUser(COUNSELOR_UID, ['GUIDANCE_COUNSELOR']).firestore().doc('guidance_counseling_cases/case-1').set(baseCase()));
+      await assertFails(asUser(COUNSELOR_UID, ['GUIDANCE_COUNSELOR']).firestore().doc('guidance_counseling_cases/case-2').set(baseCase({ counselorUid: 'someone-else' })));
+    });
+
+    it('lets SUPER_ADMIN read/write; denies HOMEROOM_TEACHER, SUBJECT_TEACHER, PARENT, and the case student from reading or writing', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('guidance_counseling_cases/case-3').set(baseCase());
+      });
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('guidance_counseling_cases/case-3').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('guidance_counseling_cases/case-3').set(baseCase({ status: 'RESOLVED' })));
+
+      await assertFails(asRole('HOMEROOM_TEACHER').firestore().doc('guidance_counseling_cases/case-3').get());
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('guidance_counseling_cases/case-3').get());
+      await assertFails(asRole('PARENT').firestore().doc('guidance_counseling_cases/case-3').get());
+      await assertFails(asUser('some-student-uid', ['STUDENT']).firestore().doc('guidance_counseling_cases/case-3').get());
+
+      await assertFails(asRole('HOMEROOM_TEACHER').firestore().doc('guidance_counseling_cases/case-4').set(baseCase({ id: 'case-4' })));
+      await assertFails(asRole('PARENT').firestore().doc('guidance_counseling_cases/case-3').set(baseCase({ status: 'RESOLVED' })));
+    });
+
+    it('lets a GUIDANCE_COUNSELOR (not just the original author) update status to RESOLVED', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('guidance_counseling_cases/case-5').set(baseCase());
+      });
+      await assertSucceeds(asUser('other-counselor', ['GUIDANCE_COUNSELOR']).firestore().doc('guidance_counseling_cases/case-5').set(
+        baseCase({ status: 'RESOLVED', updatedAt: '2026-09-02T00:00:00.000Z' })
+      ));
+    });
+
+    it('REGRESSION: denies an unauthenticated user entirely', async () => {
+      await assertFails(asAnonymous().firestore().doc('guidance_counseling_cases/case-6').get());
+      await assertFails(asAnonymous().firestore().doc('guidance_counseling_cases/case-6').set(baseCase({ id: 'case-6' })));
+    });
+  });
+
+  // infirmary_visits — บันทึกห้องพยาบาล: เขียนได้เฉพาะ INFIRMARY_STAFF/SUPER_ADMIN แต่ตั้งใจ
+  // ให้ผู้ปกครอง+นักเรียนเจ้าของอ่านได้ (ต่างจาก guidance_counseling_cases ที่ปิดไม่ให้อ่านเลย)
+  describe('infirmary_visits collection', () => {
+    const STU_UID = 'stu-uid-inf1';
+    const STU_ID = 'inf-std-1';
+    const PARENT_UID = 'parent-inf1';
+    const NURSE_UID = 'nurse-uid-1';
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID });
+      });
+    }
+    const baseVisit = (over: Record<string, unknown> = {}) => ({
+      id: 'inf-1', studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID,
+      visitDate: '2026-09-01', visitTime: '09:30 น.', symptoms: 'ปวดศีรษะ', temperature: 37.6,
+      treatment: 'นอนพัก', medicationGiven: 'พาราเซตามอล', restDurationMinutes: 30,
+      nurseUid: NURSE_UID, nurseName: 'พยาบาลทดสอบ', isUrgentAlert: false, parentAcknowledged: false,
+      createdAt: '2026-09-01T02:30:00.000Z',
+      ...over,
+    });
+
+    it('lets INFIRMARY_STAFF create a visit with studentUid/parentUid matching the real student doc; denies a mismatch', async () => {
+      await seed();
+      await assertSucceeds(asRole('INFIRMARY_STAFF').firestore().doc('infirmary_visits/inf-1').set(baseVisit()));
+      await assertFails(asRole('INFIRMARY_STAFF').firestore().doc('infirmary_visits/inf-2').set(baseVisit({ id: 'inf-2', parentUid: 'someone-else' })));
+    });
+
+    it('denies a SUBJECT_TEACHER/HOMEROOM_TEACHER from creating a visit', async () => {
+      await seed();
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('infirmary_visits/inf-3').set(baseVisit({ id: 'inf-3' })));
+      await assertFails(asRole('HOMEROOM_TEACHER').firestore().doc('infirmary_visits/inf-4').set(baseVisit({ id: 'inf-4' })));
+    });
+
+    it('lets the student and the linked parent read; denies an unrelated parent/teacher', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('infirmary_visits/inf-5').set(baseVisit({ id: 'inf-5' }));
+      });
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('infirmary_visits/inf-5').get());
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('infirmary_visits/inf-5').get());
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('infirmary_visits/inf-5').get());
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('infirmary_visits/inf-5').get());
+    });
+
+    it('lets the linked parent acknowledge (parentAcknowledged/acknowledgedAt only); denies changing other fields or an unrelated parent acknowledging', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('infirmary_visits/inf-6').set(baseVisit({ id: 'inf-6' }));
+      });
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('infirmary_visits/inf-6').set(
+        baseVisit({ id: 'inf-6', parentAcknowledged: true, acknowledgedAt: '2026-09-01T03:00:00.000Z' })
+      ));
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('infirmary_visits/inf-6').set(
+        baseVisit({ id: 'inf-6', parentAcknowledged: true, acknowledgedAt: '2026-09-01T03:00:00.000Z', symptoms: 'แก้ไขอาการ' })
+      ));
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('infirmary_visits/inf-6').set(
+        baseVisit({ id: 'inf-6', parentAcknowledged: true })
+      ));
+    });
+
+    it('denies INFIRMARY_STAFF from repointing studentUid/parentUid on update; denies deleting', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('infirmary_visits/inf-7').set(baseVisit({ id: 'inf-7' }));
+      });
+      await assertFails(asRole('INFIRMARY_STAFF').firestore().doc('infirmary_visits/inf-7').set(
+        baseVisit({ id: 'inf-7', parentUid: 'repointed-parent' })
+      ));
+      await assertFails(asRole('INFIRMARY_STAFF').firestore().doc('infirmary_visits/inf-7').delete());
+    });
+
+    // ระบบแจ้งเตือนรวมศูนย์ — TASK 1: บันทึกอาการต้องเขียนแจ้งเตือนผู้ปกครองคู่กันไปเสมอในธุรกรรมเดียวกัน
+    it('บันทึกเข้าห้องพยาบาลจริงต้องสร้าง parent_notifications คู่กันไปด้วยในธุรกรรมเดียวกัน', async () => {
+      await seed();
+      const dbNurse = asUser(NURSE_UID, ['INFIRMARY_STAFF']).firestore();
+      const visitId = await recordInfirmaryVisit({
+        studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID,
+        studentName: 'นักเรียนทดสอบ', symptoms: 'ไข้สูง', temperature: 38.5,
+        treatment: 'เช็ดตัว', medicationGiven: 'พาราเซตามอล', restDurationMinutes: 20,
+        isUrgentAlert: true, nurseUid: NURSE_UID, nurseName: 'พยาบาลทดสอบ',
+      }, dbNurse as any);
+
+      expect(visitId).toBeTruthy();
+      let notifCount = 0;
+      let notifId = '';
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const snap = await ctx.firestore().collection('parent_notifications').where('parentUid', '==', PARENT_UID).get();
+        notifCount = snap.size;
+        notifId = snap.docs[0]?.id || '';
+        expect(snap.docs[0]?.data().studentUid).toBe(STU_UID);
+      });
+      expect(notifCount).toBe(1);
+      // นักเรียนเจ้าของเรื่องเองก็ต้องอ่านแจ้งเตือนนี้ได้ด้วย (ไม่ใช่แค่ผู้ปกครอง)
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`parent_notifications/${notifId}`).get());
+    });
+  });
+
+  // ระบบแจ้งเตือนรวมศูนย์ — TASK 1: parent_notifications เขียนได้จาก role งาน + STUDENT/PARENT ที่เขียน
+  // ให้ตัวเองเท่านั้น (verify ผ่าน studentField()); เจ้าของกด "อ่านแล้ว" เองได้ (แก้ได้แค่ status)
+  describe('parent_notifications collection', () => {
+    const STU_UID = 'notif-stu-uid-1';
+    const STU_ID = 'notif-std-1';
+    const PARENT_UID = 'notif-parent-uid-1';
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID });
+      });
+    }
+    const notifDoc = (over: Record<string, unknown> = {}) => ({
+      id: 'x', parentUid: PARENT_UID, parentId: PARENT_UID, studentUid: STU_UID, studentId: STU_ID, studentName: 'นักเรียนทดสอบ',
+      title: 'แจ้งเตือนทดสอบ', message: 'ข้อความทดสอบ', status: 'unread', type: 'info',
+      ...over,
+    });
+
+    it('lets STUDENT/PARENT create a notification addressed to their own real parentUid; denies a forged parentUid', async () => {
+      await seed();
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('parent_notifications/n1').set(notifDoc({ id: 'n1' })));
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n2').set(notifDoc({ id: 'n2' })));
+      await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('parent_notifications/n3').set(
+        notifDoc({ id: 'n3', parentUid: 'someone-else', parentId: 'someone-else' })
+      ));
+    });
+
+    it('lets HOMEROOM_TEACHER/SUBJECT_TEACHER/SUPER_ADMIN create for any student; denies an unrelated STUDENT/PARENT', async () => {
+      await seed();
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('parent_notifications/n4').set(notifDoc({ id: 'n4' })));
+      await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('parent_notifications/n5').set(notifDoc({ id: 'n5' })));
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('parent_notifications/n6').set(notifDoc({ id: 'n6' })));
+      await assertFails(asUser('other-student', ['STUDENT']).firestore().doc('parent_notifications/n7').set(notifDoc({ id: 'n7' })));
+    });
+
+    it('lets the linked parent mark their own notification read (status only); denies changing other fields or an unrelated parent', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('parent_notifications/n8').set(notifDoc({ id: 'n8' }));
+      });
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n8').update({ status: 'read' }));
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n8').update({ status: 'read', title: 'แก้ไขหัวข้อ' }));
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('parent_notifications/n8').update({ status: 'read' }));
+    });
+
+    it('lets the linked parent/student read; denies an unrelated parent; only SUPER_ADMIN can delete', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('parent_notifications/n9').set(notifDoc({ id: 'n9' }));
+      });
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n9').get());
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('parent_notifications/n9').get());
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n9').delete());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('parent_notifications/n9').delete());
+    });
+
+    // TASK (เพิ่มกระดิ่งฝั่งนักเรียน): studentUid denormalize เข้า schema ให้นักเรียนเจ้าของอ่าน/
+    // มาร์คอ่านแล้วเองได้ด้วย โดยไม่กระทบ scope เดิมของผู้ปกครองเลย
+    it('lets the owning student read/mark-read their own notification via studentUid; denies an unrelated student', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('parent_notifications/n10').set(notifDoc({ id: 'n10' }));
+      });
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('parent_notifications/n10').get());
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('parent_notifications/n10').update({ status: 'read' }));
+      await assertFails(asUser('other-student', ['STUDENT']).firestore().doc('parent_notifications/n10').get());
+      // ผู้ปกครองเดิมยังอ่านได้ตามปกติ ไม่มี regression
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n10').get());
+    });
+
+    it('denies creating a notification with a forged studentUid that does not match the real students/{id}.studentUid, even for a role-based writer', async () => {
+      await seed();
+      await assertFails(
+        asRole('HOMEROOM_TEACHER').firestore().doc('parent_notifications/n11').set(
+          notifDoc({ id: 'n11', studentUid: 'someone-elses-uid' })
+        )
+      );
+      // studentUid: null (ไม่ทราบ/ยังไม่เชื่อมบัญชี) ยังเขียนได้ปกติ — ไม่ใช่ทุกคนต้องมี studentUid จริงเสมอไป
+      await assertSucceeds(
+        asRole('HOMEROOM_TEACHER').firestore().doc('parent_notifications/n12').set(
+          notifDoc({ id: 'n12', studentUid: null })
+        )
+      );
+    });
+
+    it('createParentNotification (helper จริงที่ store.ts เรียก) ข้ามการเขียนเงียบๆ เมื่อไม่มี parentUid จริง แทนการ fabricate ID ปลอม', async () => {
+      const dbTeacher = asRole('HOMEROOM_TEACHER').firestore();
+      await expect(createParentNotification({
+        parentUid: '', studentId: 'ghost-std', studentName: 'ผี', title: 'x', message: 'y',
+      }, dbTeacher as any)).resolves.not.toThrow();
+
+      let count = 0;
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const snap = await ctx.firestore().collection('parent_notifications').where('studentId', '==', 'ghost-std').get();
+        count = snap.size;
+      });
+      expect(count).toBe(0);
+    });
+  });
+
+  // เฟส 2 การเงิน — TASK 1: billing_invoices/billing_counters — ระบบสร้างใบแจ้งหนี้จริง (เดิมไม่มี
+  // ฟีเจอร์นี้อยู่เลย) เขียน/แก้ไขเฉพาะ FINANCE_STAFF/SUPER_ADMIN, อ่านเพิ่มเจ้าของ (parentUid/
+  // studentUid ตรง) — เลขที่ใบแจ้งหนี้ต้อง auditable จริงผ่าน counter transaction กันชนกัน race condition
+  describe('billing_invoices / billing_counters collections', () => {
+    const STU_UID = 'bill-stu-uid-1';
+    const STU_ID = 'bill-std-1';
+    const PARENT_UID = 'bill-parent-uid-1';
+    const FINANCE_UID = 'finance-uid-1';
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID });
+      });
+    }
+    const invoiceDoc = (over: Record<string, unknown> = {}) => ({
+      id: 'x', invoiceNumber: 'INV-2569-0001', studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID,
+      title: 'ค่าบำรุงการศึกษา', items: [{ description: 'ค่าบำรุงการศึกษา', amount: 3000 }], totalAmount: 3000,
+      dueDate: '2026-12-31', status: 'PENDING', promptPayQr: 'https://example.com/qr.png',
+      createdBy: FINANCE_UID, createdAt: '2026-09-06T00:00:00.000Z',
+      ...over,
+    });
+
+    it('lets FINANCE_STAFF create an invoice with studentUid/parentUid matching the real student doc; denies a mismatch', async () => {
+      await seed();
+      await assertSucceeds(asUser(FINANCE_UID, ['FINANCE_STAFF']).firestore().doc('billing_invoices/inv-1').set(
+        invoiceDoc({ id: 'inv-1' })
+      ));
+      await assertFails(asUser(FINANCE_UID, ['FINANCE_STAFF']).firestore().doc('billing_invoices/inv-2').set(
+        invoiceDoc({ id: 'inv-2', parentUid: 'someone-else' })
+      ));
+    });
+
+    it('denies create by non-finance roles (SUBJECT_TEACHER, PARENT, STUDENT)', async () => {
+      await seed();
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('billing_invoices/inv-3').set(invoiceDoc({ id: 'inv-3' })));
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('billing_invoices/inv-4').set(
+        invoiceDoc({ id: 'inv-4', createdBy: PARENT_UID })
+      ));
+      await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('billing_invoices/inv-5').set(
+        invoiceDoc({ id: 'inv-5', createdBy: STU_UID })
+      ));
+    });
+
+    it('denies naming someone else as createdBy, and denies creating with a non-PENDING status', async () => {
+      await seed();
+      await assertFails(asUser(FINANCE_UID, ['FINANCE_STAFF']).firestore().doc('billing_invoices/inv-6').set(
+        invoiceDoc({ id: 'inv-6', createdBy: 'someone-else' })
+      ));
+      await assertFails(asUser(FINANCE_UID, ['FINANCE_STAFF']).firestore().doc('billing_invoices/inv-7').set(
+        invoiceDoc({ id: 'inv-7', status: 'PAID' })
+      ));
+    });
+
+    it('lets FINANCE_STAFF/SUPER_ADMIN/EXECUTIVE and the linked student/parent read; denies an unrelated parent/student', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('billing_invoices/inv-8').set(invoiceDoc({ id: 'inv-8' }));
+      });
+      await assertSucceeds(asRole('FINANCE_STAFF').firestore().doc('billing_invoices/inv-8').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('billing_invoices/inv-8').get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('billing_invoices/inv-8').get());
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('billing_invoices/inv-8').get());
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('billing_invoices/inv-8').get());
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('billing_invoices/inv-8').get());
+      await assertFails(asUser('other-student', ['STUDENT']).firestore().doc('billing_invoices/inv-8').get());
+    });
+
+    it('lets FINANCE_STAFF edit invoice content but not repoint studentUid/parentUid; denies delete', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('billing_invoices/inv-9').set(invoiceDoc({ id: 'inv-9' }));
+      });
+      await assertSucceeds(asRole('FINANCE_STAFF').firestore().doc('billing_invoices/inv-9').set(
+        invoiceDoc({ id: 'inv-9', totalAmount: 3500 })
+      ));
+      await assertFails(asRole('FINANCE_STAFF').firestore().doc('billing_invoices/inv-9').set(
+        invoiceDoc({ id: 'inv-9', parentUid: 'repointed-parent' })
+      ));
+      await assertFails(asRole('FINANCE_STAFF').firestore().doc('billing_invoices/inv-9').delete());
+    });
+
+    it('only SUPER_ADMIN/FINANCE_STAFF can read/write billing_counters directly', async () => {
+      await assertSucceeds(asRole('FINANCE_STAFF').firestore().doc('billing_counters/2569').set({ academicYear: '2569', lastNumber: 5 }));
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('billing_counters/2569').get());
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('billing_counters/2569').get());
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('billing_counters/2569').set({ academicYear: '2569', lastNumber: 999 }));
+    });
+
+    // REAL race condition — 2 ใบแจ้งหนี้ถูกสร้างพร้อมกัน ต้องได้เลขที่ไม่ชนกัน (ยิงผ่าน
+    // createBillingInvoice จริงจาก services/firestoreService.ts ไม่ใช่จำลองแยก — ทดสอบโค้ดเดียวกับ
+    // ที่ใช้งานจริง ผ่าน context.firestore() ของ rules-testing SDK แทน db ของแอป เหมือนระบบสมัครชุมนุม)
+    it('สร้างใบแจ้งหนี้ 2 รายการพร้อมกัน — เลขที่ใบแจ้งหนี้ต้องไม่ชนกันและต่อเนื่อง', async () => {
+      const YEAR_STU_A = 'bill-race-std-a';
+      const YEAR_STU_B = 'bill-race-std-b';
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${YEAR_STU_A}`).set({ studentId: YEAR_STU_A, studentUid: 'race-uid-a', parentUid: 'race-parent-a' });
+        await ctx.firestore().doc(`students/${YEAR_STU_B}`).set({ studentId: YEAR_STU_B, studentUid: 'race-uid-b', parentUid: 'race-parent-b' });
+      });
+
+      const dbFinance = asUser('finance-race-uid', ['FINANCE_STAFF']).firestore();
+      const input = { title: 'ค่าเทอม', items: [{ description: 'ค่าเทอม', amount: 1000 }], totalAmount: 1000, dueDate: '2026-12-31' };
+
+      const results = await Promise.all([
+        createBillingInvoice({ studentId: YEAR_STU_A, studentUid: 'race-uid-a', parentUid: 'race-parent-a', ...input }, 'finance-race-uid', dbFinance as any),
+        createBillingInvoice({ studentId: YEAR_STU_B, studentUid: 'race-uid-b', parentUid: 'race-parent-b', ...input }, 'finance-race-uid', dbFinance as any),
+      ]);
+
+      expect(results).toHaveLength(2);
+      const invoiceNumbers = await Promise.all(results.map(async (id) => {
+        let invoiceNumber = '';
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          const snap = await ctx.firestore().doc(`billing_invoices/${id}`).get();
+          invoiceNumber = (snap.data() as any).invoiceNumber;
+        });
+        return invoiceNumber;
+      }));
+      // ต้องไม่ชนกัน (unique) และเป็นรูปแบบ auditable ที่ถูกต้อง
+      expect(new Set(invoiceNumbers).size).toBe(2);
+      for (const num of invoiceNumbers) {
+        expect(num).toMatch(/^INV-\d{4}-\d{4,}$/);
+      }
+    });
+
+    it('createBillingInvoicesBulk ออกเลขที่ต่อเนื่องไม่ซ้ำให้ทุกคนในชุดเดียว', async () => {
+      const ids = ['bulk-std-1', 'bulk-std-2', 'bulk-std-3'];
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        for (const sid of ids) {
+          await ctx.firestore().doc(`students/${sid}`).set({ studentId: sid, studentUid: `${sid}-uid`, parentUid: `${sid}-parent` });
+        }
+      });
+      const dbFinance = asUser('finance-bulk-uid', ['FINANCE_STAFF']).firestore();
+      const targets = ids.map(sid => ({ studentId: sid, studentUid: `${sid}-uid`, parentUid: `${sid}-parent` }));
+      const created = await createBillingInvoicesBulk(
+        targets,
+        { title: 'ค่าเทอมรวมทั้งห้อง', items: [{ description: 'ค่าเทอม', amount: 2000 }], totalAmount: 2000, dueDate: '2026-12-31' },
+        'finance-bulk-uid',
+        dbFinance as any,
+      );
+      expect(created).toHaveLength(3);
+      const invoiceNumbers = await Promise.all(created.map(async (id) => {
+        let invoiceNumber = '';
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          const snap = await ctx.firestore().doc(`billing_invoices/${id}`).get();
+          invoiceNumber = (snap.data() as any).invoiceNumber;
+        });
+        return invoiceNumber;
+      }));
+      expect(new Set(invoiceNumbers).size).toBe(3);
     });
   });
 

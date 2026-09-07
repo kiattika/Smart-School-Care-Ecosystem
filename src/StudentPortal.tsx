@@ -27,10 +27,13 @@ import {
   Scan,
   ShieldCheck,
   Zap,
-  HelpCircle
+  HelpCircle,
+  Users
 } from 'lucide-react';
 
+import { NotificationBell } from './components/notifications/NotificationBell';
 import { GateAttendanceTracker } from './components/student-parent/GateAttendanceTracker';
+import { StudentElectiveEnrollment } from './components/student-parent/StudentElectiveEnrollment';
 import { HealthMentalWellbeingModule } from './components/student-parent/HealthMentalWellbeingModule';
 import { SocioeconomicWelfareModule } from './components/student-parent/SocioeconomicWelfareModule';
 import { BehaviorDisciplineModule } from './components/student-parent/BehaviorDisciplineModule';
@@ -56,7 +59,7 @@ export function StudentPortal() {
 
   // 7 Module Tabs + Assessment + Overview
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'gate' | 'health' | 'socio' | 'behavior' | 'portfolio' | 'academic' | 'parent' | 'assessment'
+    'overview' | 'gate' | 'health' | 'socio' | 'behavior' | 'electives' | 'portfolio' | 'academic' | 'parent' | 'assessment'
   >('overview');
 
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
@@ -147,23 +150,26 @@ export function StudentPortal() {
           </div>
         </div>
 
-        {/* DEV: ถ้า query คืนมามากกว่าหนึ่ง record (เช่นบัญชีทดสอบผูกหลายคน) ให้สลับได้ */}
-        {import.meta.env.DEV && myStudents.length > 1 && (
-          <div className="flex items-center gap-3 self-stretch md:self-auto bg-slate-800/60 p-2 rounded-2xl border border-slate-700/60">
-            <span className="text-xs text-slate-400 pl-2">สลับโปรไฟล์ (DEV):</span>
-            <select
-              value={student.studentId}
-              onChange={(e) => setSelectedStudentId(e.target.value)}
-              className="bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-1.5 font-bold focus:outline-none focus:border-indigo-500"
-            >
-              {myStudents.map(s => (
-                <option key={s.studentId} value={s.studentId}>
-                  {s.name} (ม.{s.room || '5/8'})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div className="flex items-center gap-3 self-stretch md:self-auto">
+          {/* DEV: ถ้า query คืนมามากกว่าหนึ่ง record (เช่นบัญชีทดสอบผูกหลายคน) ให้สลับได้ */}
+          {import.meta.env.DEV && myStudents.length > 1 && (
+            <div className="flex items-center gap-3 bg-slate-800/60 p-2 rounded-2xl border border-slate-700/60">
+              <span className="text-xs text-slate-400 pl-2">สลับโปรไฟล์ (DEV):</span>
+              <select
+                value={student.studentId}
+                onChange={(e) => setSelectedStudentId(e.target.value)}
+                className="bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-1.5 font-bold focus:outline-none focus:border-indigo-500"
+              >
+                {myStudents.map(s => (
+                  <option key={s.studentId} value={s.studentId}>
+                    {s.name} (ม.{s.room || '5/8'})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <NotificationBell />
+        </div>
       </div>
 
       {/* 7 Core Module Navigation Bar */}
@@ -227,6 +233,18 @@ export function StudentPortal() {
           >
             <ShieldCheck className="w-4 h-4" />
             <span>4. ความประพฤติ & ใบรับรอง ปพ.</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('electives')}
+            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
+              activeTab === 'electives'
+                ? 'bg-gradient-to-r from-teal-600 to-cyan-600 text-white shadow-lg shadow-teal-500/25'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>สมัครชุมนุม</span>
           </button>
 
           <button
@@ -481,7 +499,7 @@ export function StudentPortal() {
 
         {/* 2. Health & Mental Well-being */}
         {activeTab === 'health' && (
-          <HealthMentalWellbeingModule studentId={student.studentId} isParentView={false} />
+          <HealthMentalWellbeingModule studentId={student.studentId} student={student} isParentView={false} />
         )}
 
         {/* 3. Socioeconomic & Home Visit */}
@@ -501,6 +519,11 @@ export function StudentPortal() {
           <BehaviorDisciplineModule student={student} isParentView={false} />
         )}
 
+        {/* สมัครชุมนุม (Elective Activities) */}
+        {activeTab === 'electives' && (
+          <StudentElectiveEnrollment student={student} />
+        )}
+
         {/* 5. Portfolio — บันทึกผลงานเอง (Firestore + อนุมัติโดยครูที่ปรึกษา) + คลังผลงานเดิม */}
         {activeTab === 'portfolio' && (
           <div className="space-y-8">
@@ -518,7 +541,7 @@ export function StudentPortal() {
 
         {/* 7. Parent Engagement & e-Billing */}
         {activeTab === 'parent' && (
-          <ParentEngagementServices studentId={student.studentId} />
+          <ParentEngagementServices studentId={student.studentId} student={student} isParentView={false} />
         )}
 
         {/* Self Assessment Form */}
