@@ -70,6 +70,46 @@ export function TeacherPortal() {
   // ใช้ในผังห้องเรียน (ClassroomSeatingManager), สุ่มนักเรียน, gradebook, Early Warning
   const { students } = useRealStudents();
 
+  // TASK 1 (แก้บั๊กวันที่ผิด) — พิสูจน์ก่อนแก้: currentDate ใน Zustand store (store.ts) กำหนดค่าแค่
+  // ครั้งเดียวตอน store module ถูกโหลด (`currentDate: new Date()`) แล้วไม่มีจุดไหนใน codebase sync
+  // กับเวลาจริงอัตโนมัติอีกเลย — จุดเดียวที่เคยเรียก setCurrentDate() คือ modal "Time Simulation"
+  // ด้านล่าง (จำลองแค่ชั่วโมง/นาทีของ "วันเดียวกับตอนโหลดหน้า" ไม่เคยขยับวันเลย) ผลคือถ้าเปิดแท็บ/
+  // dev server ค้างข้ามวัน (Vite HMR ไม่รีเซ็ต state เวลาแก้โค้ดไฟล์อื่น) currentDate จะค้างอยู่ที่วันเก่า
+  // ไปเรื่อยๆ จนกว่าจะโหลดหน้าใหม่ทั้งหมด (hard reload) — ตรงกับอาการที่รายงานเป๊ะ (เห็นวันจันทร์ทั้งที่
+  // จริงเป็นวันอังคารแล้ว) log ค่าจริงไว้ยืนยันก่อนเชื่อ ไม่เดาเฉยๆ
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[TASK1-DATE-DEBUG] mount check:', {
+      'new Date().toString()': new Date().toString(),
+      'new Date().getDay()': new Date().getDay(),
+      'Intl timeZone': Intl.DateTimeFormat().resolvedOptions().timeZone,
+      'store.currentDate (ค่าที่ component ใช้จริง)': currentDate.toString(),
+      'store.currentDate.getDay()': currentDate.getDay(),
+      'ตรงกันไหม (ควรเป็น true เสมอตอนเพิ่งโหลดหน้าใหม่)': new Date().toDateString() === currentDate.toDateString(),
+    });
+  }, []);
+
+  // แก้จริง: sync ส่วน "วัน" (ปี/เดือน/วัน) ของ currentDate ให้ตรงเวลาจริงเสมอ โดยยังคง
+  // ชั่วโมง/นาทีที่ถูกจำลองไว้จาก Time Simulation modal ไว้เหมือนเดิม (ไม่ทับการทดสอบที่ทำอยู่ตรงๆ
+  // แค่ป้องกันไม่ให้ "วัน" ค้างข้ามวันจริงแบบเงียบๆ) เช็คทุก 1 นาทีพอสำหรับตรวจจับตอนข้ามเที่ยงคืน
+  const currentDateRef = React.useRef(currentDate);
+  currentDateRef.current = currentDate;
+  useEffect(() => {
+    const syncDateIfStale = () => {
+      const now = new Date();
+      if (now.toDateString() !== currentDateRef.current.toDateString()) {
+        const synced = new Date(now);
+        synced.setHours(currentDateRef.current.getHours(), currentDateRef.current.getMinutes(), 0, 0);
+        console.warn('[TASK1-DATE-DEBUG] currentDate ค้างข้ามวัน — sync ให้ตรงวันจริงอัตโนมัติ:', {
+          before: currentDateRef.current.toString(), after: synced.toString(),
+        });
+        setCurrentDate(synced);
+      }
+    };
+    const interval = setInterval(syncDateIfStale, 60000);
+    return () => clearInterval(interval);
+  }, [setCurrentDate]);
+
   // --- บันทึกหลังสอนแทน (deadline ก่อน 24:00 น. ของวันที่สอน) ---
   const [subCompleteTarget, setSubCompleteTarget] = useState<SubstituteAssignment | null>(null);
   const [subCSummary, setSubCSummary] = useState('');
