@@ -93,14 +93,25 @@ service cloud.firestore {
     // ได้เฉพาะที่ parentUid ตรงกับผู้ปกครองจริงของ studentId ที่ระบุเท่านั้น (verify ผ่าน studentField()
     // กันสร้างแจ้งเตือนส่งให้ parentUid ใครก็ได้) และเพิ่มช่องให้เจ้าของกด "อ่านแล้ว" เอง (แก้ได้แค่ status)
     match /parent_notifications/{notifId} {
+      // TASK: เพิ่ม studentUid ให้นักเรียนเจ้าของเรื่องอ่านแจ้งเตือนของตัวเองได้ด้วย (เดิมอ่านได้เฉพาะ
+      // ผู้ปกครองที่ผูกไว้ผ่าน parentUid/parentId เท่านั้น) — ไม่กระทบ scope เดิมของผู้ปกครองเลย เป็นการ
+      // เพิ่มเงื่อนไข OR ใหม่เท่านั้น
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('HOMEROOM_TEACHER') ||
-                     (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid));
+                     (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid)) ||
+                     (isSignedIn() && resource.data.studentUid == request.auth.uid);
 
       // FIX: ตรวจแค่ "parentUid ที่ประกาศตรงกับพ่อแม่จริงของ studentId" ไม่พอ (ใครก็ประกาศ studentId/
       // parentUid ที่ถูกต้องของคนอื่นได้) ต้องตรวจด้วยว่า "ผู้เขียนเอง" เป็นตัวนักเรียนคนนั้นจริง
       // (isSelfStudent) หรือเป็นผู้ปกครองจริงของนักเรียนคนนั้น (auth.uid ตรงกับ parentUid จริง) เท่านั้น
-      allow create: if hasRole('SUPER_ADMIN') ||
+      // TASK: studentUid ถ้าใส่มาด้วย ต้องตรงกับค่าจริงจาก students/{studentId}.studentUid เท่านั้น
+      // (ห้ามประกาศ studentUid ของคนอื่นเพื่อแอบให้คนอื่นอ่านแจ้งเตือนได้ — ใช้กับทุก branch รวม role-based)
+      allow create: if (
+                       !('studentUid' in request.resource.data) ||
+                       request.resource.data.studentUid == null ||
+                       request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__')
+                     ) && (
+                       hasRole('SUPER_ADMIN') ||
                        hasRole('HOMEROOM_TEACHER') ||
                        hasRole('SUBJECT_TEACHER') ||
                        hasRole('INFIRMARY_STAFF') ||
@@ -110,15 +121,20 @@ service cloud.firestore {
                            isSelfStudent(request.resource.data.studentId) ||
                            (isSignedIn() && request.auth.uid == studentField(request.resource.data.studentId, 'parentUid', '__none__'))
                          )
-                       );
+                       )
+                     );
 
-      // ผู้ปกครองเจ้าของกด "อ่านแล้ว"/"อ่านทั้งหมด" เอง — แก้ได้เฉพาะ field status เท่านั้น
+      // ผู้ปกครอง หรือ นักเรียนเจ้าของเรื่องเอง กด "อ่านแล้ว"/"อ่านทั้งหมด" เอง — แก้ได้เฉพาะ field status เท่านั้น
       allow update: if hasRole('SUPER_ADMIN') ||
                        hasRole('HOMEROOM_TEACHER') ||
                        hasRole('SUBJECT_TEACHER') ||
                        (
                          isSignedIn() &&
-                         (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid) &&
+                         (
+                           resource.data.parentUid == request.auth.uid ||
+                           resource.data.parentId == request.auth.uid ||
+                           resource.data.studentUid == request.auth.uid
+                         ) &&
                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
                          request.resource.data.status in ['read', 'unread']
                        );

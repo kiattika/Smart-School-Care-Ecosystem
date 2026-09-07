@@ -283,6 +283,7 @@ export async function updateBehaviorScoreAndTriggerAlert(
       const currentScore = typeof studentData.behaviorScore === 'number' ? studentData.behaviorScore : 100;
       const studentName = studentData.fullName || studentData.name || `นักเรียนรหัส ${studentId}`;
       const parentUid = studentData.parentUid || studentData.parentId || '';
+      const studentUid = studentData.studentUid || null;
       const dateToday = new Date().toISOString().split('T')[0];
 
       // Deduct score ensuring it stays within [0, 100]
@@ -325,6 +326,7 @@ export async function updateBehaviorScoreAndTriggerAlert(
       transaction.set(notificationRef, {
         parentUid,
         parentId: parentUid,
+        studentUid,
         studentId,
         studentName,
         title: alertTitle,
@@ -342,6 +344,7 @@ export async function updateBehaviorScoreAndTriggerAlert(
         transaction.set(warningNotifRef, {
           parentUid,
           parentId: parentUid,
+          studentUid,
           studentId,
           studentName,
           title: "⚠️ คะแนนพฤติกรรมเริ่มลดลง",
@@ -395,11 +398,14 @@ export async function updateBehaviorScoreAndTriggerAlert(
  * ใช้อยู่แล้วข้างบน (parentUid/parentId/studentId/studentName/title/message/status/createdAt/type)
  */
 export type CreateParentNotificationInput = Pick<ParentNotification, 'parentUid' | 'studentId' | 'studentName' | 'title' | 'message'> &
-  Partial<Pick<ParentNotification, 'type' | 'pointsDeducted' | 'remainingScore' | 'attendanceStatus' | 'date'>>;
+  Partial<Pick<ParentNotification, 'type' | 'pointsDeducted' | 'remainingScore' | 'attendanceStatus' | 'date' | 'studentUid'>>;
 
-/** เขียนแจ้งเตือนผู้ปกครอง 1 รายการ — ถ้าไม่มี parentUid จริง (นักเรียนยังไม่เชื่อมบัญชีผู้ปกครอง)
- *  ข้ามการเขียนไปเงียบๆ แทนการ fabricate ID ปลอมแบบ `parent_${studentId}` ที่เคยเป็นมา (เขียนไปก็ไม่มี
- *  ผู้ปกครองคนไหนอ่านได้จริงอยู่ดี เพราะไม่มี Auth UID ไหนตรงกับ ID ปลอมนั้น) */
+/** เขียนแจ้งเตือนผู้ปกครอง (และนักเรียนเจ้าของ ถ้ามี studentUid) 1 รายการ — ถ้าไม่มี parentUid จริง
+ *  (นักเรียนยังไม่เชื่อมบัญชีผู้ปกครอง) ข้ามการเขียนไปเงียบๆ แทนการ fabricate ID ปลอมแบบ
+ *  `parent_${studentId}` ที่เคยเป็นมา (เขียนไปก็ไม่มีผู้ปกครองคนไหนอ่านได้จริงอยู่ดี เพราะไม่มี Auth UID
+ *  ไหนตรงกับ ID ปลอมนั้น) — เกตนี้ตั้งใจคงไว้เหมือนเดิม แม้จะมี studentUid มาด้วยก็ตาม เพราะทุกจุดที่
+ *  เรียกฟังก์ชันนี้อยู่ปัจจุบันยังถือว่า "ไม่มีผู้ปกครองเชื่อมบัญชี" เป็นกรณีข้อมูลไม่สมบูรณ์ที่ควร skip
+ *  ทั้งคู่ ไม่ใช่แค่ฝั่งผู้ปกครอง (ถ้าต้องการแยกกัน ต้องตัดสินใจ scope ใหม่แยกต่างหาก) */
 export async function createParentNotification(
   data: CreateParentNotificationInput,
   firestoreDb: Firestore = db,
@@ -414,6 +420,7 @@ export async function createParentNotification(
       id: ref.id,
       parentUid: data.parentUid,
       parentId: data.parentUid,
+      studentUid: data.studentUid ?? null,
       studentId: data.studentId,
       studentName: data.studentName,
       title: data.title,
@@ -445,15 +452,20 @@ export async function markAllParentNotificationsRead(notifIds: string[], firesto
   await Promise.all(notifIds.map(id => markParentNotificationRead(id, firestoreDb)));
 }
 
-/** real-time listener ของแจ้งเตือนผู้ปกครองคนเดียว เรียงใหม่สุดก่อน */
+/** real-time listener ของแจ้งเตือน 1 คน เรียงใหม่สุดก่อน — ใช้ได้ทั้งฝั่งผู้ปกครอง ({parentUid}) และ
+ *  ฝั่งนักเรียนเจ้าของเอง ({studentUid}) ตาม role ของผู้ใช้ปัจจุบัน ส่งมาได้ทีละแบบเท่านั้น
+ *  (ถ้าส่งมาทั้งคู่ ใช้ parentUid ก่อน) */
 export function subscribeParentNotifications(
   onUpdate: (notifications: ParentNotification[]) => void,
-  parentUid: string,
+  filter: { parentUid?: string; studentUid?: string },
 ): () => void {
   try {
-    if (!parentUid) { onUpdate([]); return () => {}; }
+    const parentUid = filter.parentUid;
+    const studentUid = filter.studentUid;
+    if (!parentUid && !studentUid) { onUpdate([]); return () => {}; }
     const col = collection(db, 'parent_notifications');
-    return onSnapshot(query(col, where('parentUid', '==', parentUid)), (snap) => {
+    const whereClause = parentUid ? where('parentUid', '==', parentUid) : where('studentUid', '==', studentUid);
+    return onSnapshot(query(col, whereClause), (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ParentNotification));
       list.sort((a, b) => {
         const ta = (a.createdAt as any)?.toMillis?.() ?? 0;
@@ -2080,6 +2092,7 @@ export async function recordInfirmaryVisit(
         id: notifRef.id,
         parentUid: data.parentUid,
         parentId: data.parentUid,
+        studentUid: data.studentUid ?? null,
         studentId: data.studentId,
         studentName: data.studentName,
         title: data.isUrgentAlert ? '🚨 แจ้งเตือนด่วน: นักเรียนเข้าห้องพยาบาล' : '🏥 แจ้งเตือน: นักเรียนเข้าห้องพยาบาล',

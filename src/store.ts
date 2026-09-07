@@ -800,6 +800,7 @@ export const useStore = create<StoreState>((set, get) => ({
     let studentId = '';
     let studentName = '';
     let parentUid = '';
+    let studentUid: string | undefined;
 
     set((state) => {
       const updatedConferences = state.parentConferences.map(c => {
@@ -818,12 +819,14 @@ export const useStore = create<StoreState>((set, get) => ({
 
       const student = state.students.find(s => s.studentId === studentId);
       parentUid = (student as any)?.parentUid || (student as any)?.parentId || '';
+      studentUid = student?.studentUid;
 
       return { parentConferences: updatedConferences };
     });
 
     createParentNotification({
       parentUid,
+      studentUid,
       studentId,
       studentName,
       title: '🗓️ ยืนยันการนัดพบคณะกรรมการสถานศึกษาเรียบร้อยแล้ว',
@@ -890,11 +893,13 @@ export const useStore = create<StoreState>((set, get) => ({
 
     let studentName = '';
     let parentUid = '';
+    let studentUid: string | undefined;
 
     set((state) => {
       const student = state.students.find(s => s.studentId === studentId);
       studentName = student ? student.name : `นักเรียน (${studentId})`;
       parentUid = (student as any)?.parentUid || (student as any)?.parentId || '';
+      studentUid = student?.studentUid;
 
       const newGateRecord: GateAttendanceRecord = {
         id: `gate-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -919,6 +924,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
     createParentNotification({
       parentUid,
+      studentUid,
       studentId,
       studentName,
       title: type === 'ENTRY' ? `🔔 แจ้งเตือนการมาถึงโรงเรียน (${studentName})` : `👋 แจ้งเตือนการเดินทางออกจากโรงเรียน (${studentName})`,
@@ -940,11 +946,13 @@ export const useStore = create<StoreState>((set, get) => ({
 
     let leaveStudentName = 'นักเรียน';
     let leaveParentUid = '';
+    let leaveStudentUid: string | undefined;
 
     set((state) => {
       const student = state.students.find(s => s.studentId === req.studentId);
       leaveStudentName = student ? student.name : 'นักเรียน';
       leaveParentUid = (student as any)?.parentUid || (student as any)?.parentId || '';
+      leaveStudentUid = student?.studentUid;
 
       return {
         detailedLeaveRequests: [newLeave, ...state.detailedLeaveRequests]
@@ -953,6 +961,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
     createParentNotification({
       parentUid: leaveParentUid,
+      studentUid: leaveStudentUid,
       studentId: req.studentId,
       studentName: leaveStudentName,
       title: '📝 ยื่นใบลาออนไลน์ (e-Leave) เรียบร้อยแล้ว',
@@ -967,6 +976,7 @@ export const useStore = create<StoreState>((set, get) => ({
     let approvedStudentId = '';
     let approvedStudentName = 'นักเรียน';
     let approvedParentUid = '';
+    let approvedStudentUid: string | undefined;
 
     set((state) => {
       const updated = state.detailedLeaveRequests.map(l => {
@@ -987,6 +997,7 @@ export const useStore = create<StoreState>((set, get) => ({
       approvedStudentId = studentId;
       approvedStudentName = student ? student.name : 'นักเรียน';
       approvedParentUid = (student as any)?.parentUid || (student as any)?.parentId || '';
+      approvedStudentUid = student?.studentUid;
 
       // Auto-update student morning status to LEAVE if applicable
       const updatedStudents = state.students.map(s => {
@@ -1013,6 +1024,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (approvedStudentId) {
       createParentNotification({
         parentUid: approvedParentUid,
+        studentUid: approvedStudentUid,
         studentId: approvedStudentId,
         studentName: approvedStudentName,
         title: '✅ ใบลาได้รับการอนุมัติแล้ว',

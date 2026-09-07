@@ -1544,11 +1544,16 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
 
       expect(visitId).toBeTruthy();
       let notifCount = 0;
+      let notifId = '';
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         const snap = await ctx.firestore().collection('parent_notifications').where('parentUid', '==', PARENT_UID).get();
         notifCount = snap.size;
+        notifId = snap.docs[0]?.id || '';
+        expect(snap.docs[0]?.data().studentUid).toBe(STU_UID);
       });
       expect(notifCount).toBe(1);
+      // นักเรียนเจ้าของเรื่องเองก็ต้องอ่านแจ้งเตือนนี้ได้ด้วย (ไม่ใช่แค่ผู้ปกครอง)
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`parent_notifications/${notifId}`).get());
     });
   });
 
@@ -1565,7 +1570,7 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       });
     }
     const notifDoc = (over: Record<string, unknown> = {}) => ({
-      id: 'x', parentUid: PARENT_UID, parentId: PARENT_UID, studentId: STU_ID, studentName: 'นักเรียนทดสอบ',
+      id: 'x', parentUid: PARENT_UID, parentId: PARENT_UID, studentUid: STU_UID, studentId: STU_ID, studentName: 'นักเรียนทดสอบ',
       title: 'แจ้งเตือนทดสอบ', message: 'ข้อความทดสอบ', status: 'unread', type: 'info',
       ...over,
     });
@@ -1606,6 +1611,35 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('parent_notifications/n9').get());
       await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n9').delete());
       await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('parent_notifications/n9').delete());
+    });
+
+    // TASK (เพิ่มกระดิ่งฝั่งนักเรียน): studentUid denormalize เข้า schema ให้นักเรียนเจ้าของอ่าน/
+    // มาร์คอ่านแล้วเองได้ด้วย โดยไม่กระทบ scope เดิมของผู้ปกครองเลย
+    it('lets the owning student read/mark-read their own notification via studentUid; denies an unrelated student', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('parent_notifications/n10').set(notifDoc({ id: 'n10' }));
+      });
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('parent_notifications/n10').get());
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('parent_notifications/n10').update({ status: 'read' }));
+      await assertFails(asUser('other-student', ['STUDENT']).firestore().doc('parent_notifications/n10').get());
+      // ผู้ปกครองเดิมยังอ่านได้ตามปกติ ไม่มี regression
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('parent_notifications/n10').get());
+    });
+
+    it('denies creating a notification with a forged studentUid that does not match the real students/{id}.studentUid, even for a role-based writer', async () => {
+      await seed();
+      await assertFails(
+        asRole('HOMEROOM_TEACHER').firestore().doc('parent_notifications/n11').set(
+          notifDoc({ id: 'n11', studentUid: 'someone-elses-uid' })
+        )
+      );
+      // studentUid: null (ไม่ทราบ/ยังไม่เชื่อมบัญชี) ยังเขียนได้ปกติ — ไม่ใช่ทุกคนต้องมี studentUid จริงเสมอไป
+      await assertSucceeds(
+        asRole('HOMEROOM_TEACHER').firestore().doc('parent_notifications/n12').set(
+          notifDoc({ id: 'n12', studentUid: null })
+        )
+      );
     });
 
     it('createParentNotification (helper จริงที่ store.ts เรียก) ข้ามการเขียนเงียบๆ เมื่อไม่มี parentUid จริง แทนการ fabricate ID ปลอม', async () => {

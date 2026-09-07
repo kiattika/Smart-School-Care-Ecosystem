@@ -31,6 +31,7 @@ import {
   Users
 } from 'lucide-react';
 
+import { NotificationBell } from './components/notifications/NotificationBell';
 import { GateAttendanceTracker } from './components/student-parent/GateAttendanceTracker';
 import { StudentElectiveEnrollment } from './components/student-parent/StudentElectiveEnrollment';
 import { HealthMentalWellbeingModule } from './components/student-parent/HealthMentalWellbeingModule';
@@ -149,23 +150,26 @@ export function StudentPortal() {
           </div>
         </div>
 
-        {/* DEV: ถ้า query คืนมามากกว่าหนึ่ง record (เช่นบัญชีทดสอบผูกหลายคน) ให้สลับได้ */}
-        {import.meta.env.DEV && myStudents.length > 1 && (
-          <div className="flex items-center gap-3 self-stretch md:self-auto bg-slate-800/60 p-2 rounded-2xl border border-slate-700/60">
-            <span className="text-xs text-slate-400 pl-2">สลับโปรไฟล์ (DEV):</span>
-            <select
-              value={student.studentId}
-              onChange={(e) => setSelectedStudentId(e.target.value)}
-              className="bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-1.5 font-bold focus:outline-none focus:border-indigo-500"
-            >
-              {myStudents.map(s => (
-                <option key={s.studentId} value={s.studentId}>
-                  {s.name} (ม.{s.room || '5/8'})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div className="flex items-center gap-3 self-stretch md:self-auto">
+          {/* DEV: ถ้า query คืนมามากกว่าหนึ่ง record (เช่นบัญชีทดสอบผูกหลายคน) ให้สลับได้ */}
+          {import.meta.env.DEV && myStudents.length > 1 && (
+            <div className="flex items-center gap-3 bg-slate-800/60 p-2 rounded-2xl border border-slate-700/60">
+              <span className="text-xs text-slate-400 pl-2">สลับโปรไฟล์ (DEV):</span>
+              <select
+                value={student.studentId}
+                onChange={(e) => setSelectedStudentId(e.target.value)}
+                className="bg-slate-900 border border-slate-700 text-xs text-white rounded-xl px-3 py-1.5 font-bold focus:outline-none focus:border-indigo-500"
+              >
+                {myStudents.map(s => (
+                  <option key={s.studentId} value={s.studentId}>
+                    {s.name} (ม.{s.room || '5/8'})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          <NotificationBell />
+        </div>
       </div>
 
       {/* 7 Core Module Navigation Bar */}

@@ -5,11 +5,14 @@ import { subscribeParentNotifications, markParentNotificationRead, markAllParent
 import { ParentNotification } from '../../types';
 
 /**
- * กระดิ่งแจ้งเตือนรวมศูนย์ — real-time จาก Firestore (parent_notifications) ของผู้ปกครองที่ล็อกอินอยู่
- * เท่านั้น (ดู firestore.rules: อ่านได้เฉพาะ resource.data.parentUid == auth.uid)
+ * กระดิ่งแจ้งเตือนรวมศูนย์ — real-time จาก Firestore (parent_notifications) ของผู้ใช้ที่ล็อกอินอยู่เอง
+ * เท่านั้น ใช้ร่วมกันได้ทั้งฝั่งผู้ปกครอง (query ผ่าน parentUid) และฝั่งนักเรียนเจ้าของเรื่องเอง (query
+ * ผ่าน studentUid — เพิ่มเข้ามาทีหลัง เดิม schema ผูกกับ parentUid เท่านั้น) เลือก field ตาม
+ * `user.role` ปัจจุบันอัตโนมัติ ไม่ต้องส่ง prop บอกโหมด
+ * (ดู firestore.rules: อ่านได้เฉพาะ resource.data.parentUid == auth.uid หรือ studentUid == auth.uid)
  *
- * วางไว้ในส่วนหัวของ portal ใดก็ได้ที่ผู้ใช้มีบทบาทเป็นผู้ปกครอง — ไม่ต้องส่ง prop ใดๆ ดึง uid ของ
- * ผู้ใช้ปัจจุบันจาก store เอง (เดิมระบบนี้ไม่มี UI แสดงผลเลยสักที่ ทั้งที่ข้อมูลจริงบางส่วนมีอยู่แล้ว)
+ * วางไว้ในส่วนหัวของ portal ใดก็ได้ที่ผู้ใช้มีบทบาทเป็นผู้ปกครองหรือนักเรียน — ไม่ต้องส่ง prop ใดๆ ดึง
+ * uid/role ของผู้ใช้ปัจจุบันจาก store เอง (เดิมระบบนี้ไม่มี UI แสดงผลเลยสักที่ ทั้งที่ข้อมูลจริงบางส่วนมีอยู่แล้ว)
  */
 export function NotificationBell() {
   const user = useStore(s => s.user);
@@ -19,11 +22,14 @@ export function NotificationBell() {
   const [isMarkingAll, setIsMarkingAll] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
+  const isStudent = user?.role === 'student';
+
   useEffect(() => {
     if (!user?.uid) { setNotifications([]); return; }
-    const unsubscribe = subscribeParentNotifications(setNotifications, user.uid);
+    const filter = isStudent ? { studentUid: user.uid } : { parentUid: user.uid };
+    const unsubscribe = subscribeParentNotifications(setNotifications, filter);
     return () => unsubscribe();
-  }, [user?.uid]);
+  }, [user?.uid, isStudent]);
 
   // ปิด panel เมื่อคลิกนอกกรอบ
   useEffect(() => {

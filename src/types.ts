@@ -409,6 +409,7 @@ export interface ParentNotification {
   id: string;
   parentUid: string;
   parentId?: string;
+  studentUid?: string | null; // denormalized จาก students/{studentId}.studentUid — ให้นักเรียนเจ้าของอ่านได้เอง
   studentId: string;
   studentName: string;
   title: string;
