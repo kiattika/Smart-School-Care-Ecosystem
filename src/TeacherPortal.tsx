@@ -1,6 +1,5 @@
 import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/utils";
 import React, { useState, useEffect, useMemo } from 'react';
-import { usePeriodsConfig } from './hooks/usePeriodsConfig';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
@@ -101,9 +100,8 @@ export function TeacherPortal() {
     }
   };
 
-  const { periods: dbPeriods, error: periodsError } = usePeriodsConfig();
-  const { 
-    periods: fsPeriods, 
+  const {
+    periods: fsPeriods,
     schedules: fsSchedules, 
     loading: fsLoading, 
     error: fsError,
@@ -515,11 +513,15 @@ export function TeacherPortal() {
   const parseSchedule = parseThaiSchedule;
 
   // Time Simulation Helpers
+  // FIX (ตัดสินใจตาม TASK B): เดิมมี fallback ชั้นที่ 2 ไปอ่าน dbPeriods (usePeriodsConfig →
+  // school_settings/periods_config) เงียบๆ เมื่อ admin_periods_config ว่างเปล่า — collection นั้น
+  // ไม่มีหน้าแอดมินจัดการแล้วตั้งแต่ AdminPeriodsConfigPage.tsx เปลี่ยนไปผูกกับ admin_periods_config
+  // ตรงๆ (ดู commit ก่อนหน้า) ทำให้ข้อมูลใน school_settings/periods_config อาจเป็นค่าเก่า/ผิดที่ไม่มี
+  // ใครดูแลต่อ แต่ยังถูกใช้แสดงเป็นเวลาคาบจริงแบบไม่มีการเตือนเลย — ตัดชั้นนี้ออก เหลือแค่
+  // admin_periods_config (ของจริง) → ตารางมาตรฐานในโค้ด (ค่าคงที่ที่เห็นได้ตรงๆ ไม่ใช่ store ที่ถูกทิ้งร้าง)
   const getPeriodTimes = (index: number) => {
     // 1. First try to find period configuration matching the periodNumber
-    const match = (fsPeriods && fsPeriods.length > 0)
-      ? fsPeriods.find(p => p.periodNumber === index)
-      : dbPeriods.find(p => p.periodNumber === index);
+    const match = fsPeriods.find(p => p.periodNumber === index);
 
     if (match) {
       const [sh, sm] = match.startTime.split(':').map(Number);
@@ -1095,7 +1097,7 @@ export function TeacherPortal() {
               return (
                 <div className="space-y-4">
                   {/* Empty periods alert for regular teachers if no periods configured */}
-                  {(!fsLoading && fsPeriods.length === 0 && dbPeriods.length === 0) && (
+                  {(!fsLoading && fsPeriods.length === 0) && (
                     <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-center gap-3 text-amber-300 text-sm">
                       <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400" />
                       <span>{emptyPeriodsMessage || "ยังไม่มีการตั้งค่าคาบเรียนจากผู้ดูแลระบบ"}</span>
@@ -1111,11 +1113,11 @@ export function TeacherPortal() {
                   )}
 
                   {/* Non-blocking visible write error alert */}
-                  {(fsError || periodsError) && (
+                  {fsError && (
                     <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-4 flex items-center justify-between gap-3 text-rose-300 text-sm">
                       <div className="flex items-center gap-3">
                         <AlertOctagon className="w-5 h-5 shrink-0 text-rose-400" />
-                        <span>{fsError || periodsError}</span>
+                        <span>{fsError}</span>
                       </div>
                       {clearFsError && (
                         <button onClick={clearFsError} className="text-rose-400 hover:text-rose-200">
