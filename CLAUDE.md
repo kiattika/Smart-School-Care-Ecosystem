@@ -69,6 +69,32 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - `src/components/SubstituteTeachingModule.tsx` — `students` (เช็คชื่อสอนแทน)
 - `src/components/student-parent/*` — 7 ไฟล์: BehaviorDisciplineModule, SocioeconomicWelfareModule, AcademicHomeworkModule, PortfolioActivityVault, HealthMentalWellbeingModule, ParentEngagementServices, GateAttendanceTracker
 
+### ใช้ `StudentPicker` กลางสำหรับจุดที่ต้องเลือกนักเรียน (ห้ามสร้าง select/checkbox เอง)
+
+`src/components/shared/StudentPicker.tsx` คือ component กลางสำหรับเลือกนักเรียน แทน `<select>` ธรรมดา
+หรือ checkbox list ที่เขียนขึ้นเองกระจัดกระจายหลายจุด — โหมด `single` (ช่องค้นหา autocomplete ด้วยเลข
+ประจำตัวหรือชื่อ) และโหมด `multi-room` (เลือกห้องแล้วติ๊ก checkbox หลายคน + "เลือกทั้งหมด") ดึงรายชื่อ
+สดผ่าน `useRealStudents()` เอง หรือรับ prop `students` ก็ได้ถ้าไฟล์นั้นดึงไว้แล้ว **สำคัญ: ไม่ auto-select
+นักเรียนคนแรกให้เป็นค่าเริ่มต้นเด็ดขาด** (ต่างจาก pattern เก่าที่เคย `useState(students[0]?.studentId || '')`
+ซึ่งเป็นทั้งบั๊ก state ค้างว่างตอน `students` ยังโหลดไม่เสร็จ และความเสี่ยงด้านความปลอดภัยที่ผู้ใช้กด "บันทึก"
+โดยลืมเปลี่ยนนักเรียนที่เลือกอยู่ — บังคับให้ผู้ใช้เลือกเองเสมอ
+
+**แปลงไปใช้แล้ว:** `FinancePortal.tsx` (สร้างใบแจ้งหนี้), `InfirmaryPortal.tsx` (บันทึกการรักษา — จุดนี้เคย
+มีบั๊ก dropdown เลือกไม่ติดมาก่อน), `GuidancePortal.tsx` (เปิดเคสให้คำปรึกษาใหม่)
+
+**ตั้งใจไม่แปลง (ตรวจสอบแล้วไม่เข้ากับ pattern การค้นหา/เลือกของ StudentPicker):**
+- `RandomStudentPickerModal.tsx` — เป็นฟีเจอร์สุ่มหมุน (roulette) ไม่มี UI ค้นหา/เลือกรายบุคคลอยู่แล้ว คนละวัตถุประสงค์
+- `ClassroomSeatingManager.tsx` — รายชื่อนักเรียนผูกกับ drag-and-drop/click-to-arm ผังที่นั่งและสถานะการเข้าเรียนแน่นหนา ไม่ใช่ list เลือกทั่วไป
+
+**เช็คลิสต์ไฟล์ที่ยังไม่แปลง (backlog, ~17 ไฟล์ จากการสแกน `<select>`/checkbox ที่อ้างอิง `studentId`):**
+- `src/ParentPortal.tsx`, `src/StudentPortal.tsx`, `src/TeacherPortal.tsx`, `src/HomeVisitPortal.tsx`
+- `src/components/StudentManagementPage.tsx`, `src/components/StudentSelfAssessmentForm.tsx`
+- `src/components/SubstituteTeachingModule.tsx`, `src/components/BulkDataImportModal.tsx`
+- `src/components/ClassroomLeaderboard.tsx`
+- `src/components/admin/HouseManagerPage.tsx`
+- `src/components/ExecutiveEngagementDashboard.tsx`, `src/components/ExecutiveLearnerAnalytics.tsx`
+- `src/components/student-parent/BehaviorDisciplineModule.tsx`, `ParentEngagementServices.tsx`, `PortfolioActivityVault.tsx`
+
 ### แสดงรายวิชา+ระดับชั้น+ห้อง ใช้ `formatCourseTitle()` เสมอ
 
 จุดที่โชว์ชื่อวิชาคู่กับห้อง ต้องมีระดับชั้น (ม.5/8) ด้วย — ใช้ `formatCourseTitle(name, level, room)`

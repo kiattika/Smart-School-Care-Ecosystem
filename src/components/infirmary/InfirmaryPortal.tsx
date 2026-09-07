@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
+import { StudentPicker } from '../shared/StudentPicker';
 import {
   recordInfirmaryVisit as recordInfirmaryVisitFirestore,
   acknowledgeInfirmaryVisit,
@@ -54,17 +55,12 @@ export function InfirmaryPortal() {
 
   const [activeTab, setActiveTab] = useState<'visits' | 'inventory' | 'screening' | 'profiles'>('visits');
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedStudentId, setSelectedStudentId] = useState<string>(students[0]?.studentId || '');
-
-  // BUG FIX: useRealStudents() โหลดแบบ async — ตอน mount ครั้งแรก students มักยังว่างอยู่ (listener
-  // ยังไม่ทันส่งข้อมูลกลับมา) ทำให้ useState ด้านบนตั้งต้นเป็น '' ค้างตลอดไป (ไม่มี re-init อัตโนมัติ)
-  // แม้ dropdown จะแสดงผลเหมือนเลือกคนแรกไว้แล้ว (browser auto-select ตัวเลือกแรกเวลา value ที่ผูกไว้
-  // ไม่ตรงกับ option ไหนเลย — ไม่ได้แปลว่า state จริงมีค่า) sync state ให้ตรงกับข้อมูลจริงทันทีที่โหลดเสร็จ
-  useEffect(() => {
-    if (!selectedStudentId && students.length > 0) {
-      setSelectedStudentId(students[0].studentId);
-    }
-  }, [students, selectedStudentId]);
+  // เฟส 2 shared components — TASK 2: เปลี่ยนไปใช้ StudentPicker กลาง ซึ่งไม่ auto-select นักเรียน
+  // คนแรกให้ (ต้องพิมพ์ค้นหา/เลือกเองเสมอ) ตั้งใจเปลี่ยนพฤติกรรมเดิม — เดิม default เป็น students[0]
+  // เคยเป็นสาเหตุบั๊ก state ค้างว่างเงียบๆ ที่เจอมาก่อน แต่ยิ่งไปกว่านั้น การ pre-fill นักเรียนคนแรกไว้
+  // ในฟอร์ม "บันทึกการรักษา" ก็เป็นความเสี่ยงด้านความปลอดภัย (พยาบาลอาจกดบันทึกโดยลืมเปลี่ยนคนไข้)
+  // ให้เริ่มว่างเสมอ บังคับเลือกน่าเชื่อถือกว่า
+  const [selectedStudentId, setSelectedStudentId] = useState<string>('');
 
   // New visit form state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -98,28 +94,24 @@ export function InfirmaryPortal() {
 
   const handleRecordVisit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // BUG FIX: เดิม selectedStudentId ตั้งค่าครั้งแรกจาก useState(students[0]?.studentId || '')
-    // ตอน useRealStudents() ยังโหลดไม่เสร็จ (students=[]) จึงค้างเป็น '' ตลอดไป แม้ dropdown จะ
-    // "ดูเหมือน" เลือกคนแรกไว้แล้วหลัง students โหลดเสร็จ (เพราะ browser auto-select ตัวเลือกแรก
-    // เวลา value ที่ผูกไว้ไม่ตรงกับ option ไหนเลย) — ทำให้กด "บันทึก" ครั้งแรกไม่มีอะไรเกิดขึ้นเลย
-    // เงียบๆ (ไม่มี error, modal ไม่ปิด) จนกว่าจะเลือก dropdown ใหม่ด้วยมือ แก้โดย fallback ไป
-    // students[0] สดตอน submit เหมือน handleAddCase ใน GuidancePortal.tsx
-    const effectiveStudentId = selectedStudentId || students[0]?.studentId || '';
-    if (!effectiveStudentId) return;
+    if (!selectedStudentId) {
+      setRecordVisitError('กรุณาเลือกนักเรียนก่อนบันทึก');
+      return;
+    }
     if (!user?.uid) {
       setRecordVisitError('ไม่พบบัญชีผู้ใช้ที่ล็อกอินอยู่ กรุณาเข้าสู่ระบบใหม่ก่อนบันทึก');
       return;
     }
-    const student = students.find(s => s.studentId === effectiveStudentId);
+    const student = students.find(s => s.studentId === selectedStudentId);
 
     setIsSavingVisit(true);
     setRecordVisitError(null);
     try {
       await recordInfirmaryVisitFirestore({
-        studentId: effectiveStudentId,
+        studentId: selectedStudentId,
         studentUid: student?.studentUid || null,
         parentUid: student?.parentUid || null,
-        studentName: student?.fullName || effectiveStudentId,
+        studentName: student?.fullName || selectedStudentId,
         symptoms,
         temperature: parseFloat(temperature) || 37.0,
         treatment,
@@ -387,16 +379,8 @@ export function InfirmaryPortal() {
                   <h3 className="text-base font-bold text-white">บันทึกตรวจสุขภาพและวัคซีนประจำปี 2569</h3>
                   <p className="text-xs text-slate-400">ข้อมูลน้ำหนัก ส่วนสูง ดัชนีมวลกาย (BMI) และการได้รับวัคซีนป้องกันโรค</p>
                 </div>
-                <div className="flex gap-2">
-                  <select
-                    value={selectedStudentId}
-                    onChange={(e) => setSelectedStudentId(e.target.value)}
-                    className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white"
-                  >
-                    {students.map(s => (
-                      <option key={s.studentId} value={s.studentId}>{s.fullName} ({s.studentId})</option>
-                    ))}
-                  </select>
+                <div className="w-64">
+                  <StudentPicker mode="single" students={students} value={selectedStudentId} onSelect={setSelectedStudentId} />
                 </div>
               </div>
 
@@ -437,15 +421,9 @@ export function InfirmaryPortal() {
                   <h3 className="text-base font-bold text-white">ข้อมูลโรคประจำตัว อาการแพ้ยา และภาวะดูแลพิเศษ</h3>
                   <p className="text-xs text-slate-400">เชื่อมโยงข้อมูลสุขภาพจากฐานข้อมูลนักเรียนเพื่อความปลอดภัยสูงสุดระหว่างอยู่โรงเรียน</p>
                 </div>
-                <select
-                  value={selectedStudentId}
-                  onChange={(e) => setSelectedStudentId(e.target.value)}
-                  className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white"
-                >
-                  {students.map(s => (
-                    <option key={s.studentId} value={s.studentId}>{s.fullName}</option>
-                  ))}
-                </select>
+                <div className="w-64">
+                  <StudentPicker mode="single" students={students} value={selectedStudentId} onSelect={setSelectedStudentId} />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
@@ -507,17 +485,7 @@ export function InfirmaryPortal() {
             <form onSubmit={handleRecordVisit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">เลือกนักเรียน</label>
-                <select
-                  value={selectedStudentId}
-                  onChange={(e) => setSelectedStudentId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                >
-                  {students.map(s => (
-                    <option key={s.studentId} value={s.studentId}>
-                      เลขที่ {s.studentNo} - {s.fullName} ({s.studentId})
-                    </option>
-                  ))}
-                </select>
+                <StudentPicker mode="single" students={students} value={selectedStudentId} onSelect={setSelectedStudentId} />
               </div>
 
               <div className="grid grid-cols-2 gap-3">

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
 import { useGuidanceScreenings } from '../../hooks/useGuidanceScreenings';
+import { StudentPicker } from '../shared/StudentPicker';
 import { PHQ9Screening, TwoQuestionScreening, GuidanceCounselingCase } from '../../types';
 import {
   createGuidanceCounselingCase,
@@ -93,7 +94,9 @@ export function GuidancePortal() {
   }, []);
 
   const [showAddCaseModal, setShowAddCaseModal] = useState(false);
-  const [newStudentId, setNewStudentId] = useState(students[0]?.studentId || '');
+  // เฟส 2 shared components — TASK 2: เปลี่ยนไปใช้ StudentPicker กลาง ไม่ auto-select นักเรียนคนแรกอีกต่อไป
+  // (เดิม default เป็น students[0] เคยเป็นความเสี่ยงบันทึกเคสผิดคนถ้าครูแนะแนวลืมเปลี่ยน)
+  const [newStudentId, setNewStudentId] = useState('');
   const [newIssue, setNewIssue] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [newSeverity, setNewSeverity] = useState<'LOW' | 'MODERATE' | 'HIGH'>('MODERATE');
@@ -102,8 +105,11 @@ export function GuidancePortal() {
 
   const handleAddCase = async (e: React.FormEvent) => {
     e.preventDefault();
-    const effectiveStudentId = newStudentId || students[0]?.studentId || '';
-    const st = students.find(s => s.studentId === effectiveStudentId);
+    if (!newStudentId) {
+      setAddCaseError('กรุณาเลือกนักเรียนก่อนบันทึกเคส');
+      return;
+    }
+    const st = students.find(s => s.studentId === newStudentId);
     if (!user?.uid) {
       setAddCaseError('ไม่พบบัญชีผู้ใช้ที่ล็อกอินอยู่ กรุณาเข้าสู่ระบบใหม่ก่อนบันทึกเคส');
       return;
@@ -112,7 +118,7 @@ export function GuidancePortal() {
     setAddCaseError(null);
     try {
       await createGuidanceCounselingCase({
-        studentId: effectiveStudentId,
+        studentId: newStudentId,
         studentName: st?.fullName || 'ไม่ระบุชื่อ',
         classRoom: st?.room || 'ไม่ระบุห้อง',
         category: newIssue,
@@ -425,16 +431,7 @@ export function GuidancePortal() {
             <form onSubmit={handleAddCase} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">เลือกนักเรียน</label>
-                <select
-                  value={newStudentId || students[0]?.studentId || ''}
-                  onChange={(e) => setNewStudentId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                >
-                  {students.length === 0 && <option value="">— ยังไม่มีข้อมูลนักเรียน —</option>}
-                  {students.map(s => (
-                    <option key={s.studentId} value={s.studentId}>{s.fullName} ({s.studentId})</option>
-                  ))}
-                </select>
+                <StudentPicker mode="single" students={students} value={newStudentId} onSelect={setNewStudentId} />
               </div>
 
               <div>

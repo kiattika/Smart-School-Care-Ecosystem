@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
 import { createBillingInvoice, createBillingInvoicesBulk, subscribeBillingInvoices } from '../../services/firestoreService';
+import { StudentPicker } from '../shared/StudentPicker';
 import {
   Wallet,
   CheckCircle,
@@ -44,32 +45,22 @@ export function FinancePortal() {
   const [selectedInvoice, setSelectedInvoice] = useState<BillingInvoice | null>(null);
 
   // TASK 1: สร้างใบแจ้งหนี้ใหม่ — เดี่ยว หรือ bulk (ค่าใช้จ่ายเดียวกันให้หลายคนพร้อมกัน เช่น ค่าเทอม)
+  // (เฟส 2 shared components — TASK 2: การค้นหา/เลือกห้องมาจาก StudentPicker กลางแล้ว ไม่ต้องมี
+  // state ค้นหา/toggle ของตัวเองซ้ำอีก)
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createMode, setCreateMode] = useState<'single' | 'bulk'>('single');
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
-  const [studentPickerSearch, setStudentPickerSearch] = useState('');
   const [newTitle, setNewTitle] = useState('');
   const [newAmount, setNewAmount] = useState('');
   const [newDueDate, setNewDueDate] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
-  const pickerStudents = useMemo(() => {
-    const q = studentPickerSearch.trim().toLowerCase();
-    if (!q) return students;
-    return students.filter(s => s.fullName.toLowerCase().includes(q) || s.studentId.toLowerCase().includes(q) || (s.room || '').toLowerCase().includes(q));
-  }, [students, studentPickerSearch]);
-
-  const toggleStudentSelection = (studentId: string) => {
-    setSelectedStudentIds((prev) => prev.includes(studentId) ? prev.filter(id => id !== studentId) : [...prev, studentId]);
-  };
-
   const resetCreateForm = () => {
     setNewTitle('');
     setNewAmount('');
     setNewDueDate('');
     setSelectedStudentIds([]);
-    setStudentPickerSearch('');
     setCreateError(null);
   };
 
@@ -371,45 +362,21 @@ export function FinancePortal() {
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
                   {createMode === 'single' ? 'เลือกนักเรียน' : `เลือกนักเรียน (${selectedStudentIds.length} คน)`}
                 </label>
-                <input
-                  type="text"
-                  value={studentPickerSearch}
-                  onChange={(e) => setStudentPickerSearch(e.target.value)}
-                  placeholder="ค้นหาชื่อ, รหัสนักเรียน, หรือห้อง..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white mb-2"
-                />
-                {createMode === 'bulk' && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStudentIds(
-                      selectedStudentIds.length === pickerStudents.length ? [] : pickerStudents.map(s => s.studentId)
-                    )}
-                    className="text-[10px] text-emerald-400 font-semibold mb-2 hover:underline"
-                  >
-                    {selectedStudentIds.length === pickerStudents.length ? 'ยกเลิกเลือกทั้งหมด' : `เลือกทั้งหมด (${pickerStudents.length} คน)`}
-                  </button>
+                {createMode === 'single' ? (
+                  <StudentPicker
+                    mode="single"
+                    students={students}
+                    value={selectedStudentIds[0] || ''}
+                    onSelect={(id) => setSelectedStudentIds(id ? [id] : [])}
+                  />
+                ) : (
+                  <StudentPicker
+                    mode="multi-room"
+                    students={students}
+                    value={selectedStudentIds}
+                    onSelect={setSelectedStudentIds}
+                  />
                 )}
-                <div className="max-h-48 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl divide-y divide-slate-800">
-                  {pickerStudents.length === 0 && (
-                    <div className="p-3 text-center text-[11px] text-slate-500">ไม่พบนักเรียนที่ตรงกับคำค้นหา</div>
-                  )}
-                  {pickerStudents.map((s) => {
-                    const checked = selectedStudentIds.includes(s.studentId);
-                    return (
-                      <label key={s.studentId} className="flex items-center gap-2.5 px-3 py-2 text-xs cursor-pointer hover:bg-slate-900/60">
-                        <input
-                          type={createMode === 'single' ? 'radio' : 'checkbox'}
-                          name="student-picker"
-                          checked={checked}
-                          onChange={() => createMode === 'single' ? setSelectedStudentIds([s.studentId]) : toggleStudentSelection(s.studentId)}
-                          className="accent-emerald-500"
-                        />
-                        <span className="text-white font-medium">{s.fullName}</span>
-                        <span className="text-slate-500 font-mono text-[10px]">{s.studentId} • {s.room}</span>
-                      </label>
-                    );
-                  })}
-                </div>
               </div>
 
               <div>
