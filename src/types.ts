@@ -65,37 +65,35 @@ export interface Student {
 }
 
 /**
- * ตั้งค่ากิจกรรมแบบ "ตามความสนใจ" (ELECTIVE) — นักเรียนสมัครเอง มีที่นั่งจำกัด เช่น ชุมนุม
- * ต่างจากกิจกรรม/วิชายกห้อง (WHOLE_CLASS) ที่ดึงรายชื่อจาก room ของนักเรียนตรงๆ — ถ้า subjectCode
- * ไหนไม่มี config นี้ ถือเป็น WHOLE_CLASS โดยปริยาย (ดู TeacherPortal.tsx courseStudents)
- *
- * capacityPerSection ใช้ "ต่อ section" คือต่อ scheduleId หนึ่งๆ อย่างอิสระต่อกัน — ถ้ากิจกรรม
- * เดียวสอนหลาย section (เช่น ชุมนุมคอมพิวเตอร์ 2 กลุ่ม) แต่ละ section นับที่นั่งแยกกัน คนละ 20 คน
- * (ไม่ใช่แชร์โควตารวม 20 คนทั้งกิจกรรม) — ใช้ค่าเดียวกันทุก section ของ subjectCode นี้
+ * ชุมนุม/กิจกรรมตามความสนใจ (ELECTIVE) — แอดมินงานชุมนุมสร้างชื่อ+จำนวนรับ+ครูรับผิดชอบเอง
+ * โดยตรง "ไม่ผูกกับ subjectCode ที่ import จากตารางสอนอีกต่อไป" (ออกแบบใหม่ — ของเดิมดึง
+ * subjectCode จาก schedules ซึ่งทุกคาบ "กิจกรรมชุมนุม" ของทุกครูใช้ชื่อกลางเดียวกันหมด ไม่ใช่ชื่อ
+ * ชุมนุมจริง ทำให้แยกชุมนุมจริงไม่ได้เลย) — 1 ชุมนุม = 1 ครูรับผิดชอบ = โควตาที่นั่งเดียว (ไม่มี
+ * concept "หลาย section" อีกต่อไปเหมือนของเดิมที่ผูกกับ scheduleId หลายคาบ)
  */
 export interface ElectiveActivityConfig {
-  id: string;               // = subjectCode
-  subjectCode: string;
-  name: string;
-  capacityPerSection: number | null; // null = ไม่จำกัดที่นั่ง
+  id: string;
+  name: string;                    // ชื่อชุมนุมที่แอดมินตั้งเอง เช่น "ชุมนุมคอมพิวเตอร์"
+  capacity: number;                // จำนวนรับทั้งชุมนุม
+  responsibleTeacherUid: string;   // ครูรับผิดชอบที่แอดมินกำหนด
+  responsibleTeacherName: string;
   createdBy: string;
-  createdAt: string; // ISO
+  createdAt: Timestamp;
 }
 
 /**
  * การสมัคร/ถอนชุมนุม 1 รายการ — ไม่ลบ document จริงเมื่อถอน (mark removedAt แทน) เพื่อเก็บ
- * ประวัติไว้ (ใครถอนเมื่อไหร่ เหตุผลอะไร) — id เป็น `${scheduleId}_${studentId}` กันสมัครซ้ำ
- * section เดิม (สมัครใหม่หลังถูกถอน = set() ทับ doc เดิม, สมัคร section/subjectCode อื่น = doc ใหม่)
+ * ประวัติไว้ (ใครถอนเมื่อไหร่ เหตุผลอะไร) — id เป็น `${activityId}_${studentId}` กันสมัครซ้ำ
+ * ชุมนุมเดิม (สมัครใหม่หลังถูกถอน = set() ทับ doc เดิม, สมัครชุมนุมอื่น = doc ใหม่)
  */
 export interface ActivityEnrollment {
   id: string;
-  scheduleId: string;
-  subjectCode: string;
+  activityId: string;              // อ้างอิง elective_activities_config/{id}
   studentId: string;
   studentUid: string;
   enrolledAt: string; // ISO
   removedAt: string | null;
-  removedBy: string | null;    // UID ครูที่ถอน — null ถ้านักเรียนถอนตัวเอง
+  removedBy: string | null;    // UID ครูรับผิดชอบที่ถอน — null ถ้านักเรียนถอนตัวเอง
   removedReason: string | null;
 }
 

@@ -1684,7 +1684,12 @@ export function subscribeStudentHomeLocationsByRoom(
  * Elective activities (ชุมนุม/กิจกรรมตามความสนใจ) — elective_activities_config +
  * activity_enrollments + activity_enrollment_counts
  *
- * capacity ตรวจสอบแบบ atomic ผ่าน "ตัวนับ" แยก (activity_enrollment_counts/{scheduleId})
+ * ออกแบบใหม่: แอดมินงานชุมนุมสร้างชื่อ+จำนวนรับ+ครูรับผิดชอบเองตรงๆ ไม่ผูกกับ subjectCode/
+ * scheduleId ที่ import จากตารางสอนอีกต่อไป (ของเดิมดึงจาก schedules ซึ่งทุกคาบ "กิจกรรมชุมนุม"
+ * ของทุกครูใช้ชื่อกลางเดียวกันหมด แยกชุมนุมจริงไม่ได้) — 1 ชุมนุม = 1 โควตาที่นั่งเดียว ไม่มี
+ * concept "หลาย section" อีกต่อไป
+ *
+ * capacity ตรวจสอบแบบ atomic ผ่าน "ตัวนับ" แยก (activity_enrollment_counts/{activityId})
  * ไม่ใช่การนับจาก activity_enrollments ตรงๆ เพราะ Firestore Transaction.get() รับได้แค่
  * DocumentReference เดียว query ข้าม document ไม่ได้ — ตัวนับนี้ sync คู่กับ enrollment เสมอ
  * ในทรานแซกชันเดียวกัน (อ่าน-ตรวจ-เขียนพร้อมกัน) ทำให้ 2 คนแย่งที่นั่งสุดท้ายพร้อมกัน มีแค่คนเดียว
@@ -1695,31 +1700,47 @@ export function subscribeStudentHomeLocationsByRoom(
  * โดยไม่ต้องเขียนตรรกะซ้ำในเทสต์ — ดู src/__tests__/firestore.rules.test.ts
  * ──────────────────────────────────────────────────────────────────────────── */
 
-export async function saveElectiveActivityConfig(
-  config: { subjectCode: string; name: string; capacityPerSection: number | null; createdBy: string },
+/** สร้างชุมนุมใหม่ — auto id (ไม่ผูกกับ subjectCode อีกต่อไป) คืนค่า id ที่สร้างให้เรียกใช้ต่อได้ */
+export async function createElectiveActivity(
+  config: { name: string; capacity: number; responsibleTeacherUid: string; responsibleTeacherName: string; createdBy: string },
+  firestoreDb: Firestore = db,
+): Promise<string> {
+  const ref = doc(collection(firestoreDb, 'elective_activities_config'));
+  try {
+    await setDoc(ref, {
+      id: ref.id,
+      name: config.name,
+      capacity: config.capacity,
+      responsibleTeacherUid: config.responsibleTeacherUid,
+      responsibleTeacherName: config.responsibleTeacherName,
+      createdBy: config.createdBy,
+      createdAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `elective_activities_config/${ref.id}`);
+  }
+  return ref.id;
+}
+
+/** แก้ไขชุมนุมที่มีอยู่ (ชื่อ/จำนวนรับ/ครูรับผิดชอบ) — ไม่แตะ createdAt/createdBy เดิม */
+export async function updateElectiveActivity(
+  id: string,
+  updates: Partial<Pick<ElectiveActivityConfig, 'name' | 'capacity' | 'responsibleTeacherUid' | 'responsibleTeacherName'>>,
   firestoreDb: Firestore = db,
 ): Promise<void> {
   try {
-    await setDoc(doc(firestoreDb, 'elective_activities_config', config.subjectCode), {
-      id: config.subjectCode,
-      subjectCode: config.subjectCode,
-      name: config.name,
-      capacityPerSection: config.capacityPerSection,
-      createdBy: config.createdBy,
-      createdAt: serverTimestamp(),
-    }, { merge: true });
+    await updateDoc(doc(firestoreDb, 'elective_activities_config', id), updates);
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `elective_activities_config/${config.subjectCode}`);
+    handleFirestoreError(error, OperationType.UPDATE, `elective_activities_config/${id}`);
   }
 }
 
-/** ยกเลิกการเป็น ELECTIVE ของ subjectCode นี้ (กลับไปเป็น WHOLE_CLASS โดยปริยาย) —
- *  ไม่แตะ activity_enrollments ที่มีอยู่แล้ว (เก็บประวัติไว้) */
-export async function removeElectiveActivityConfig(subjectCode: string, firestoreDb: Firestore = db): Promise<void> {
+/** ลบชุมนุม — ไม่แตะ activity_enrollments ที่มีอยู่แล้ว (เก็บประวัติไว้) */
+export async function removeElectiveActivityConfig(id: string, firestoreDb: Firestore = db): Promise<void> {
   try {
-    await deleteDoc(doc(firestoreDb, 'elective_activities_config', subjectCode));
+    await deleteDoc(doc(firestoreDb, 'elective_activities_config', id));
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `elective_activities_config/${subjectCode}`);
+    handleFirestoreError(error, OperationType.DELETE, `elective_activities_config/${id}`);
   }
 }
 
@@ -1740,18 +1761,17 @@ export function subscribeElectiveActivityConfigs(onUpdate: (configs: ElectiveAct
 /** สมัครชุมนุม/กิจกรรม ELECTIVE — atomic capacity check ผ่านทรานแซกชัน (กัน race condition) */
 export async function enrollInActivity(
   params: {
-    scheduleId: string;
-    subjectCode: string;
+    activityId: string;
     studentId: string;
     studentUid: string;
-    capacityPerSection: number | null;
+    capacity: number;
   },
   firestoreDb: Firestore = db,
 ): Promise<void> {
-  const { scheduleId, subjectCode, studentId, studentUid, capacityPerSection } = params;
-  const enrollmentId = `${scheduleId}_${studentId}`;
+  const { activityId, studentId, studentUid, capacity } = params;
+  const enrollmentId = `${activityId}_${studentId}`;
   const enrollmentRef = doc(firestoreDb, 'activity_enrollments', enrollmentId);
-  const counterRef = doc(firestoreDb, 'activity_enrollment_counts', scheduleId);
+  const counterRef = doc(firestoreDb, 'activity_enrollment_counts', activityId);
   try {
     await runTransaction(firestoreDb, async (transaction) => {
       // อ่านก่อนเขียนเสมอ (ข้อกำหนดของ Firestore transaction)
@@ -1765,14 +1785,13 @@ export async function enrollInActivity(
       }
 
       const currentCount = counterSnap.exists() ? Number((counterSnap.data() as any).count) || 0 : 0;
-      if (capacityPerSection !== null && currentCount >= capacityPerSection) {
+      if (currentCount >= capacity) {
         throw new Error('ENROLL_FULL: ที่นั่งเต็มแล้ว');
       }
 
       transaction.set(enrollmentRef, {
         id: enrollmentId,
-        scheduleId,
-        subjectCode,
+        activityId,
         studentId,
         studentUid,
         enrolledAt: serverTimestamp(),
@@ -1781,8 +1800,7 @@ export async function enrollInActivity(
         removedReason: null,
       });
       transaction.set(counterRef, {
-        scheduleId,
-        subjectCode,
+        activityId,
         count: currentCount + 1,
         updatedAt: serverTimestamp(),
       }, { merge: true });
@@ -1796,20 +1814,20 @@ export async function enrollInActivity(
   }
 }
 
-/** ถอนชุมนุม — นักเรียนถอนตัวเอง (removedBy: null) หรือครูถอน (removedBy: uid ครู) */
+/** ถอนชุมนุม — นักเรียนถอนตัวเอง (removedBy: null) หรือครูรับผิดชอบถอน (removedBy: uid ครู) */
 export async function withdrawFromActivity(
   params: {
-    scheduleId: string;
+    activityId: string;
     studentId: string;
     removedBy: string | null;
     removedReason: string | null;
   },
   firestoreDb: Firestore = db,
 ): Promise<void> {
-  const { scheduleId, studentId, removedBy, removedReason } = params;
-  const enrollmentId = `${scheduleId}_${studentId}`;
+  const { activityId, studentId, removedBy, removedReason } = params;
+  const enrollmentId = `${activityId}_${studentId}`;
   const enrollmentRef = doc(firestoreDb, 'activity_enrollments', enrollmentId);
-  const counterRef = doc(firestoreDb, 'activity_enrollment_counts', scheduleId);
+  const counterRef = doc(firestoreDb, 'activity_enrollment_counts', activityId);
   try {
     await runTransaction(firestoreDb, async (transaction) => {
       const [enrollmentSnap, counterSnap] = await Promise.all([
@@ -1839,25 +1857,25 @@ export async function withdrawFromActivity(
   }
 }
 
-/** รายชื่อสมัครปัจจุบัน (ยังไม่ถูกถอน) ของ section หนึ่ง — real-time สำหรับหน้าครูผู้สอน */
-export function subscribeActiveEnrollmentsBySchedule(
-  scheduleId: string,
+/** รายชื่อสมัครปัจจุบัน (ยังไม่ถูกถอน) ของชุมนุมหนึ่ง — real-time สำหรับหน้าครูรับผิดชอบ */
+export function subscribeActiveEnrollmentsByActivity(
+  activityId: string,
   onUpdate: (enrollments: ActivityEnrollment[]) => void,
 ): () => void {
   try {
     const q = query(
       collection(db, 'activity_enrollments'),
-      where('scheduleId', '==', scheduleId),
+      where('activityId', '==', activityId),
       where('removedAt', '==', null),
     );
     return onSnapshot(q, (snap) => {
       onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as ActivityEnrollment)));
     }, (err) => {
-      console.warn('[subscribeActiveEnrollmentsBySchedule] listener error:', err.message);
+      console.warn('[subscribeActiveEnrollmentsByActivity] listener error:', err.message);
       onUpdate([]);
     });
   } catch (error) {
-    console.warn('[subscribeActiveEnrollmentsBySchedule] setup error:', error);
+    console.warn('[subscribeActiveEnrollmentsByActivity] setup error:', error);
     return () => {};
   }
 }

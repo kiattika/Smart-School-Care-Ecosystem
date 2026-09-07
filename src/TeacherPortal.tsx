@@ -12,7 +12,7 @@ import { computeAttendanceSummary } from './lib/attendanceSummary';
 import { computeStudentAttendanceStats, defaultAttendanceDateRange } from './lib/studentAttendanceStats';
 import { useRoomAttendanceRecords } from './hooks/useRoomAttendanceRecords';
 import { useElectiveActivities } from './hooks/useElectiveActivities';
-import { subscribeActiveEnrollmentsBySchedule, withdrawFromActivity } from './services/firestoreService';
+import { subscribeActiveEnrollmentsByActivity, withdrawFromActivity } from './services/firestoreService';
 import { ActivityEnrollment } from './types';
 import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } from 'date-fns';
 import { th } from 'date-fns/locale';
@@ -424,19 +424,21 @@ export function TeacherPortal() {
 
   // ELECTIVE (ชุมนุม/กิจกรรมตามความสนใจ — นักเรียนสมัครเอง คละห้อง) vs WHOLE_CLASS (ยกห้อง/วิชาหลัก)
   // — กรองด้วย room เดิมใช้ไม่ได้กับ ELECTIVE เพราะนักเรียนคละห้องมาเลือกเอง (ดู elective_activities_config)
-  const { isElective } = useElectiveActivities();
-  const activeCourseIsElective = isElective(activeCourse?.code);
-  // scheduleId จริงใน collection `schedules` — courseId ที่ derive มาใช้ prefix `course_` แทน `sch_`
-  // (ดู globalCourses mapping ด้านบน: courseId = `course_${rawId.slice(4)}`) แปลงกลับตรงนี้
-  const activeCourseScheduleId = activeCourse?.id?.startsWith('course_')
-    ? `sch_${activeCourse.id.slice(7)}`
-    : (activeCourse?.id || '');
+  //
+  // ออกแบบใหม่ (เฟส 2): ชุมนุมไม่ผูกกับ subjectCode/scheduleId ที่ import จากตารางสอนอีกต่อไป (ของเดิม
+  // ทุกคาบ "กิจกรรมชุมนุม" ของทุกครูใช้ subjectCode กลางเดียวกันหมด แยกไม่ได้ว่าใครรับผิดชอบชุมนุมไหน)
+  // — ตรวจแทนว่า (1) คาบที่กำลังสอนอยู่คือคาบ "ชุมนุม" ทั่วไปตามชื่อที่ import มาจริง (เหมือน keyword
+  // ที่ detectSubjectType ใช้จำแนก ACTIVITY) และ (2) ครูคนนี้มีชุมนุมที่ตัวเองรับผิดชอบอยู่จริงไหม —
+  // ถ้าใช่ทั้งคู่ ถือว่ากำลังสอนชุมนุมของตัวเอง ดึงรายชื่อจาก activity_enrollments ของชุมนุมนั้น
+  const { configsByTeacherUid } = useElectiveActivities();
+  const myClubConfig = user?.uid ? (configsByTeacherUid.get(user.uid)?.[0] || null) : null;
+  const activeCourseIsElective = !!myClubConfig && !!(activeCourse?.name || '').includes('ชุมนุม');
 
   const [electiveEnrollments, setElectiveEnrollments] = useState<ActivityEnrollment[]>([]);
   useEffect(() => {
-    if (!activeCourseIsElective || !activeCourseScheduleId) { setElectiveEnrollments([]); return; }
-    return subscribeActiveEnrollmentsBySchedule(activeCourseScheduleId, setElectiveEnrollments);
-  }, [activeCourseIsElective, activeCourseScheduleId]);
+    if (!activeCourseIsElective || !myClubConfig) { setElectiveEnrollments([]); return; }
+    return subscribeActiveEnrollmentsByActivity(myClubConfig.id, setElectiveEnrollments);
+  }, [activeCourseIsElective, myClubConfig?.id]);
 
   // ครูถอนชื่อนักเรียนออกจากชุมนุมของตัวเอง (ต้องระบุเหตุผล เช่น "ไม่ผ่านคัดเลือก นศท")
   // — ที่นั่งว่างขึ้นทันที นักเรียนคนนั้นสมัครที่อื่นได้ทันที (withdrawFromActivity)
@@ -448,7 +450,7 @@ export function TeacherPortal() {
     setRemoveBusy(true);
     try {
       await withdrawFromActivity({
-        scheduleId: removingEnrollment.scheduleId,
+        activityId: removingEnrollment.activityId,
         studentId: removingEnrollment.studentId,
         removedBy: user.uid,
         removedReason: removeReason.trim(),
