@@ -67,9 +67,12 @@ service cloud.firestore {
 
     // 2. Mental Health & Counseling Self-Assessments (PHQ-9, SDQ)
     match /student_self_assessments/{studentId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('GUIDANCE_COUNSELOR') || 
-                     isSelf(resource.data.studentId) || 
+      // TASK 9 (ExecutivePortal Learner Analytics): เพิ่ม EXECUTIVE อ่านได้ทั้งโรงเรียน — ฝั่ง UI
+      // (ExecutiveLearnerAnalytics.tsx) รวมเป็นกราฟแจกแจง/เปอร์เซ็นต์เท่านั้น ไม่โชว์ผลรายบุคคล
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('GUIDANCE_COUNSELOR') ||
+                     hasRole('EXECUTIVE') ||
+                     isSelf(resource.data.studentId) ||
                      isSelf(resource.data.studentUid);
       allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isSelf(studentId);
     }

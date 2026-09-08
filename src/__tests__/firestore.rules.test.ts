@@ -188,6 +188,14 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('student_self_assessments/assess-01').get());
     });
 
+    it('TASK 9 (ExecutivePortal Learner Analytics): EXECUTIVE role อ่านได้ทั้งโรงเรียน (สรุปกราฟ/เปอร์เซ็นต์ ไม่โชว์รายบุคคล)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_self_assessments/assess-01').set({ studentUid: 'std-uid-1', score: 9 });
+      });
+
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('student_self_assessments/assess-01').get());
+    });
+
     it('allows GUIDANCE_COUNSELOR and student self to write self assessment', async () => {
       await assertSucceeds(
         asRole('GUIDANCE_COUNSELOR').firestore().doc('student_self_assessments/assess-g').set({ score: 10 })
