@@ -114,7 +114,7 @@ export function StudentElectiveEnrollment({ student }: { student: Student }) {
                   <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
                     <Clock className="w-3 h-3" />
                     {dayLabel && `วัน${dayLabel}`}
-                    {cfg.periodNumber !== null && cfg.periodNumber !== undefined && ` คาบ ${cfg.periodNumber}`}
+                    {cfg.periodNumber !== null && cfg.periodNumber !== undefined && ` คาบ ${cfg.periodNumber}${cfg.periodNumberEnd && cfg.periodNumberEnd !== cfg.periodNumber ? `-${cfg.periodNumberEnd}` : ''}`}
                     {cfg.room && ` · ห้อง ${cfg.room}`}
                   </p>
                 )}

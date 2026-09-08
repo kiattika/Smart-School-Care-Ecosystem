@@ -1,10 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { Users, Save, Trash2, Loader2, Search, Info, Pencil, X, Lock, Unlock } from 'lucide-react';
+import { Users, Save, Trash2, Loader2, Search, Info, Pencil, X, Lock, Unlock, CalendarClock, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useElectiveActivities } from '../../hooks/useElectiveActivities';
 import { createElectiveActivity, updateElectiveActivity, removeElectiveActivityConfig } from '../../services/firestoreService';
 import { useStore } from '../../store';
+import {
+  detectClubSlotsForTeacher,
+  mergeClubSlotCandidates,
+  ScheduleDocLite,
+  ClubScheduleCandidate,
+} from '../../lib/electiveClubDetection';
 
 interface TeacherOption {
   uid: string;
@@ -21,30 +27,39 @@ const DAY_OPTIONS: { value: string; label: string }[] = [
 
 /**
  * แอดมินงานชุมนุม: สร้างชุมนุม/กิจกรรมตามความสนใจ (ELECTIVE — นักเรียนสมัครเอง มีที่นั่งจำกัด) เอง
- * โดยตรง — ตั้งชื่อ + จำนวนรับ + ครูรับผิดชอบ (ร่วมกันได้หลายคน) + วัน/คาบ/ห้อง ไม่ผูกกับ subjectCode
- * ที่ import จากตารางสอนอีกต่อไป
+ * โดยตรง — ตั้งชื่อ + จำนวนรับ + ครูรับผิดชอบ (ร่วมกันได้หลายคน) ไม่ผูกกับ subjectCode ที่ import จาก
+ * ตารางสอนอีกต่อไป
  *
  * ออกแบบใหม่ (เฟส 2 — ยืนยันจากผู้ใช้แล้ว): ของเดิมดึงรายชื่อ subjectCode ที่มีอยู่จริงใน schedules
  * มาให้เลือก แต่ทุกคาบ "กิจกรรมชุมนุม" ของทุกครูใช้ subjectCode/ชื่อกลางเดียวกันหมด (ไม่ใช่ชื่อชุมนุม
  * จริงของแต่ละคน) ทำให้แยกชุมนุมจริงไม่ได้เลย — เปลี่ยนเป็นฟอร์มสร้างชุมนุมใหม่ตรงๆ แทน
  *
- * ต่อยอด: รองรับครูร่วมสอนหลายคนต่อชุมนุม (ยืนยันจากไฟล์ภาระงานสอนจริงว่าเป็นรูปแบบปกติ) + ผูกวัน/
- * คาบ/ห้องเข้ากับชุมนุม + enrollmentStatus ควบคุมว่ายังเปิดรับสมัครอยู่ไหม — ปิดรับสมัครแล้วรายชื่อ
- * ที่ enroll ไว้จะไปโผล่ในตารางสอนประจำวันของครูผู้รับผิดชอบทุกคนให้เช็คชื่อได้ (ดู TeacherPortal.tsx)
+ * ต่อยอด: รองรับครูร่วมสอนหลายคนต่อชุมนุม (ยืนยันจากไฟล์ภาระงานสอนจริงว่าเป็นรูปแบบปกติ) + enrollmentStatus
+ * ควบคุมว่ายังเปิดรับสมัครอยู่ไหม — ปิดรับสมัครแล้วรายชื่อที่ enroll ไว้จะไปโผล่ในตารางสอนประจำวันของ
+ * ครูผู้รับผิดชอบทุกคนให้เช็คชื่อได้ (ดู TeacherPortal.tsx)
+ *
+ * แก้ไข (ยืนยันจากโรงเรียนอีกครั้ง): วัน/คาบชุมนุม "ไม่ใช่" สิ่งที่แอดมินกำหนดเอง — ครูทุกคนที่สอน
+ * ม.4-6 มีคาบ "กิจกรรมชุมนุม" วันพฤหัสฯ คาบ 7-8 เหมือนกันหมดตามตารางสอนจริงที่ import มา (ยกเว้นครู
+ * นศท ที่มีคาบยาวกว่า 7-9) จึงดึงวัน/คาบจากตารางสอนจริงของครูรับผิดชอบที่เลือกไว้เสมอ (ดู
+ * src/lib/electiveClubDetection.ts) ไม่มีช่องให้พิมพ์วัน/คาบเองอีกต่อไป
  */
 export function ElectiveActivityManagerPage() {
   const { user } = useStore();
   const { configs, counts, loading: configsLoading } = useElectiveActivities();
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   const [teacherSearch, setTeacherSearch] = useState('');
+  const [schedules, setSchedules] = useState<ScheduleDocLite[]>([]);
 
   // ฟอร์มสร้าง/แก้ไข
   const [editingId, setEditingId] = useState<string | null>(null); // null = กำลังสร้างใหม่
   const [nameInput, setNameInput] = useState('');
   const [capacityInput, setCapacityInput] = useState<string>('');
   const [teacherUidsInput, setTeacherUidsInput] = useState<string[]>([]);
+  // วัน/คาบชุมนุม — ตั้งได้ทางเดียวเท่านั้นคือเลือกจาก candidate ที่ตรวจจับจากตารางสอนจริง
+  // (ดู clubSlotCandidates ด้านล่าง) ไม่มีช่องพิมพ์เองอีกต่อไป
   const [dayInput, setDayInput] = useState<string>('');
   const [periodInput, setPeriodInput] = useState<string>('');
+  const [periodEndInput, setPeriodEndInput] = useState<string>('');
   const [roomInput, setRoomInput] = useState<string>('');
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -65,6 +80,15 @@ export function ElectiveActivityManagerPage() {
     return unsub;
   }, []);
 
+  // ตารางสอนจริงที่ import มา — ใช้ตรวจจับคาบชุมนุมของครูรับผิดชอบที่เลือกไว้ (ดึงวัน/คาบอัตโนมัติ
+  // แทนให้แอดมินพิมพ์เอง — ยืนยันจากโรงเรียนแล้วว่าทุกคนมีคาบชุมนุมตามตารางสอนจริงอยู่แล้ว)
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'schedules'), (snap) => {
+      setSchedules(snap.docs.map(d => d.data() as ScheduleDocLite));
+    }, (err) => console.warn('[ElectiveActivityManagerPage] schedules listener:', err.message));
+    return unsub;
+  }, []);
+
   const filteredTeachers = useMemo(() => {
     const q = teacherSearch.trim().toLowerCase();
     const base = teachers.filter(t => !teacherUidsInput.includes(t.uid));
@@ -77,6 +101,47 @@ export function ElectiveActivityManagerPage() {
     [teacherUidsInput, teachers]
   );
 
+  // ตรวจจับคาบชุมนุมของครูรับผิดชอบที่เลือกไว้จากตารางสอนจริง (ยืนยันจากโรงเรียน — ไม่ใช่ให้แอดมิน
+  // พิมพ์เอง) — ครูแต่ละคนอาจมีมากกว่า 1 ช่วงคาบที่ subjectName มีคำว่า "ชุมนุม" (ไม่ควรเกิดปกติ แต่
+  // เผื่อไว้) รวมทุกคนเป็น candidate ที่ไม่ซ้ำกัน ให้แอดมินเลือกถ้ามีมากกว่า 1 แบบ
+  const clubSlotCandidates: ClubScheduleCandidate[] = useMemo(() => {
+    const perTeacher = teacherUidsInput.map(uid => ({ uid, slots: detectClubSlotsForTeacher(schedules, uid) }));
+    return mergeClubSlotCandidates(perTeacher);
+  }, [schedules, teacherUidsInput]);
+
+  // ครูรับผิดชอบที่เลือกไว้ แต่ไม่มีคาบชุมนุมในตารางสอนที่ import มาเลย — เตือนแอดมินตรงๆ แทนที่จะ
+  // ปล่อยว่าง/error เงียบๆ (อาจเป็นเพราะยังไม่ได้ import ตารางสอนของครูคนนั้น)
+  const teachersWithoutClubSlot = useMemo(
+    () => selectedTeachers.filter(t => !clubSlotCandidates.some(c => c.teacherUids.includes(t.uid))),
+    [selectedTeachers, clubSlotCandidates]
+  );
+
+  const isSlotChosen = dayInput !== '' && periodInput !== '';
+
+  // เลือก candidate มาใช้เป็นวัน/คาบของชุมนุม (เรียกเองจากปุ่ม "ใช้ช่วงเวลานี้" หรือ auto-apply
+  // ตอนสร้างใหม่เมื่อมี candidate ที่ไม่กำกวมแค่แบบเดียว)
+  const applySlot = (slot: ClubScheduleCandidate) => {
+    setDayInput(slot.dayOfWeek);
+    setPeriodInput(String(slot.periodStart));
+    setPeriodEndInput(slot.periodEnd !== slot.periodStart ? String(slot.periodEnd) : '');
+    setRoomInput(prev => prev || slot.room);
+  };
+
+  const clearSlot = () => {
+    setDayInput('');
+    setPeriodInput('');
+    setPeriodEndInput('');
+  };
+
+  // สร้างชุมนุมใหม่ (ไม่ใช่แก้ไขของเดิม) + ยังไม่เลือกวัน/คาบเอง + เจอ candidate ไม่กำกวมแค่แบบเดียว
+  // → auto-apply ให้เลย (ไม่ต้องกดเลือกเองถ้าไม่จำเป็น) — ไม่ auto-apply ทับค่าที่แอดมินเลือกไว้แล้ว
+  useEffect(() => {
+    if (editingId) return;
+    if (isSlotChosen) return;
+    if (clubSlotCandidates.length === 1) applySlot(clubSlotCandidates[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clubSlotCandidates, editingId]);
+
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3500); };
 
   const resetForm = () => {
@@ -86,6 +151,7 @@ export function ElectiveActivityManagerPage() {
     setTeacherUidsInput([]);
     setDayInput('');
     setPeriodInput('');
+    setPeriodEndInput('');
     setRoomInput('');
     setTeacherSearch('');
   };
@@ -99,6 +165,7 @@ export function ElectiveActivityManagerPage() {
     setTeacherUidsInput(cfg.responsibleTeacherUids || []);
     setDayInput(cfg.dayOfWeek || '');
     setPeriodInput(cfg.periodNumber !== null && cfg.periodNumber !== undefined ? String(cfg.periodNumber) : '');
+    setPeriodEndInput(cfg.periodNumberEnd !== null && cfg.periodNumberEnd !== undefined ? String(cfg.periodNumberEnd) : '');
     setRoomInput(cfg.room || '');
     setTeacherSearch('');
   };
@@ -110,7 +177,7 @@ export function ElectiveActivityManagerPage() {
     if (!Number.isFinite(capacity) || capacity <= 0) { flash('กรอกจำนวนรับเป็นตัวเลขมากกว่า 0'); return; }
     if (selectedTeachers.length === 0) { flash('เลือกครูรับผิดชอบอย่างน้อย 1 คน'); return; }
     const periodNumber = periodInput.trim() === '' ? null : parseInt(periodInput, 10);
-    if (periodInput.trim() !== '' && !Number.isFinite(periodNumber)) { flash('คาบต้องเป็นตัวเลข'); return; }
+    const periodNumberEnd = periodEndInput.trim() === '' ? null : parseInt(periodEndInput, 10);
 
     setBusy('save');
     try {
@@ -122,6 +189,7 @@ export function ElectiveActivityManagerPage() {
           responsibleTeacherNames: selectedTeachers.map(t => t.name),
           dayOfWeek: dayInput || null,
           periodNumber,
+          periodNumberEnd,
           room: roomInput.trim() || null,
         });
         flash(`แก้ไขชุมนุม "${name}" แล้ว`);
@@ -133,6 +201,7 @@ export function ElectiveActivityManagerPage() {
           responsibleTeacherNames: selectedTeachers.map(t => t.name),
           dayOfWeek: dayInput || null,
           periodNumber,
+          periodNumberEnd,
           room: roomInput.trim() || null,
           enrollmentStatus: 'OPEN',
           createdBy: user?.uid || 'unknown',
@@ -182,7 +251,7 @@ export function ElectiveActivityManagerPage() {
             <Users className="w-6 h-6 text-indigo-400" /> จัดการชุมนุม (Elective Activities)
           </h2>
           <p className="text-slate-400 mt-1 text-sm">
-            สร้างชุมนุม กำหนดจำนวนรับ ครูรับผิดชอบ (ร่วมกันได้หลายคน) และวัน/คาบเรียนเอง — ไม่ผูกกับตารางสอนที่ import มา
+            สร้างชุมนุม กำหนดจำนวนรับ และครูรับผิดชอบ (ร่วมกันได้หลายคน) — วัน/คาบเรียนดึงจากตารางสอนจริงของครูรับผิดชอบให้อัตโนมัติ
           </p>
         </div>
       </div>
@@ -225,45 +294,6 @@ export function ElectiveActivityManagerPage() {
           </label>
         </div>
 
-        {/* วัน/คาบ/ห้อง — ผูกชุมนุมเข้ากับเวลาจริง เพื่อให้เข้าตารางสอนของครูได้เมื่อปิดรับสมัคร */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <label className="text-xs text-slate-400 space-y-1 block">
-            วันที่เรียน
-            <select
-              value={dayInput}
-              onChange={e => setDayInput(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
-            >
-              <option value="">— ไม่ระบุ —</option>
-              {DAY_OPTIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
-            </select>
-          </label>
-          <label className="text-xs text-slate-400 space-y-1 block">
-            คาบที่
-            <input
-              type="number"
-              min={0}
-              value={periodInput}
-              onChange={e => setPeriodInput(e.target.value)}
-              placeholder="เช่น 8"
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
-            />
-          </label>
-          <label className="text-xs text-slate-400 space-y-1 block">
-            ห้อง (ถ้ามี)
-            <input
-              value={roomInput}
-              onChange={e => setRoomInput(e.target.value)}
-              placeholder="เช่น 521"
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
-            />
-          </label>
-        </div>
-        <div className="flex items-start gap-2 text-[11px] text-slate-500 -mt-1">
-          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-          <span>ไม่ระบุวัน/คาบได้ถ้ายังไม่ตัดสินใจ — แต่ต้องระบุก่อนปิดรับสมัคร ไม่งั้นจะไม่โผล่ในตารางสอนของครู</span>
-        </div>
-
         <div className="space-y-1.5">
           <span className="text-xs text-slate-400">ครูรับผิดชอบ (เลือกได้หลายคน — ครูร่วมสอน)</span>
           {selectedTeachers.length > 0 && (
@@ -300,6 +330,73 @@ export function ElectiveActivityManagerPage() {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* วัน/คาบ — ดึงจากตารางสอนจริงของครูรับผิดชอบเสมอ (ยืนยันจากโรงเรียน) ไม่มีช่องให้พิมพ์เอง */}
+        <div className="space-y-2">
+          <span className="text-xs text-slate-400 flex items-center gap-1.5">
+            <CalendarClock className="w-3.5 h-3.5" /> วัน/คาบชุมนุม (ดึงจากตารางสอนจริงของครูรับผิดชอบ)
+          </span>
+
+          {selectedTeachers.length === 0 ? (
+            <div className="flex items-start gap-2 text-[11px] text-slate-500 bg-slate-900/40 border border-slate-800 rounded-xl p-3">
+              <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>เลือกครูรับผิดชอบก่อน ระบบจะค้นหาคาบ "กิจกรรมชุมนุม" ในตารางสอนที่ import มาให้อัตโนมัติ</span>
+            </div>
+          ) : isSlotChosen ? (
+            <div className="flex items-center justify-between gap-3 bg-emerald-950/30 border border-emerald-700/40 rounded-xl p-3">
+              <div className="flex items-center gap-2 text-xs text-emerald-300">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>
+                  วัน{DAY_OPTIONS.find(d => d.value === dayInput)?.label || dayInput} คาบ {periodInput}
+                  {periodEndInput && periodEndInput !== periodInput ? `-${periodEndInput}` : ''}
+                  {roomInput && ` · ห้อง ${roomInput}`}
+                </span>
+              </div>
+              <button onClick={clearSlot} className="text-[11px] text-slate-400 hover:text-slate-200 shrink-0 flex items-center gap-1">
+                <X className="w-3.5 h-3.5" /> เปลี่ยน/ล้างค่า
+              </button>
+            </div>
+          ) : clubSlotCandidates.length > 0 ? (
+            <div className="space-y-1.5">
+              {clubSlotCandidates.map(c => {
+                const names = c.teacherUids.map(uid => teachers.find(t => t.uid === uid)?.name || uid).join(', ');
+                return (
+                  <button
+                    key={`${c.dayOfWeek}_${c.periodStart}_${c.periodEnd}_${c.room}`}
+                    onClick={() => applySlot(c)}
+                    className="w-full flex items-center justify-between gap-3 bg-slate-900/60 hover:bg-slate-900 border border-slate-800 rounded-xl p-3 text-left transition"
+                  >
+                    <div className="text-xs text-white">
+                      วัน{DAY_OPTIONS.find(d => d.value === c.dayOfWeek)?.label || c.dayOfWeek} คาบ {c.periodStart}
+                      {c.periodEnd !== c.periodStart ? `-${c.periodEnd}` : ''}
+                      {c.room && ` · ห้อง ${c.room}`}
+                      <p className="text-[10px] text-slate-500 mt-0.5">พบในตารางสอนของ: {names}</p>
+                    </div>
+                    <span className="text-[11px] font-bold text-indigo-400 shrink-0">ใช้ช่วงเวลานี้</span>
+                  </button>
+                );
+              })}
+              {clubSlotCandidates.length > 1 && (
+                <div className="flex items-start gap-2 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>ครูรับผิดชอบที่เลือกไว้มีคาบชุมนุมคนละเวลากัน — เลือกช่วงเวลาที่จะใช้จริงสำหรับชุมนุมนี้ด้านบน</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-start gap-2 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>ไม่พบคาบ "กิจกรรมชุมนุม" ในตารางสอนของครูที่เลือกเลย — ตรวจสอบว่า import ตารางสอนของครูคนนี้แล้วหรือยัง (ชุมนุมนี้จะยังไม่มีวัน/คาบจนกว่าจะพบข้อมูล และจะไม่โผล่ในตารางสอนของครูตอนปิดรับสมัคร)</span>
+            </div>
+          )}
+
+          {teachersWithoutClubSlot.length > 0 && clubSlotCandidates.length > 0 && (
+            <div className="flex items-start gap-2 text-[11px] text-amber-300/90">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>ไม่พบคาบชุมนุมของ: {teachersWithoutClubSlot.map(t => t.name).join(', ')} (ตรวจสอบว่า import ตารางสอนครบหรือยัง)</span>
+            </div>
+          )}
         </div>
 
         <button
@@ -344,7 +441,7 @@ export function ElectiveActivityManagerPage() {
                     <p className="text-[10px] text-slate-500">
                       ครูรับผิดชอบ: {(c.responsibleTeacherNames || []).join(', ') || '— ไม่ได้ระบุ —'}
                       {dayLabel && ` · วัน${dayLabel}`}
-                      {c.periodNumber !== null && c.periodNumber !== undefined && ` คาบ ${c.periodNumber}`}
+                      {c.periodNumber !== null && c.periodNumber !== undefined && ` คาบ ${c.periodNumber}${c.periodNumberEnd && c.periodNumberEnd !== c.periodNumber ? `-${c.periodNumberEnd}` : ''}`}
                       {c.room && ` · ห้อง ${c.room}`}
                     </p>
                   </div>

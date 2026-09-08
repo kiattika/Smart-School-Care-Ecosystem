@@ -1715,7 +1715,7 @@ export async function createElectiveActivity(
   config: {
     name: string; capacity: number;
     responsibleTeacherUids: string[]; responsibleTeacherNames: string[];
-    dayOfWeek?: string | null; periodNumber?: number | null; room?: string | null;
+    dayOfWeek?: string | null; periodNumber?: number | null; periodNumberEnd?: number | null; room?: string | null;
     enrollmentStatus?: 'OPEN' | 'CLOSED';
     createdBy: string;
   },
@@ -1731,6 +1731,7 @@ export async function createElectiveActivity(
       responsibleTeacherNames: config.responsibleTeacherNames,
       dayOfWeek: config.dayOfWeek ?? null,
       periodNumber: config.periodNumber ?? null,
+      periodNumberEnd: config.periodNumberEnd ?? null,
       room: config.room ?? null,
       enrollmentStatus: config.enrollmentStatus ?? 'OPEN',
       createdBy: config.createdBy,
@@ -1747,7 +1748,7 @@ export async function updateElectiveActivity(
   id: string,
   updates: Partial<Pick<ElectiveActivityConfig,
     'name' | 'capacity' | 'responsibleTeacherUids' | 'responsibleTeacherNames' |
-    'dayOfWeek' | 'periodNumber' | 'room' | 'enrollmentStatus'>>,
+    'dayOfWeek' | 'periodNumber' | 'periodNumberEnd' | 'room' | 'enrollmentStatus'>>,
   firestoreDb: Firestore = db,
 ): Promise<void> {
   try {

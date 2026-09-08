@@ -1125,48 +1125,55 @@ export function TeacherPortal() {
                 )
                 .forEach(cfg => {
                   const virtualCourseId = `elective_${cfg.id}`;
-                  const periodNum = cfg.periodNumber as number;
-                  const { start, end } = getPeriodTimes(periodNum);
-                  const startTime = formatTime(start);
-                  const endTime = formatTime(end);
                   const room = cfg.room || 'ชุมนุม';
                   const recordDate = format(targetDate, 'yyyy-MM-dd');
-                  const attRoomCandidates = [room];
-                  const expectedRecordIds = new Set<string>();
-                  attRoomCandidates.forEach(r => {
-                    expectedRecordIds.add(`${todayStr}_${r.replace('/', '-')}_p${periodNum}`);
-                  });
-                  const firestoreChecked = todayAttendanceDocs.some(a =>
-                    expectedRecordIds.has(a.id) ||
-                    (a.periodNumber !== null &&
-                      Number(a.periodNumber) === Number(periodNum) &&
-                      attRoomCandidates.some(r => isSameRoom(a.room, r)))
-                  );
-                  const attendanceSummary = computeAttendanceSummary(
-                    todayAttendanceDocs, expectedRecordIds, periodNum, attRoomCandidates, isSameRoom
-                  );
-                  const existingRecord = postTeachingRecords.find(r => r.date === recordDate && r.courseId === virtualCourseId);
                   const enrolledCount = electiveCounts[cfg.id] || 0;
-                  rawMappedPeriods.push({
-                    id: virtualCourseId,
-                    scheduleId: virtualCourseId,
-                    courseId: virtualCourseId,
-                    periodNumber: periodNum,
-                    startTime,
-                    endTime,
-                    subjectCode: 'ชุมนุม',
-                    subjectName: cfg.name,
-                    className: 'ชุมนุม',
-                    level: 'ชุมนุม',
-                    room,
-                    attendanceTaken: firestoreChecked,
-                    lateRequestStatus: null,
-                    hasPostTeachingRecord: !!existingRecord,
-                    roleLabel: 'กิจกรรม',
-                    studentsCount: enrolledCount || cfg.capacity,
-                    type: 'ACTIVITY',
-                    attendanceSummary
-                  });
+                  // ผูก courseId เดียวกันตลอดทั้งช่วงคาบ (เหมือนคาบจริงที่ merge กัน — periodRange
+                  // detection ใน resolveCourseAndPeriod จับคู่ด้วย subjectCode+className+room+type
+                  // ที่ตรงกันอยู่แล้ว ไม่ต้องพึ่ง courseId) — แต่ต้องใช้ courseId เดียวกันเพื่อให้
+                  // hasPostTeachingRecord/attendanceRecords ผูกกับ "ชุมนุมนี้" ก้อนเดียว ไม่แยกคาบ
+                  // ตัวอย่างจริง: ชุมนุม นศท มีคาบยาวกว่าชุมนุมทั่วไป (7-9 แทน 7-8) — periodNumberEnd
+                  const periodEnd = cfg.periodNumberEnd ?? (cfg.periodNumber as number);
+                  for (let periodNum = cfg.periodNumber as number; periodNum <= periodEnd; periodNum++) {
+                    const { start, end } = getPeriodTimes(periodNum);
+                    const startTime = formatTime(start);
+                    const endTime = formatTime(end);
+                    const attRoomCandidates = [room];
+                    const expectedRecordIds = new Set<string>();
+                    attRoomCandidates.forEach(r => {
+                      expectedRecordIds.add(`${todayStr}_${r.replace('/', '-')}_p${periodNum}`);
+                    });
+                    const firestoreChecked = todayAttendanceDocs.some(a =>
+                      expectedRecordIds.has(a.id) ||
+                      (a.periodNumber !== null &&
+                        Number(a.periodNumber) === Number(periodNum) &&
+                        attRoomCandidates.some(r => isSameRoom(a.room, r)))
+                    );
+                    const attendanceSummary = computeAttendanceSummary(
+                      todayAttendanceDocs, expectedRecordIds, periodNum, attRoomCandidates, isSameRoom
+                    );
+                    const existingRecord = postTeachingRecords.find(r => r.date === recordDate && r.courseId === virtualCourseId);
+                    rawMappedPeriods.push({
+                      id: `${virtualCourseId}_p${periodNum}`,
+                      scheduleId: `${virtualCourseId}_p${periodNum}`,
+                      courseId: virtualCourseId,
+                      periodNumber: periodNum,
+                      startTime,
+                      endTime,
+                      subjectCode: 'ชุมนุม',
+                      subjectName: cfg.name,
+                      className: 'ชุมนุม',
+                      level: 'ชุมนุม',
+                      room,
+                      attendanceTaken: firestoreChecked,
+                      lateRequestStatus: null,
+                      hasPostTeachingRecord: !!existingRecord,
+                      roleLabel: 'กิจกรรม',
+                      studentsCount: enrolledCount || cfg.capacity,
+                      type: 'ACTIVITY',
+                      attendanceSummary
+                    });
+                  }
                 });
 
               // Deduplicate schedule items by period slot (periodNumber + subjectCode + className)

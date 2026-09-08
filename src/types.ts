@@ -83,8 +83,13 @@ export interface ElectiveActivityConfig {
   capacity: number;                // จำนวนรับทั้งชุมนุม
   responsibleTeacherUids: string[]; // ครูรับผิดชอบร่วมกันได้หลายคน (แอดมินกำหนด)
   responsibleTeacherNames: string[]; // ชื่อคู่ลำดับเดียวกับ responsibleTeacherUids (denormalize ไว้แสดงผล)
+  // วัน/คาบชุมนุม — ยืนยันจากโรงเรียนว่าไม่ใช่ค่าที่แอดมินกำหนดเอง ต้องดึงจากตารางสอนจริงที่ import
+  // มาของครูรับผิดชอบ (schedules ที่ subjectName มีคำว่า "ชุมนุม") เสมอ ดู ElectiveActivityManagerPage.tsx
+  // + src/lib/electiveClubDetection.ts — periodNumber/periodNumberEnd เป็นช่วงคาบต่อเนื่อง (เช่น ครู
+  // นศท มีคาบยาวกว่าคนอื่น 7-9 แทน 7-8 ปกติ) periodNumberEnd ไม่ระบุ = ชุมนุมนี้มีคาบเดียว
   dayOfWeek?: string | null;   // 'monday'..'sunday' — คาบ/วันที่ชุมนุมนี้เรียนจริง (เหมือน schedules.dayOfWeek)
-  periodNumber?: number | null; // คาบที่เท่าไหร่
+  periodNumber?: number | null; // คาบเริ่ม
+  periodNumberEnd?: number | null; // คาบสิ้นสุด (ถ้าเป็นคาบต่อเนื่องหลายคาบ เช่น นศท 7-9) — ไม่ระบุ = คาบเดียวเท่ากับ periodNumber
   room?: string | null;         // ห้องเรียน (ถ้ามี)
   enrollmentStatus: 'OPEN' | 'CLOSED'; // ปิดรับสมัครแล้วค่อยเข้าตารางสอนให้เช็คชื่อได้
   createdBy: string;
