@@ -826,6 +826,33 @@ export async function getSelfAssessmentRecord(studentId: string): Promise<Studen
 }
 
 /**
+ * TASK 9 (ExecutivePortal Learner Analytics): real-time listener ของ self-assessment ทั้งโรงเรียน —
+ * เดิม ExecutivePortal อ่าน selfAssessments จาก Zustand store ที่ไม่มี listener ผูกไว้เลย (ว่างเปล่า
+ * เสมอเมื่อเปิดหน้าใหม่/ล็อกอินใหม่) ต่างจาก getAllSelfAssessmentRecords() ด้านล่างที่ fetch ครั้งเดียว —
+ * ฟังก์ชันนี้ใช้ได้เพราะ firestore.rules เพิ่ม EXECUTIVE อ่านได้แล้ว
+ */
+export function subscribeAllSelfAssessments(
+  onUpdate: (assessments: Record<string, StudentSelfAssessment>) => void
+): () => void {
+  try {
+    return onSnapshot(collection(db, 'student_self_assessments'), (snap) => {
+      const map: Record<string, StudentSelfAssessment> = {};
+      snap.docs.forEach(d => {
+        const data = d.data() as StudentSelfAssessment;
+        map[data.studentId || d.id] = data;
+      });
+      onUpdate(map);
+    }, (error) => {
+      console.warn('[subscribeAllSelfAssessments] listener error:', error.message);
+      onUpdate({});
+    });
+  } catch (error) {
+    console.warn('[subscribeAllSelfAssessments] setup error:', error);
+    return () => {};
+  }
+}
+
+/**
  * Fetch all student self-assessments
  */
 export async function getAllSelfAssessmentRecords(): Promise<Record<string, StudentSelfAssessment>> {

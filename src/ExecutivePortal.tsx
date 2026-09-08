@@ -1,7 +1,7 @@
 import { cn } from "./lib/utils";
 // TASK 1-8 (audit ข้อมูลปลอม): ExecutivePortal เดิมใช้ mockExecutiveData แทบทุก tab — หลังแก้ครบทุก
 // TASK แล้วไม่มีจุดไหนอ่านจาก mockExecutiveData อีกเลย (ทุก tab ใช้ Firestore จริงหรือถูกลบออกเพราะ
-// ไม่มีข้อมูลจริงรองรับ) จึงลบ import นี้ทิ้ง — เหลือแค่ TASK 9 (Engagement/Analytics) ที่ต้องแก้ไฟล์อื่น
+// ไม่มีข้อมูลจริงรองรับ) จึงลบ import นี้ทิ้ง
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from './lib/firebase';
@@ -13,9 +13,11 @@ import {
   subscribeAllPHQ9Screenings,
   subscribeAllSDQAssessments,
   subscribeInfirmaryVisits,
+  subscribeActiveLearningLogs,
+  subscribeAllSelfAssessments,
 } from './services/firestoreService';
 import { isNonStudentSession } from './utils/teacherLoadReportParser';
-import { LateAttendanceRequestRecord, StudentHomeLocation, TwoQuestionScreening, PHQ9Screening, SDQAssessment, InfirmaryVisit } from './types';
+import { LateAttendanceRequestRecord, StudentHomeLocation, TwoQuestionScreening, PHQ9Screening, SDQAssessment, InfirmaryVisit, ActiveLearningRecord, StudentSelfAssessment } from './types';
 import {
   LayoutDashboard,
   Map as MapIcon,
@@ -92,14 +94,27 @@ const createCustomIcon = (pin: GisPin) => L.divIcon({
 
 
 export function ExecutivePortal() {
-  const {
-    postTeachingRecords,
-    selfAssessments,
-    activeLearningPoints,
-    activeLearningLogs
-  } = useStore();
+  const { postTeachingRecords } = useStore();
   // นักเรียนจาก Firestore สด — store แบบ session-local ทำให้ผู้บริหารเห็น 0 คนเมื่อไม่ได้ import เอง
   const { students } = useRealStudents();
+
+  // TASK 9 (audit): เดิม selfAssessments/activeLearningPoints/activeLearningLogs อ่านจาก Zustand
+  // store ที่ไม่มี Firestore listener ผูกไว้เลย (ว่างเปล่าเสมอเมื่อเปิดหน้าใหม่/ล็อกอินใหม่ ตรงกับ
+  // pattern บั๊กเดียวกับที่แก้ไปแล้วใน AdvisorPortal/TeacherPortal — ดู CLAUDE.md) แต่การเขียนจริง
+  // (addActiveLearningPoints/saveSelfAssessment ใน store.ts) เขียนลง Firestore จริงอยู่แล้ว
+  // (active_learning_logs, student_self_assessments) จึงแค่ต้องเพิ่ม listener อ่านกลับ
+  const [activeLearningLogs, setActiveLearningLogs] = useState<ActiveLearningRecord[]>([]);
+  useEffect(() => subscribeActiveLearningLogs(setActiveLearningLogs), []);
+  const activeLearningPoints = useMemo(() => {
+    const totals: Record<string, number> = {};
+    activeLearningLogs.forEach(log => {
+      totals[log.studentId] = Math.max(0, (totals[log.studentId] || 0) + log.points);
+    });
+    return totals;
+  }, [activeLearningLogs]);
+
+  const [selfAssessments, setSelfAssessments] = useState<Record<string, StudentSelfAssessment>>({});
+  useEffect(() => subscribeAllSelfAssessments(setSelfAssessments), []);
 
   // TASK 4 (GIS): พิกัดบ้านนักเรียนจริงทั้งโรงเรียน (firestore.rules เพิ่ม EXECUTIVE อ่านได้แล้ว)
   const [homeLocations, setHomeLocations] = useState<StudentHomeLocation[]>([]);
@@ -494,7 +509,12 @@ export function ExecutivePortal() {
                   เอาออกทั้ง 4 ตัว เหลือไว้แค่ "Academic Discipline" ที่คำนวณจากข้อมูลจริง 2 แหล่ง:
                   postTeachingRecords (subscribe จริงที่ App.tsx ระดับ root ให้ผู้ใช้ทุกคนผ่าน
                   useSubstituteSync — ดู CLAUDE.md) เทียบกับจำนวนคาบเรียนวันนี้ทั้งโรงเรียนที่ query
-                  จาก schedules สด (ไม่นับคาบไม่มีนักเรียนเช่น PLC/ประชุม/พักกลางวัน) */}
+                  จาก schedules สด (ไม่นับคาบไม่มีนักเรียนเช่น PLC/ประชุม/พักกลางวัน)
+
+                  หมายเหตุ TASK 9: activeLearningPoints/Logs ข้างต้น (ตอนตรวจสอบรอบแรก) เป็น
+                  session-local จริง — ตอนนี้แก้แล้ว (ดู subscribeActiveLearningLogs ด้านบน) จึงเป็น
+                  ข้อมูลจริงที่ใช้ใน tab "engagement" ได้แล้ว แค่ไม่ได้เอากลับมาใส่ในการ์ด KPI ที่นี่เพราะ
+                  ยังไม่มี business logic ที่ยืนยันว่าควรนับเป็น pillar ประเมินภาพรวมโรงเรียน */}
               <div className="space-y-6">
                 <div>
                   <h3 className="text-sm font-medium text-slate-400 uppercase tracking-widest mb-4">Academic Discipline (ข้อมูลจริงจาก Firestore)</h3>
