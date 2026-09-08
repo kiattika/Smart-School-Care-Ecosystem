@@ -1,5 +1,7 @@
 import { cn } from "./lib/utils";
-import { mockExecutiveData } from "./data/mockData";
+// TASK 1-8 (audit ข้อมูลปลอม): ExecutivePortal เดิมใช้ mockExecutiveData แทบทุก tab — หลังแก้ครบทุก
+// TASK แล้วไม่มีจุดไหนอ่านจาก mockExecutiveData อีกเลย (ทุก tab ใช้ Firestore จริงหรือถูกลบออกเพราะ
+// ไม่มีข้อมูลจริงรองรับ) จึงลบ import นี้ทิ้ง — เหลือแค่ TASK 9 (Engagement/Analytics) ที่ต้องแก้ไฟล์อื่น
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from './lib/firebase';
@@ -14,14 +16,11 @@ import {
 } from './services/firestoreService';
 import { isNonStudentSession } from './utils/teacherLoadReportParser';
 import { LateAttendanceRequestRecord, StudentHomeLocation, TwoQuestionScreening, PHQ9Screening, SDQAssessment, InfirmaryVisit } from './types';
-import { 
-  LayoutDashboard, 
-  FileSpreadsheet, 
-  UploadCloud, 
+import {
+  LayoutDashboard,
   Map as MapIcon,
   Activity,
   AlertTriangle,
-  CheckCircle,
   FileText,
   Heart,
   Users,
@@ -32,8 +31,6 @@ import {
   TrendingDown,
   Stethoscope,
   Scale,
-  Gavel,
-  Check,
   Inbox,
   Clock,
   X,
@@ -180,7 +177,7 @@ export function ExecutivePortal() {
     ? Math.min(100, Math.round((todayCompletedPostTeachingCount / todayScheduledPeriodCount) * 100))
     : null;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'policy' | 'reports' | 'import' | 'approvals' | 'analytics'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'approvals' | 'analytics'>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -192,23 +189,17 @@ export function ExecutivePortal() {
     { id: 'analytics', label: 'บทสรุปผู้เรียน', fullLabel: 'บทสรุปผู้เรียน (Learner DNA)', icon: Users, badge: null, color: 'text-blue-400' },
     { id: 'gis', label: 'แผนที่สารสนเทศ', fullLabel: 'แผนที่สารสนเทศ (GIS)', icon: MapIcon, badge: null, color: 'text-emerald-400' },
     { id: 'health', label: 'สุขภาวะ', fullLabel: 'สุขภาวะ (Health & Safety)', icon: Stethoscope, badge: null, color: 'text-emerald-400' },
-    { id: 'policy', label: 'กำหนดนโยบาย', fullLabel: 'กำหนดนโยบาย (Policy Action)', icon: Gavel, badge: null, color: 'text-emerald-400' },
-    { id: 'reports', label: 'รายงาน', fullLabel: 'รายงาน (Report Center)', icon: FileSpreadsheet, badge: null, color: 'text-emerald-400' },
-    { id: 'import', label: 'ศูนย์ข้อมูล', fullLabel: 'ศูนย์ข้อมูล (Master Data)', icon: UploadCloud, badge: null, color: 'text-emerald-400' },
     { id: 'approvals', label: 'กล่องคำขอ', fullLabel: 'กล่องคำขอ (Approvals)', icon: Inbox, badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : null, color: 'text-amber-400' },
   ] as const;
   
-  // States for Import & Reports
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processed, setProcessed] = useState(false);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-
   // States for GIS Filter
   const [gisFilter, setGisFilter] = useState<'all' | 'risk'>('all');
   const [showHeatmap, setShowHeatmap] = useState(false);
 
-  // States for Policy Actions
-  const [actionStatuses, setActionStatuses] = useState<Record<string, 'approved' | 'reviewed' | null>>({});
+  // TASK 6 (audit): เดิมมี state actionStatuses + handleAction สำหรับ "Policy Action Center" (ปุ่ม
+  // approve/review proposal ปลอมที่ดึงจาก mock data (policyProposals) ทั้งหมด ไม่มีระบบ
+  // นโยบาย/งบประมาณจริงในระบบเลย) — เอา tab นี้ออกทั้งหมด ตรงกับที่เคยตัดสินใจกับ tab เกินขอบเขต
+  // ใน FinancePortal มาก่อน (ดูคำสั่ง TASK 6)
 
   // TASK 4 (GIS): pin จริงจาก student_home_locations + students (ชื่อ/riskLevel) — ตัด nameไม่เจอนักเรียน
   // (studentId ไม่ match กับ students ที่มีอยู่ตอนนี้ เช่น import ไม่ครบ) ออกแทนการโชว์ "ไม่ทราบชื่อ"
@@ -234,24 +225,13 @@ export function ExecutivePortal() {
     return true;
   });
 
-  const handleAction = (id: string, action: 'approved' | 'reviewed') => {
-    setActionStatuses(prev => ({ ...prev, [id]: action }));
-  };
+  // TASK 8 (audit): เดิมมี handleProcessData — ปุ่ม "Synchronize Data" ในตาราง Master Data Management
+  // เป็น setTimeout ปลอมล้วน (ไม่เขียน Firestore จริง) ลบพร้อมกับ tab นี้ทั้งหมด (ดูเหตุผลเต็มที่จุด tab)
 
-  const handleProcessData = () => {
-    setIsProcessing(true);
-    setTimeout(() => {
-      setIsProcessing(false);
-      setProcessed(true);
-    }, 2000);
-  };
-
-  const handleDownload = (id: string) => {
-    setDownloadingId(id);
-    setTimeout(() => {
-      setDownloadingId(null);
-    }, 1500);
-  };
+  // TASK 7 (audit): เดิมมี handleDownload — ปุ่ม "Export Report" ในตาราง Report Center เป็น
+  // setTimeout ปลอมล้วน (ไม่มีไฟล์ PDF ออกจริง) ผูกกับตารางห้องเรียน/ครูที่ปรึกษา hardcode เอง
+  // (ไม่ใช่ students/staff จริงด้วยซ้ำ) — ผิดกฎ CLAUDE.md "ห้ามใช้ setTimeout แทนการเขียน/สร้างผลลัพธ์จริง"
+  // เอา tab ออกทั้งหมดเหมือน TASK 6
 
   return (
     <div className="flex h-screen w-full bg-[#05070a] text-slate-100 font-sans selection:bg-emerald-500/30 overflow-hidden">
@@ -442,9 +422,6 @@ export function ExecutivePortal() {
               {activeTab === 'analytics' && 'Executive Learner Insights'}
               {activeTab === 'gis' && 'Spatial Intelligence (School GIS)'}
               {activeTab === 'health' && 'Student Wellness & Analytics'}
-              {activeTab === 'policy' && 'Policy Action Center'}
-              {activeTab === 'reports' && 'Automated PDF Reporting'}
-              {activeTab === 'import' && 'Master Data Management'}
               {activeTab === 'approvals' && 'Approval Inbox (กล่องคำขออนุมัติ)'}
             </h2>
           </div>
@@ -752,74 +729,15 @@ export function ExecutivePortal() {
             </div>
           )}
 
-          {activeTab === 'import' && (
-            <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
-              <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-10 shadow-xl">
-                <h3 className="text-2xl font-bold text-white mb-2">Master Data Management</h3>
-                <p className="text-slate-400 text-sm mb-8">Import official student rosters to auto-generate school credentials and directory links.</p>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-                  <div className="border-2 border-dashed border-slate-700 rounded-2xl p-10 flex flex-col items-center justify-center bg-slate-900/50 hover:bg-slate-900/80 hover:border-emerald-500/50 transition-colors cursor-pointer group">
-                    <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                      <UploadCloud className="w-8 h-8 text-emerald-400" />
-                    </div>
-                    <p className="text-slate-200 font-medium mb-1">Drag and drop CSV here</p>
-                    <p className="text-slate-500 text-xs mb-6">Supports .csv files up to 10MB</p>
-                    <button className="px-6 py-2 bg-white/5 border border-white/10 hover:bg-white/10 rounded-lg text-sm font-medium transition-colors">
-                      Browse Files
-                    </button>
-                  </div>
-
-                  <div className="flex flex-col justify-center space-y-4">
-                    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                      <div className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-1">Field Name</div>
-                      <div className="text-sm text-slate-300">Student ID (5-digit)</div>
-                      <div className="text-[10px] text-slate-500 mt-1">Source: Academic Office (CSV)</div>
-                    </div>
-                    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                      <div className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1">Field Name</div>
-                      <div className="text-sm text-slate-300">Email (@utd.ac.th)</div>
-                      <div className="text-[10px] text-slate-500 mt-1">Source: Auto-generated System</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-6 border-t border-white/10">
-                  <button 
-                    onClick={handleProcessData}
-                    disabled={isProcessing || processed}
-                    className={cn(
-                      "flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-bold transition-all shadow-lg",
-                      processed 
-                        ? "bg-emerald-600 text-white" 
-                        : isProcessing
-                          ? "bg-emerald-600/50 text-white/70 cursor-not-allowed"
-                          : "bg-[#deff9a] text-[#05070a] hover:bg-[#c9f076] shadow-[0_0_20px_rgba(222,255,154,0.2)]"
-                    )}
-                  >
-                    {isProcessing ? (
-                      <>
-                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Processing...
-                      </>
-                    ) : processed ? (
-                      <>
-                        <CheckCircle className="w-5 h-5" />
-                        System Synchronized
-                      </>
-                    ) : (
-                      <>
-                        Synchronize Data
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* TASK 8 (audit): tab "import" (Master Data Management) ถูกลบออกทั้งหมด — เดิม UI ลาก-วาง
+              ไฟล์ไม่มี input/handler รับไฟล์จริงเลย และปุ่ม "Synchronize Data" (handleProcessData) เป็น
+              setTimeout ปลอม ไม่เขียน Firestore จริง ซ้ำซ้อนกับ BulkDataImportModal.tsx ที่ทำงานจริงอยู่แล้ว
+              ใน AdminPortal — เลือก "ลบทิ้ง" แทน "ลิงก์ไปหน้า import จริง" เพราะตรวจสอบ firestore.rules
+              แล้วพบว่า EXECUTIVE ไม่มีสิทธิ์เขียน students/staff เลย (allow write เฉพาะ SUPER_ADMIN/
+              HOMEROOM_TEACHER) การฝัง BulkDataImportModal ในหน้านี้จะยังใช้งานไม่ได้จริงอยู่ดีถ้าไม่ขยาย
+              สิทธิ์เขียนข้อมูลนักเรียน/บุคลากรทั้งโรงเรียนให้ EXECUTIVE เพิ่ม — ซึ่งเป็นการขยายสิทธิ์เขียน
+              ข้อมูลหลักที่ใหญ่กว่าการอนุญาตอ่านเพื่อสรุปภาพรวมใน TASK 4/5 มาก และไม่มีความต้องการทางธุรกิจ
+              ที่ยืนยันว่า EXECUTIVE ต้อง import ข้อมูลเอง (เป็นงานปฏิบัติการที่ AdminPortal ทำอยู่แล้ว) */}
 
           {activeTab === 'health' && (
             <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
@@ -877,132 +795,13 @@ export function ExecutivePortal() {
             </div>
           )}
 
-          {activeTab === 'policy' && (
-            <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
-              <div className="flex flex-col mb-8">
-                <h3 className="text-2xl font-bold text-white mb-2">Policy Action Center</h3>
-                <p className="text-slate-400 text-sm">Review data-driven proposals and allocate resources effectively.</p>
-              </div>
+          {/* TASK 6 (audit): tab "policy" (Policy Action Center) ถูกลบออกทั้งหมด — ไม่มีระบบนโยบาย/
+              งบประมาณจริงในระบบเลย ปุ่ม Approve/Review เดิมแค่แก้ state ในเครื่อง ไม่เขียน Firestore
+              จริง ตรงกับที่เคยตัดสินใจกับ tab เกินขอบเขตใน FinancePortal มาก่อน */}
 
-              <div className="space-y-6">
-                {mockExecutiveData.policyProposals.map((proposal) => {
-                  const status = actionStatuses[proposal.id];
-                  return (
-                    <div key={proposal.id} className="bg-[#0f1219] border border-white/10 rounded-2xl p-8 shadow-xl relative overflow-hidden">
-                      {status === 'approved' && <div className="absolute inset-0 bg-emerald-500/5 pointer-events-none border border-emerald-500/20 rounded-2xl"></div>}
-                      <div className="flex flex-col md:flex-row gap-6 justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-3">
-                            <span className="px-2 py-1 bg-white/5 rounded text-xs font-mono text-slate-400">{proposal.id}</span>
-                            <h4 className="text-xl font-bold text-white">{proposal.title}</h4>
-                          </div>
-                          <p className="text-slate-300 text-sm leading-relaxed mb-6">{proposal.description}</p>
-                          
-                          <div className="flex gap-6">
-                            <div className="bg-white/5 px-4 py-2 rounded-lg border border-white/5">
-                              <div className="text-xs text-slate-500 mb-1 uppercase tracking-wider">Affected Students</div>
-                              <div className="text-lg font-bold text-indigo-400">{proposal.affectedStudents}</div>
-                            </div>
-                            <div className="bg-white/5 px-4 py-2 rounded-lg border border-white/5">
-                              <div className="text-xs text-slate-500 mb-1 uppercase tracking-wider">Est. Budget</div>
-                              <div className="text-lg font-bold text-amber-400">{proposal.estimatedBudget}</div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="w-full md:w-auto flex flex-col gap-3 shrink-0">
-                          {status ? (
-                            <div className={cn(
-                              "flex items-center justify-center gap-2 px-6 py-3 rounded-xl border text-sm font-bold w-48",
-                              status === 'approved' ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" : "bg-slate-800 border-slate-600 text-slate-300"
-                            )}>
-                              <Check className="w-4 h-4" />
-                              {status === 'approved' ? 'Approved' : 'Reviewed'}
-                            </div>
-                          ) : (
-                            <>
-                              <button 
-                                onClick={() => handleAction(proposal.id, 'approved')}
-                                className="flex items-center justify-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-emerald-600/20 w-full md:w-48"
-                              >
-                                <CheckCircle2 className="w-4 h-4" /> Approve Resource
-                              </button>
-                              <button 
-                                onClick={() => handleAction(proposal.id, 'reviewed')}
-                                className="flex items-center justify-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 rounded-xl text-sm font-bold transition-all w-full md:w-48"
-                              >
-                                Mark as Reviewed
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'reports' && (
-            <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h3 className="text-2xl font-bold text-white mb-2">Automated PDF Reporting</h3>
-                  <p className="text-slate-400 text-sm">One-Click Export: Generate academic and behavioral summaries in seconds.</p>
-                </div>
-              </div>
-
-              <div className="bg-[#0f1219] border border-white/10 rounded-2xl overflow-hidden shadow-xl">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-[#05070a] border-b border-white/10 text-slate-400">
-                    <tr>
-                      <th className="px-6 py-5 font-medium">Classroom</th>
-                      <th className="px-6 py-5 font-medium">Homeroom Advisor</th>
-                      <th className="px-6 py-5 font-medium text-center">Total Students</th>
-                      <th className="px-6 py-5 font-medium text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5">
-                    {[
-                      { id: '1', class: 'Grade 7 (ม.1/1)', advisor: 'ครูสมปอง ใจดี', students: 45 },
-                      { id: '2', class: 'Grade 7 (ม.1/2)', advisor: 'ครูวิภาดา รักเรียน', students: 42 },
-                      { id: '3', class: 'Grade 8 (ม.2/1)', advisor: 'ครูมานะ อดทน', students: 48 },
-                      { id: '4', class: 'Grade 9 (ม.3/1)', advisor: 'ครูปิติ ยินดี', students: 40 },
-                    ].map(row => (
-                      <tr key={row.id} className="hover:bg-white/5 transition-colors">
-                        <td className="px-6 py-5 font-bold text-slate-200">{row.class}</td>
-                        <td className="px-6 py-5 text-slate-400">{row.advisor}</td>
-                        <td className="px-6 py-5 text-center text-slate-300 font-mono">{row.students}</td>
-                        <td className="px-6 py-5 text-right">
-                          <button 
-                            onClick={() => handleDownload(row.id)}
-                            disabled={downloadingId === row.id}
-                            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-xl text-xs font-bold transition-colors w-44"
-                          >
-                            {downloadingId === row.id ? (
-                              <>
-                                <svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                Generating PDF...
-                              </>
-                            ) : (
-                              <>
-                                <FileText className="w-4 h-4" />
-                                Export Report
-                              </>
-                            )}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          {/* TASK 7 (audit): tab "reports" (Report Center) ถูกลบออกทั้งหมด — ตารางห้องเรียน/ครูที่
+              ปรึกษา hardcode เอง (ไม่ใช่ students/staff จริง) ปุ่ม "Export Report" เป็น setTimeout
+              ปลอมล้วนไม่มีไฟล์ PDF ออกจริง ผิดกฎ CLAUDE.md */}
 
           {activeTab === 'approvals' && (
             <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
