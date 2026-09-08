@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { 
+import { format } from 'date-fns';
+import {
   StoreState, 
   AttendanceStatus, 
   Course, 
@@ -895,7 +896,9 @@ export const useStore = create<StoreState>((set, get) => ({
     const hours = now.getHours().toString().padStart(2, '0');
     const minutes = now.getMinutes().toString().padStart(2, '0');
     const timeStr = `${hours}:${minutes} น.`;
-    const dateStr = now.toISOString().split('T')[0];
+    // .toISOString() แปลงเป็น UTC เสมอ — ช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย (UTC+7) จะลากวันถอยหลัง
+    // ไป 1 วัน ใช้ format() จาก date-fns แทน (คำนวณจาก local time fields ตรงๆ)
+    const dateStr = format(now, 'yyyy-MM-dd');
     const isLate = type === 'ENTRY' && (now.getHours() > 8 || (now.getHours() === 8 && now.getMinutes() > 0));
 
     let studentName = '';
@@ -1071,7 +1074,7 @@ export const useStore = create<StoreState>((set, get) => ({
       totalScore,
       riskLevel,
       recommendation,
-      conductedAt: new Date().toISOString().split('T')[0]
+      conductedAt: format(new Date(), 'yyyy-MM-dd')
     };
     await savePHQ9ScreeningFirestore(studentId, screening);
 
@@ -1091,7 +1094,7 @@ export const useStore = create<StoreState>((set, get) => ({
       q1Depressed: q1,
       q2Hopeless: q2,
       isPositive,
-      conductedAt: new Date().toISOString().split('T')[0]
+      conductedAt: format(new Date(), 'yyyy-MM-dd')
     };
     await save2QScreeningFirestore(studentId, screening);
 
@@ -1107,7 +1110,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const newSDQ: SDQAssessment = {
       ...sdq,
       id: `sdq-${Date.now()}`,
-      assessmentDate: new Date().toISOString().split('T')[0]
+      assessmentDate: format(new Date(), 'yyyy-MM-dd')
     };
     await saveSDQAssessmentFirestore(newSDQ);
 
@@ -1125,7 +1128,7 @@ export const useStore = create<StoreState>((set, get) => ({
       category,
       description,
       teacherName,
-      date: new Date().toISOString().split('T')[0],
+      date: format(new Date(), 'yyyy-MM-dd'),
       academicYear: '2569'
     };
 

@@ -13,6 +13,8 @@
  * ยืนยันจากทางโรงเรียน รอการยืนยัน/ปรับภายหลัง
  */
 
+import { format } from 'date-fns';
+
 export type AttendanceStatusValue = 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE';
 
 /** ค่าเริ่มต้น (ยังไม่ยืนยันจากโรงเรียน) — ต่ำกว่านี้ถือว่าน่าเป็นห่วง ต้องติดตาม/แจ้งเตือน */
@@ -122,7 +124,9 @@ export function defaultAttendanceDateRange(days: number = 30, today: Date = new 
   const end = new Date(today);
   const start = new Date(today);
   start.setDate(start.getDate() - (days - 1));
-  const fmt = (d: Date) => d.toISOString().split('T')[0];
+  // .toISOString() แปลงเป็น UTC เสมอ — ช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย (UTC+7) จะลากวันถอยหลัง
+  // ไป 1 วัน ใช้ format() จาก date-fns แทน (คำนวณจาก local time fields ตรงๆ)
+  const fmt = (d: Date) => format(d, 'yyyy-MM-dd');
   return { start: fmt(start), end: fmt(end) };
 }
 

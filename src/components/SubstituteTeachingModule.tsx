@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { format } from 'date-fns';
 import { DatePicker } from './shared/DatePicker';
 import {
   UserCheck,
@@ -245,7 +246,10 @@ export function SubstituteTeachingModule() {
   const [absentEmail, setAbsentEmail] = useState('');
   const [triggerType, setTriggerType] = useState<'SICK_LEAVE' | 'PERSONAL_LEAVE' | 'OFFICIAL_DUTY'>('SICK_LEAVE');
   const [leaveReason, setLeaveReason] = useState('');
-  const todayStr = new Date().toISOString().split('T')[0];
+  // .toISOString() แปลงเป็น UTC เสมอ — ประเทศไทย (UTC+7) ถ้าเรียกช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย
+  // วันที่จะถูกลากถอยหลังไป 1 วัน (เช่น อังคาร ตี 2 เมืองไทย = ยังเป็นจันทร์ในมุมมอง UTC) ใช้ format()
+  // จาก date-fns แทนเสมอ (คำนวณจาก local time fields ตรงๆ ไม่ผ่าน UTC conversion)
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
   // ช่วงวันที่ลา — รองรับลาหลายวันติดกันแบบฟอร์มจริง (เดิมเลือกได้แค่วันเดียว)
   const [rangeStart, setRangeStart] = useState(todayStr);
   const [rangeEnd, setRangeEnd] = useState(todayStr);
@@ -321,7 +325,10 @@ export function SubstituteTeachingModule() {
     const out: DateSlot[] = [];
     const emailLower = absentEmail.toLowerCase();
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dateStr = d.toISOString().split('T')[0];
+      // BUG เดียวกับ todayStr ด้านบน: d ตั้งเป็น local midnight (T00:00:00 ไม่มี timezone offset)
+      // .toISOString() แปลงเป็น UTC แล้วลากวันถอยหลัง 1 วันเสมอ (เที่ยงคืนไทย = 17:00 UTC เมื่อวาน)
+      // ทำให้ทุกวันในช่วงลาที่แสดง/ใช้จับคู่วัน-คาบเพี้ยนไป 1 วันทั้งช่วง — ใช้ format() แทน
+      const dateStr = format(d, 'yyyy-MM-dd');
       const dayNum = jsDateToThaiDayNum(dateStr);
       schedules
         .filter(s => s.emails.includes(emailLower) && s.day === dayNum && s.period >= 0)
@@ -422,7 +429,8 @@ export function SubstituteTeachingModule() {
     const start = new Date(fromDate + 'T00:00:00');
     for (let i = 0; i < 14; i++) {
       const d = new Date(start); d.setDate(d.getDate() + i);
-      const dateStr = d.toISOString().split('T')[0];
+      // BUG เดียวกัน — ดูคอมเมนต์ที่ rangeSlots ด้านบน
+      const dateStr = format(d, 'yyyy-MM-dd');
       if (dateStr >= rangeStart && dateStr <= rangeEnd) continue; // R ลาอยู่ช่วงนี้ ไปสอนแทนไม่ได้
       const dayNum = jsDateToThaiDayNum(dateStr);
       schedules

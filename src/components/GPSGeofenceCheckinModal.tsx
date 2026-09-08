@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Navigation, 
@@ -175,7 +176,9 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
-    const dateStr = now.toISOString().split('T')[0];
+    // .toISOString() แปลงเป็น UTC เสมอ — ช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย (UTC+7) จะลากวันถอยหลัง
+    // ไป 1 วัน ใช้ format() จาก date-fns แทน (คำนวณจาก local time fields ตรงๆ)
+    const dateStr = format(now, 'yyyy-MM-dd');
 
     // Determine status (entry after 08:00 is late)
     const currentHour = now.getHours();

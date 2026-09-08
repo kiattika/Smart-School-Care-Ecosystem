@@ -17,6 +17,7 @@ import {
   writeBatch,
   Firestore
 } from 'firebase/firestore';
+import { format } from 'date-fns';
 import { db, auth } from '../lib/firebase';
 import {
   computeStudentAttendanceStats,
@@ -285,7 +286,9 @@ export async function updateBehaviorScoreAndTriggerAlert(
       const studentName = studentData.fullName || studentData.name || `นักเรียนรหัส ${studentId}`;
       const parentUid = studentData.parentUid || studentData.parentId || '';
       const studentUid = studentData.studentUid || null;
-      const dateToday = new Date().toISOString().split('T')[0];
+      // .toISOString() แปลงเป็น UTC เสมอ — ช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย (UTC+7) จะลากวันถอยหลัง
+      // ไป 1 วัน ใช้ format() จาก date-fns แทน (คำนวณจาก local time fields ตรงๆ)
+      const dateToday = format(new Date(), 'yyyy-MM-dd');
 
       // Deduct score ensuring it stays within [0, 100]
       const newScore = Math.max(0, Math.min(100, currentScore + scoreDeducted));
@@ -2185,7 +2188,9 @@ export async function recordInfirmaryVisit(
     studentId: data.studentId,
     studentUid: data.studentUid,
     parentUid: data.parentUid,
-    visitDate: now.toISOString().split('T')[0],
+    // .toISOString() แปลงเป็น UTC เสมอ — ช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย (UTC+7) จะลากวันถอยหลัง
+    // ไป 1 วัน ใช้ format() จาก date-fns แทน (คำนวณจาก local time fields ตรงๆ)
+    visitDate: format(now, 'yyyy-MM-dd'),
     visitTime: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
     symptoms: data.symptoms,
     temperature: data.temperature,

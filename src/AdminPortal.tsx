@@ -1,5 +1,6 @@
 import { cn } from "./lib/utils";
 import React, { useState } from 'react';
+import { format } from 'date-fns';
 import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, PanelLeft, PanelLeftClose, PanelLeftOpen, Menu, X, ChevronLeft, ChevronRight, ArrowRight, GraduationCap } from 'lucide-react';
 import clsx, { ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -34,7 +35,9 @@ export function AdminPortal() {
   // New states for substitution assignment form
   const [subCourseId, setSubCourseId] = useState<string>('');
   const [subSubstituteEmail, setSubSubstituteEmail] = useState<string>('');
-  const [subDate, setSubDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  // .toISOString() แปลงเป็น UTC เสมอ — ช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย (UTC+7) จะลากวันถอยหลัง
+  // ไป 1 วัน ใช้ format() จาก date-fns แทน (คำนวณจาก local time fields ตรงๆ)
+  const [subDate, setSubDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
 
   const showToast = (msg: string) => {
     setToast(msg);
