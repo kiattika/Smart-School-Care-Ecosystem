@@ -19,7 +19,7 @@ import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } fro
 import { th } from 'date-fns/locale';
 import { useStore } from './store';
 import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, SubstituteAssignment, Student, LateAttendanceRequestRecord } from './types';
-import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, Sparkles, Calendar, CalendarOff, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
+import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, XCircle, Sparkles, Calendar, CalendarOff, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { motion, AnimatePresence } from 'motion/react';
@@ -237,6 +237,9 @@ export function TeacherPortal() {
         level: sch.level || '',
         // TASK 3: ครูร่วมสอน (เช่น HR ม.5/8) — teacherEmail ข้างบนเป็นของครูคนแรก/หลักเท่านั้น
         teacherIds: Array.isArray(sch.teacherIds) ? sch.teacherIds : (sch.teacherId ? [sch.teacherId] : []),
+        // TASK 2 (สมุดบันทึกคะแนน — ผ่าน/ไม่ผ่านสำหรับวิชากิจกรรม): ดึงจาก field เดิมของ schedule doc
+        // ที่ import มาอยู่แล้ว (ใช้ตัวเดียวกับที่ scheduleDocIdFor/detectSubjectType ใช้แยก ACTIVITY)
+        subjectType: (sch.subjectType || sch.type) === 'ACTIVITY' ? 'ACTIVITY' : 'MAIN',
       } as GlobalCourse;
     });
   }, [fsSchedules]);
@@ -293,7 +296,8 @@ export function TeacherPortal() {
           schedule: gc.scheduleString,
           attendanceTaken: isTaken,
           teacherName: gc.teacherName,
-          roleLabel
+          roleLabel,
+          subjectType: gc.subjectType || 'MAIN'
         };
       });
 
@@ -471,7 +475,8 @@ export function TeacherPortal() {
             postMidterm: rec.postMidterm,
             final: rec.final,
             total: rec.total,
-            grade: rec.grade
+            grade: rec.grade,
+            passFailResult: rec.passFailResult ?? null
           });
         }
       });
@@ -1603,6 +1608,8 @@ export function TeacherPortal() {
                       const targetClassName = selectedCourse?.level || selectedCourse?.room || (selectedCourse as any)?.className || (selectedCourse as any)?.roomName || '';
                       const courseCode = selectedCourse?.code || '';
                       const term = selectedCourse?.term || '1/2569';
+                      // TASK 2: วิชากิจกรรม (ACTIVITY) บันทึกแค่ผ่าน/ไม่ผ่าน ไม่ใช่คะแนนตัวเลข 4 ช่องแบบวิชาหลัก
+                      const isActivitySubject = selectedCourse?.subjectType === 'ACTIVITY';
 
                       const rawSetting = courseScoreSettings.find(s => s.courseId === selectedGradebookCourseId);
                       const setting = {
@@ -1628,6 +1635,25 @@ export function TeacherPortal() {
                         );
                       }
 
+                      // TASK 2: วิชากิจกรรม (ACTIVITY) — ผ่าน (ผ) / ไม่ผ่าน (มผ) เท่านั้น ไม่มีคะแนนตัวเลข
+                      const handlePassFailChange = (studentId: string, result: 'PASS' | 'FAIL') => {
+                        const gradeLabel = result === 'PASS' ? 'ผ' : 'มผ';
+                        updateStudentScore(selectedGradebookCourseId, studentId, {
+                          preMidterm: 0, midterm: 0, postMidterm: 0, final: 0, total: 0,
+                          grade: gradeLabel,
+                          passFailResult: result
+                        });
+                        saveGradebookScore({
+                          courseCode,
+                          className: targetClassName,
+                          studentId,
+                          term,
+                          preMidterm: 0, midterm: 0, postMidterm: 0, final: 0, total: 0,
+                          grade: gradeLabel,
+                          passFailResult: result
+                        });
+                      };
+
                       return (
                         <table className="w-full text-left text-sm text-slate-300">
                           <thead className="bg-[#0b0f19] border-b border-slate-800/80">
@@ -1635,12 +1661,18 @@ export function TeacherPortal() {
                               <th className="px-4 py-3 font-bold text-slate-200">เลขที่ (No.)</th>
                               <th className="px-4 py-3 font-bold text-slate-200">รหัสนักเรียน</th>
                               <th className="px-4 py-3 font-bold text-slate-200">ชื่อ - นามสกุล</th>
-                              <th className="px-4 py-3 font-bold text-center text-slate-200">ก่อนกลางภาค<br/><span className="text-[10px] text-slate-400 font-normal">Max {setting.preMidterm}</span></th>
-                              <th className="px-4 py-3 font-bold text-center text-slate-200">กลางภาค<br/><span className="text-[10px] text-slate-400 font-normal">Max {setting.midterm}</span></th>
-                              <th className="px-4 py-3 font-bold text-center text-slate-200">หลังกลางภาค<br/><span className="text-[10px] text-slate-400 font-normal">Max {setting.postMidterm}</span></th>
-                              <th className="px-4 py-3 font-bold text-center text-slate-200">ปลายภาค<br/><span className="text-[10px] text-slate-400 font-normal">Max {setting.final}</span></th>
-                              <th className="px-4 py-3 font-bold text-center text-blue-400">รวม (Total)</th>
-                              <th className="px-4 py-3 font-bold text-center text-emerald-400">เกรด (Grade)</th>
+                              {isActivitySubject ? (
+                                <th className="px-4 py-3 font-bold text-center text-slate-200">ผลการประเมิน (ผ/มผ)</th>
+                              ) : (
+                                <>
+                                  <th className="px-4 py-3 font-bold text-center text-slate-200">ก่อนกลางภาค<br/><span className="text-[10px] text-slate-400 font-normal">Max {setting.preMidterm}</span></th>
+                                  <th className="px-4 py-3 font-bold text-center text-slate-200">กลางภาค<br/><span className="text-[10px] text-slate-400 font-normal">Max {setting.midterm}</span></th>
+                                  <th className="px-4 py-3 font-bold text-center text-slate-200">หลังกลางภาค<br/><span className="text-[10px] text-slate-400 font-normal">Max {setting.postMidterm}</span></th>
+                                  <th className="px-4 py-3 font-bold text-center text-slate-200">ปลายภาค<br/><span className="text-[10px] text-slate-400 font-normal">Max {setting.final}</span></th>
+                                  <th className="px-4 py-3 font-bold text-center text-blue-400">รวม (Total)</th>
+                                  <th className="px-4 py-3 font-bold text-center text-emerald-400">เกรด (Grade)</th>
+                                </>
+                              )}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/80">
@@ -1650,8 +1682,44 @@ export function TeacherPortal() {
                               const studentName = student.fullName || student.name || `นักเรียน ${studentId}`;
 
                               const score = studentScores.find(s => s.courseId === selectedGradebookCourseId && s.studentId === studentId) || {
-                                preMidterm: 0, midterm: 0, postMidterm: 0, final: 0, total: 0, grade: '0'
+                                preMidterm: 0, midterm: 0, postMidterm: 0, final: 0, total: 0, grade: '0', passFailResult: null as 'PASS' | 'FAIL' | null
                               };
+
+                              if (isActivitySubject) {
+                                return (
+                                  <tr key={student.id || studentId} className="hover:bg-slate-800/40 transition-colors">
+                                    <td className="px-4 py-2 font-mono text-xs">{studentNumber}</td>
+                                    <td className="px-4 py-2 font-mono text-xs">{studentId}</td>
+                                    <td className="px-4 py-2 text-xs font-medium text-white">{studentName}</td>
+                                    <td className="px-4 py-2">
+                                      <div className="flex items-center justify-center gap-2">
+                                        <button
+                                          onClick={() => handlePassFailChange(studentId, 'PASS')}
+                                          className={cn(
+                                            'px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-colors',
+                                            score.passFailResult === 'PASS'
+                                              ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                                              : 'bg-transparent border-slate-700 text-slate-400 hover:border-emerald-500/40 hover:text-emerald-300'
+                                          )}
+                                        >
+                                          <CheckCircle className="w-3.5 h-3.5" /> ผ่าน (ผ)
+                                        </button>
+                                        <button
+                                          onClick={() => handlePassFailChange(studentId, 'FAIL')}
+                                          className={cn(
+                                            'px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-colors',
+                                            score.passFailResult === 'FAIL'
+                                              ? 'bg-rose-500/20 border-rose-500/50 text-rose-300'
+                                              : 'bg-transparent border-slate-700 text-slate-400 hover:border-rose-500/40 hover:text-rose-300'
+                                          )}
+                                        >
+                                          <XCircle className="w-3.5 h-3.5" /> ไม่ผ่าน (มผ)
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              }
 
                               const calculateGrade = (total: number) => {
                                 if (total >= 80) return '4';
@@ -1678,7 +1746,7 @@ export function TeacherPortal() {
                                 const total = newScores.preMidterm + newScores.midterm + newScores.postMidterm + newScores.final;
                                 const grade = calculateGrade(total);
 
-                                updateStudentScore(selectedGradebookCourseId, studentId, { ...newScores, total, grade });
+                                updateStudentScore(selectedGradebookCourseId, studentId, { ...newScores, total, grade, passFailResult: null });
 
                                 // Persist to Firestore under composite ID: SCORE_${courseCode}_${className}_${studentId}_${term}
                                 saveGradebookScore({
@@ -1691,7 +1759,8 @@ export function TeacherPortal() {
                                   postMidterm: newScores.postMidterm,
                                   final: newScores.final,
                                   total,
-                                  grade
+                                  grade,
+                                  passFailResult: null
                                 });
                               };
 

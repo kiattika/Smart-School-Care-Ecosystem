@@ -634,6 +634,8 @@ export interface GradebookScoreRecord {
   final: number;
   total: number;
   grade: string;
+  // TASK 2 (วิชากิจกรรม — ผ่าน/ไม่ผ่าน) — ดู StudentScore.passFailResult ใน types.ts สำหรับเหตุผล
+  passFailResult?: 'PASS' | 'FAIL' | null;
   updatedAt?: any;
 }
 

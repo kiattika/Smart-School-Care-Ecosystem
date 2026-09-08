@@ -226,6 +226,8 @@ export interface GlobalCourse {
   // TASK 3 (ครูร่วมสอน): ครูรับผิดชอบร่วมกันได้หลายคนต่อคาบ (เช่น HR ม.5/8) — teacherEmail ข้างบน
   // ยังคงเป็นของครูคนแรก/หลักเท่านั้น (backward compat) ใช้ teacherIds เพื่อจับคู่ครูร่วมสอนคนอื่นด้วย
   teacherIds?: string[];
+  // ใช้แยกวิชาหลัก (คะแนนตัวเลข) กับวิชากิจกรรม (ผ่าน/ไม่ผ่าน) ในสมุดบันทึกคะแนน — ดู TeacherPortal.tsx
+  subjectType?: 'MAIN' | 'ACTIVITY';
 }
 
 export interface Course {
@@ -242,6 +244,8 @@ export interface Course {
   teacherEmail?: string;
   roleLabel?: string;
   level?: string;   // ระดับชั้น เช่น "ม.5/8" (แยกจาก room ที่เป็นห้องกายภาพ เช่น "943")
+  // TASK 2 (สมุดบันทึกคะแนน): วิชาหลัก (MAIN) กรอกคะแนนตัวเลขปกติ วิชากิจกรรม (ACTIVITY) เลือกผ่าน/ไม่ผ่านแทน
+  subjectType?: 'MAIN' | 'ACTIVITY';
 }
 
 export interface PostTeachingRecord {
@@ -413,6 +417,10 @@ export interface StudentScore {
   final: number;
   total: number;
   grade: string;
+  // TASK 2 (วิชากิจกรรม — ผ่าน/ไม่ผ่าน): field แยกต่างหาก ไม่แตะความหมายของ field ตัวเลขเดิมเลย —
+  // เลือกเก็บแบบนี้แทนการ "ยืม" field ตัวเลข/grade เดิมมาใช้สองความหมาย เพื่อกระทบ schema เดิมน้อยที่สุด
+  // (วิชา MAIN: passFailResult เป็น null เสมอ ไม่แตะ. วิชา ACTIVITY: preMidterm..grade ไม่ใช้ ปล่อย 0/'')
+  passFailResult?: 'PASS' | 'FAIL' | null;
 }
 
 export interface CourseScoreSetting {
