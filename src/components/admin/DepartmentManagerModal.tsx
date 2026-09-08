@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { X, Plus, Save, Loader2, Trash2, Layers } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { X, Plus, Save, Loader2, Trash2, Layers, ShieldCheck, Search } from 'lucide-react';
 import { DepartmentConfig } from '../../types';
 import { saveDepartmentConfig, deactivateDepartmentConfig } from '../../services/firestoreService';
 import { DEFAULT_DEPARTMENTS } from '../../lib/departments';
+import { db } from '../../lib/firebase';
 
 /**
  * เมนูแอดมิน: เพิ่ม/แก้ไข/ปิดใช้งาน กลุ่มสาระฯ/กลุ่มงาน (Firestore: department_config)
@@ -34,8 +36,41 @@ export function DepartmentManagerModal({
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
 
+  // TASK 4: ผู้รับผิดชอบสำรอง — ตั้งไว้ล่วงหน้าเผื่อหัวหน้ากลุ่มสาระฯ ลาป่วยเอง
+  const [staff, setStaff] = useState<Array<{ uid: string; name: string }>>([]);
+  const [backupPickerDeptId, setBackupPickerDeptId] = useState<string | null>(null);
+  const [backupSearch, setBackupSearch] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const unsub = onSnapshot(collection(db, 'staff'), (snap) => {
+      const list = snap.docs.map(d => {
+        const data = d.data() as any;
+        const name = `${data.prefix || ''}${data.firstName || ''} ${data.lastName || ''}`.trim() || data.email || d.id;
+        return { uid: d.id, name };
+      });
+      list.sort((a, b) => a.name.localeCompare(b.name, 'th'));
+      setStaff(list);
+    }, (err) => console.warn('[DepartmentManagerModal] staff listener:', err.message));
+    return unsub;
+  }, [isOpen]);
+
   if (!isOpen) return null;
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3000); };
+
+  const setBackupApprover = async (d: DepartmentConfig, person: { uid: string; name: string } | null) => {
+    setBusy(`backup-${d.id}`);
+    try {
+      await saveDepartmentConfig({
+        id: d.id, name: d.name, kind: d.kind, order: d.order, parentId: d.parentId,
+        backupApproverUid: person?.uid ?? null, backupApproverName: person?.name ?? null,
+      });
+      flash(person ? `ตั้ง "${person.name}" เป็นผู้รับผิดชอบสำรองของ "${d.name}" แล้ว` : `ยกเลิกผู้รับผิดชอบสำรองของ "${d.name}" แล้ว`);
+      setBackupPickerDeptId(null);
+      setBackupSearch('');
+    } catch (e) { flash('ไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e))); }
+    finally { setBusy(null); }
+  };
 
   const seedDefaults = async () => {
     setBusy('seed');
@@ -116,21 +151,70 @@ export function DepartmentManagerModal({
           {/* List */}
           <div className="space-y-1.5">
             {departments.map(d => (
-              <div key={d.id} className="flex items-center gap-2 bg-slate-900/40 border border-slate-800 rounded-lg px-3 py-2">
-                {editId === d.id ? (
-                  <>
-                    <input value={editName} onChange={e => setEditName(e.target.value)} className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
-                    <button onClick={() => saveEdit(d)} disabled={busy === d.id} className="text-emerald-400 text-xs font-bold px-2 py-1">บันทึก</button>
-                    <button onClick={() => setEditId(null)} className="text-slate-500 text-xs px-2 py-1">ยกเลิก</button>
-                  </>
-                ) : (
-                  <>
-                    <span className="flex-1 text-sm text-slate-200">{d.name}</span>
-                    <span className="text-[10px] text-slate-500">{KIND_LABEL[d.kind || 'LEARNING_AREA']}</span>
-                    <code className="text-[10px] text-slate-600">{d.id}</code>
-                    <button onClick={() => { setEditId(d.id); setEditName(d.name); }} className="text-blue-400 text-xs px-2 py-1">แก้ไข</button>
-                    <button onClick={() => deactivate(d)} disabled={busy === d.id} className="text-red-400 px-1.5 py-1"><Trash2 className="w-3.5 h-3.5" /></button>
-                  </>
+              <div key={d.id} className="bg-slate-900/40 border border-slate-800 rounded-lg px-3 py-2 space-y-2">
+                <div className="flex items-center gap-2">
+                  {editId === d.id ? (
+                    <>
+                      <input value={editName} onChange={e => setEditName(e.target.value)} className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-sm text-white" />
+                      <button onClick={() => saveEdit(d)} disabled={busy === d.id} className="text-emerald-400 text-xs font-bold px-2 py-1">บันทึก</button>
+                      <button onClick={() => setEditId(null)} className="text-slate-500 text-xs px-2 py-1">ยกเลิก</button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="flex-1 text-sm text-slate-200">{d.name}</span>
+                      <span className="text-[10px] text-slate-500">{KIND_LABEL[d.kind || 'LEARNING_AREA']}</span>
+                      <code className="text-[10px] text-slate-600">{d.id}</code>
+                      <button onClick={() => { setEditId(d.id); setEditName(d.name); }} className="text-blue-400 text-xs px-2 py-1">แก้ไข</button>
+                      <button onClick={() => deactivate(d)} disabled={busy === d.id} className="text-red-400 px-1.5 py-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                    </>
+                  )}
+                </div>
+
+                {/* TASK 4: ผู้รับผิดชอบสำรอง — เผื่อหัวหน้ากลุ่มสาระฯ ลาป่วยเอง */}
+                <div className="flex items-center gap-2 pl-1 border-l-2 border-slate-800">
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-400 shrink-0 ml-1" />
+                  <span className="text-[10px] text-slate-500 shrink-0">ผู้รับผิดชอบสำรอง:</span>
+                  {d.backupApproverUid ? (
+                    <span className="text-[11px] text-indigo-300 font-semibold">{d.backupApproverName}</span>
+                  ) : (
+                    <span className="text-[11px] text-amber-400/80 italic">ยังไม่ได้กำหนด (fallback: หัวหน้าฝ่ายวิชาการฯ)</span>
+                  )}
+                  <div className="flex-1" />
+                  {d.backupApproverUid && (
+                    <button onClick={() => setBackupApprover(d, null)} disabled={busy === `backup-${d.id}`} className="text-[10px] text-red-400 hover:text-red-300 px-1.5">ยกเลิก</button>
+                  )}
+                  <button
+                    onClick={() => { setBackupPickerDeptId(backupPickerDeptId === d.id ? null : d.id); setBackupSearch(''); }}
+                    className="text-[10px] text-blue-400 hover:text-blue-300 px-1.5"
+                  >
+                    {d.backupApproverUid ? 'เปลี่ยน' : 'กำหนด'}
+                  </button>
+                </div>
+
+                {backupPickerDeptId === d.id && (
+                  <div className="pl-6 space-y-1.5">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        value={backupSearch}
+                        onChange={e => setBackupSearch(e.target.value)}
+                        placeholder="ค้นหาชื่อครู..."
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-2 py-1.5 text-xs text-white outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="max-h-32 overflow-y-auto border border-white/5 rounded-lg divide-y divide-white/5">
+                      {staff.filter(s => s.name.toLowerCase().includes(backupSearch.trim().toLowerCase())).slice(0, 20).map(s => (
+                        <button
+                          key={s.uid}
+                          onClick={() => setBackupApprover(d, s)}
+                          disabled={busy === `backup-${d.id}`}
+                          className="w-full text-left px-2.5 py-1.5 text-[11px] text-slate-200 hover:bg-white/5"
+                        >
+                          {s.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             ))}

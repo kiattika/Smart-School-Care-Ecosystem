@@ -766,6 +766,53 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
       const newStudentsToStore: Student[] = [];
       const newCoursesToStore: Course[] = [];
       const newGlobalCoursesToStore: GlobalCourse[] = [];
+
+      // TASK 3 (ครูร่วมสอน — ยืนยันจากข้อมูลจริง Teacher_Load_Report เช่น HR ม.5/8 มี 2 ครูรับผิดชอบ
+      // ร่วมกัน): ไฟล์รายงานภาระงานสอนแยกเป็น "แถวต่อครูหนึ่งคน" เสมอ — 2 ครูที่รับผิดชอบคาบ/ห้อง
+      // เดียวกันจริงจะได้ scheduleDocId ตรงกัน (scheduleDocIdFor ไม่ฝัง teacherKey ให้ ACTIVITY ที่มี
+      // ห้องเรียนจริงระบุอยู่) แต่การเขียนแบบเดิม (batch.set ทีละแถว ทับด้วย teacherIds: [ครูคนนั้นคน
+      // เดียว] ทุกครั้ง) จะทำให้ครูคนหลังในไฟล์ทับ teacherIds ของครูคนก่อนหน้าเงียบๆ — เหมือนบั๊ก PLC
+      // เดิมที่เคย fix ไปแล้ว (ดู ROOT CAUSE FIX ด้านบน) ต้อง scan ทุกแถวก่อนเขียนจริง แล้ว union
+      // teacherIds ต่อ scheduleDocId ไว้ล่วงหน้า จากนั้นทุกแถวที่ตกลง doc id เดียวกันจะเขียน "อาร์เรย์
+      // ที่รวมครบแล้ว" ชุดเดียวกันเสมอ ไม่ว่าจะประมวลผลตามลำดับไหน (idempotent, ไม่ใช่ last-write-wins)
+      const mergedTeachersByScheduleId = new Map<string, {
+        teacherIds: string[];
+        primaryTeacherId: string | null;
+        primaryTeacherEmail: string | null;
+        primaryTeacherName: string;
+        unlinkedTeacherName: string | null;
+        unlinkedTeacherEmail: string | null;
+      }>();
+      if (importType === 'COURSE') {
+        for (const row of validRows) {
+          const parsedData = row.parsedData as any;
+          if (!parsedData?.isTeacherLoadReport) continue;
+          const teacherKey = primaryTeacherKey(parsedData);
+          for (const slot of (parsedData.slots || [])) {
+            const scheduleDocId = scheduleDocIdFor(parsedData.subjectCode, parsedData.room, parsedData.level, slot.dayOfWeek, slot.periodNumber, parsedData.subjectType, teacherKey);
+            const entry = mergedTeachersByScheduleId.get(scheduleDocId) || {
+              teacherIds: [], primaryTeacherId: null, primaryTeacherEmail: null, primaryTeacherName: '',
+              unlinkedTeacherName: null, unlinkedTeacherEmail: null,
+            };
+            if (parsedData.matchedTeacherId) {
+              if (!entry.teacherIds.includes(parsedData.matchedTeacherId)) entry.teacherIds.push(parsedData.matchedTeacherId);
+              if (!entry.primaryTeacherId) {
+                entry.primaryTeacherId = parsedData.matchedTeacherId;
+                entry.primaryTeacherEmail = parsedData.matchedTeacherEmail || parsedData.teacherEmail || null;
+                entry.primaryTeacherName = parsedData.teacherName || '';
+              }
+            } else if (!entry.primaryTeacherId && !entry.unlinkedTeacherName) {
+              // ยังไม่มีครูที่ match ได้เลยสำหรับ doc นี้ — เก็บข้อมูล unlinked ไว้ก่อน (ถ้ามีครูคนอื่น
+              // ใน doc เดียวกัน match ได้ทีหลัง จะไม่ทับของครูที่ match ได้แล้ว)
+              entry.unlinkedTeacherName = parsedData.unlinkedTeacherName || parsedData.teacherName || null;
+              entry.unlinkedTeacherEmail = parsedData.unlinkedTeacherEmail || parsedData.teacherEmail || null;
+              entry.primaryTeacherName = entry.primaryTeacherName || parsedData.teacherName || '';
+            }
+            mergedTeachersByScheduleId.set(scheduleDocId, entry);
+          }
+        }
+      }
+
       for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
         const chunk = validRows.slice(i, i + BATCH_SIZE);
         const batch = writeBatch(db);
@@ -896,6 +943,17 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 const scheduleDocId = scheduleDocIdFor(parsedData.subjectCode, parsedData.room, parsedData.level, slot.dayOfWeek, slot.periodNumber, parsedData.subjectType, teacherKey);
                 const scheduleRef = doc(db, 'schedules', scheduleDocId);
 
+                // TASK 3 (ครูร่วมสอน): ใช้ teacherIds ที่ union มาแล้วจาก mergedTeachersByScheduleId
+                // (pre-pass ด้านบน) เสมอ แทนที่จะสร้าง [ครูคนนี้คนเดียว] จากแถวนี้ตรงๆ — กันไม่ให้
+                // แถวของครูอีกคนที่ scheduleDocId เดียวกัน (คาบ/ห้องเดียวกันจริง) เขียนทับ teacherIds
+                // ของครูคนก่อนหน้าเงียบๆ ทุกแถวที่ตกลง doc id เดียวกันจะได้อาร์เรย์ที่รวมครบแล้วชุด
+                // เดียวกันเสมอ ไม่ว่าจะเขียนตามลำดับไหน (idempotent)
+                const merged = mergedTeachersByScheduleId.get(scheduleDocId);
+                const teacherIds = merged?.teacherIds.length ? merged.teacherIds : (parsedData.matchedTeacherId ? [parsedData.matchedTeacherId] : []);
+                const primaryTeacherId = merged?.primaryTeacherId ?? (parsedData.matchedTeacherId || null);
+                const primaryTeacherEmail = merged?.primaryTeacherEmail ?? (parsedData.matchedTeacherEmail || parsedData.teacherEmail || null);
+                const primaryTeacherName = merged?.primaryTeacherName || parsedData.teacherName || '';
+
                 const schedulePayload = {
                   id: scheduleDocId,
                   subjectCode: parsedData.subjectCode,
@@ -903,13 +961,13 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                   room: parsedData.room || '',
                   level: parsedData.level || '',
                   credits: parsedData.credits || 1.5,
-                  teacherIds: parsedData.matchedTeacherId ? [parsedData.matchedTeacherId] : [],
-                  teacherId: parsedData.matchedTeacherId || null,
-                  teacherEmail: parsedData.matchedTeacherEmail || parsedData.teacherEmail || (parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : null),
-                  sourceTeacherName: parsedData.teacherName || '',
+                  teacherIds,
+                  teacherId: primaryTeacherId,
+                  teacherEmail: primaryTeacherEmail || (primaryTeacherId ? `${primaryTeacherId}@utd.ac.th` : null),
+                  sourceTeacherName: primaryTeacherName,
                   department: parsedData.department || '',
-                  unlinkedTeacherName: parsedData.matchedTeacherId ? null : (parsedData.unlinkedTeacherName || parsedData.teacherName || null),
-                  unlinkedTeacherEmail: parsedData.matchedTeacherId ? null : (parsedData.unlinkedTeacherEmail || parsedData.teacherEmail || null),
+                  unlinkedTeacherName: primaryTeacherId ? null : (merged?.unlinkedTeacherName ?? (parsedData.unlinkedTeacherName || parsedData.teacherName || null)),
+                  unlinkedTeacherEmail: primaryTeacherId ? null : (merged?.unlinkedTeacherEmail ?? (parsedData.unlinkedTeacherEmail || parsedData.teacherEmail || null)),
                   subjectType: parsedData.subjectType, // 'MAIN' or 'ACTIVITY'
                   dayOfWeek: slot.dayOfWeek,
                   periodNumber: slot.periodNumber,

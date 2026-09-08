@@ -146,32 +146,32 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
     const unlinkedScheduleMap = new Map<string, any[]>();
 
     schedulesData.forEach((sch) => {
-      let matchedStaffId: string | null = null;
+      // TASK 3 (ครูร่วมสอน — ยืนยันจากข้อมูลจริง เช่น HR ม.5/8 มี 2 ครูรับผิดชอบร่วมกัน): คาบเดียวกัน
+      // ต้องนับภาระงานสอนให้ "ทุกคน" ที่รับผิดชอบร่วม ไม่ใช่แค่คนแรกใน teacherIds — เดิมใช้
+      // teacherIds[0] อย่างเดียวทำให้ครูร่วมสอนคนที่ 2 เป็นต้นไปหายไปจากรายงานภาระงานสอนของตัวเอง
+      // ทั้งที่สอนจริง ใช้ Set รวมทุก id ที่จับคู่ได้จากทุกช่องทาง (email / teacherIds / teacherId)
+      const matchedStaffIds = new Set<string>();
 
-      // 1. Check direct email match (Primary)
-      if (sch.teacherEmail) {
+      if (Array.isArray(sch.teacherIds)) {
+        sch.teacherIds.forEach((tid: string) => { if (tid && staffLoadsMap.has(tid)) matchedStaffIds.add(tid); });
+      }
+      if (sch.teacherId && staffLoadsMap.has(sch.teacherId)) matchedStaffIds.add(sch.teacherId);
+
+      // Email match (Primary field — เก็บไว้เผื่อ doc เก่าที่ไม่มี teacherIds/teacherId เลย)
+      if (matchedStaffIds.size === 0 && sch.teacherEmail) {
         const cleanEmail = sch.teacherEmail.toLowerCase().trim();
         const found = staffData.find(s => s.email && s.email.toLowerCase().trim() === cleanEmail);
-        if (found) matchedStaffId = found.id;
+        if (found) matchedStaffIds.add(found.id);
       }
 
-      // 2. Check direct teacherIds or teacherId
-      if (!matchedStaffId) {
-        if (sch.teacherIds && Array.isArray(sch.teacherIds) && sch.teacherIds.length > 0) {
-          matchedStaffId = sch.teacherIds[0];
-        } else if (sch.teacherId) {
-          matchedStaffId = sch.teacherId;
-        }
-      }
-
-      // 3. Check name match against staff as fallback
-      if (!matchedStaffId && sch.sourceTeacherName) {
+      // Name match against staff as last-resort fallback
+      if (matchedStaffIds.size === 0 && sch.sourceTeacherName) {
         const matchRes = matchTeacherByName(sch.sourceTeacherName, staffData);
-        if (matchRes?.id) matchedStaffId = matchRes.id;
+        if (matchRes?.id) matchedStaffIds.add(matchRes.id);
       }
 
-      if (matchedStaffId && staffLoadsMap.has(matchedStaffId)) {
-        staffLoadsMap.get(matchedStaffId)!.scheduleItems.push(sch);
+      if (matchedStaffIds.size > 0) {
+        matchedStaffIds.forEach(id => staffLoadsMap.get(id)!.scheduleItems.push(sch));
       } else {
         // Collect into unlinked teacher bucket
         const unlinkedKey = sch.unlinkedTeacherName || sch.sourceTeacherName || 'ครูผู้สอนที่ยังไม่ได้จับคู่';

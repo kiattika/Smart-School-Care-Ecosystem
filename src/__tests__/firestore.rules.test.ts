@@ -1010,29 +1010,29 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
   describe('elective_activities_config collection', () => {
     it('lets any signed-in user read', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
-        await ctx.firestore().doc('elective_activities_config/club-1').set({ name: 'ชุมนุมคอมพิวเตอร์', capacity: 20, responsibleTeacherUid: 'teacher-club-uid', responsibleTeacherName: 'ครูเอ' });
+        await ctx.firestore().doc('elective_activities_config/club-1').set({ name: 'ชุมนุมคอมพิวเตอร์', capacity: 20, responsibleTeacherUids: ['teacher-club-uid'], responsibleTeacherNames: ['ครูเอ'], enrollmentStatus: 'OPEN' });
       });
       await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('elective_activities_config/club-1').get());
       await assertSucceeds(asUser('stu-1', ['STUDENT']).firestore().doc('elective_activities_config/club-1').get());
     });
     it('denies anonymous read (ต้อง signed-in)', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
-        await ctx.firestore().doc('elective_activities_config/club-x').set({ name: 'X', capacity: 10, responsibleTeacherUid: 't-x', responsibleTeacherName: 'X' });
+        await ctx.firestore().doc('elective_activities_config/club-x').set({ name: 'X', capacity: 10, responsibleTeacherUids: ['t-x'], responsibleTeacherNames: ['X'], enrollmentStatus: 'OPEN' });
       });
       await assertFails(asAnonymous().firestore().doc('elective_activities_config/club-x').get());
     });
     it('allows SUPER_ADMIN and ACADEMIC_HEAD to write; denies other roles', async () => {
       await assertSucceeds(
-        asRole('SUPER_ADMIN').firestore().doc('elective_activities_config/club-a').set({ name: 'A', capacity: 10, responsibleTeacherUid: 't-a', responsibleTeacherName: 'ครู A' })
+        asRole('SUPER_ADMIN').firestore().doc('elective_activities_config/club-a').set({ name: 'A', capacity: 10, responsibleTeacherUids: ['t-a'], responsibleTeacherNames: ['ครู A'], enrollmentStatus: 'OPEN' })
       );
       await assertSucceeds(
-        asRole('ACADEMIC_HEAD').firestore().doc('elective_activities_config/club-b').set({ name: 'B', capacity: 15, responsibleTeacherUid: 't-b', responsibleTeacherName: 'ครู B' })
+        asRole('ACADEMIC_HEAD').firestore().doc('elective_activities_config/club-b').set({ name: 'B', capacity: 15, responsibleTeacherUids: ['t-b'], responsibleTeacherNames: ['ครู B'], enrollmentStatus: 'OPEN' })
       );
       await assertFails(
-        asRole('SUBJECT_TEACHER').firestore().doc('elective_activities_config/club-c').set({ name: 'C', capacity: 10, responsibleTeacherUid: 't-c', responsibleTeacherName: 'ครู C' })
+        asRole('SUBJECT_TEACHER').firestore().doc('elective_activities_config/club-c').set({ name: 'C', capacity: 10, responsibleTeacherUids: ['t-c'], responsibleTeacherNames: ['ครู C'], enrollmentStatus: 'OPEN' })
       );
       await assertFails(
-        asRole('HEAD_OF_DEPARTMENT').firestore().doc('elective_activities_config/club-d').set({ name: 'D', capacity: 10, responsibleTeacherUid: 't-d', responsibleTeacherName: 'ครู D' })
+        asRole('HEAD_OF_DEPARTMENT').firestore().doc('elective_activities_config/club-d').set({ name: 'D', capacity: 10, responsibleTeacherUids: ['t-d'], responsibleTeacherNames: ['ครู D'], enrollmentStatus: 'OPEN' })
       );
     });
   });
@@ -1043,7 +1043,9 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('students/std-e1').set({ studentId: 'std-e1', studentUid: 'stu-e1-uid', name: 'นักเรียน E1' });
         await ctx.firestore().doc('students/std-e2').set({ studentId: 'std-e2', studentUid: 'stu-e2-uid', name: 'นักเรียน E2' });
-        await ctx.firestore().doc('elective_activities_config/club-1').set({ name: 'ชุมนุมคอมพิวเตอร์', capacity: 20, responsibleTeacherUid: 'teacher-club-uid', responsibleTeacherName: 'ครูเอ' });
+        // ตั้งใจให้มีครูรับผิดชอบร่วม 2 คน (teacher-club-uid, teacher-club-uid-2) — ยืนยันแล้วว่าเป็น
+        // รูปแบบจริงที่เกิดบ่อย ไม่ใช่ edge case (ดู TASK 3 ในชุดใหญ่เดียวกันนี้)
+        await ctx.firestore().doc('elective_activities_config/club-1').set({ name: 'ชุมนุมคอมพิวเตอร์', capacity: 20, responsibleTeacherUids: ['teacher-club-uid', 'teacher-club-uid-2'], responsibleTeacherNames: ['ครูเอ', 'ครูบี'], enrollmentStatus: 'OPEN' });
       });
     };
 
@@ -1093,6 +1095,22 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertSucceeds(
         asUser('teacher-club-uid', ['SUBJECT_TEACHER']).firestore().doc('activity_enrollments/club-1_std-e1').update({
           removedAt: new Date().toISOString(), removedBy: 'teacher-club-uid', removedReason: 'ไม่ผ่านคัดเลือก นศท',
+        })
+      );
+    });
+
+    it('ครูร่วมสอนคนที่ 2 ในชุมนุมเดียวกัน (responsibleTeacherUids array) ถอนชื่อนักเรียนได้เหมือนกัน', async () => {
+      await seedStudentAndClub();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('activity_enrollments/club-1_std-e2').set({
+          activityId: 'club-1', studentId: 'std-e2', studentUid: 'stu-e2-uid',
+          removedAt: null, removedBy: null, removedReason: null,
+        });
+      });
+      // teacher-club-uid-2 คือครูร่วมสอนคนที่ 2 ใน responsibleTeacherUids ของ club-1 (ไม่ใช่คนแรก)
+      await assertSucceeds(
+        asUser('teacher-club-uid-2', ['SUBJECT_TEACHER']).firestore().doc('activity_enrollments/club-1_std-e2').update({
+          removedAt: new Date().toISOString(), removedBy: 'teacher-club-uid-2', removedReason: 'ทดสอบครูร่วมสอน',
         })
       );
     });
@@ -1251,7 +1269,7 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     it('นักเรียนที่ถูกครูถอน สมัครชุมนุมอื่นที่ยังว่างได้สำเร็จ', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('students/std-r1').set({ studentId: 'std-r1', studentUid: 'r-uid-1' });
-        await ctx.firestore().doc('elective_activities_config/club-ra').set({ name: 'ชุมนุม RA', capacity: 5, responsibleTeacherUid: 'teacher-ra-uid', responsibleTeacherName: 'ครู RA' });
+        await ctx.firestore().doc('elective_activities_config/club-ra').set({ name: 'ชุมนุม RA', capacity: 5, responsibleTeacherUids: ['teacher-ra-uid'], responsibleTeacherNames: ['ครู RA'], enrollmentStatus: 'OPEN' });
       });
       const dbR = asUser('r-uid-1', ['STUDENT']).firestore();
 

@@ -2,6 +2,7 @@ import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/util
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
 import { useSchoolCalendar } from './hooks/useSchoolCalendar';
+import { DatePicker } from './components/shared/DatePicker';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests } from './services/firestoreService';
@@ -69,6 +70,46 @@ export function TeacherPortal() {
   // รายชื่อนักเรียนอ่านจาก Firestore สด (real-time) แทน Zustand store แบบ session-local
   // ใช้ในผังห้องเรียน (ClassroomSeatingManager), สุ่มนักเรียน, gradebook, Early Warning
   const { students } = useRealStudents();
+
+  // TASK 1 (แก้บั๊กวันที่ผิด) — พิสูจน์ก่อนแก้: currentDate ใน Zustand store (store.ts) กำหนดค่าแค่
+  // ครั้งเดียวตอน store module ถูกโหลด (`currentDate: new Date()`) แล้วไม่มีจุดไหนใน codebase sync
+  // กับเวลาจริงอัตโนมัติอีกเลย — จุดเดียวที่เคยเรียก setCurrentDate() คือ modal "Time Simulation"
+  // ด้านล่าง (จำลองแค่ชั่วโมง/นาทีของ "วันเดียวกับตอนโหลดหน้า" ไม่เคยขยับวันเลย) ผลคือถ้าเปิดแท็บ/
+  // dev server ค้างข้ามวัน (Vite HMR ไม่รีเซ็ต state เวลาแก้โค้ดไฟล์อื่น) currentDate จะค้างอยู่ที่วันเก่า
+  // ไปเรื่อยๆ จนกว่าจะโหลดหน้าใหม่ทั้งหมด (hard reload) — ตรงกับอาการที่รายงานเป๊ะ (เห็นวันจันทร์ทั้งที่
+  // จริงเป็นวันอังคารแล้ว) log ค่าจริงไว้ยืนยันก่อนเชื่อ ไม่เดาเฉยๆ
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[TASK1-DATE-DEBUG] mount check:', {
+      'new Date().toString()': new Date().toString(),
+      'new Date().getDay()': new Date().getDay(),
+      'Intl timeZone': Intl.DateTimeFormat().resolvedOptions().timeZone,
+      'store.currentDate (ค่าที่ component ใช้จริง)': currentDate.toString(),
+      'store.currentDate.getDay()': currentDate.getDay(),
+      'ตรงกันไหม (ควรเป็น true เสมอตอนเพิ่งโหลดหน้าใหม่)': new Date().toDateString() === currentDate.toDateString(),
+    });
+  }, []);
+
+  // แก้จริง: sync ส่วน "วัน" (ปี/เดือน/วัน) ของ currentDate ให้ตรงเวลาจริงเสมอ โดยยังคง
+  // ชั่วโมง/นาทีที่ถูกจำลองไว้จาก Time Simulation modal ไว้เหมือนเดิม (ไม่ทับการทดสอบที่ทำอยู่ตรงๆ
+  // แค่ป้องกันไม่ให้ "วัน" ค้างข้ามวันจริงแบบเงียบๆ) เช็คทุก 1 นาทีพอสำหรับตรวจจับตอนข้ามเที่ยงคืน
+  const currentDateRef = React.useRef(currentDate);
+  currentDateRef.current = currentDate;
+  useEffect(() => {
+    const syncDateIfStale = () => {
+      const now = new Date();
+      if (now.toDateString() !== currentDateRef.current.toDateString()) {
+        const synced = new Date(now);
+        synced.setHours(currentDateRef.current.getHours(), currentDateRef.current.getMinutes(), 0, 0);
+        console.warn('[TASK1-DATE-DEBUG] currentDate ค้างข้ามวัน — sync ให้ตรงวันจริงอัตโนมัติ:', {
+          before: currentDateRef.current.toString(), after: synced.toString(),
+        });
+        setCurrentDate(synced);
+      }
+    };
+    const interval = setInterval(syncDateIfStale, 60000);
+    return () => clearInterval(interval);
+  }, [setCurrentDate]);
 
   // --- บันทึกหลังสอนแทน (deadline ก่อน 24:00 น. ของวันที่สอน) ---
   const [subCompleteTarget, setSubCompleteTarget] = useState<SubstituteAssignment | null>(null);
@@ -194,6 +235,8 @@ export function TeacherPortal() {
         roomName: sch.room || sch.level || sch.targetClass || '',
         scheduleString,
         level: sch.level || '',
+        // TASK 3: ครูร่วมสอน (เช่น HR ม.5/8) — teacherEmail ข้างบนเป็นของครูคนแรก/หลักเท่านั้น
+        teacherIds: Array.isArray(sch.teacherIds) ? sch.teacherIds : (sch.teacherId ? [sch.teacherId] : []),
       } as GlobalCourse;
     });
   }, [fsSchedules]);
@@ -201,9 +244,12 @@ export function TeacherPortal() {
   const myCourses: Course[] = useMemo(() => {
     const rawList = globalCourses
       .filter(gc => {
-        // 1. Is original teacher
-        const isOriginal = isTeacherEmailMatch(gc.teacherEmail, user?.email);
-        
+        // 1. Is original teacher — TASK 3: ตรวจทั้ง email ของครูคนแรก/หลัก (backward compat) และ
+        // teacherIds ทั้งอาร์เรย์ (ครูร่วมสอนคนอื่นที่ไม่ใช่ครูคนแรกในไฟล์ import ก็ต้องเห็นวิชานี้
+        // ในตารางสอน/สมุดคะแนนของตัวเองด้วย — ไม่ใช่แค่คนที่ email ตรงกับ teacherEmail เท่านั้น)
+        const isOriginal = isTeacherEmailMatch(gc.teacherEmail, user?.email) ||
+          (!!user?.uid && (gc.teacherIds || []).includes(user.uid));
+
         // 2. Is substitute teacher today
         const isSub = substituteAssignments.some(sa => 
           sa.courseId === gc.courseId && 
@@ -433,9 +479,14 @@ export function TeacherPortal() {
   // — ตรวจแทนว่า (1) คาบที่กำลังสอนอยู่คือคาบ "ชุมนุม" ทั่วไปตามชื่อที่ import มาจริง (เหมือน keyword
   // ที่ detectSubjectType ใช้จำแนก ACTIVITY) และ (2) ครูคนนี้มีชุมนุมที่ตัวเองรับผิดชอบอยู่จริงไหม —
   // ถ้าใช่ทั้งคู่ ถือว่ากำลังสอนชุมนุมของตัวเอง ดึงรายชื่อจาก activity_enrollments ของชุมนุมนั้น
-  const { configsByTeacherUid } = useElectiveActivities();
-  const myClubConfig = user?.uid ? (configsByTeacherUid.get(user.uid)?.[0] || null) : null;
-  const activeCourseIsElective = !!myClubConfig && !!(activeCourse?.name || '').includes('ชุมนุม');
+  const { configs: electiveConfigs, configById: electiveConfigById, counts: electiveCounts } = useElectiveActivities();
+  // TASK 2.3: ตรวจว่า activeCourse ที่เปิดอยู่ตอนนี้คือชุมนุม ด้วย courseId prefix `elective_` ที่ตั้งไว้
+  // ตอนสร้าง virtual period (ดูจุด rawMappedPeriods ด้านล่าง) แทนการเดาจาก "ชุมนุมแรกที่ครูรับผิดชอบ" +
+  // ชื่อคาบมีคำว่า "ชุมนุม" แบบเดิม — เดิมพังเมื่อครูรับผิดชอบมากกว่า 1 ชุมนุม (index ผิดชุมนุม) หรือ
+  // ชื่อคาบที่ import มาไม่มีคำว่า "ชุมนุม" ตรงตัว ตอนนี้ผูกกับ config ที่ถูกต้องเป๊ะๆ ผ่าน id เสมอ
+  const activeElectiveConfigId = activeCourse?.id?.startsWith('elective_') ? activeCourse.id.slice('elective_'.length) : null;
+  const activeCourseIsElective = !!activeElectiveConfigId;
+  const myClubConfig = activeElectiveConfigId ? (electiveConfigById.get(activeElectiveConfigId) || null) : null;
 
   const [electiveEnrollments, setElectiveEnrollments] = useState<ActivityEnrollment[]>([]);
   useEffect(() => {
@@ -1058,6 +1109,72 @@ export function TeacherPortal() {
                   });
                 });
               }
+
+              // TASK 2.3: ชุมนุมที่ "ปิดรับสมัครแล้ว" (enrollmentStatus === 'CLOSED') ต้องไปโผล่ในตารางสอน
+              // ประจำวันของครูรับผิดชอบทุกคน (responsibleTeacherUids) เหมือนวิชาปกติ เช็คชื่อ/บันทึกหลังสอน
+              // ได้เหมือนคาบจริง — ผูกกับวัน/คาบที่แอดมินกำหนดตอนสร้างชุมนุม (dayOfWeek/periodNumber) ไม่ใช่
+              // จาก schedules ที่ import มา (ชุมนุมเฟส 2 ถูกออกแบบใหม่ให้แยกออกจาก schedules ทั้งหมดแล้ว)
+              // ใช้ courseId พิเศษ `elective_<configId>` กันชนกับ courseId จริง — resolveCourseAndPeriod()
+              // จะ synth course ให้จาก periodItem นี้เองเมื่อไม่เจอใน myCourses (fallback ที่มีอยู่แล้ว)
+              electiveConfigs
+                .filter(cfg =>
+                  cfg.enrollmentStatus === 'CLOSED' &&
+                  !!user?.uid && (cfg.responsibleTeacherUids || []).includes(user.uid) &&
+                  !!cfg.dayOfWeek && DAY_NAME_TO_NUM[cfg.dayOfWeek] === targetDayOfWeek &&
+                  cfg.periodNumber !== null && cfg.periodNumber !== undefined
+                )
+                .forEach(cfg => {
+                  const virtualCourseId = `elective_${cfg.id}`;
+                  const room = cfg.room || 'ชุมนุม';
+                  const recordDate = format(targetDate, 'yyyy-MM-dd');
+                  const enrolledCount = electiveCounts[cfg.id] || 0;
+                  // ผูก courseId เดียวกันตลอดทั้งช่วงคาบ (เหมือนคาบจริงที่ merge กัน — periodRange
+                  // detection ใน resolveCourseAndPeriod จับคู่ด้วย subjectCode+className+room+type
+                  // ที่ตรงกันอยู่แล้ว ไม่ต้องพึ่ง courseId) — แต่ต้องใช้ courseId เดียวกันเพื่อให้
+                  // hasPostTeachingRecord/attendanceRecords ผูกกับ "ชุมนุมนี้" ก้อนเดียว ไม่แยกคาบ
+                  // ตัวอย่างจริง: ชุมนุม นศท มีคาบยาวกว่าชุมนุมทั่วไป (7-9 แทน 7-8) — periodNumberEnd
+                  const periodEnd = cfg.periodNumberEnd ?? (cfg.periodNumber as number);
+                  for (let periodNum = cfg.periodNumber as number; periodNum <= periodEnd; periodNum++) {
+                    const { start, end } = getPeriodTimes(periodNum);
+                    const startTime = formatTime(start);
+                    const endTime = formatTime(end);
+                    const attRoomCandidates = [room];
+                    const expectedRecordIds = new Set<string>();
+                    attRoomCandidates.forEach(r => {
+                      expectedRecordIds.add(`${todayStr}_${r.replace('/', '-')}_p${periodNum}`);
+                    });
+                    const firestoreChecked = todayAttendanceDocs.some(a =>
+                      expectedRecordIds.has(a.id) ||
+                      (a.periodNumber !== null &&
+                        Number(a.periodNumber) === Number(periodNum) &&
+                        attRoomCandidates.some(r => isSameRoom(a.room, r)))
+                    );
+                    const attendanceSummary = computeAttendanceSummary(
+                      todayAttendanceDocs, expectedRecordIds, periodNum, attRoomCandidates, isSameRoom
+                    );
+                    const existingRecord = postTeachingRecords.find(r => r.date === recordDate && r.courseId === virtualCourseId);
+                    rawMappedPeriods.push({
+                      id: `${virtualCourseId}_p${periodNum}`,
+                      scheduleId: `${virtualCourseId}_p${periodNum}`,
+                      courseId: virtualCourseId,
+                      periodNumber: periodNum,
+                      startTime,
+                      endTime,
+                      subjectCode: 'ชุมนุม',
+                      subjectName: cfg.name,
+                      className: 'ชุมนุม',
+                      level: 'ชุมนุม',
+                      room,
+                      attendanceTaken: firestoreChecked,
+                      lateRequestStatus: null,
+                      hasPostTeachingRecord: !!existingRecord,
+                      roleLabel: 'กิจกรรม',
+                      studentsCount: enrolledCount || cfg.capacity,
+                      type: 'ACTIVITY',
+                      attendanceSummary
+                    });
+                  }
+                });
 
               // Deduplicate schedule items by period slot (periodNumber + subjectCode + className)
               const seenPeriodSlotKeys = new Set<string>();
@@ -2515,11 +2632,10 @@ export function TeacherPortal() {
                   <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-300 mb-1">วันที่ทำการสอน (Teaching Date)</label>
-                      <input 
-                        type="date"
+                      <DatePicker
                         value={ptDate}
-                        onChange={(e) => setPtDate(e.target.value)}
-                        className="bg-[#161f30] border border-slate-800/80 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:border-emerald-500 outline-none"
+                        onChange={setPtDate}
+                        className="flex items-center gap-2 bg-[#161f30] border border-slate-800/80 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:border-emerald-500 outline-none cursor-pointer"
                       />
                     </div>
                     <div className="text-left sm:text-right">

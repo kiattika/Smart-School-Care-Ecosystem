@@ -157,6 +157,10 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
 
   // Interaction State
   const [selectedStudentToPlace, setSelectedStudentToPlace] = useState<Student | null>(null);
+  // TASK 7: ซ่อน sidebar "นักเรียนที่ยังไม่มีที่นั่ง" อัตโนมัติเมื่อจัดครบแล้ว (ไม่ตรึงไว้ตลอด) —
+  // แต่ยังกดปุ่ม "+ เพิ่มนักเรียน" เรียกกลับมาได้เอง (เผื่อมีย้ายเข้า-ออกทีหลัง) ค่านี้เป็นแค่ manual
+  // override เมื่อกดปุ่ม — เงื่อนไข "มีคนยังไม่มีที่นั่งจริง" ด้านล่างจะ auto-show ทับอยู่แล้วเสมอ
+  const [forceShowUnassignedSidebar, setForceShowUnassignedSidebar] = useState(false);
   const [draggedStudent, setDraggedStudent] = useState<{ student: Student; fromSeatId?: string } | null>(null);
   const [highlightedStudentIds, setHighlightedStudentIds] = useState<string[]>([]);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -979,8 +983,10 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
 
       {/* Main Workspace Layout */}
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
-        
-        {/* Left Side: Unseated Students Pool */}
+
+        {/* Left Side: Unseated Students Pool — TASK 7: ซ่อนอัตโนมัติเมื่อจัดที่นั่งครบแล้ว (ไม่ตรึงไว้
+            ตลอด) ยกเว้นกดปุ่ม "+ เพิ่มนักเรียน" เรียกกลับมาเอง หรือมีคนยังไม่มีที่นั่งจริงอยู่ */}
+        {(unassignedStudents.length > 0 || courseStudents.length === 0 || forceShowUnassignedSidebar) && (
         <aside className="w-64 bg-[#10141e] border-r border-slate-800 flex flex-col shrink-0 z-10">
           <div className="p-3.5 border-b border-slate-800 flex items-center justify-between bg-[#0e111a]">
             <div className="flex items-center gap-2">
@@ -1073,6 +1079,19 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
             </div>
           )}
         </aside>
+        )}
+
+        {/* ปุ่มเรียก sidebar กลับมา — แสดงเฉพาะตอนถูกซ่อนอัตโนมัติเพราะจัดที่นั่งครบแล้ว
+            (กรณีต้องการสลับ/ย้ายที่นั่งใหม่ทีหลัง) */}
+        {!(unassignedStudents.length > 0 || courseStudents.length === 0 || forceShowUnassignedSidebar) && (
+          <button
+            onClick={() => setForceShowUnassignedSidebar(true)}
+            title="เรียกรายชื่อนักเรียนกลับมา"
+            className="absolute top-3 left-3 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#161f30] border border-slate-700 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-300 text-[11px] font-bold shadow-lg transition-colors cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" /> เพิ่มนักเรียน
+          </button>
+        )}
 
         {/* Center: Interactive Seating Chart Canvas */}
         <main className="flex-1 overflow-auto p-8 relative flex flex-col items-center">

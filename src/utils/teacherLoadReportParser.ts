@@ -65,7 +65,7 @@ export interface GeneratedScheduleDocument {
   subjectType: 'MAIN' | 'ACTIVITY';
   dayOfWeek: DayOfWeek;
   periodNumber: number;
-  sourceTeacherName: string;
+  sourceTeacherName: string; // ครูคนแรก/หลักเสมอ (backward compat กับโค้ดเดิมที่คาดหวัง string เดียว)
   department: string;
 }
 
@@ -553,42 +553,71 @@ export function parseTeacherLoadReport(
 
 /**
  * TASK 7: Generates Firestore schedule documents (1 document per parsed day/period slot)
+ *
+ * TASK 3 (ครูร่วมสอน — ยืนยันจากข้อมูลจริง Teacher_Load_Report เช่น HR ม.5/8 มี 2 ครูรับผิดชอบร่วม):
+ * ไฟล์รายงานภาระงานสอนแยกเป็น "แถวต่อครูหนึ่งคน" เสมอ — 2 ครูที่รับผิดชอบคาบ/ห้องเดียวกันจริงจะมา
+ * เป็นคนละแถวในไฟล์ แต่ต้อง scheduleDocId ตรงกัน (ดู scheduleDocIdFor's ห้องเรียนจริง → ไม่ฝัง
+ * teacherKey) แล้ว "รวม" เป็น doc เดียวโดยมี teacherIds ครบทุกคน — ถ้าปล่อยให้แต่ละแถว push
+ * document object แยกกันที่ id ซ้ำกัน ผู้เขียนจริง (batch.set) จะเจอปัญหาเดิมที่เคย fix ไปแล้วสำหรับ
+ * PLC (ครูคนหลังทับ teacherIds ของครูคนก่อนเงียบๆ) จึง merge ที่ชั้นนี้ก่อนคืนค่าเสมอ — ผลลัพธ์
+ * ไม่ขึ้นกับลำดับแถวในไฟล์ (merge แบบ set-union ไม่ใช่ last-write-wins)
  */
 export function generateScheduleDocuments(
   courseRows: TeacherLoadCourseRow[]
 ): GeneratedScheduleDocument[] {
-  const documents: GeneratedScheduleDocument[] = [];
+  const byId = new Map<string, GeneratedScheduleDocument>();
 
   for (const row of courseRows) {
     if (!row.isValid || row.slots.length === 0) continue;
 
     // ใช้สูตร id เดียวกับ handleImport/computeSyncReplacePlan เสมอ (ดู scheduleSyncReplace.ts) —
     // กันไม่ให้ ACTIVITY ของครูหลายคนที่ชื่อ+วัน-คาบตรงกัน (PLC/โฮมรูม/แนะแนว ฯลฯ) ชนกันเป็น doc เดียว
+    // (ยกเว้นมีห้องเรียนจริงระบุอยู่ — กรณีนั้นคือครูร่วมสอนคาบเดียวกันจริง ต้อง "ชน" กันโดยตั้งใจ)
     const teacherKey = primaryTeacherKey(row);
 
     for (const slot of row.slots) {
       const scheduleDocId = scheduleDocIdFor(row.subjectCode, row.room, row.level, slot.dayOfWeek, slot.periodNumber, row.subjectType, teacherKey);
 
-      documents.push({
+      const newTeacherId = row.matchedTeacherId || null;
+      const newDoc: GeneratedScheduleDocument = {
         id: scheduleDocId,
         subjectCode: row.subjectCode,
         subjectName: row.subjectName,
         room: row.room || '',
         level: row.level || '',
         credits: 1.5,
-        teacherIds: row.matchedTeacherId ? [row.matchedTeacherId] : [],
-        teacherId: row.matchedTeacherId || null,
+        teacherIds: newTeacherId ? [newTeacherId] : [],
+        teacherId: newTeacherId,
         teacherEmail: row.matchedTeacherEmail || row.teacherEmail || null,
-        unlinkedTeacherName: row.matchedTeacherId ? null : (row.unlinkedTeacherName || row.teacherName || null),
-        unlinkedTeacherEmail: row.matchedTeacherId ? null : (row.unlinkedTeacherEmail || row.teacherEmail || null),
+        unlinkedTeacherName: newTeacherId ? null : (row.unlinkedTeacherName || row.teacherName || null),
+        unlinkedTeacherEmail: newTeacherId ? null : (row.unlinkedTeacherEmail || row.teacherEmail || null),
         subjectType: row.subjectType,
         dayOfWeek: slot.dayOfWeek,
         periodNumber: slot.periodNumber,
         sourceTeacherName: row.teacherName,
         department: row.department,
+      };
+
+      const existingDoc = byId.get(scheduleDocId);
+      if (!existingDoc) {
+        byId.set(scheduleDocId, newDoc);
+        continue;
+      }
+
+      // ครูอีกคนของคาบ/ห้องเดียวกัน — union teacherIds เข้าไป ไม่ทับของเดิม
+      // teacherId/teacherEmail/sourceTeacherName หลักยังคงเป็นของครูคนแรกที่เจอในไฟล์ (backward
+      // compat กับโค้ดเก่าที่คาดหวัง field เดี่ยว) — ครูคนถัดไปเห็นได้ผ่าน teacherIds เท่านั้น
+      const mergedTeacherIds = Array.from(new Set([...existingDoc.teacherIds, ...newDoc.teacherIds]));
+      byId.set(scheduleDocId, {
+        ...existingDoc,
+        teacherIds: mergedTeacherIds,
+        // ถ้าครูคนแรกเป็น unlinked แต่ครูคนหลัง match ได้ ให้ใช้ของครูที่ match ได้เป็นหลักแทน
+        teacherId: existingDoc.teacherId || newDoc.teacherId,
+        teacherEmail: existingDoc.teacherEmail || newDoc.teacherEmail,
+        unlinkedTeacherName: existingDoc.teacherId ? existingDoc.unlinkedTeacherName : (existingDoc.unlinkedTeacherName || newDoc.unlinkedTeacherName),
       });
     }
   }
 
-  return documents;
+  return Array.from(byId.values());
 }

@@ -17,6 +17,7 @@ import {
   writeBatch,
   Firestore
 } from 'firebase/firestore';
+import { format } from 'date-fns';
 import { db, auth } from '../lib/firebase';
 import {
   computeStudentAttendanceStats,
@@ -285,7 +286,9 @@ export async function updateBehaviorScoreAndTriggerAlert(
       const studentName = studentData.fullName || studentData.name || `นักเรียนรหัส ${studentId}`;
       const parentUid = studentData.parentUid || studentData.parentId || '';
       const studentUid = studentData.studentUid || null;
-      const dateToday = new Date().toISOString().split('T')[0];
+      // .toISOString() แปลงเป็น UTC เสมอ — ช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย (UTC+7) จะลากวันถอยหลัง
+      // ไป 1 วัน ใช้ format() จาก date-fns แทน (คำนวณจาก local time fields ตรงๆ)
+      const dateToday = format(new Date(), 'yyyy-MM-dd');
 
       // Deduct score ensuring it stays within [0, 100]
       const newScore = Math.max(0, Math.min(100, currentScore + scoreDeducted));
@@ -914,16 +917,22 @@ export async function saveGPSCheckInLogFirestore(log: GPSCheckInLog): Promise<vo
  * ──────────────────────────────────────────────────────────────────────────── */
 export async function saveDepartmentConfig(dept: {
   id: string; name: string; order?: number; kind?: string; parentId?: string | null; active?: boolean;
+  backupApproverUid?: string | null; backupApproverName?: string | null;
 }): Promise<void> {
   try {
-    await setDoc(doc(db, 'department_config', dept.id), {
+    const payload: Record<string, unknown> = {
       name: dept.name,
       order: dept.order ?? 999,
       kind: dept.kind ?? 'LEARNING_AREA',
       parentId: dept.parentId ?? null,
       active: dept.active ?? true,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    };
+    // TASK 4: ผู้รับผิดชอบสำรอง — ใส่เฉพาะตอนมีการส่งค่ามาจริง (undefined) ไม่งั้น merge:true จะไม่แตะ
+    // field เดิม ทำให้ saveEdit/addNew ที่ไม่ได้ตั้งใจแก้ backupApprover ไม่เผลอไปเคลียร์ค่าที่ตั้งไว้แล้ว
+    if (dept.backupApproverUid !== undefined) payload.backupApproverUid = dept.backupApproverUid;
+    if (dept.backupApproverName !== undefined) payload.backupApproverName = dept.backupApproverName;
+    await setDoc(doc(db, 'department_config', dept.id), payload, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `department_config/${dept.id}`);
   }
@@ -1703,7 +1712,13 @@ export function subscribeStudentHomeLocationsByRoom(
 
 /** สร้างชุมนุมใหม่ — auto id (ไม่ผูกกับ subjectCode อีกต่อไป) คืนค่า id ที่สร้างให้เรียกใช้ต่อได้ */
 export async function createElectiveActivity(
-  config: { name: string; capacity: number; responsibleTeacherUid: string; responsibleTeacherName: string; createdBy: string },
+  config: {
+    name: string; capacity: number;
+    responsibleTeacherUids: string[]; responsibleTeacherNames: string[];
+    dayOfWeek?: string | null; periodNumber?: number | null; periodNumberEnd?: number | null; room?: string | null;
+    enrollmentStatus?: 'OPEN' | 'CLOSED';
+    createdBy: string;
+  },
   firestoreDb: Firestore = db,
 ): Promise<string> {
   const ref = doc(collection(firestoreDb, 'elective_activities_config'));
@@ -1712,8 +1727,13 @@ export async function createElectiveActivity(
       id: ref.id,
       name: config.name,
       capacity: config.capacity,
-      responsibleTeacherUid: config.responsibleTeacherUid,
-      responsibleTeacherName: config.responsibleTeacherName,
+      responsibleTeacherUids: config.responsibleTeacherUids,
+      responsibleTeacherNames: config.responsibleTeacherNames,
+      dayOfWeek: config.dayOfWeek ?? null,
+      periodNumber: config.periodNumber ?? null,
+      periodNumberEnd: config.periodNumberEnd ?? null,
+      room: config.room ?? null,
+      enrollmentStatus: config.enrollmentStatus ?? 'OPEN',
       createdBy: config.createdBy,
       createdAt: serverTimestamp(),
     });
@@ -1726,7 +1746,9 @@ export async function createElectiveActivity(
 /** แก้ไขชุมนุมที่มีอยู่ (ชื่อ/จำนวนรับ/ครูรับผิดชอบ) — ไม่แตะ createdAt/createdBy เดิม */
 export async function updateElectiveActivity(
   id: string,
-  updates: Partial<Pick<ElectiveActivityConfig, 'name' | 'capacity' | 'responsibleTeacherUid' | 'responsibleTeacherName'>>,
+  updates: Partial<Pick<ElectiveActivityConfig,
+    'name' | 'capacity' | 'responsibleTeacherUids' | 'responsibleTeacherNames' |
+    'dayOfWeek' | 'periodNumber' | 'periodNumberEnd' | 'room' | 'enrollmentStatus'>>,
   firestoreDb: Firestore = db,
 ): Promise<void> {
   try {
@@ -2167,7 +2189,9 @@ export async function recordInfirmaryVisit(
     studentId: data.studentId,
     studentUid: data.studentUid,
     parentUid: data.parentUid,
-    visitDate: now.toISOString().split('T')[0],
+    // .toISOString() แปลงเป็น UTC เสมอ — ช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย (UTC+7) จะลากวันถอยหลัง
+    // ไป 1 วัน ใช้ format() จาก date-fns แทน (คำนวณจาก local time fields ตรงๆ)
+    visitDate: format(now, 'yyyy-MM-dd'),
     visitTime: now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
     symptoms: data.symptoms,
     temperature: data.temperature,

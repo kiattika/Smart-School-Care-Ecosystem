@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { 
+import { format } from 'date-fns';
+import {
   StoreState, 
   AttendanceStatus, 
   Course, 
@@ -63,13 +64,19 @@ import {
 const STATUS_CYCLE: AttendanceStatus[] = ['PRESENT', 'ABSENT', 'LATE', 'LEAVE'];
 
 /** สร้าง approval chain 4 ขั้น — ขั้นที่ 1 auto-approve เฉพาะเมื่อผู้เสนอคือ HEAD_OF_DEPARTMENT ตัวจริง
+ *  หรือผู้ได้รับมอบหมายให้ปฏิบัติหน้าที่แทน (backupApproverUid/ACADEMIC_HEAD fallback ตอนหัวหน้า
+ *  กลุ่มสาระฯ ลาป่วยเอง — ดู actingAsBackupApproverForDeptId ใน types.ts)
  *  ใช้ร่วมกันทั้ง proposeSubstituteAssignment (เดี่ยว) และ proposeSubstituteSwap (คู่แลกคาบ) */
 function buildSubstituteApprovalChain(
   isHodProposer: boolean,
   proposerEmail: string,
   proposerName: string,
-  now: string
+  now: string,
+  actingAsBackupApproverForDeptId?: string | null
 ): SubstituteApprovalStep[] {
+  const approveComment = actingAsBackupApproverForDeptId
+    ? 'เสนอจัดครูสอนแทนโดยผู้ได้รับมอบหมายให้ปฏิบัติหน้าที่แทนหัวหน้ากลุ่มสาระฯ (ลาป่วย)'
+    : 'เสนอจัดครูสอนแทนโดยหัวหน้ากลุ่มสาระฯ';
   return SUBSTITUTE_STAGE_ORDER
     .filter((s): s is Exclude<SubstituteApprovalStage, 'COMPLETED'> => s !== 'COMPLETED')
     .map((stage, idx) => {
@@ -81,7 +88,7 @@ function buildSubstituteApprovalChain(
           approverEmail: proposerEmail,
           status: 'APPROVED' as const,
           approvedAt: now,
-          comment: 'เสนอจัดครูสอนแทนโดยหัวหน้ากลุ่มสาระฯ',
+          comment: approveComment,
         };
       }
       return {
@@ -447,11 +454,12 @@ export const useStore = create<StoreState>((set, get) => ({
 
     const proposerEmail = payload.proposedByEmail || '';
     const proposerName = payload.proposedByName || '';
-    // ขั้นที่ 1 ถือว่าอนุมัติโดยผู้เสนอทันที เฉพาะกรณีผู้เสนอคือหัวหน้ากลุ่มสาระฯ ตัวจริงเท่านั้น
-    // — ถ้าครูขอลากิจ/ไปราชการด้วยตนเอง (proposedByRole เป็น SUBJECT_TEACHER/HOMEROOM_TEACHER)
+    // ขั้นที่ 1 ถือว่าอนุมัติโดยผู้เสนอทันที เฉพาะกรณีผู้เสนอคือหัวหน้ากลุ่มสาระฯ ตัวจริง หรือผู้ได้รับ
+    // มอบหมายให้ปฏิบัติหน้าที่แทน (actingAsBackupApproverForDeptId — ตอนหัวหน้ากลุ่มสาระฯ ลาป่วยเอง)
+    // — ถ้าครูขอลากิจ/ไปราชการด้วยตนเอง (proposedByRole เป็น SUBJECT_TEACHER/HOMEROOM_TEACHER ธรรมดา)
     // ขั้นที่ 1 ต้องรอหัวหน้ากลุ่มสาระฯ มาอนุมัติจริงก่อน ห้าม auto-approve แทน
-    const isHodProposer = payload.proposedByRole === 'HEAD_OF_DEPARTMENT';
-    const chain = buildSubstituteApprovalChain(isHodProposer, proposerEmail, proposerName, now);
+    const isHodProposer = payload.proposedByRole === 'HEAD_OF_DEPARTMENT' || !!payload.actingAsBackupApproverForDeptId;
+    const chain = buildSubstituteApprovalChain(isHodProposer, proposerEmail, proposerName, now, payload.actingAsBackupApproverForDeptId);
 
     // ครูที่ถูกมอบหมาย (substituteTeacherEmail) ต้องกดยืนยันก่อนเข้า approval chain — ยกเว้น
     // กรณีลาป่วย (isHodProposer) ซึ่งเป็นสถานการณ์ฉุกเฉินวันเดียวกัน หัวหน้ากลุ่มสาระฯ ต้องสั่งการ
@@ -506,8 +514,8 @@ export const useStore = create<StoreState>((set, get) => ({
     const buildLeg = (payload: typeof legA, id: string, linkedId: string): SubstituteAssignment => {
       const proposerEmail = payload.proposedByEmail || '';
       const proposerName = payload.proposedByName || '';
-      const isHodProposer = payload.proposedByRole === 'HEAD_OF_DEPARTMENT';
-      const chain = buildSubstituteApprovalChain(isHodProposer, proposerEmail, proposerName, now);
+      const isHodProposer = payload.proposedByRole === 'HEAD_OF_DEPARTMENT' || !!payload.actingAsBackupApproverForDeptId;
+      const chain = buildSubstituteApprovalChain(isHodProposer, proposerEmail, proposerName, now, payload.actingAsBackupApproverForDeptId);
       const { id: _ignored, ...rest } = payload;
       return {
         ...rest,
@@ -888,7 +896,9 @@ export const useStore = create<StoreState>((set, get) => ({
     const hours = now.getHours().toString().padStart(2, '0');
     const minutes = now.getMinutes().toString().padStart(2, '0');
     const timeStr = `${hours}:${minutes} น.`;
-    const dateStr = now.toISOString().split('T')[0];
+    // .toISOString() แปลงเป็น UTC เสมอ — ช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย (UTC+7) จะลากวันถอยหลัง
+    // ไป 1 วัน ใช้ format() จาก date-fns แทน (คำนวณจาก local time fields ตรงๆ)
+    const dateStr = format(now, 'yyyy-MM-dd');
     const isLate = type === 'ENTRY' && (now.getHours() > 8 || (now.getHours() === 8 && now.getMinutes() > 0));
 
     let studentName = '';
@@ -1064,7 +1074,7 @@ export const useStore = create<StoreState>((set, get) => ({
       totalScore,
       riskLevel,
       recommendation,
-      conductedAt: new Date().toISOString().split('T')[0]
+      conductedAt: format(new Date(), 'yyyy-MM-dd')
     };
     await savePHQ9ScreeningFirestore(studentId, screening);
 
@@ -1084,7 +1094,7 @@ export const useStore = create<StoreState>((set, get) => ({
       q1Depressed: q1,
       q2Hopeless: q2,
       isPositive,
-      conductedAt: new Date().toISOString().split('T')[0]
+      conductedAt: format(new Date(), 'yyyy-MM-dd')
     };
     await save2QScreeningFirestore(studentId, screening);
 
@@ -1100,7 +1110,7 @@ export const useStore = create<StoreState>((set, get) => ({
     const newSDQ: SDQAssessment = {
       ...sdq,
       id: `sdq-${Date.now()}`,
-      assessmentDate: new Date().toISOString().split('T')[0]
+      assessmentDate: format(new Date(), 'yyyy-MM-dd')
     };
     await saveSDQAssessmentFirestore(newSDQ);
 
@@ -1118,7 +1128,7 @@ export const useStore = create<StoreState>((set, get) => ({
       category,
       description,
       teacherName,
-      date: new Date().toISOString().split('T')[0],
+      date: format(new Date(), 'yyyy-MM-dd'),
       academicYear: '2569'
     };
 

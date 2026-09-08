@@ -512,5 +512,42 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
       expect(written.size).toBe(2); // ต้องไม่ยุบเหลือ 1 — นี่คืออาการเดิมที่ทำให้ kiattika เหลือ 0 คาบ
       expect(written.get(kiattikaDoc!.id)?.teacherId).toBe('test_admin_kiattika_001');
     });
+
+    // TASK 3 (ครูร่วมสอน — ยืนยันจากข้อมูลจริง Teacher_Load_Report): HR ม.5/8 ห้อง 943 มี 2 ครู
+    // รับผิดชอบร่วมกันจริง (ไม่ใช่ edge case) — ตรงข้ามกับ PLC/กิจกรรมไม่มีห้องด้านบน: ตรงนี้ "มีห้อง
+    // เรียนจริง" ระบุอยู่ ต้องรวมเป็น schedule doc เดียว มี teacherIds ครบทั้ง 2 คน ไม่แยก doc
+    it('TASK 3: ครู 2 คนรับผิดชอบ HR ห้องเดียวกันจริง (มีห้องระบุ) → รวมเป็น doc เดียว มี teacherIds ครบทั้งคู่', () => {
+      const rows = [
+        { 'กลุ่มสาระ': 'คณิตศาสตร์', 'ที่': '1', 'ชื่อ-สกุล': 'Mr.Kiattisak', 'อีเมล์': 'kiattisak@utd.ac.th',
+          'ลำดับวิชา': '1', 'รหัสวิชา': 'HR', 'ชื่อรายวิชา': 'HomeRoom (กิจกรรม)', 'คาบ/ห้อง': '1 / [943] HR 5/8', 'วัน-คาบที่สอน': 'จ0', 'ระดับ': 'M.5/8', 'สรุปคาบ': '1' },
+        { 'กลุ่มสาระ': 'วิทยาศาสตร์', 'ที่': '2', 'ชื่อ-สกุล': 'ครูสมชาย', 'อีเมล์': 'somchai@utd.ac.th',
+          'ลำดับวิชา': '1', 'รหัสวิชา': 'HR', 'ชื่อรายวิชา': 'HomeRoom (กิจกรรม)', 'คาบ/ห้อง': '1 / [943] HR 5/8', 'วัน-คาบที่สอน': 'จ0', 'ระดับ': 'M.5/8', 'สรุปคาบ': '1' },
+      ];
+      const { courseRows } = parseTeacherLoadReport(rows, mockStaffList);
+      expect(courseRows.every(r => r.isValid)).toBe(true);
+
+      const docs = generateScheduleDocuments(courseRows);
+      const hrDocs = docs.filter(d => d.subjectCode === 'HR');
+      expect(hrDocs).toHaveLength(1); // ต้องรวมเป็น doc เดียว ไม่ใช่ 2 doc แยกแบบ PLC
+
+      const merged = hrDocs[0];
+      expect(merged.teacherIds.sort()).toEqual(['teacher-kiattisak-uid', 'teacher-somchai-uid'].sort());
+      // ครูคนแรกในไฟล์ยังคงเป็น teacherId/teacherEmail หลัก (backward compat กับโค้ดเก่าที่คาดหวัง field เดี่ยว)
+      expect(merged.teacherId).toBe('teacher-kiattisak-uid');
+      expect(merged.teacherEmail).toBe('kiattisak@utd.ac.th');
+    });
+
+    it('TASK 3: ผลลัพธ์การ merge ไม่ขึ้นกับลำดับแถวในไฟล์ (union ไม่ใช่ last-write-wins)', () => {
+      const rowsReversed = [
+        { 'กลุ่มสาระ': 'วิทยาศาสตร์', 'ที่': '2', 'ชื่อ-สกุล': 'ครูสมชาย', 'อีเมล์': 'somchai@utd.ac.th',
+          'ลำดับวิชา': '1', 'รหัสวิชา': 'HR', 'ชื่อรายวิชา': 'HomeRoom (กิจกรรม)', 'คาบ/ห้อง': '1 / [943] HR 5/8', 'วัน-คาบที่สอน': 'จ0', 'ระดับ': 'M.5/8', 'สรุปคาบ': '1' },
+        { 'กลุ่มสาระ': 'คณิตศาสตร์', 'ที่': '1', 'ชื่อ-สกุล': 'Mr.Kiattisak', 'อีเมล์': 'kiattisak@utd.ac.th',
+          'ลำดับวิชา': '1', 'รหัสวิชา': 'HR', 'ชื่อรายวิชา': 'HomeRoom (กิจกรรม)', 'คาบ/ห้อง': '1 / [943] HR 5/8', 'วัน-คาบที่สอน': 'จ0', 'ระดับ': 'M.5/8', 'สรุปคาบ': '1' },
+      ];
+      const { courseRows } = parseTeacherLoadReport(rowsReversed, mockStaffList);
+      const docs = generateScheduleDocuments(courseRows).filter(d => d.subjectCode === 'HR');
+      expect(docs).toHaveLength(1);
+      expect(docs[0].teacherIds.sort()).toEqual(['teacher-kiattisak-uid', 'teacher-somchai-uid'].sort());
+    });
   });
 });

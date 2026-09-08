@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { 
+import { format } from 'date-fns';
+import {
   BookOpen, 
   CheckCircle, 
   Clock, 
@@ -113,7 +114,9 @@ export function SupervisionPortal() {
       teacherName: obsTeacherName,
       subject: 'รายวิชาตามตารางสอน',
       classRoom: 'ม.5/8',
-      visitDate: new Date().toISOString().split('T')[0],
+      // .toISOString() แปลงเป็น UTC เสมอ — ช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย (UTC+7) จะลากวันถอยหลัง
+      // ไป 1 วัน ใช้ format() จาก date-fns แทน (คำนวณจาก local time fields ตรงๆ)
+      visitDate: format(new Date(), 'yyyy-MM-dd'),
       status: 'COMPLETED' as const,
       avgScore: avg,
       strengths: obsStrengths,

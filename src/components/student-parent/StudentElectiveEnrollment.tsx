@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Users, CheckCircle2, XCircle, Loader2, UserRound } from 'lucide-react';
+import { Users, CheckCircle2, XCircle, Loader2, UserRound, Clock, Lock } from 'lucide-react';
 import { Student, ActivityEnrollment } from '../../types';
 import { useElectiveActivities } from '../../hooks/useElectiveActivities';
 import { enrollInActivity, withdrawFromActivity, subscribeActiveEnrollmentsByStudent } from '../../services/firestoreService';
+
+const DAY_TH_SHORT: Record<string, string> = {
+  monday: 'จันทร์', tuesday: 'อังคาร', wednesday: 'พุธ', thursday: 'พฤหัสบดี', friday: 'ศุกร์', saturday: 'เสาร์', sunday: 'อาทิตย์',
+};
 
 /**
  * นักเรียนสมัคร/ถอนชุมนุม (ELECTIVE) — ที่นั่งจำกัด ตรวจนับจริงตอนเขียนผ่าน Firestore transaction
@@ -89,8 +93,11 @@ export function StudentElectiveEnrollment({ student }: { student: Student }) {
           {configs.map(cfg => {
             const isMine = myCurrentEnrollment?.activityId === cfg.id;
             const remaining = seatsRemaining(cfg.id);
+            const isClosed = cfg.enrollmentStatus === 'CLOSED';
             const isFull = remaining !== null && remaining <= 0 && !isMine;
             const blockedByOther = !!myCurrentEnrollment && !isMine;
+            const teacherNames = (cfg.responsibleTeacherNames || []).join(', ') || '— ไม่ได้ระบุ —';
+            const dayLabel = cfg.dayOfWeek ? DAY_TH_SHORT[cfg.dayOfWeek] || cfg.dayOfWeek : null;
             return (
               <div
                 key={cfg.id}
@@ -101,8 +108,16 @@ export function StudentElectiveEnrollment({ student }: { student: Student }) {
                   {isMine && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
                 </div>
                 <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                  <UserRound className="w-3 h-3" /> ครูรับผิดชอบ: {cfg.responsibleTeacherName}
+                  <UserRound className="w-3 h-3" /> ครูรับผิดชอบ: {teacherNames}
                 </p>
+                {(dayLabel || cfg.periodNumber !== null && cfg.periodNumber !== undefined || cfg.room) && (
+                  <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                    <Clock className="w-3 h-3" />
+                    {dayLabel && `วัน${dayLabel}`}
+                    {cfg.periodNumber !== null && cfg.periodNumber !== undefined && ` คาบ ${cfg.periodNumber}${cfg.periodNumberEnd && cfg.periodNumberEnd !== cfg.periodNumber ? `-${cfg.periodNumberEnd}` : ''}`}
+                    {cfg.room && ` · ห้อง ${cfg.room}`}
+                  </p>
+                )}
                 <div className="flex items-center justify-between">
                   <span className={`text-xs font-bold ${isFull ? 'text-red-400' : 'text-emerald-400'}`}>
                     เหลือ {remaining}/{cfg.capacity} ที่นั่ง
@@ -118,12 +133,12 @@ export function StudentElectiveEnrollment({ student }: { student: Student }) {
                   ) : (
                     <button
                       onClick={() => handleEnroll(cfg.id, cfg.capacity)}
-                      disabled={busyId === cfg.id || isFull || blockedByOther}
-                      title={blockedByOther ? 'ถอนชุมนุมเดิมก่อนสมัครใหม่' : isFull ? 'ที่นั่งเต็มแล้ว' : ''}
+                      disabled={busyId === cfg.id || isFull || blockedByOther || isClosed}
+                      title={isClosed ? 'ปิดรับสมัครแล้ว' : blockedByOther ? 'ถอนชุมนุมเดิมก่อนสมัครใหม่' : isFull ? 'ที่นั่งเต็มแล้ว' : ''}
                       className="px-3 py-1.5 text-xs font-bold text-white bg-teal-600 hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg flex items-center gap-1"
                     >
-                      {busyId === cfg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                      {isFull ? 'เต็มแล้ว' : 'สมัคร'}
+                      {busyId === cfg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : isClosed ? <Lock className="w-3 h-3" /> : null}
+                      {isClosed ? 'ปิดรับสมัครแล้ว' : isFull ? 'เต็มแล้ว' : 'สมัคร'}
                     </button>
                   )}
                 </div>

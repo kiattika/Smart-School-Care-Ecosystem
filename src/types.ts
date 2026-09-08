@@ -69,15 +69,29 @@ export interface Student {
  * ชุมนุม/กิจกรรมตามความสนใจ (ELECTIVE) — แอดมินงานชุมนุมสร้างชื่อ+จำนวนรับ+ครูรับผิดชอบเอง
  * โดยตรง "ไม่ผูกกับ subjectCode ที่ import จากตารางสอนอีกต่อไป" (ออกแบบใหม่ — ของเดิมดึง
  * subjectCode จาก schedules ซึ่งทุกคาบ "กิจกรรมชุมนุม" ของทุกครูใช้ชื่อกลางเดียวกันหมด ไม่ใช่ชื่อ
- * ชุมนุมจริง ทำให้แยกชุมนุมจริงไม่ได้เลย) — 1 ชุมนุม = 1 ครูรับผิดชอบ = โควตาที่นั่งเดียว (ไม่มี
- * concept "หลาย section" อีกต่อไปเหมือนของเดิมที่ผูกกับ scheduleId หลายคาบ)
+ * ชุมนุมจริง ทำให้แยกชุมนุมจริงไม่ได้เลย) — 1 ชุมนุม = 1 โควตาที่นั่งเดียว (ไม่มี concept "หลาย
+ * section" อีกต่อไปเหมือนของเดิมที่ผูกกับ scheduleId หลายคาบ)
+ *
+ * ต่อยอด: รองรับครูร่วมสอนหลายคนต่อชุมนุม (responsibleTeacherUids — ยืนยันจากไฟล์ภาระงานสอนจริงว่า
+ * เป็นรูปแบบปกติ ไม่ใช่ edge case) + ผูกวัน/คาบ/ห้องจริงเข้ากับชุมนุม เพื่อให้ปรากฏในตารางสอน
+ * ประจำวันของครูผู้รับผิดชอบได้เหมือนวิชาปกติ (ดู TeacherPortal.tsx) + enrollmentStatus ควบคุมว่า
+ * ยังเปิดรับสมัครอยู่ไหม — ปิดรับสมัครแล้วค่อยให้เช็คชื่อได้ (กันเช็คชื่อก่อนรายชื่อนิ่ง)
  */
 export interface ElectiveActivityConfig {
   id: string;
   name: string;                    // ชื่อชุมนุมที่แอดมินตั้งเอง เช่น "ชุมนุมคอมพิวเตอร์"
   capacity: number;                // จำนวนรับทั้งชุมนุม
-  responsibleTeacherUid: string;   // ครูรับผิดชอบที่แอดมินกำหนด
-  responsibleTeacherName: string;
+  responsibleTeacherUids: string[]; // ครูรับผิดชอบร่วมกันได้หลายคน (แอดมินกำหนด)
+  responsibleTeacherNames: string[]; // ชื่อคู่ลำดับเดียวกับ responsibleTeacherUids (denormalize ไว้แสดงผล)
+  // วัน/คาบชุมนุม — ยืนยันจากโรงเรียนว่าไม่ใช่ค่าที่แอดมินกำหนดเอง ต้องดึงจากตารางสอนจริงที่ import
+  // มาของครูรับผิดชอบ (schedules ที่ subjectName มีคำว่า "ชุมนุม") เสมอ ดู ElectiveActivityManagerPage.tsx
+  // + src/lib/electiveClubDetection.ts — periodNumber/periodNumberEnd เป็นช่วงคาบต่อเนื่อง (เช่น ครู
+  // นศท มีคาบยาวกว่าคนอื่น 7-9 แทน 7-8 ปกติ) periodNumberEnd ไม่ระบุ = ชุมนุมนี้มีคาบเดียว
+  dayOfWeek?: string | null;   // 'monday'..'sunday' — คาบ/วันที่ชุมนุมนี้เรียนจริง (เหมือน schedules.dayOfWeek)
+  periodNumber?: number | null; // คาบเริ่ม
+  periodNumberEnd?: number | null; // คาบสิ้นสุด (ถ้าเป็นคาบต่อเนื่องหลายคาบ เช่น นศท 7-9) — ไม่ระบุ = คาบเดียวเท่ากับ periodNumber
+  room?: string | null;         // ห้องเรียน (ถ้ามี)
+  enrollmentStatus: 'OPEN' | 'CLOSED'; // ปิดรับสมัครแล้วค่อยเข้าตารางสอนให้เช็คชื่อได้
   createdBy: string;
   createdAt: Timestamp;
 }
@@ -209,6 +223,9 @@ export interface GlobalCourse {
   roomName: string;
   scheduleString: string;
   level: string;
+  // TASK 3 (ครูร่วมสอน): ครูรับผิดชอบร่วมกันได้หลายคนต่อคาบ (เช่น HR ม.5/8) — teacherEmail ข้างบน
+  // ยังคงเป็นของครูคนแรก/หลักเท่านั้น (backward compat) ใช้ teacherIds เพื่อจับคู่ครูร่วมสอนคนอื่นด้วย
+  teacherIds?: string[];
 }
 
 export interface Course {
@@ -328,6 +345,11 @@ export interface SubstituteAssignment {
   proposedByEmail?: string;
   proposedByName?: string;
   proposedByRole?: string;
+  // ตั้งค่าเมื่อผู้เสนอไม่ใช่หัวหน้ากลุ่มสาระฯ ตัวจริง แต่เป็นผู้ได้รับมอบหมายให้ปฏิบัติหน้าที่แทน
+  // (department_config.backupApproverUid หรือ ACADEMIC_HEAD กรณี fallback) ตอนหัวหน้ากลุ่มสาระฯ
+  // ลาป่วยเอง — เก็บ departmentId ที่กำลังปฏิบัติหน้าที่แทนไว้ เพื่อความโปร่งใสในการตรวจสอบย้อนหลัง
+  // (ไม่ปลอม proposedByRole เป็น HEAD_OF_DEPARTMENT — proposedByRole ยังเป็น role จริงของคนคนนั้นเสมอ)
+  actingAsBackupApproverForDeptId?: string | null;
   notes?: string;
   // วิธี B (หาครูสอนแทน): TEACHING = สอนเนื้อหาจริง, SUPERVISION_ONLY = ควบคุมชั้นเรียนอย่างเดียว
   // (บังคับเมื่อครูสอนแทนมาจากกลุ่มสาระอื่น) — ต้องแนบใบงาน/ใบความรู้/แบบทดสอบก่อนส่งคำขอได้
@@ -843,6 +865,12 @@ export interface DepartmentConfig {
   kind?: 'LEARNING_AREA' | 'DIRECTORATE' | 'SUPPORT' | 'ACTIVITY'; // ประเภทกลุ่ม
   parentId?: string | null; // กลุ่มย่อย (เช่น วิทย์-คอมพิวเตอร์ อยู่ใต้ วิทย์และเทคโนโลยี)
   active?: boolean;
+  // ผู้รับผิดชอบสำรอง — กำหนดไว้ล่วงหน้าเผื่อหัวหน้ากลุ่มสาระฯ ลาป่วยเอง (ไม่ใช่ ACADEMIC_HEAD เพราะ
+  // ดูแลทั้งโรงเรียน ไม่รู้ว่าใครลาวันไหนในแต่ละกลุ่มสาระ — ยืนยันจากโรงเรียนแล้ว) คนนี้จะเป็นทั้งผู้จัด
+  // สอนแทนและอนุมัติขั้น 1 แทนเมื่อหัวหน้ากลุ่มสาระฯ ตัวจริงลาป่วย — ถ้ายังไม่ได้กำหนดไว้ fallback ไปที่
+  // ACADEMIC_HEAD พร้อมเตือนชัดเจนในหน้าจอ (ดู SubstituteTeachingModule.tsx)
+  backupApproverUid?: string | null;
+  backupApproverName?: string | null;
 }
 
 export interface TCASPortfolioConfig {
