@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ClipboardCheck, Repeat, Clock } from 'lucide-react';
+import { ClipboardCheck, Repeat, Clock, Users, Palette } from 'lucide-react';
 import { useStore } from './store';
 import { cn } from './lib/utils';
 import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
 import { LateAttendanceApprovalList } from './components/LateAttendanceApprovalList';
+import { ElectiveActivityManagerPage } from './components/admin/ElectiveActivityManagerPage';
+import { HouseManagerPage } from './components/admin/HouseManagerPage';
 import { subscribeLateAttendanceRequests } from './services/firestoreService';
 import { LateAttendanceRequestRecord } from './types';
 
@@ -19,7 +21,28 @@ import { LateAttendanceRequestRecord } from './types';
  * LateAttendanceApprovalList) แทนต่อยอด ExecutivePortal เพราะ ExecutivePortal
  * เป็นหน้าใหญ่ (1200+ บรรทัด) ที่ผูกกับ role EXECUTIVE โดยตรง — การ mount ให้ role อื่น
  * จะทำให้ tab/สิทธิ์ปนกันและ maintain ยากกว่า
+ *
+ * แก้ไข (ตรวจสอบ firestore.rules จริงแล้ว): 4 role นี้ถูก route มาที่นี่เสมอ (เช็คด้วย
+ * user.activeRole ใน App.tsx) ไม่มีทางไปถึง AdminPortal เลย แต่บาง role มีสิทธิ์เขียน
+ * ข้อมูลหน้าแอดมินจริงนอกเหนือจากงานอนุมัติ — grep firestore.rules ทั้งไฟล์หา
+ * hasRole('HEAD_OF_DEPARTMENT'/'ACADEMIC_HEAD'/'DEPUTY_DIRECTOR_ACADEMIC'/'DIRECTOR')
+ * ครบทุกจุดแล้วพบว่ามีแค่ ACADEMIC_HEAD เท่านั้นที่มีสิทธิ์เพิ่มเติมนอกเหนืองานอนุมัติ:
+ *   - elective_activities_config (write): SUPER_ADMIN || ACADEMIC_HEAD
+ *   - house_config (write): SUPER_ADMIN || ACADEMIC_HEAD
+ * ส่วน HEAD_OF_DEPARTMENT/DEPUTY_DIRECTOR_ACADEMIC/DIRECTOR ที่เจอใน rules ทั้งหมด
+ * (gradebook_scores, substitute_assignments, post_teaching_records, late_attendance_requests)
+ * เป็นงานที่หน้านี้จัดการอยู่แล้ว (หรือเป็นงานสอน/เช็คคะแนนของครูที่มีบทบาทนั้นร่วมด้วย
+ * ไม่ใช่หน้าแอดมิน) ไม่ต้องเพิ่มแท็บใหม่ — ไม่เปลี่ยนให้ 4 role นี้ไปที่ AdminPortal เต็ม
+ * รูปแบบตามที่ตกลงกันไว้ (มีเมนู SUPER_ADMIN-only หลายจุดที่ role เหล่านี้ไม่ควรเข้าถึง
+ * เช่น จัดการสิทธิ์บุคลากร/import ข้อมูลนักเรียน-ครู) — เพิ่มแค่แท็บที่มีสิทธิ์จริงแทน
+ * reuse component เดิมตรงๆ (ElectiveActivityManagerPage/HouseManagerPage) ไม่สร้างใหม่
  */
+
+// แท็บเพิ่มเติมที่ ACADEMIC_HEAD มีสิทธิ์จริงตาม firestore.rules (เขียน elective_activities_config
+// และ house_config ได้) — role อื่นไม่เห็นแท็บเหล่านี้เลย เพราะไม่มีสิทธิ์เขียนจริง
+const EXTRA_TAB_ROLES: Record<string, Array<'elective' | 'house'>> = {
+  ACADEMIC_HEAD: ['elective', 'house'],
+};
 
 // role ที่เห็น tab "เช็คชื่อย้อนหลัง" — DIRECTOR เห็นแบบ read-only (กำกับดูแล)
 const LATE_ATTENDANCE_VIEWER_ROLES = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN', 'EXECUTIVE', 'DIRECTOR'];
@@ -39,8 +62,9 @@ export function ApprovalsPortal() {
   const activeRole = user?.activeRole || '';
   const canSeeLateAttendance = LATE_ATTENDANCE_VIEWER_ROLES.includes(activeRole);
   const lateAttendanceReadOnly = !LATE_ATTENDANCE_APPROVER_ROLES.includes(activeRole);
+  const extraTabs = EXTRA_TAB_ROLES[activeRole] || [];
 
-  const [tab, setTab] = useState<'substitute' | 'late-attendance'>('substitute');
+  const [tab, setTab] = useState<'substitute' | 'late-attendance' | 'elective' | 'house'>('substitute');
 
   // นับคำขอเช็คชื่อย้อนหลังที่รออนุมัติ (สำหรับ badge)
   const [lateRequests, setLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
@@ -115,6 +139,35 @@ export function ApprovalsPortal() {
               )}
             </button>
           )}
+
+          {/* แท็บเพิ่มเติมตามสิทธิ์จริงใน firestore.rules — ตอนนี้มีแค่ ACADEMIC_HEAD
+              (elective_activities_config/house_config) role อื่นไม่เห็นเลย */}
+          {extraTabs.includes('elective') && (
+            <button
+              onClick={() => setTab('elective')}
+              className={cn(
+                'px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 -mb-px transition-colors',
+                tab === 'elective'
+                  ? 'border-indigo-500 text-white'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              )}
+            >
+              <Users className="w-4 h-4" /> จัดการชุมนุม
+            </button>
+          )}
+          {extraTabs.includes('house') && (
+            <button
+              onClick={() => setTab('house')}
+              className={cn(
+                'px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 -mb-px transition-colors',
+                tab === 'house'
+                  ? 'border-indigo-500 text-white'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              )}
+            >
+              <Palette className="w-4 h-4" /> จัดการคณะสี
+            </button>
+          )}
         </div>
       </div>
 
@@ -125,6 +178,8 @@ export function ApprovalsPortal() {
             <SubstituteTeachingModule />
           </div>
         )}
+        {tab === 'elective' && extraTabs.includes('elective') && <ElectiveActivityManagerPage />}
+        {tab === 'house' && extraTabs.includes('house') && <HouseManagerPage />}
         {tab === 'late-attendance' && canSeeLateAttendance && (
           <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6">
             <LateAttendanceApprovalList readOnly={lateAttendanceReadOnly} />
