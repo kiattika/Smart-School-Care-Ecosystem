@@ -208,9 +208,30 @@ export function SubstituteTeachingModule() {
     effectiveProfile
       ? `${effectiveProfile.prefix || ''}${effectiveProfile.firstName} ${effectiveProfile.lastName}`.trim()
       : (user?.displayName || effectiveEmail || 'ผู้ใช้ระบบ');
-  const effectiveDeptId = effectiveProfile?.assignments?.departmentId || '';
+  const ownDeptId = effectiveProfile?.assignments?.departmentId || '';
 
-  const { nameOf: deptName } = useDepartments();
+  const { departments, nameOf: deptName } = useDepartments();
+
+  // TASK 4: หัวหน้ากลุ่มสาระฯ ลาป่วยเอง — ใครมีสิทธิ์ปฏิบัติหน้าที่แทน (จัดสอนแทน + อนุมัติขั้น 1)
+  // กลุ่มสาระที่ effectiveEmail (ผู้ใช้จริง) ถูกกำหนดเป็น backupApproverUid ไว้ล่วงหน้า หรือถ้ากลุ่ม
+  // สาระไหนยังไม่ได้กำหนดตัวสำรองไว้เลย ให้ ACADEMIC_HEAD เป็น fallback สุดท้าย (ยืนยันจากโรงเรียนแล้ว
+  // — ไม่ใช่เพราะ ACADEMIC_HEAD ควรทำเรื่องนี้ปกติ แต่กันไม่ให้คำขอค้างเมื่อยังไม่มีใครถูกตั้งค่าไว้)
+  const myBackupApproverDepts = useMemo(() => {
+    if (!user?.uid) return [];
+    return departments.filter(d => {
+      if (d.backupApproverUid) return d.backupApproverUid === user.uid;
+      return effectiveRole === 'ACADEMIC_HEAD'; // fallback สุดท้ายเมื่อกลุ่มสาระนี้ยังไม่ได้ตั้งค่าไว้
+    });
+  }, [departments, user?.uid, effectiveRole]);
+  const isActingAsBackupApprover = effectiveRole !== 'HEAD_OF_DEPARTMENT' && myBackupApproverDepts.length > 0;
+  // กลุ่มสาระที่กำลังปฏิบัติหน้าที่แทนอยู่ตอนนี้ — ไม่ใช่กลุ่มสาระของตัวเอง (ownDeptId) เพราะผู้รับมอบ
+  // อาจสังกัดคนละกลุ่มสาระกับหัวหน้าที่ลาป่วยก็ได้ (เช่น รองหัวหน้าที่ตั้งไว้ล่วงหน้าอาจย้ายไปช่วยกลุ่มอื่น)
+  const backupApproverDeptIdInUse = isActingAsBackupApprover ? myBackupApproverDepts[0]?.id : undefined;
+  const backupApproverDeptUsesFallback = !!backupApproverDeptIdInUse &&
+    !departments.find(d => d.id === backupApproverDeptIdInUse)?.backupApproverUid;
+  // effectiveDeptId: หัวหน้ากลุ่มสาระฯ ตัวจริงใช้กลุ่มสาระตัวเอง; ผู้ปฏิบัติหน้าที่แทนใช้กลุ่มสาระที่
+  // กำลังปฏิบัติหน้าที่แทนอยู่แทน ไม่ใช่กลุ่มสาระตัวเอง (มีผลกับทุกจุดที่ scope รายชื่อครู/คำขอด้วย deptId)
+  const effectiveDeptId = isActingAsBackupApprover ? (backupApproverDeptIdInUse || '') : ownDeptId;
 
   // --- toast ---
   const [toast, setToast] = useState<{ title: string; message: string; error?: boolean } | null>(null);
@@ -549,6 +570,7 @@ export function SubstituteTeachingModule() {
               departmentName: deptNameFinal, departmentId: deptIdFinal,
               triggerType, leaveReason: leaveReasonFinal,
               proposedByEmail: effectiveEmail, proposedByName: effectiveName, proposedByRole: effectiveRole,
+              actingAsBackupApproverForDeptId: isActingAsBackupApprover ? backupApproverDeptIdInUse : undefined,
               notes: notes.trim(), coverageMode: 'TEACHING',
             },
             {
@@ -563,6 +585,7 @@ export function SubstituteTeachingModule() {
               departmentName: deptNameFinal, departmentId: deptIdFinal,
               triggerType, leaveReason: `แลกคาบ — จ่ายคืนให้ ${partner.prefix || ''}${partner.firstName} ${partner.lastName}`,
               proposedByEmail: effectiveEmail, proposedByName: effectiveName, proposedByRole: effectiveRole,
+              actingAsBackupApproverForDeptId: isActingAsBackupApprover ? backupApproverDeptIdInUse : undefined,
               notes: notes.trim(), coverageMode: 'TEACHING',
             }
           );
@@ -604,6 +627,7 @@ export function SubstituteTeachingModule() {
           proposedByEmail: effectiveEmail,
           proposedByName: effectiveName,
           proposedByRole: effectiveRole,
+          actingAsBackupApproverForDeptId: isActingAsBackupApprover ? backupApproverDeptIdInUse : undefined,
           notes: notes.trim(),
           coverageMode,
           worksheetAttachmentUrl,
@@ -647,6 +671,7 @@ export function SubstituteTeachingModule() {
         proposedByEmail: effectiveEmail,
         proposedByName: effectiveName,
         proposedByRole: effectiveRole,
+        actingAsBackupApproverForDeptId: isActingAsBackupApprover ? backupApproverDeptIdInUse : undefined,
         notes: sa.notes,
         coverageMode: sa.coverageMode,
         worksheetAttachmentUrl: sa.worksheetAttachmentUrl,
@@ -753,6 +778,7 @@ export function SubstituteTeachingModule() {
         proposedByEmail: effectiveEmail,
         proposedByName: effectiveName,
         proposedByRole: effectiveRole,
+        actingAsBackupApproverForDeptId: isActingAsBackupApprover ? backupApproverDeptIdInUse : undefined,
         notes: reselectTarget.notes,
         coverageMode: isCrossDept ? 'SUPERVISION_ONLY' : 'TEACHING',
         // ครูคนใหม่ยังไม่เคยยืนยัน — ไม่พกใบงานเดิมมา ถ้าเป็นครูข้ามกลุ่มสาระต้องแนบใหม่ที่หน้ารายการ
@@ -910,7 +936,7 @@ export function SubstituteTeachingModule() {
     role === SUBSTITUTE_TEACHER_DECLINED_ROLE ? 'ครูสอนแทน (ปฏิเสธการมอบหมาย)' : (ROLE_NAMES_TH[role || ''] || role || '-');
 
   const roleLabel = ROLE_NAMES_TH[effectiveRole] || effectiveRole;
-  const canPropose = effectiveRole === 'HEAD_OF_DEPARTMENT';
+  const canPropose = effectiveRole === 'HEAD_OF_DEPARTMENT' || isActingAsBackupApprover;
   const isApprover = APPROVAL_ROLES.includes(effectiveRole);
   const isSubTeacher = canSelfPropose; // SUBJECT_TEACHER/HOMEROOM_TEACHER — เดิมชื่อ isSubTeacher, มีความหมายเดียวกับ canSelfPropose
   const isOversight = effectiveRole === 'SUPER_ADMIN' || effectiveRole === 'EXECUTIVE';
@@ -1138,6 +1164,25 @@ export function SubstituteTeachingModule() {
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <Layers className="w-5 h-5 text-amber-400" /> กระดานจัดครูสอนแทน — {deptName(effectiveDeptId)}
               </h2>
+              {isActingAsBackupApprover && (
+                <div className={cn(
+                  'rounded-xl p-3 text-xs flex items-start gap-2',
+                  backupApproverDeptUsesFallback
+                    ? 'bg-amber-500/10 border border-amber-500/30 text-amber-300'
+                    : 'bg-indigo-500/10 border border-indigo-500/30 text-indigo-300'
+                )}>
+                  <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                  {backupApproverDeptUsesFallback ? (
+                    <span>
+                      <strong>กลุ่มสาระฯ "{deptName(effectiveDeptId)}" ยังไม่ได้กำหนดผู้รับผิดชอบสำรองไว้ล่วงหน้า</strong> —
+                      คุณ (หัวหน้าฝ่ายวิชาการฯ) กำลังปฏิบัติหน้าที่แทนเป็นการชั่วคราวตามค่าเริ่มต้นสุดท้าย
+                      แนะนำให้ไปกำหนดผู้รับผิดชอบสำรองของกลุ่มสาระนี้ไว้ล่วงหน้าที่หน้าจัดการกลุ่มสาระฯ
+                    </span>
+                  ) : (
+                    <span>คุณกำลังปฏิบัติหน้าที่แทนหัวหน้ากลุ่มสาระฯ "{deptName(effectiveDeptId)}" (ผู้รับผิดชอบสำรองที่กำหนดไว้ล่วงหน้า) — คำขอที่เสนอจะถือว่าอนุมัติขั้น 1 ทันทีเหมือนหัวหน้ากลุ่มสาระฯ ตัวจริง</span>
+                  )}
+                </div>
+              )}
               {deptAssignments.length === 0 ? (
                 <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-12 text-center text-slate-500">
                   <AlertCircle className="w-10 h-10 text-slate-600 mx-auto mb-3" />

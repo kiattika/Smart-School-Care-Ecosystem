@@ -914,16 +914,22 @@ export async function saveGPSCheckInLogFirestore(log: GPSCheckInLog): Promise<vo
  * ──────────────────────────────────────────────────────────────────────────── */
 export async function saveDepartmentConfig(dept: {
   id: string; name: string; order?: number; kind?: string; parentId?: string | null; active?: boolean;
+  backupApproverUid?: string | null; backupApproverName?: string | null;
 }): Promise<void> {
   try {
-    await setDoc(doc(db, 'department_config', dept.id), {
+    const payload: Record<string, unknown> = {
       name: dept.name,
       order: dept.order ?? 999,
       kind: dept.kind ?? 'LEARNING_AREA',
       parentId: dept.parentId ?? null,
       active: dept.active ?? true,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    };
+    // TASK 4: ผู้รับผิดชอบสำรอง — ใส่เฉพาะตอนมีการส่งค่ามาจริง (undefined) ไม่งั้น merge:true จะไม่แตะ
+    // field เดิม ทำให้ saveEdit/addNew ที่ไม่ได้ตั้งใจแก้ backupApprover ไม่เผลอไปเคลียร์ค่าที่ตั้งไว้แล้ว
+    if (dept.backupApproverUid !== undefined) payload.backupApproverUid = dept.backupApproverUid;
+    if (dept.backupApproverName !== undefined) payload.backupApproverName = dept.backupApproverName;
+    await setDoc(doc(db, 'department_config', dept.id), payload, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `department_config/${dept.id}`);
   }

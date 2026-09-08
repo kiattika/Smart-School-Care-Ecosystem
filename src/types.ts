@@ -328,6 +328,11 @@ export interface SubstituteAssignment {
   proposedByEmail?: string;
   proposedByName?: string;
   proposedByRole?: string;
+  // ตั้งค่าเมื่อผู้เสนอไม่ใช่หัวหน้ากลุ่มสาระฯ ตัวจริง แต่เป็นผู้ได้รับมอบหมายให้ปฏิบัติหน้าที่แทน
+  // (department_config.backupApproverUid หรือ ACADEMIC_HEAD กรณี fallback) ตอนหัวหน้ากลุ่มสาระฯ
+  // ลาป่วยเอง — เก็บ departmentId ที่กำลังปฏิบัติหน้าที่แทนไว้ เพื่อความโปร่งใสในการตรวจสอบย้อนหลัง
+  // (ไม่ปลอม proposedByRole เป็น HEAD_OF_DEPARTMENT — proposedByRole ยังเป็น role จริงของคนคนนั้นเสมอ)
+  actingAsBackupApproverForDeptId?: string | null;
   notes?: string;
   // วิธี B (หาครูสอนแทน): TEACHING = สอนเนื้อหาจริง, SUPERVISION_ONLY = ควบคุมชั้นเรียนอย่างเดียว
   // (บังคับเมื่อครูสอนแทนมาจากกลุ่มสาระอื่น) — ต้องแนบใบงาน/ใบความรู้/แบบทดสอบก่อนส่งคำขอได้
@@ -843,6 +848,12 @@ export interface DepartmentConfig {
   kind?: 'LEARNING_AREA' | 'DIRECTORATE' | 'SUPPORT' | 'ACTIVITY'; // ประเภทกลุ่ม
   parentId?: string | null; // กลุ่มย่อย (เช่น วิทย์-คอมพิวเตอร์ อยู่ใต้ วิทย์และเทคโนโลยี)
   active?: boolean;
+  // ผู้รับผิดชอบสำรอง — กำหนดไว้ล่วงหน้าเผื่อหัวหน้ากลุ่มสาระฯ ลาป่วยเอง (ไม่ใช่ ACADEMIC_HEAD เพราะ
+  // ดูแลทั้งโรงเรียน ไม่รู้ว่าใครลาวันไหนในแต่ละกลุ่มสาระ — ยืนยันจากโรงเรียนแล้ว) คนนี้จะเป็นทั้งผู้จัด
+  // สอนแทนและอนุมัติขั้น 1 แทนเมื่อหัวหน้ากลุ่มสาระฯ ตัวจริงลาป่วย — ถ้ายังไม่ได้กำหนดไว้ fallback ไปที่
+  // ACADEMIC_HEAD พร้อมเตือนชัดเจนในหน้าจอ (ดู SubstituteTeachingModule.tsx)
+  backupApproverUid?: string | null;
+  backupApproverName?: string | null;
 }
 
 export interface TCASPortfolioConfig {
