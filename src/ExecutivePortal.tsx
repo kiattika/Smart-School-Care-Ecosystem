@@ -4,9 +4,16 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { format } from 'date-fns';
-import { subscribeLateAttendanceRequests, subscribeAllStudentHomeLocations } from './services/firestoreService';
+import {
+  subscribeLateAttendanceRequests,
+  subscribeAllStudentHomeLocations,
+  subscribeAll2QScreenings,
+  subscribeAllPHQ9Screenings,
+  subscribeAllSDQAssessments,
+  subscribeInfirmaryVisits,
+} from './services/firestoreService';
 import { isNonStudentSession } from './utils/teacherLoadReportParser';
-import { LateAttendanceRequestRecord, StudentHomeLocation } from './types';
+import { LateAttendanceRequestRecord, StudentHomeLocation, TwoQuestionScreening, PHQ9Screening, SDQAssessment, InfirmaryVisit } from './types';
 import { 
   LayoutDashboard, 
   FileSpreadsheet, 
@@ -49,11 +56,10 @@ import { ExecutiveLearnerAnalytics } from './components/ExecutiveLearnerAnalytic
 import { ExecutiveEngagementDashboard } from './components/ExecutiveEngagementDashboard';
 import { useStore } from './store';
 import { useRealStudents } from './hooks/useRealStudents';
-import { 
+import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   BarChart, Bar,
   PieChart, Pie, Cell,
-  ScatterChart, Scatter, ZAxis
 } from 'recharts';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
@@ -101,6 +107,38 @@ export function ExecutivePortal() {
   // TASK 4 (GIS): พิกัดบ้านนักเรียนจริงทั้งโรงเรียน (firestore.rules เพิ่ม EXECUTIVE อ่านได้แล้ว)
   const [homeLocations, setHomeLocations] = useState<StudentHomeLocation[]>([]);
   useEffect(() => subscribeAllStudentHomeLocations(setHomeLocations), []);
+
+  // TASK 5 (Health tab): ข้อมูลสุขภาพจริงทั้งโรงเรียน (firestore.rules เพิ่ม EXECUTIVE อ่านได้แล้ว) —
+  // ใช้แค่สรุปจำนวน/เปอร์เซ็นต์ระดับโรงเรียน ไม่โชว์ผลรายบุคคล ตามคำสั่ง TASK 5
+  const [screenings2Q, setScreenings2Q] = useState<TwoQuestionScreening[]>([]);
+  const [screeningsPhq9, setScreeningsPhq9] = useState<PHQ9Screening[]>([]);
+  const [sdqAssessments, setSdqAssessments] = useState<SDQAssessment[]>([]);
+  const [infirmaryVisits, setInfirmaryVisits] = useState<InfirmaryVisit[]>([]);
+  useEffect(() => subscribeAll2QScreenings(setScreenings2Q), []);
+  useEffect(() => subscribeAllPHQ9Screenings(setScreeningsPhq9), []);
+  useEffect(() => subscribeAllSDQAssessments(setSdqAssessments), []);
+  useEffect(() => subscribeInfirmaryVisits(setInfirmaryVisits), []);
+
+  const healthSummary = useMemo(() => {
+    const positive2Q = screenings2Q.filter(s => s.isPositive).length;
+    const phq9Elevated = screeningsPhq9.filter(s => s.riskLevel !== 'NORMAL' && s.riskLevel !== 'MILD').length;
+    const sdqAtRisk = sdqAssessments.filter(s => s.triagingStatus === 'AT_RISK' || s.triagingStatus === 'VULNERABLE').length;
+    const thisMonthStr = format(new Date(), 'yyyy-MM');
+    const infirmaryThisMonth = infirmaryVisits.filter(v => (v.visitDate || '').startsWith(thisMonthStr));
+    return {
+      total2Q: screenings2Q.length,
+      positive2Q,
+      positive2QPercent: screenings2Q.length > 0 ? Math.round((positive2Q / screenings2Q.length) * 100) : null,
+      totalPhq9: screeningsPhq9.length,
+      phq9Elevated,
+      phq9ElevatedPercent: screeningsPhq9.length > 0 ? Math.round((phq9Elevated / screeningsPhq9.length) * 100) : null,
+      totalSdq: sdqAssessments.length,
+      sdqAtRisk,
+      sdqAtRiskPercent: sdqAssessments.length > 0 ? Math.round((sdqAtRisk / sdqAssessments.length) * 100) : null,
+      infirmaryVisitsThisMonth: infirmaryThisMonth.length,
+      infirmaryUrgentThisMonth: infirmaryThisMonth.filter(v => v.isUrgentAlert).length,
+    };
+  }, [screenings2Q, screeningsPhq9, sdqAssessments, infirmaryVisits]);
 
   // คำขอเช็คชื่อย้อนหลัง — อ่านจาก Firestore สด (อนุมัติจริงทำที่หน้ารองผู้อำนวยการฝ่ายวิชาการ)
   const [lateAttendanceRequests, setLateAttendanceRequests] = useState<LateAttendanceRequestRecord[]>([]);
@@ -785,101 +823,56 @@ export function ExecutivePortal() {
 
           {activeTab === 'health' && (
             <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
-              
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                {/* Health Risks KPI */}
-                <div className="lg:col-span-1 flex flex-col gap-4">
-                  <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl">
-                    <h3 className="text-sm font-medium text-slate-400 mb-6 uppercase tracking-widest">Prevalent Health Risks</h3>
-                    <div className="space-y-4">
-                      <div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-slate-300">Malnutrition</span>
-                          <span className="text-rose-400 font-bold">{mockExecutiveData.healthRisks.malnutrition}%</span>
-                        </div>
-                        <div className="w-full bg-white/5 rounded-full h-2">
-                          <div className="bg-rose-500 h-2 rounded-full" style={{ width: `${mockExecutiveData.healthRisks.malnutrition}%` }}></div>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-slate-300">Dental Issues</span>
-                          <span className="text-orange-400 font-bold">{mockExecutiveData.healthRisks.dentalIssues}%</span>
-                        </div>
-                        <div className="w-full bg-white/5 rounded-full h-2">
-                          <div className="bg-orange-500 h-2 rounded-full" style={{ width: `${mockExecutiveData.healthRisks.dentalIssues}%` }}></div>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-slate-300">Vision Impairment</span>
-                          <span className="text-amber-400 font-bold">{mockExecutiveData.healthRisks.visionIssues}%</span>
-                        </div>
-                        <div className="w-full bg-white/5 rounded-full h-2">
-                          <div className="bg-amber-400 h-2 rounded-full" style={{ width: `${mockExecutiveData.healthRisks.visionIssues}%` }}></div>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-slate-300">Mental Stress</span>
-                          <span className="text-indigo-400 font-bold">{mockExecutiveData.healthRisks.mentalStress}%</span>
-                        </div>
-                        <div className="w-full bg-white/5 rounded-full h-2">
-                          <div className="bg-indigo-500 h-2 rounded-full" style={{ width: `${mockExecutiveData.healthRisks.mentalStress}%` }}></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+              {/* TASK 5 (audit): เดิม tab นี้ทั้งหมดเป็นข้อมูลปลอม — malnutrition/dental/vision % คงที่
+                  (ไม่มีฟิลด์จริงในระบบเลย, ตรวจสอบแล้ว SemesterHealthRecord/height/weight/bmi มาจาก
+                  mockStudentParentData.ts เท่านั้น ไม่เคยเขียนลง Firestore จริง), กราฟแจกแจงดัชนีมวลกาย
+                  และกราฟกระจายระยะทาง-ผลการเรียน (ไม่มี commute distance จริงเหมือนที่พบใน TASK 4) —
+                  เอาออกทั้งหมด แทนที่ด้วยสรุปภาพรวมจากข้อมูลจริงที่มีอยู่ (คัดกรอง 2Q/PHQ-9, ประเมิน SDQ,
+                  บันทึกห้องพยาบาล) นับจำนวน/เปอร์เซ็นต์ระดับโรงเรียนเท่านั้น ไม่โชว์ผลรายบุคคล ตามคำสั่ง TASK 5 */}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl">
+                  <h3 className="text-sm font-medium text-slate-400 mb-2 uppercase tracking-widest">คัดกรองสุขภาพจิต (2Q)</h3>
+                  {healthSummary.total2Q > 0 ? (
+                    <>
+                      <p className="text-4xl font-bold text-white mb-1">{healthSummary.positive2QPercent}%</p>
+                      <p className="text-xs text-slate-400">พบความเสี่ยง {healthSummary.positive2Q} จาก {healthSummary.total2Q} คนที่คัดกรองแล้ว</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-500">ยังไม่มีข้อมูลคัดกรอง 2Q ในระบบ</p>
+                  )}
                 </div>
 
-                {/* BMI Distribution */}
-                <div className="lg:col-span-1 bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl flex flex-col h-[350px]">
-                  <h3 className="text-lg font-medium text-white mb-6">BMI Distribution</h3>
-                  <div className="flex-1 w-full min-h-0">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={mockExecutiveData.bmiDistribution} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                        <XAxis dataKey="category" stroke="#475569" tick={{fill: '#94a3b8', fontSize: 11}} axisLine={false} tickLine={false} />
-                        <YAxis stroke="#475569" tick={{fill: '#94a3b8', fontSize: 12}} axisLine={false} tickLine={false} />
-                        <RechartsTooltip 
-                          cursor={{fill: '#ffffff05'}}
-                          contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                          itemStyle={{ color: '#deff9a' }}
-                        />
-                        <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]}>
-                          {mockExecutiveData.bmiDistribution.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={index === 1 ? '#10b981' : index === 0 ? '#fbbf24' : '#ef4444'} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl">
+                  <h3 className="text-sm font-medium text-slate-400 mb-2 uppercase tracking-widest">คัดกรองซึมเศร้า (PHQ-9)</h3>
+                  {healthSummary.totalPhq9 > 0 ? (
+                    <>
+                      <p className="text-4xl font-bold text-white mb-1">{healthSummary.phq9ElevatedPercent}%</p>
+                      <p className="text-xs text-slate-400">ระดับปานกลางขึ้นไป {healthSummary.phq9Elevated} จาก {healthSummary.totalPhq9} คนที่คัดกรองแล้ว</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-500">ยังไม่มีข้อมูลคัดกรอง PHQ-9 ในระบบ</p>
+                  )}
                 </div>
 
-                {/* Commute vs Performance Scatter */}
-                <div className="lg:col-span-2 bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl flex flex-col h-[350px]">
-                  <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-lg font-medium text-white">Commute vs. Performance Analysis</h3>
-                    <span className="text-xs text-slate-400 bg-white/5 px-2 py-1 rounded">Distance (km) vs Attendance (%)</span>
-                  </div>
-                  <div className="flex-1 w-full min-h-0">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ScatterChart margin={{ top: 10, right: 20, left: -20, bottom: 10 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" />
-                        <XAxis type="number" dataKey="distance" name="Distance" unit="km" stroke="#475569" tick={{fill: '#94a3b8', fontSize: 12}} axisLine={false} tickLine={false} />
-                        <YAxis type="number" dataKey="attendance" name="Attendance" unit="%" stroke="#475569" tick={{fill: '#94a3b8', fontSize: 12}} axisLine={false} tickLine={false} domain={['dataMin - 5', 100]} />
-                        <ZAxis type="number" dataKey="late" range={[50, 400]} name="Late Days" />
-                        <RechartsTooltip 
-                          cursor={{strokeDasharray: '3 3'}}
-                          contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                          itemStyle={{ color: '#deff9a' }}
-                        />
-                        <Scatter name="Students" data={mockExecutiveData.correlationData} fill="#deff9a" opacity={0.6} />
-                      </ScatterChart>
-                    </ResponsiveContainer>
-                  </div>
+                <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl">
+                  <h3 className="text-sm font-medium text-slate-400 mb-2 uppercase tracking-widest">ประเมินพฤติกรรม (SDQ)</h3>
+                  {healthSummary.totalSdq > 0 ? (
+                    <>
+                      <p className="text-4xl font-bold text-white mb-1">{healthSummary.sdqAtRiskPercent}%</p>
+                      <p className="text-xs text-slate-400">กลุ่มเสี่ยง/ต้องดูแล {healthSummary.sdqAtRisk} จาก {healthSummary.totalSdq} ฉบับที่ประเมินแล้ว</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-500">ยังไม่มีข้อมูลประเมิน SDQ ในระบบ</p>
+                  )}
                 </div>
 
+                <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl">
+                  <h3 className="text-sm font-medium text-slate-400 mb-2 uppercase tracking-widest">ห้องพยาบาล (เดือนนี้)</h3>
+                  <p className="text-4xl font-bold text-white mb-1">{healthSummary.infirmaryVisitsThisMonth}</p>
+                  <p className="text-xs text-slate-400">
+                    ครั้ง{healthSummary.infirmaryUrgentThisMonth > 0 ? ` · แจ้งเตือนด่วน ${healthSummary.infirmaryUrgentThisMonth} ครั้ง` : ''}
+                  </p>
+                </div>
               </div>
             </div>
           )}

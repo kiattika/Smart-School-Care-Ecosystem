@@ -1335,6 +1335,60 @@ export function subscribeSDQAssessments(
 }
 
 /**
+ * TASK 5 (ExecutivePortal Health, สรุปภาพรวมโรงเรียน): อ่านผลคัดกรอง/ประเมินทั้งโรงเรียนแบบไม่ scope
+ * รายบุคคล — ต่างจาก subscribeSDQAssessments ด้านบนที่ต้องระบุ studentUid/respondentUid เสมอ
+ * (สำหรับมุมมองนักเรียน/ผู้ปกครอง/ครู) ฟังก์ชันกลุ่มนี้ใช้กับ EXECUTIVE เท่านั้น (firestore.rules
+ * อนุญาตอ่านทั้ง collection แล้ว) ฝั่ง UI ต้องรวมเป็นจำนวน/เปอร์เซ็นต์เท่านั้น ห้ามโชว์ผลรายบุคคล
+ */
+export function subscribeAll2QScreenings(
+  onUpdate: (screenings: TwoQuestionScreening[]) => void
+): () => void {
+  try {
+    return onSnapshot(collection(db, 'student_screenings_2q'), (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as TwoQuestionScreening)));
+    }, (error) => {
+      console.warn('[subscribeAll2QScreenings] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeAll2QScreenings] setup error:', error);
+    return () => {};
+  }
+}
+
+export function subscribeAllPHQ9Screenings(
+  onUpdate: (screenings: PHQ9Screening[]) => void
+): () => void {
+  try {
+    return onSnapshot(collection(db, 'student_screenings_phq9'), (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as PHQ9Screening)));
+    }, (error) => {
+      console.warn('[subscribeAllPHQ9Screenings] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeAllPHQ9Screenings] setup error:', error);
+    return () => {};
+  }
+}
+
+export function subscribeAllSDQAssessments(
+  onUpdate: (assessments: SDQAssessment[]) => void
+): () => void {
+  try {
+    return onSnapshot(collection(db, 'student_assessments_sdq'), (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as SDQAssessment)));
+    }, (error) => {
+      console.warn('[subscribeAllSDQAssessments] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeAllSDQAssessments] setup error:', error);
+    return () => {};
+  }
+}
+
+/**
  * Parent Engagement Persistence (Billing, Messages, Appointments)
  *
  * ขอบเขตงานจริง (ยืนยันจากโรงเรียน): "แจ้งค่าใช้จ่าย + ส่งใบเสร็จ เท่านั้น" ไม่ใช่ระบบบัญชีเต็มรูปแบบ
