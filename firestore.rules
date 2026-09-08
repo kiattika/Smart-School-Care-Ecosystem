@@ -320,13 +320,16 @@ service cloud.firestore {
     // ฝั่ง UI เพราะ optimistic local state แต่ Firestore ปฏิเสธจริง) แก้เป็น isSelfStudent() ที่เทียบผ่าน
     // students/{studentId}.studentUid จริงแทน — ไม่ได้เปลี่ยนว่าใครมีสิทธิ์ (ยังเป็นเจ้าของตัวเอง/
     // ครูประจำชั้น/ครูแนะแนว/แอดมินเหมือนเดิม) แค่แก้วิธีตรวจว่า "ตัวเอง" ให้ตรงกับที่ระบบตั้งใจไว้จริง
+    // TASK 5 (ExecutivePortal Health, ยืนยันจากผู้ใช้): เพิ่ม EXECUTIVE อ่านได้ทั้งโรงเรียน เพื่อสรุป
+    // ภาพรวมระดับโรงเรียน (นับจำนวน ไม่ระบุตัวบุคคล) — Firestore ไม่มี field-level redaction ฝั่ง UI
+    // ต้องรวมเป็นตัวเลขสรุปเท่านั้น ห้ามโชว์ผลรายบุคคล
     match /student_screenings_2q/{studentId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || hasRole('EXECUTIVE') || isSelfStudent(studentId);
       allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
     }
 
     match /student_screenings_phq9/{studentId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || hasRole('EXECUTIVE') || isSelfStudent(studentId);
       allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
     }
 
@@ -339,6 +342,7 @@ service cloud.firestore {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('GUIDANCE_COUNSELOR') ||
                      hasRole('HOMEROOM_TEACHER') ||
+                     hasRole('EXECUTIVE') ||
                      (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.respondentUid == request.auth.uid));
 
       // studentUid ต้อง denormalize ตรงกับ students/{studentId} จริงเสมอ (ไม่ว่าใครเป็นผู้กรอก)
@@ -496,7 +500,11 @@ service cloud.firestore {
     match /student_home_locations/{studentId} {
       // resource == null = doc ยังไม่ถูกสร้าง (นักเรียนเปิดหน้าก่อนบันทึกครั้งแรก) —
       // ต้องยอมให้ get ผ่านแบบ "ไม่มีข้อมูล" ไม่งั้น rule error (Null value) แล้ว listener พัง
+      // TASK 4 (ExecutivePortal GIS, ยืนยันจากผู้ใช้): เพิ่ม EXECUTIVE อ่านได้ทั้งโรงเรียน (ไม่ scope ห้อง)
+      // เพราะ Firestore ไม่มี field-level redaction — ฝั่ง UI ต้องรวมเป็นสรุป/จุดพิกัดเท่านั้น
+      // ห้ามโชว์ชื่อ-นามสกุลนักเรียนรายคนในแผนที่ผู้บริหาร
       allow read: if hasRole('SUPER_ADMIN')
+                     || hasRole('EXECUTIVE')
                      || (isSignedIn() && resource == null)
                      || (resource != null && resource.data.studentUid == request.auth.uid)
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass));
@@ -601,6 +609,7 @@ service cloud.firestore {
     match /infirmary_visits/{visitId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('INFIRMARY_STAFF') ||
+                     hasRole('EXECUTIVE') ||
                      (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
 
       allow create: if (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF')) &&

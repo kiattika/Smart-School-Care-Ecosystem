@@ -1033,6 +1033,13 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertFails(asRole('SUBJECT_TEACHER').firestore().doc(`student_home_locations/${STU_ID}`).get());
       await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_home_locations/${STU_ID}`).get());
     });
+    it('TASK 4 (ExecutivePortal GIS): EXECUTIVE role อ่านได้ทั้งโรงเรียน (ไม่ scope ห้อง) เพื่อสรุปแผนที่ผู้บริหาร', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_home_locations/${STU_ID}`).set(loc());
+      });
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc(`student_home_locations/${STU_ID}`).get());
+    });
     it('denies deleting a home location', async () => {
       await seed();
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
@@ -1390,6 +1397,21 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
       await assertFails(asUser(OTHER_UID, ['STUDENT']).firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
     });
+
+    it('TASK 5 (ExecutivePortal Health): EXECUTIVE role อ่านได้เพื่อสรุปภาพรวมโรงเรียน (นับจำนวน ไม่ระบุตัวบุคคล)', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_screenings_2q/${STU_ID}`).set({
+          id: '2q-3', studentId: STU_ID, q1Depressed: true, q2Hopeless: false, isPositive: true, conductedAt: '2026-09-01',
+        });
+        await ctx.firestore().doc(`student_screenings_phq9/${STU_ID}`).set({
+          id: 'phq-4', studentId: STU_ID, answers: [1, 1, 1, 1, 1, 1, 1, 1, 1], totalScore: 9, riskLevel: 'MODERATE',
+          recommendation: 'ทดสอบ', conductedAt: '2026-09-01',
+        });
+      });
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc(`student_screenings_2q/${STU_ID}`).get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
+    });
   });
 
   // student_assessments_sdq — read access baseline (write path ยังมีปัญหา evaluator self-check
@@ -1407,6 +1429,7 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc('student_assessments_sdq/sdq-1').get());
       await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('student_assessments_sdq/sdq-1').get());
       await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('student_assessments_sdq/sdq-1').get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('student_assessments_sdq/sdq-1').get());
       await assertFails(asUser('unrelated-uid', ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-1').get());
     });
 
@@ -1616,6 +1639,13 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('infirmary_visits/inf-5').get());
       await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('infirmary_visits/inf-5').get());
       await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('infirmary_visits/inf-5').get());
+    });
+    it('TASK 5 (ExecutivePortal Health): EXECUTIVE role อ่านได้เพื่อสรุปภาพรวมโรงเรียน', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('infirmary_visits/inf-8').set(baseVisit({ id: 'inf-8' }));
+      });
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('infirmary_visits/inf-8').get());
     });
 
     it('lets the linked parent acknowledge (parentAcknowledged/acknowledgedAt only); denies changing other fields or an unrelated parent acknowledging', async () => {
