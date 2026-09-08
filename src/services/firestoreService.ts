@@ -1743,6 +1743,28 @@ export function subscribeStudentHomeLocationsByRoom(
   }
 }
 
+/**
+ * TASK 4 (ExecutivePortal GIS): ผู้บริหารดูพิกัดบ้านนักเรียนทั้งโรงเรียน (ไม่ scope ห้อง) —
+ * ต่างจาก subscribeStudentHomeLocationsByRoom ที่ query ทีละห้องสำหรับครูที่ปรึกษา ฟังก์ชันนี้
+ * อ่านทั้ง collection ตรงๆ ต้องอาศัย firestore.rules อนุญาต EXECUTIVE อ่านได้แล้ว (ดู TASK 4 rules)
+ * ฝั่ง UI ต้องรวมเป็นจุดพิกัด/สรุป ไม่โชว์ชื่อ-นามสกุลนักเรียนรายคนตรงๆ บนแผนที่ผู้บริหาร
+ */
+export function subscribeAllStudentHomeLocations(
+  onUpdate: (locs: StudentHomeLocation[]) => void
+): () => void {
+  try {
+    return onSnapshot(collection(db, HOME_LOCATION_COL), (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as StudentHomeLocation)));
+    }, (error) => {
+      console.warn('[subscribeAllStudentHomeLocations] Listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeAllStudentHomeLocations] Setup error:', error);
+    return () => {};
+  }
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
  * Elective activities (ชุมนุม/กิจกรรมตามความสนใจ) — elective_activities_config +
  * activity_enrollments + activity_enrollment_counts

@@ -4,9 +4,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { format } from 'date-fns';
-import { subscribeLateAttendanceRequests } from './services/firestoreService';
+import { subscribeLateAttendanceRequests, subscribeAllStudentHomeLocations } from './services/firestoreService';
 import { isNonStudentSession } from './utils/teacherLoadReportParser';
-import { LateAttendanceRequestRecord } from './types';
+import { LateAttendanceRequestRecord, StudentHomeLocation } from './types';
 import { 
   LayoutDashboard, 
   FileSpreadsheet, 
@@ -66,14 +66,21 @@ import { motion, AnimatePresence } from 'motion/react';
 // ================= Mock Data =================
 
 
-const getPinColor = (pin: any) => {
-  if (pin.riskStatus === 'critical') return '#ef4444'; // Rose
-  if (pin.riskStatus === 'warning') return '#fbbf24'; // Amber
-  if (pin.isScholarship) return '#8b5cf6'; // Violet
+// TASK 4 (ExecutivePortal GIS, audit): เดิม pin ใช้ riskStatus/isScholarship/commuteDistance
+// แบบสมมติ (ดึงจาก mock data เดิมของหน้านี้ทั้งหมด) ไม่มีข้อมูลจริงรองรับเลยสักฟิลด์ — ตรวจสอบแล้ว
+// StudentHomeLocation ไม่มีฟิลด์เหล่านี้ และไม่มี scholarship field จริงในระบบเลย (grep ทั้งโปรเจกต์)
+// จึงตัด isScholarship/commuteDistance ออกตามคำสั่ง ("ถ้าไม่มีข้อมูลจริงรองรับ ให้เอาออก") แต่สถานะเสี่ยง
+// มีข้อมูลจริงรองรับ (Student.riskLevel — เก็บที่ students/{id}.riskLevel จริง อัปเดตผ่าน
+// updateBehaviorScoreAndTriggerAlert) จึงใช้แทนได้โดยไม่ผิดกฎ
+type GisPin = { id: string; lat: number; lng: number; name: string; riskLevel: 'NORMAL' | 'WARNING' | 'CRITICAL' };
+
+const getPinColor = (pin: GisPin) => {
+  if (pin.riskLevel === 'CRITICAL') return '#ef4444'; // Rose
+  if (pin.riskLevel === 'WARNING') return '#fbbf24'; // Amber
   return '#10b981'; // Emerald
 };
 
-const createCustomIcon = (pin: any) => L.divIcon({
+const createCustomIcon = (pin: GisPin) => L.divIcon({
   className: 'custom-map-pin',
   html: `<div style="background-color: ${getPinColor(pin)}; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 15px ${getPinColor(pin)};"></div>`,
   iconSize: [16, 16],
@@ -90,6 +97,10 @@ export function ExecutivePortal() {
   } = useStore();
   // นักเรียนจาก Firestore สด — store แบบ session-local ทำให้ผู้บริหารเห็น 0 คนเมื่อไม่ได้ import เอง
   const { students } = useRealStudents();
+
+  // TASK 4 (GIS): พิกัดบ้านนักเรียนจริงทั้งโรงเรียน (firestore.rules เพิ่ม EXECUTIVE อ่านได้แล้ว)
+  const [homeLocations, setHomeLocations] = useState<StudentHomeLocation[]>([]);
+  useEffect(() => subscribeAllStudentHomeLocations(setHomeLocations), []);
 
   // คำขอเช็คชื่อย้อนหลัง — อ่านจาก Firestore สด (อนุมัติจริงทำที่หน้ารองผู้อำนวยการฝ่ายวิชาการ)
   const [lateAttendanceRequests, setLateAttendanceRequests] = useState<LateAttendanceRequestRecord[]>([]);
@@ -155,16 +166,33 @@ export function ExecutivePortal() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   // States for GIS Filter
-  const [gisFilter, setGisFilter] = useState<'all' | 'risk' | 'scholarship'>('all');
+  const [gisFilter, setGisFilter] = useState<'all' | 'risk'>('all');
   const [showHeatmap, setShowHeatmap] = useState(false);
 
   // States for Policy Actions
   const [actionStatuses, setActionStatuses] = useState<Record<string, 'approved' | 'reviewed' | null>>({});
 
-  const filteredPins = mockExecutiveData.gisStudents.filter(pin => {
+  // TASK 4 (GIS): pin จริงจาก student_home_locations + students (ชื่อ/riskLevel) — ตัด nameไม่เจอนักเรียน
+  // (studentId ไม่ match กับ students ที่มีอยู่ตอนนี้ เช่น import ไม่ครบ) ออกแทนการโชว์ "ไม่ทราบชื่อ"
+  const gisPins = useMemo<GisPin[]>(() => {
+    return homeLocations
+      .map(loc => {
+        const student = students.find(s => s.studentId === loc.studentId);
+        if (!student) return null;
+        return {
+          id: loc.id,
+          lat: loc.latitude,
+          lng: loc.longitude,
+          name: student.name,
+          riskLevel: student.riskLevel || 'NORMAL',
+        } as GisPin;
+      })
+      .filter((p): p is GisPin => p !== null);
+  }, [homeLocations, students]);
+
+  const filteredPins = gisPins.filter(pin => {
     if (gisFilter === 'all') return true;
-    if (gisFilter === 'risk') return pin.riskStatus === 'warning' || pin.riskStatus === 'critical';
-    if (gisFilter === 'scholarship') return pin.isScholarship;
+    if (gisFilter === 'risk') return pin.riskLevel === 'WARNING' || pin.riskLevel === 'CRITICAL';
     return true;
   });
 
@@ -600,10 +628,10 @@ export function ExecutivePortal() {
                           <div className="w-3 h-3 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>
                           <span className="font-medium text-sm">นักเรียนทั้งหมด</span>
                         </div>
-                        <span className="text-xs bg-black/30 px-2 py-1 rounded-md">{mockExecutiveData.gisStudents.length}</span>
+                        <span className="text-xs bg-black/30 px-2 py-1 rounded-md">{gisPins.length}</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => setGisFilter('risk')}
                         className={cn("w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all", gisFilter === 'risk' ? "bg-rose-500/10 border-rose-500/50 text-rose-300" : "bg-white/5 border-transparent text-slate-400 hover:bg-white/10")}
                       >
@@ -611,19 +639,11 @@ export function ExecutivePortal() {
                           <div className="w-3 h-3 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]"></div>
                           <span className="font-medium text-sm">กลุ่มเสี่ยง (At-Risk)</span>
                         </div>
-                        <span className="text-xs bg-black/30 px-2 py-1 rounded-md">{mockExecutiveData.gisStudents.filter(p => p.riskStatus === 'warning' || p.riskStatus === 'critical').length}</span>
+                        <span className="text-xs bg-black/30 px-2 py-1 rounded-md">{gisPins.filter(p => p.riskLevel === 'WARNING' || p.riskLevel === 'CRITICAL').length}</span>
                       </button>
-
-                      <button 
-                        onClick={() => setGisFilter('scholarship')}
-                        className={cn("w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all", gisFilter === 'scholarship' ? "bg-violet-500/10 border-violet-500/50 text-violet-300" : "bg-white/5 border-transparent text-slate-400 hover:bg-white/10")}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-3 h-3 rounded-full bg-violet-500 shadow-[0_0_8px_rgba(139,92,246,0.8)]"></div>
-                          <span className="font-medium text-sm">นักเรียนทุน คสศ.</span>
-                        </div>
-                        <span className="text-xs bg-black/30 px-2 py-1 rounded-md">{mockExecutiveData.gisStudents.filter(p => p.isScholarship).length}</span>
-                      </button>
+                      {/* TASK 4 (audit): เดิมมีปุ่มกรอง "นักเรียนทุน คสศ." (isScholarship) — ไม่มีฟิลด์
+                          scholarship จริงในระบบเลย (grep ทั้งโปรเจกต์ไม่เจอ) เอาออกตามกฎ ห้ามแสดงข้อมูล
+                          ที่ไม่มีข้อมูลจริงรองรับ */}
                     </div>
                   </div>
 
@@ -652,10 +672,10 @@ export function ExecutivePortal() {
                     />
                     
                     {filteredPins.map(pin => (
-                      <Marker 
-                        key={pin.id} 
-                        position={[pin.lat, pin.lng]} 
-                        icon={showHeatmap && (pin.riskStatus === 'critical' || pin.riskStatus === 'warning') ? L.divIcon({
+                      <Marker
+                        key={pin.id}
+                        position={[pin.lat, pin.lng]}
+                        icon={showHeatmap && (pin.riskLevel === 'CRITICAL' || pin.riskLevel === 'WARNING') ? L.divIcon({
                           className: 'heatmap-pin',
                           html: `<div style="background: radial-gradient(circle, rgba(239,68,68,0.8) 0%, rgba(239,68,68,0) 70%); width: 60px; height: 60px; border-radius: 50%; transform: translate(-20px, -20px);"></div>`,
                           iconSize: [20, 20],
@@ -665,10 +685,8 @@ export function ExecutivePortal() {
                         <Popup className="custom-popup">
                           <div className="p-1 font-sans">
                             <h4 className="font-bold text-slate-800 text-sm mb-1">{pin.name.replace(/^[นายด.ช.ญ.\s]+/, 'Student #')}</h4>
-                            <p className="text-xs text-slate-600 mb-1">ระยะทาง: {pin.commuteDistance}</p>
                             <p className="text-xs text-slate-600">
-                              สถานะ: {pin.riskStatus === 'safe' ? 'ปลอดภัย' : pin.riskStatus === 'warning' ? 'เฝ้าระวัง' : 'วิกฤต'}
-                              {pin.isScholarship && ' (ทุน คสศ.)'}
+                              สถานะ: {pin.riskLevel === 'NORMAL' ? 'ปกติ' : pin.riskLevel === 'WARNING' ? 'เฝ้าระวัง' : 'วิกฤต'}
                             </p>
                           </div>
                         </Popup>
