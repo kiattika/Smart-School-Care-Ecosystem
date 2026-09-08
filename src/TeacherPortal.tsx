@@ -428,7 +428,14 @@ export function TeacherPortal() {
     }
 
     const selectedCourse = gradebookCourses.find(c => c.id === selectedGradebookCourseId);
-    const targetClassName = selectedCourse?.room || (selectedCourse as any)?.className || (selectedCourse as any)?.roomName || '';
+    // ROOT CAUSE (พิสูจน์ด้วย debug log จริง — ไม่ใช่แค่เดา): เดิมใช้ .room (ห้องกายภาพ เช่น "943")
+    // ก่อน .level (ระดับชั้น เช่น "ม.5/8") — getStudentsByClass() query where('className', '==', ...)
+    // และ fallback isSameRoom(s.room/.className, ...) ต่างเทียบกับค่า "ระดับชั้น" ของนักเรียนทั้งคู่
+    // (ดู students/{id}.room และ .className ในฐานข้อมูลจริง — ทั้งสอง field เก็บ "ม.5/8" ไม่ใช่ "943")
+    // ผลคือทุกวิชาที่ import มามีห้องกายภาพระบุ (เกือบทุกวิชา ไม่ใช่แค่ที่มีครูร่วมสอน) ค้นหาไม่เจอ
+    // นักเรียนเลย คืน 0 คนเงียบๆ ทั้งทาง Firestore query และ fallback — ไม่เกี่ยวกับ TASK 3
+    // (teacherId → teacherIds) เลย ตรวจแล้วว่า gradebookCourses/myCourses กรองวิชาถูกต้องอยู่แล้ว
+    const targetClassName = selectedCourse?.level || selectedCourse?.room || (selectedCourse as any)?.className || (selectedCourse as any)?.roomName || '';
     const courseCode = selectedCourse?.code || '';
     const term = selectedCourse?.term || '1/2569';
 
@@ -1590,7 +1597,10 @@ export function TeacherPortal() {
                   <div className="overflow-x-auto">
                     {(() => {
                       const selectedCourse = gradebookCourses.find(c => c.id === selectedGradebookCourseId);
-                      const targetClassName = selectedCourse?.room || (selectedCourse as any)?.className || (selectedCourse as any)?.roomName || '';
+                      // ต้องใช้สูตรเดียวกับตอนดึงรายชื่อนักเรียน (useEffect ด้านบน) เป๊ะๆ — ไม่งั้นตอน
+                      // บันทึกคะแนนจะเขียนด้วย targetClassName คนละค่ากับตอนอ่าน (เช่น อ่านด้วย "ม.5/8"
+                      // แต่เขียนด้วย "943") ทำให้คะแนนที่บันทึกหายไปเงียบๆ ตอนโหลดหน้าใหม่
+                      const targetClassName = selectedCourse?.level || selectedCourse?.room || (selectedCourse as any)?.className || (selectedCourse as any)?.roomName || '';
                       const courseCode = selectedCourse?.code || '';
                       const term = selectedCourse?.term || '1/2569';
 
