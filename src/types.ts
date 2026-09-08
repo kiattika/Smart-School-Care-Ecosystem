@@ -218,6 +218,9 @@ export interface GlobalCourse {
   roomName: string;
   scheduleString: string;
   level: string;
+  // TASK 3 (ครูร่วมสอน): ครูรับผิดชอบร่วมกันได้หลายคนต่อคาบ (เช่น HR ม.5/8) — teacherEmail ข้างบน
+  // ยังคงเป็นของครูคนแรก/หลักเท่านั้น (backward compat) ใช้ teacherIds เพื่อจับคู่ครูร่วมสอนคนอื่นด้วย
+  teacherIds?: string[];
 }
 
 export interface Course {

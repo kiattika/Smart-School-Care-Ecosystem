@@ -24,6 +24,14 @@
  * แก้โดยฝัง teacherKey (primaryTeacherKey) เข้าไปใน id เฉพาะแถว subjectType === 'ACTIVITY'
  * เท่านั้น — แถว MAIN ไม่แตะ (room/level ของ MAIN ระบุห้องเรียนจริงที่ไม่ชนกันข้ามครูอยู่แล้ว
  * และมี schedule doc เก่าที่อ้างอิง id รูปแบบเดิมอยู่จริงใน production)
+ *
+ * TASK 3 (ครูร่วมสอน — ยืนยันจากข้อมูลจริง Teacher_Load_Report): แถว ACTIVITY ที่ "มีห้องเรียนจริง"
+ * ระบุอยู่ (เช่น HR ม.5/8 ห้อง 943 ที่มี 2 ครูรับผิดชอบร่วมกัน) คือคาบ/ห้องเดียวกันจริง ไม่ใช่คนละ
+ * session แบบ PLC/กิจกรรมทั้งโรงเรียนที่ไม่มีห้องเฉพาะ — ต้อง "รวม" เป็น schedule doc เดียวกัน
+ * (ผ่าน teacherIds: string[] ในตัว doc เอง ดู generateScheduleDocuments/handleConfirmImport) ไม่ใช่
+ * แยก doc ต่อครูแบบ ACTIVITY ไม่มีห้อง — จึงฝัง teacherKey เฉพาะตอน "ไม่มีห้องเรียนจริง" เท่านั้น
+ * (room ว่าง — คือกรณีที่ root-cause fix เดิมตั้งใจแก้จริงๆ) ถ้ามี room ระบุอยู่ ถือว่าเป็นห้อง/คาบ
+ * จริงที่ครูหลายคนแชร์กันได้ ไม่ฝัง teacherKey แม้จะเป็น ACTIVITY ก็ตาม
  */
 export function scheduleDocIdFor(
   subjectCode: string, room: string, level: string, dayOfWeek: string, periodNumber: number,
@@ -34,7 +42,8 @@ export function scheduleDocIdFor(
   const safeTeacherKey = teacherKey
     ? String(teacherKey).replace(/[^\p{L}\p{N}\p{M}_-]+/gu, '_').slice(0, 40)
     : '';
-  const teacherSegment = subjectType === 'ACTIVITY' && safeTeacherKey ? `_t${safeTeacherKey}` : '';
+  const hasRealRoom = !!(room && String(room).trim());
+  const teacherSegment = subjectType === 'ACTIVITY' && !hasRealRoom && safeTeacherKey ? `_t${safeTeacherKey}` : '';
   return `sch_${safeCode}_${cleanRoom}${teacherSegment}_${dayOfWeek}_p${periodNumber}`;
 }
 

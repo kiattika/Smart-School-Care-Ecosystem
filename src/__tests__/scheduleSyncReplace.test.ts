@@ -123,6 +123,13 @@ describe('computeSyncReplacePlan — Bulk Import COURSE sync/replace', () => {
         .toBe('sch_ค32101_943_monday_p6');
     });
 
+    it('TASK 3 (ครูร่วมสอน): ACTIVITY ที่มีห้องเรียนจริง (เช่น HR ม.5/8 ห้อง 943) ไม่ฝัง teacherKey — ครูร่วมรับผิดชอบหลายคนต้องได้ id เดียวกัน (merge เป็น doc เดียวกัน ไม่แยกคนละ doc แบบ PLC)', () => {
+      const idTeacherA = scheduleDocIdFor('HR', '943', 'M.5/8', 'monday', 0, 'ACTIVITY', 'teacher-a-uid');
+      const idTeacherB = scheduleDocIdFor('HR', '943', 'M.5/8', 'monday', 0, 'ACTIVITY', 'teacher-b-uid');
+      expect(idTeacherA).toBe(idTeacherB);
+      expect(idTeacherA).toBe('sch_HR_943_monday_p0');
+    });
+
     it('primaryTeacherKey: เลือก UID จริงก่อนเสมอ ไม่ fabricate ตัวใหม่', () => {
       expect(primaryTeacherKey({ matchedTeacherId: 'uid-1', matchedTeacherEmail: 'a@utd.ac.th', teacherName: 'A' })).toBe('uid-1');
       expect(primaryTeacherKey({ matchedTeacherEmail: 'a@utd.ac.th', teacherName: 'A' })).toBe('a@utd.ac.th');

@@ -235,6 +235,8 @@ export function TeacherPortal() {
         roomName: sch.room || sch.level || sch.targetClass || '',
         scheduleString,
         level: sch.level || '',
+        // TASK 3: ครูร่วมสอน (เช่น HR ม.5/8) — teacherEmail ข้างบนเป็นของครูคนแรก/หลักเท่านั้น
+        teacherIds: Array.isArray(sch.teacherIds) ? sch.teacherIds : (sch.teacherId ? [sch.teacherId] : []),
       } as GlobalCourse;
     });
   }, [fsSchedules]);
@@ -242,9 +244,12 @@ export function TeacherPortal() {
   const myCourses: Course[] = useMemo(() => {
     const rawList = globalCourses
       .filter(gc => {
-        // 1. Is original teacher
-        const isOriginal = isTeacherEmailMatch(gc.teacherEmail, user?.email);
-        
+        // 1. Is original teacher — TASK 3: ตรวจทั้ง email ของครูคนแรก/หลัก (backward compat) และ
+        // teacherIds ทั้งอาร์เรย์ (ครูร่วมสอนคนอื่นที่ไม่ใช่ครูคนแรกในไฟล์ import ก็ต้องเห็นวิชานี้
+        // ในตารางสอน/สมุดคะแนนของตัวเองด้วย — ไม่ใช่แค่คนที่ email ตรงกับ teacherEmail เท่านั้น)
+        const isOriginal = isTeacherEmailMatch(gc.teacherEmail, user?.email) ||
+          (!!user?.uid && (gc.teacherIds || []).includes(user.uid));
+
         // 2. Is substitute teacher today
         const isSub = substituteAssignments.some(sa => 
           sa.courseId === gc.courseId && 
