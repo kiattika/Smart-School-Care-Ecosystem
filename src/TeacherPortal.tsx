@@ -5,7 +5,7 @@ import { useSchoolCalendar } from './hooks/useSchoolCalendar';
 import { DatePicker } from './components/shared/DatePicker';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
-import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests } from './services/firestoreService';
+import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests, subscribeHiddenGradebookCourses, hideGradebookCourse, unhideGradebookCourse } from './services/firestoreService';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from './lib/firebase';
 import { TeacherScheduleList, SubjectPeriod } from './components/TeacherScheduleList';
@@ -423,6 +423,21 @@ export function TeacherPortal() {
   const [isCopyMode, setIsCopyMode] = useState(false);
   const [copyTargetCourses, setCopyTargetCourses] = useState<string[]>([]);
   const [isEarlyWarningDrawerOpen, setIsEarlyWarningDrawerOpen] = useState(false);
+
+  // TASK 3 (สมุดบันทึกคะแนน): คาบกิจกรรมที่ไม่ต้องประเมิน (เช่น PLC, พักกลางวัน) ครูซ่อนออกจาก dropdown
+  // ของตัวเองได้ — ไม่ลบข้อมูลจริง แค่ preference ส่วนตัวต่อครูคนเดียว (ดู firestoreService.ts)
+  const [hiddenGradebookCourseIds, setHiddenGradebookCourseIds] = useState<Set<string>>(new Set());
+  const [showHiddenCoursesModal, setShowHiddenCoursesModal] = useState(false);
+  useEffect(() => {
+    if (!user?.uid) { setHiddenGradebookCourseIds(new Set()); return; }
+    return subscribeHiddenGradebookCourses(user.uid, setHiddenGradebookCourseIds);
+  }, [user?.uid]);
+
+  // dropdown เลือกวิชา — ตัดคาบกิจกรรมที่ครูซ่อนไว้ออก (ไม่ตัดวิชาหลัก MAIN เพราะไม่มีปุ่มซ่อนให้)
+  const visibleGradebookCourses = useMemo(
+    () => gradebookCourses.filter(c => !hiddenGradebookCourseIds.has(c.id)),
+    [gradebookCourses, hiddenGradebookCourseIds]
+  );
 
   useEffect(() => {
     if (!selectedGradebookCourseId) {
@@ -1569,7 +1584,7 @@ export function TeacherPortal() {
                   </div>
                   <div className="flex items-center gap-3">
                     {selectedGradebookCourseId && (
-                      <button 
+                      <button
                         onClick={() => {
                           const existing = courseScoreSettings.find(s => s.courseId === selectedGradebookCourseId);
                           setScoreSettingForm(existing || { preMidterm: 25, midterm: 20, postMidterm: 25, final: 30 });
@@ -1581,13 +1596,22 @@ export function TeacherPortal() {
                         ⚙️ ตั้งค่าสัดส่วนคะแนนรายวิชา
                       </button>
                     )}
-                    <select 
+                    {/* TASK 3: ซ่อนคาบกิจกรรมที่ไม่ต้องประเมิน (เช่น PLC, พักกลางวัน) ออกจาก dropdown —
+                        ไม่ลบข้อมูลจริง แค่ preference ส่วนตัวของครูคนนี้ */}
+                    <button
+                      onClick={() => setShowHiddenCoursesModal(true)}
+                      className="bg-[#1b2a4a] hover:bg-[#23365d] text-slate-300 border border-slate-700 text-xs font-bold py-2 px-3 rounded-lg transition-colors flex items-center gap-2"
+                      title="ซ่อน/แสดงคาบกิจกรรมที่ไม่ต้องประเมินออกจากรายการด้านนี้"
+                    >
+                      🚫 วิชาที่ไม่ต้องประเมิน
+                    </button>
+                    <select
                       className="bg-[#0b0f19] border border-slate-800/80 text-white text-sm rounded-lg p-2 focus:border-emerald-500 outline-none"
                       value={selectedGradebookCourseId}
                       onChange={(e) => setSelectedGradebookCourseId(e.target.value)}
                     >
                       <option value="">-- เลือกรายวิชา --</option>
-                      {gradebookCourses.map(c => (
+                      {visibleGradebookCourses.map(c => (
                         <option key={c.id} value={c.id}>{c.code} {formatCourseTitle(c.name, c.level, c.room)}</option>
                       ))}
                     </select>
@@ -2047,6 +2071,55 @@ export function TeacherPortal() {
                 >
                   {isCopyMode && copyTargetCourses.length > 0 ? `บันทึกและคัดลอก (${copyTargetCourses.length} ห้อง)` : 'บันทึกการตั้งค่า'}
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* TASK 3: ซ่อน/แสดงคาบกิจกรรมที่ไม่ต้องประเมิน (เช่น PLC, พักกลางวัน) ออกจาก dropdown สมุด
+              บันทึกคะแนน — ไม่ลบข้อมูลจริง แค่ preference ส่วนตัวของครูคนนี้ (ดู
+              gradebook_hidden_courses ใน firestoreService.ts) แสดงเฉพาะวิชากิจกรรม (ACTIVITY)
+              เพราะวิชาหลัก (MAIN) ต้องมีการประเมินเสมอ ไม่มีเหตุผลให้ซ่อน */}
+          {showHiddenCoursesModal && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in">
+              <div className="bg-[#151921] border border-white/10 rounded-2xl w-full max-w-md shadow-2xl p-6">
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="text-lg font-bold text-white">วิชาที่ไม่ต้องประเมิน</h3>
+                  <button onClick={() => setShowHiddenCoursesModal(false)} className="text-slate-400 hover:text-white transition-colors">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 mb-4">
+                  เลือกคาบกิจกรรมที่ไม่ต้องประเมิน (เช่น PLC, พักกลางวัน) เพื่อซ่อนออกจากรายการเลือกวิชาด้านบน — ไม่ลบข้อมูลจริง เอากลับมาแสดงได้ทุกเมื่อ
+                </p>
+                <div className="max-h-80 overflow-y-auto space-y-1.5 pr-1">
+                  {gradebookCourses.filter(c => c.subjectType === 'ACTIVITY').length === 0 ? (
+                    <div className="text-xs text-slate-500 py-6 text-center">ไม่มีคาบกิจกรรมในตารางสอนของคุณ</div>
+                  ) : gradebookCourses.filter(c => c.subjectType === 'ACTIVITY').map(c => {
+                    const isHidden = hiddenGradebookCourseIds.has(c.id);
+                    return (
+                      <div key={c.id} className="flex items-center justify-between gap-3 bg-[#0b0d14] border border-white/10 rounded-lg px-3 py-2.5">
+                        <span className={cn('text-xs', isHidden ? 'text-slate-500 line-through' : 'text-slate-200')}>
+                          {c.code} {formatCourseTitle(c.name, c.level, c.room)}
+                        </span>
+                        <button
+                          onClick={() => {
+                            if (!user?.uid) return;
+                            if (isHidden) unhideGradebookCourse(user.uid, c.id);
+                            else hideGradebookCourse(user.uid, c.id, c.name);
+                          }}
+                          className={cn(
+                            'shrink-0 text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition-colors',
+                            isHidden
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                              : 'bg-slate-800/60 border-slate-700 text-slate-300 hover:bg-slate-800'
+                          )}
+                        >
+                          {isHidden ? 'แสดงอีกครั้ง' : 'ไม่ต้องประเมิน'}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}

@@ -740,6 +740,57 @@ export async function getGradebookScoresByClass(
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Gradebook hidden courses (TASK 3) — คาบกิจกรรมที่ไม่ต้องประเมิน (เช่น PLC, พักกลางวัน)
+ * ครูซ่อนออกจาก dropdown สมุดบันทึกคะแนนของตัวเองได้ (preference ส่วนตัวต่อครูคนเดียว ไม่ลบข้อมูลจริง
+ * ไม่กระทบครูคนอื่น) — เลือก schema นี้แทนการเพิ่ม flag ที่ elective_activities_config เพราะคาบแบบ
+ * PLC/พักกลางวัน/HR ไม่ได้มาจาก collection นั้นเลย (นั่นมีไว้เฉพาะชุมนุมที่นักเรียนสมัครเอง) แต่มาจาก
+ * schedules ที่ import ตรงๆ — เพิ่ม flag บน schedules เองเสี่ยงโดนโครงสร้าง sync/replace ของการ import
+ * ลบ/เขียนทับตอน import รอบถัดไป จึงแยกเป็น collection ต่างหากที่ผูกกับครู+courseId แทน
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const GRADEBOOK_HIDDEN_COURSES_COL = 'gradebook_hidden_courses';
+
+export function subscribeHiddenGradebookCourses(
+  teacherUid: string,
+  onUpdate: (hiddenCourseIds: Set<string>) => void
+): () => void {
+  try {
+    const q = query(collection(db, GRADEBOOK_HIDDEN_COURSES_COL), where('teacherUid', '==', teacherUid));
+    return onSnapshot(q, (snap) => {
+      const ids = new Set<string>();
+      snap.forEach(d => { const courseId = d.data().courseId; if (courseId) ids.add(courseId); });
+      onUpdate(ids);
+    }, (error) => {
+      console.warn('[subscribeHiddenGradebookCourses] Listener error:', error.message);
+    });
+  } catch (error) {
+    console.warn('[subscribeHiddenGradebookCourses] Setup error:', error);
+    return () => {};
+  }
+}
+
+export async function hideGradebookCourse(teacherUid: string, courseId: string, courseName: string): Promise<void> {
+  const docId = `${teacherUid}_${courseId}`;
+  try {
+    await setDoc(doc(db, GRADEBOOK_HIDDEN_COURSES_COL, docId), {
+      teacherUid, courseId, courseName,
+      hiddenAt: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${GRADEBOOK_HIDDEN_COURSES_COL}/${docId}`);
+  }
+}
+
+export async function unhideGradebookCourse(teacherUid: string, courseId: string): Promise<void> {
+  const docId = `${teacherUid}_${courseId}`;
+  try {
+    await deleteDoc(doc(db, GRADEBOOK_HIDDEN_COURSES_COL, docId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${GRADEBOOK_HIDDEN_COURSES_COL}/${docId}`);
+  }
+}
+
 /**
  * Save student self-assessment record to 'student_self_assessments'
  */

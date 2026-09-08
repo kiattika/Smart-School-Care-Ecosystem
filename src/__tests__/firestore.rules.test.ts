@@ -408,6 +408,66 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
+  // 8.1 gradebook_hidden_courses (TASK 3 — คาบกิจกรรมที่ไม่ต้องประเมิน ครูซ่อนเป็นรายบุคคล)
+  describe('gradebook_hidden_courses collection', () => {
+    it('allows a teacher to hide (create) and unhide (delete) their own course', async () => {
+      const teacher = asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore();
+      await assertSucceeds(
+        teacher.doc('gradebook_hidden_courses/teacher-uid-1_course-plc').set({
+          teacherUid: 'teacher-uid-1', courseId: 'course-plc', courseName: 'PLC'
+        })
+      );
+      await assertSucceeds(teacher.doc('gradebook_hidden_courses/teacher-uid-1_course-plc').delete());
+    });
+
+    it('denies creating a hidden-course doc under someone else\'s teacherUid (spoofing)', async () => {
+      const teacher = asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore();
+      await assertFails(
+        teacher.doc('gradebook_hidden_courses/teacher-uid-2_course-plc').set({
+          teacherUid: 'teacher-uid-2', courseId: 'course-plc', courseName: 'PLC'
+        })
+      );
+    });
+
+    it('allows a teacher to list only their own hidden courses, not another teacher\'s', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gradebook_hidden_courses/teacher-uid-1_course-plc').set({
+          teacherUid: 'teacher-uid-1', courseId: 'course-plc', courseName: 'PLC'
+        });
+        await ctx.firestore().doc('gradebook_hidden_courses/teacher-uid-2_course-lunch').set({
+          teacherUid: 'teacher-uid-2', courseId: 'course-lunch', courseName: 'พักกลางวัน'
+        });
+      });
+
+      const teacher1 = asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore();
+      const ownSnap = await teacher1.collection('gradebook_hidden_courses').where('teacherUid', '==', 'teacher-uid-1').get();
+      expect(ownSnap.size).toBe(1);
+
+      await assertFails(
+        teacher1.collection('gradebook_hidden_courses').where('teacherUid', '==', 'teacher-uid-2').get()
+      );
+    });
+
+    it('denies unauthenticated access to gradebook_hidden_courses', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gradebook_hidden_courses/teacher-uid-1_course-plc').set({
+          teacherUid: 'teacher-uid-1', courseId: 'course-plc', courseName: 'PLC'
+        });
+      });
+      await assertFails(asAnonymous().firestore().doc('gradebook_hidden_courses/teacher-uid-1_course-plc').get());
+    });
+
+    it('denies update (must delete + recreate instead — doc is effectively immutable once written)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gradebook_hidden_courses/teacher-uid-1_course-plc').set({
+          teacherUid: 'teacher-uid-1', courseId: 'course-plc', courseName: 'PLC'
+        });
+      });
+      const teacher = asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore();
+      await assertFails(teacher.doc('gradebook_hidden_courses/teacher-uid-1_course-plc').update({ courseName: 'changed' }));
+    });
+  });
+
   // 9. admin_periods_config
   describe('admin_periods_config collection', () => {
     it('allows any signed-in user to read admin_periods_config', async () => {
