@@ -40,10 +40,11 @@ service cloud.firestore {
     // ครูรับผิดชอบของชุมนุม (elective_activities_config) นี้จริง — เทียบ responsibleTeacherUid
     // ใช้ให้ครูถอนชื่อนักเรียนออกจากชุมนุม/กิจกรรม ELECTIVE ของตัวเองเท่านั้น (activity_enrollments)
     // (เดิมเทียบผ่าน schedules/{scheduleId}.teacherId — ออกแบบใหม่แล้วชุมนุมไม่ผูกกับ schedules อีกต่อไป)
+    // รองรับครูร่วมสอนหลายคนต่อชุมนุม — responsibleTeacherUids เป็น array (เดิมเป็นค่าเดียว)
     function isResponsibleTeacherOfActivity(activityId) {
       return isSignedIn()
         && exists(/databases/$(database)/documents/elective_activities_config/$(activityId))
-        && get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('responsibleTeacherUid', '') == request.auth.uid;
+        && request.auth.uid in get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('responsibleTeacherUids', []);
     }
 
     // 1. Students Collection
@@ -523,11 +524,18 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       // สมัคร: สร้าง doc ของตัวเองเท่านั้น ต้องยังไม่ถอน (removedAt/removedBy ต้องเป็น null ตอนสร้าง)
+      // และชุมนุมนั้นต้องยังเปิดรับสมัครอยู่ (enrollmentStatus == 'OPEN') — ปิดรับสมัครแล้วห้ามสมัครใหม่
+      // ผ่าน Firestore ตรงๆ แม้จะข้าม UI มา (ปุ่ม "สมัคร" ฝั่ง UI ก็ disable ไว้แล้วเช่นกัน) — เช็ค
+      // exists() ก่อนเสมอ กัน get() พังตอน activityId ไม่มี config จริง (ให้ผ่านเหมือนเดิม ไม่ใช่ error)
       allow create: if hasRole('STUDENT')
                        && request.resource.data.studentUid == request.auth.uid
                        && request.resource.data.removedAt == null
                        && request.resource.data.removedBy == null
-                       && studentField(request.resource.data.studentId, 'studentUid', '__none__') == request.auth.uid;
+                       && studentField(request.resource.data.studentId, 'studentUid', '__none__') == request.auth.uid
+                       && (
+                         !exists(/databases/$(database)/documents/elective_activities_config/$(request.resource.data.activityId)) ||
+                         get(/databases/$(database)/documents/elective_activities_config/$(request.resource.data.activityId)).data.get('enrollmentStatus', 'OPEN') == 'OPEN'
+                       );
 
       // ถอน: แก้ได้เฉพาะ removedAt/removedBy/removedReason เท่านั้น — นักเรียนถอนตัวเอง
       // (removedBy ต้องเป็น null) หรือครูรับผิดชอบชุมนุมนั้นถอน (removedBy ต้องเป็น uid ตัวเอง)

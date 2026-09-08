@@ -69,15 +69,24 @@ export interface Student {
  * ชุมนุม/กิจกรรมตามความสนใจ (ELECTIVE) — แอดมินงานชุมนุมสร้างชื่อ+จำนวนรับ+ครูรับผิดชอบเอง
  * โดยตรง "ไม่ผูกกับ subjectCode ที่ import จากตารางสอนอีกต่อไป" (ออกแบบใหม่ — ของเดิมดึง
  * subjectCode จาก schedules ซึ่งทุกคาบ "กิจกรรมชุมนุม" ของทุกครูใช้ชื่อกลางเดียวกันหมด ไม่ใช่ชื่อ
- * ชุมนุมจริง ทำให้แยกชุมนุมจริงไม่ได้เลย) — 1 ชุมนุม = 1 ครูรับผิดชอบ = โควตาที่นั่งเดียว (ไม่มี
- * concept "หลาย section" อีกต่อไปเหมือนของเดิมที่ผูกกับ scheduleId หลายคาบ)
+ * ชุมนุมจริง ทำให้แยกชุมนุมจริงไม่ได้เลย) — 1 ชุมนุม = 1 โควตาที่นั่งเดียว (ไม่มี concept "หลาย
+ * section" อีกต่อไปเหมือนของเดิมที่ผูกกับ scheduleId หลายคาบ)
+ *
+ * ต่อยอด: รองรับครูร่วมสอนหลายคนต่อชุมนุม (responsibleTeacherUids — ยืนยันจากไฟล์ภาระงานสอนจริงว่า
+ * เป็นรูปแบบปกติ ไม่ใช่ edge case) + ผูกวัน/คาบ/ห้องจริงเข้ากับชุมนุม เพื่อให้ปรากฏในตารางสอน
+ * ประจำวันของครูผู้รับผิดชอบได้เหมือนวิชาปกติ (ดู TeacherPortal.tsx) + enrollmentStatus ควบคุมว่า
+ * ยังเปิดรับสมัครอยู่ไหม — ปิดรับสมัครแล้วค่อยให้เช็คชื่อได้ (กันเช็คชื่อก่อนรายชื่อนิ่ง)
  */
 export interface ElectiveActivityConfig {
   id: string;
   name: string;                    // ชื่อชุมนุมที่แอดมินตั้งเอง เช่น "ชุมนุมคอมพิวเตอร์"
   capacity: number;                // จำนวนรับทั้งชุมนุม
-  responsibleTeacherUid: string;   // ครูรับผิดชอบที่แอดมินกำหนด
-  responsibleTeacherName: string;
+  responsibleTeacherUids: string[]; // ครูรับผิดชอบร่วมกันได้หลายคน (แอดมินกำหนด)
+  responsibleTeacherNames: string[]; // ชื่อคู่ลำดับเดียวกับ responsibleTeacherUids (denormalize ไว้แสดงผล)
+  dayOfWeek?: string | null;   // 'monday'..'sunday' — คาบ/วันที่ชุมนุมนี้เรียนจริง (เหมือน schedules.dayOfWeek)
+  periodNumber?: number | null; // คาบที่เท่าไหร่
+  room?: string | null;         // ห้องเรียน (ถ้ามี)
+  enrollmentStatus: 'OPEN' | 'CLOSED'; // ปิดรับสมัครแล้วค่อยเข้าตารางสอนให้เช็คชื่อได้
   createdBy: string;
   createdAt: Timestamp;
 }

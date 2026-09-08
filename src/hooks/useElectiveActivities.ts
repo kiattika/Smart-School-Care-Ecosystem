@@ -31,13 +31,16 @@ export function useElectiveActivities() {
   }, [configs]);
 
   // ครูรับผิดชอบ 1 คนอาจดูแลได้มากกว่า 1 ชุมนุม (ไม่บังคับ 1:1) — เผื่อกรณีนี้ไว้แม้ยังไม่มี UI
-  // เลือกเมื่อมีหลายชุมนุม (ดู TeacherPortal.tsx — ใช้ตัวแรกไปก่อนถ้ามีมากกว่า 1)
+  // เลือกเมื่อมีหลายชุมนุม (ดู TeacherPortal.tsx — ใช้ตัวแรกไปก่อนถ้ามีมากกว่า 1) — 1 ชุมนุมตอนนี้
+  // มีครูรับผิดชอบร่วมได้หลายคนด้วย (responsibleTeacherUids array) จึงต้อง index ทุกคนในนั้น
   const configsByTeacherUid = useMemo(() => {
     const map = new Map<string, ElectiveActivityConfig[]>();
     configs.forEach(c => {
-      const list = map.get(c.responsibleTeacherUid) || [];
-      list.push(c);
-      map.set(c.responsibleTeacherUid, list);
+      (c.responsibleTeacherUids || []).forEach(uid => {
+        const list = map.get(uid) || [];
+        list.push(c);
+        map.set(uid, list);
+      });
     });
     return map;
   }, [configs]);

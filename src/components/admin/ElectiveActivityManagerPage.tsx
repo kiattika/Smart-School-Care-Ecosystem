@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
-import { Users, Save, Trash2, Loader2, Search, Info, Pencil, X } from 'lucide-react';
+import { Users, Save, Trash2, Loader2, Search, Info, Pencil, X, Lock, Unlock } from 'lucide-react';
 import { useElectiveActivities } from '../../hooks/useElectiveActivities';
 import { createElectiveActivity, updateElectiveActivity, removeElectiveActivityConfig } from '../../services/firestoreService';
 import { useStore } from '../../store';
@@ -11,13 +11,26 @@ interface TeacherOption {
   name: string;
 }
 
+const DAY_OPTIONS: { value: string; label: string }[] = [
+  { value: 'monday', label: 'จันทร์' },
+  { value: 'tuesday', label: 'อังคาร' },
+  { value: 'wednesday', label: 'พุธ' },
+  { value: 'thursday', label: 'พฤหัสบดี' },
+  { value: 'friday', label: 'ศุกร์' },
+];
+
 /**
  * แอดมินงานชุมนุม: สร้างชุมนุม/กิจกรรมตามความสนใจ (ELECTIVE — นักเรียนสมัครเอง มีที่นั่งจำกัด) เอง
- * โดยตรง — ตั้งชื่อ + จำนวนรับ + ครูรับผิดชอบ ไม่ผูกกับ subjectCode ที่ import จากตารางสอนอีกต่อไป
+ * โดยตรง — ตั้งชื่อ + จำนวนรับ + ครูรับผิดชอบ (ร่วมกันได้หลายคน) + วัน/คาบ/ห้อง ไม่ผูกกับ subjectCode
+ * ที่ import จากตารางสอนอีกต่อไป
  *
  * ออกแบบใหม่ (เฟส 2 — ยืนยันจากผู้ใช้แล้ว): ของเดิมดึงรายชื่อ subjectCode ที่มีอยู่จริงใน schedules
  * มาให้เลือก แต่ทุกคาบ "กิจกรรมชุมนุม" ของทุกครูใช้ subjectCode/ชื่อกลางเดียวกันหมด (ไม่ใช่ชื่อชุมนุม
  * จริงของแต่ละคน) ทำให้แยกชุมนุมจริงไม่ได้เลย — เปลี่ยนเป็นฟอร์มสร้างชุมนุมใหม่ตรงๆ แทน
+ *
+ * ต่อยอด: รองรับครูร่วมสอนหลายคนต่อชุมนุม (ยืนยันจากไฟล์ภาระงานสอนจริงว่าเป็นรูปแบบปกติ) + ผูกวัน/
+ * คาบ/ห้องเข้ากับชุมนุม + enrollmentStatus ควบคุมว่ายังเปิดรับสมัครอยู่ไหม — ปิดรับสมัครแล้วรายชื่อ
+ * ที่ enroll ไว้จะไปโผล่ในตารางสอนประจำวันของครูผู้รับผิดชอบทุกคนให้เช็คชื่อได้ (ดู TeacherPortal.tsx)
  */
 export function ElectiveActivityManagerPage() {
   const { user } = useStore();
@@ -29,7 +42,10 @@ export function ElectiveActivityManagerPage() {
   const [editingId, setEditingId] = useState<string | null>(null); // null = กำลังสร้างใหม่
   const [nameInput, setNameInput] = useState('');
   const [capacityInput, setCapacityInput] = useState<string>('');
-  const [teacherUidInput, setTeacherUidInput] = useState('');
+  const [teacherUidsInput, setTeacherUidsInput] = useState<string[]>([]);
+  const [dayInput, setDayInput] = useState<string>('');
+  const [periodInput, setPeriodInput] = useState<string>('');
+  const [roomInput, setRoomInput] = useState<string>('');
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<{ id: string; name: string } | null>(null);
@@ -51,11 +67,15 @@ export function ElectiveActivityManagerPage() {
 
   const filteredTeachers = useMemo(() => {
     const q = teacherSearch.trim().toLowerCase();
-    if (!q) return teachers;
-    return teachers.filter(t => t.name.toLowerCase().includes(q));
-  }, [teachers, teacherSearch]);
+    const base = teachers.filter(t => !teacherUidsInput.includes(t.uid));
+    if (!q) return base;
+    return base.filter(t => t.name.toLowerCase().includes(q));
+  }, [teachers, teacherSearch, teacherUidsInput]);
 
-  const selectedTeacher = teachers.find(t => t.uid === teacherUidInput) || null;
+  const selectedTeachers = useMemo(
+    () => teacherUidsInput.map(uid => teachers.find(t => t.uid === uid)).filter((t): t is TeacherOption => !!t),
+    [teacherUidsInput, teachers]
+  );
 
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3500); };
 
@@ -63,7 +83,10 @@ export function ElectiveActivityManagerPage() {
     setEditingId(null);
     setNameInput('');
     setCapacityInput('');
-    setTeacherUidInput('');
+    setTeacherUidsInput([]);
+    setDayInput('');
+    setPeriodInput('');
+    setRoomInput('');
     setTeacherSearch('');
   };
 
@@ -73,7 +96,10 @@ export function ElectiveActivityManagerPage() {
     setEditingId(id);
     setNameInput(cfg.name);
     setCapacityInput(String(cfg.capacity));
-    setTeacherUidInput(cfg.responsibleTeacherUid);
+    setTeacherUidsInput(cfg.responsibleTeacherUids || []);
+    setDayInput(cfg.dayOfWeek || '');
+    setPeriodInput(cfg.periodNumber !== null && cfg.periodNumber !== undefined ? String(cfg.periodNumber) : '');
+    setRoomInput(cfg.room || '');
     setTeacherSearch('');
   };
 
@@ -82,7 +108,9 @@ export function ElectiveActivityManagerPage() {
     const capacity = parseInt(capacityInput, 10);
     if (!name) { flash('กรอกชื่อชุมนุมก่อน'); return; }
     if (!Number.isFinite(capacity) || capacity <= 0) { flash('กรอกจำนวนรับเป็นตัวเลขมากกว่า 0'); return; }
-    if (!selectedTeacher) { flash('เลือกครูรับผิดชอบก่อน'); return; }
+    if (selectedTeachers.length === 0) { flash('เลือกครูรับผิดชอบอย่างน้อย 1 คน'); return; }
+    const periodNumber = periodInput.trim() === '' ? null : parseInt(periodInput, 10);
+    if (periodInput.trim() !== '' && !Number.isFinite(periodNumber)) { flash('คาบต้องเป็นตัวเลข'); return; }
 
     setBusy('save');
     try {
@@ -90,21 +118,41 @@ export function ElectiveActivityManagerPage() {
         await updateElectiveActivity(editingId, {
           name,
           capacity,
-          responsibleTeacherUid: selectedTeacher.uid,
-          responsibleTeacherName: selectedTeacher.name,
+          responsibleTeacherUids: selectedTeachers.map(t => t.uid),
+          responsibleTeacherNames: selectedTeachers.map(t => t.name),
+          dayOfWeek: dayInput || null,
+          periodNumber,
+          room: roomInput.trim() || null,
         });
         flash(`แก้ไขชุมนุม "${name}" แล้ว`);
       } else {
         await createElectiveActivity({
           name,
           capacity,
-          responsibleTeacherUid: selectedTeacher.uid,
-          responsibleTeacherName: selectedTeacher.name,
+          responsibleTeacherUids: selectedTeachers.map(t => t.uid),
+          responsibleTeacherNames: selectedTeachers.map(t => t.name),
+          dayOfWeek: dayInput || null,
+          periodNumber,
+          room: roomInput.trim() || null,
+          enrollmentStatus: 'OPEN',
           createdBy: user?.uid || 'unknown',
         });
         flash(`สร้างชุมนุม "${name}" แล้ว`);
       }
       resetForm();
+    } catch (e) {
+      flash('ไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleToggleEnrollment = async (id: string, current: 'OPEN' | 'CLOSED') => {
+    setBusy(`toggle-${id}`);
+    try {
+      const next = current === 'OPEN' ? 'CLOSED' : 'OPEN';
+      await updateElectiveActivity(id, { enrollmentStatus: next });
+      flash(next === 'CLOSED' ? 'ปิดรับสมัครแล้ว — รายชื่อจะไปปรากฏในตารางสอนของครูผู้รับผิดชอบ' : 'เปิดรับสมัครอีกครั้งแล้ว');
     } catch (e) {
       flash('ไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -134,7 +182,7 @@ export function ElectiveActivityManagerPage() {
             <Users className="w-6 h-6 text-indigo-400" /> จัดการชุมนุม (Elective Activities)
           </h2>
           <p className="text-slate-400 mt-1 text-sm">
-            สร้างชุมนุม กำหนดจำนวนรับ และครูรับผิดชอบเอง — ไม่ผูกกับตารางสอนที่ import มา
+            สร้างชุมนุม กำหนดจำนวนรับ ครูรับผิดชอบ (ร่วมกันได้หลายคน) และวัน/คาบเรียนเอง — ไม่ผูกกับตารางสอนที่ import มา
           </p>
         </div>
       </div>
@@ -177,41 +225,81 @@ export function ElectiveActivityManagerPage() {
           </label>
         </div>
 
+        {/* วัน/คาบ/ห้อง — ผูกชุมนุมเข้ากับเวลาจริง เพื่อให้เข้าตารางสอนของครูได้เมื่อปิดรับสมัคร */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <label className="text-xs text-slate-400 space-y-1 block">
+            วันที่เรียน
+            <select
+              value={dayInput}
+              onChange={e => setDayInput(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
+            >
+              <option value="">— ไม่ระบุ —</option>
+              {DAY_OPTIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+            </select>
+          </label>
+          <label className="text-xs text-slate-400 space-y-1 block">
+            คาบที่
+            <input
+              type="number"
+              min={0}
+              value={periodInput}
+              onChange={e => setPeriodInput(e.target.value)}
+              placeholder="เช่น 8"
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
+            />
+          </label>
+          <label className="text-xs text-slate-400 space-y-1 block">
+            ห้อง (ถ้ามี)
+            <input
+              value={roomInput}
+              onChange={e => setRoomInput(e.target.value)}
+              placeholder="เช่น 521"
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
+            />
+          </label>
+        </div>
+        <div className="flex items-start gap-2 text-[11px] text-slate-500 -mt-1">
+          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>ไม่ระบุวัน/คาบได้ถ้ายังไม่ตัดสินใจ — แต่ต้องระบุก่อนปิดรับสมัคร ไม่งั้นจะไม่โผล่ในตารางสอนของครู</span>
+        </div>
+
         <div className="space-y-1.5">
-          <span className="text-xs text-slate-400">ครูรับผิดชอบ</span>
-          {selectedTeacher ? (
-            <div className="flex items-center justify-between bg-slate-900/60 border border-slate-800 rounded-lg px-3 py-2.5">
-              <span className="text-sm text-white">{selectedTeacher.name}</span>
-              <button onClick={() => setTeacherUidInput('')} className="text-slate-500 hover:text-slate-300">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="relative">
-                <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  value={teacherSearch}
-                  onChange={e => setTeacherSearch(e.target.value)}
-                  placeholder="ค้นหาชื่อครู..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
-                />
-              </div>
-              <div className="max-h-40 overflow-y-auto border border-white/5 rounded-xl divide-y divide-white/5">
-                {filteredTeachers.length === 0 ? (
-                  <div className="p-3 text-center text-xs text-slate-500">ไม่พบครูที่ตรงกับคำค้นหา</div>
-                ) : filteredTeachers.slice(0, 30).map(t => (
-                  <button
-                    key={t.uid}
-                    onClick={() => setTeacherUidInput(t.uid)}
-                    className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-white/5"
-                  >
-                    {t.name}
+          <span className="text-xs text-slate-400">ครูรับผิดชอบ (เลือกได้หลายคน — ครูร่วมสอน)</span>
+          {selectedTeachers.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-1.5">
+              {selectedTeachers.map(t => (
+                <span key={t.uid} className="flex items-center gap-1.5 bg-slate-900/60 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white">
+                  {t.name}
+                  <button onClick={() => setTeacherUidsInput(prev => prev.filter(u => u !== t.uid))} className="text-slate-500 hover:text-slate-300">
+                    <X className="w-3 h-3" />
                   </button>
-                ))}
-              </div>
-            </>
+                </span>
+              ))}
+            </div>
           )}
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              value={teacherSearch}
+              onChange={e => setTeacherSearch(e.target.value)}
+              placeholder="ค้นหาชื่อครูเพื่อเพิ่ม..."
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white outline-none focus:border-indigo-500"
+            />
+          </div>
+          <div className="max-h-40 overflow-y-auto border border-white/5 rounded-xl divide-y divide-white/5">
+            {filteredTeachers.length === 0 ? (
+              <div className="p-3 text-center text-xs text-slate-500">ไม่พบครูที่ตรงกับคำค้นหา (หรือเพิ่มครบทุกคนแล้ว)</div>
+            ) : filteredTeachers.slice(0, 30).map(t => (
+              <button
+                key={t.uid}
+                onClick={() => { setTeacherUidsInput(prev => [...prev, t.uid]); setTeacherSearch(''); }}
+                className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-white/5"
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
         </div>
 
         <button
@@ -225,7 +313,7 @@ export function ElectiveActivityManagerPage() {
 
         <div className="flex items-start gap-2 text-[11px] text-slate-500">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-          <span>1 ชุมนุม มีครูรับผิดชอบและโควตาที่นั่งของตัวเองอิสระ ไม่แชร์โควตากับชุมนุมอื่น</span>
+          <span>1 ชุมนุม มีโควตาที่นั่งของตัวเองอิสระ ไม่แชร์โควตากับชุมนุมอื่น — ครูร่วมสอนทุกคนเห็น/เช็คชื่อชุมนุมนี้ได้เหมือนกันทุกคน</span>
         </div>
       </div>
 
@@ -242,15 +330,35 @@ export function ElectiveActivityManagerPage() {
           <div className="space-y-1.5">
             {configs.map(c => {
               const enrolled = counts[c.id] || 0;
+              const dayLabel = DAY_OPTIONS.find(d => d.value === c.dayOfWeek)?.label;
+              const isClosed = c.enrollmentStatus === 'CLOSED';
               return (
                 <div key={c.id} className="flex items-center gap-3 bg-slate-900/40 border border-slate-800 rounded-lg px-3 py-2.5">
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm text-slate-200">{c.name}</span>
-                    <p className="text-[10px] text-slate-500">ครูรับผิดชอบ: {c.responsibleTeacherName}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm text-slate-200">{c.name}</span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isClosed ? 'bg-rose-500/20 text-rose-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
+                        {isClosed ? 'ปิดรับสมัครแล้ว' : 'เปิดรับสมัคร'}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-500">
+                      ครูรับผิดชอบ: {(c.responsibleTeacherNames || []).join(', ') || '— ไม่ได้ระบุ —'}
+                      {dayLabel && ` · วัน${dayLabel}`}
+                      {c.periodNumber !== null && c.periodNumber !== undefined && ` คาบ ${c.periodNumber}`}
+                      {c.room && ` · ห้อง ${c.room}`}
+                    </p>
                   </div>
                   <span className="text-xs font-bold text-indigo-400 shrink-0">
                     {enrolled}/{c.capacity} ที่นั่ง
                   </span>
+                  <button
+                    onClick={() => handleToggleEnrollment(c.id, c.enrollmentStatus)}
+                    disabled={busy === `toggle-${c.id}`}
+                    title={isClosed ? 'เปิดรับสมัครอีกครั้ง' : 'ปิดรับสมัคร (รายชื่อจะเข้าตารางสอนครู)'}
+                    className={`p-1.5 rounded-lg ${isClosed ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-amber-400 hover:bg-amber-500/10'}`}
+                  >
+                    {busy === `toggle-${c.id}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isClosed ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                  </button>
                   <button
                     onClick={() => startEdit(c.id)}
                     className="text-slate-400 hover:text-slate-200 p-1.5"

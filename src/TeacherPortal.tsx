@@ -474,9 +474,14 @@ export function TeacherPortal() {
   // — ตรวจแทนว่า (1) คาบที่กำลังสอนอยู่คือคาบ "ชุมนุม" ทั่วไปตามชื่อที่ import มาจริง (เหมือน keyword
   // ที่ detectSubjectType ใช้จำแนก ACTIVITY) และ (2) ครูคนนี้มีชุมนุมที่ตัวเองรับผิดชอบอยู่จริงไหม —
   // ถ้าใช่ทั้งคู่ ถือว่ากำลังสอนชุมนุมของตัวเอง ดึงรายชื่อจาก activity_enrollments ของชุมนุมนั้น
-  const { configsByTeacherUid } = useElectiveActivities();
-  const myClubConfig = user?.uid ? (configsByTeacherUid.get(user.uid)?.[0] || null) : null;
-  const activeCourseIsElective = !!myClubConfig && !!(activeCourse?.name || '').includes('ชุมนุม');
+  const { configs: electiveConfigs, configById: electiveConfigById, counts: electiveCounts } = useElectiveActivities();
+  // TASK 2.3: ตรวจว่า activeCourse ที่เปิดอยู่ตอนนี้คือชุมนุม ด้วย courseId prefix `elective_` ที่ตั้งไว้
+  // ตอนสร้าง virtual period (ดูจุด rawMappedPeriods ด้านล่าง) แทนการเดาจาก "ชุมนุมแรกที่ครูรับผิดชอบ" +
+  // ชื่อคาบมีคำว่า "ชุมนุม" แบบเดิม — เดิมพังเมื่อครูรับผิดชอบมากกว่า 1 ชุมนุม (index ผิดชุมนุม) หรือ
+  // ชื่อคาบที่ import มาไม่มีคำว่า "ชุมนุม" ตรงตัว ตอนนี้ผูกกับ config ที่ถูกต้องเป๊ะๆ ผ่าน id เสมอ
+  const activeElectiveConfigId = activeCourse?.id?.startsWith('elective_') ? activeCourse.id.slice('elective_'.length) : null;
+  const activeCourseIsElective = !!activeElectiveConfigId;
+  const myClubConfig = activeElectiveConfigId ? (electiveConfigById.get(activeElectiveConfigId) || null) : null;
 
   const [electiveEnrollments, setElectiveEnrollments] = useState<ActivityEnrollment[]>([]);
   useEffect(() => {
@@ -1099,6 +1104,65 @@ export function TeacherPortal() {
                   });
                 });
               }
+
+              // TASK 2.3: ชุมนุมที่ "ปิดรับสมัครแล้ว" (enrollmentStatus === 'CLOSED') ต้องไปโผล่ในตารางสอน
+              // ประจำวันของครูรับผิดชอบทุกคน (responsibleTeacherUids) เหมือนวิชาปกติ เช็คชื่อ/บันทึกหลังสอน
+              // ได้เหมือนคาบจริง — ผูกกับวัน/คาบที่แอดมินกำหนดตอนสร้างชุมนุม (dayOfWeek/periodNumber) ไม่ใช่
+              // จาก schedules ที่ import มา (ชุมนุมเฟส 2 ถูกออกแบบใหม่ให้แยกออกจาก schedules ทั้งหมดแล้ว)
+              // ใช้ courseId พิเศษ `elective_<configId>` กันชนกับ courseId จริง — resolveCourseAndPeriod()
+              // จะ synth course ให้จาก periodItem นี้เองเมื่อไม่เจอใน myCourses (fallback ที่มีอยู่แล้ว)
+              electiveConfigs
+                .filter(cfg =>
+                  cfg.enrollmentStatus === 'CLOSED' &&
+                  !!user?.uid && (cfg.responsibleTeacherUids || []).includes(user.uid) &&
+                  !!cfg.dayOfWeek && DAY_NAME_TO_NUM[cfg.dayOfWeek] === targetDayOfWeek &&
+                  cfg.periodNumber !== null && cfg.periodNumber !== undefined
+                )
+                .forEach(cfg => {
+                  const virtualCourseId = `elective_${cfg.id}`;
+                  const periodNum = cfg.periodNumber as number;
+                  const { start, end } = getPeriodTimes(periodNum);
+                  const startTime = formatTime(start);
+                  const endTime = formatTime(end);
+                  const room = cfg.room || 'ชุมนุม';
+                  const recordDate = format(targetDate, 'yyyy-MM-dd');
+                  const attRoomCandidates = [room];
+                  const expectedRecordIds = new Set<string>();
+                  attRoomCandidates.forEach(r => {
+                    expectedRecordIds.add(`${todayStr}_${r.replace('/', '-')}_p${periodNum}`);
+                  });
+                  const firestoreChecked = todayAttendanceDocs.some(a =>
+                    expectedRecordIds.has(a.id) ||
+                    (a.periodNumber !== null &&
+                      Number(a.periodNumber) === Number(periodNum) &&
+                      attRoomCandidates.some(r => isSameRoom(a.room, r)))
+                  );
+                  const attendanceSummary = computeAttendanceSummary(
+                    todayAttendanceDocs, expectedRecordIds, periodNum, attRoomCandidates, isSameRoom
+                  );
+                  const existingRecord = postTeachingRecords.find(r => r.date === recordDate && r.courseId === virtualCourseId);
+                  const enrolledCount = electiveCounts[cfg.id] || 0;
+                  rawMappedPeriods.push({
+                    id: virtualCourseId,
+                    scheduleId: virtualCourseId,
+                    courseId: virtualCourseId,
+                    periodNumber: periodNum,
+                    startTime,
+                    endTime,
+                    subjectCode: 'ชุมนุม',
+                    subjectName: cfg.name,
+                    className: 'ชุมนุม',
+                    level: 'ชุมนุม',
+                    room,
+                    attendanceTaken: firestoreChecked,
+                    lateRequestStatus: null,
+                    hasPostTeachingRecord: !!existingRecord,
+                    roleLabel: 'กิจกรรม',
+                    studentsCount: enrolledCount || cfg.capacity,
+                    type: 'ACTIVITY',
+                    attendanceSummary
+                  });
+                });
 
               // Deduplicate schedule items by period slot (periodNumber + subjectCode + className)
               const seenPeriodSlotKeys = new Set<string>();

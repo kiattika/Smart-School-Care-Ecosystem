@@ -1709,7 +1709,13 @@ export function subscribeStudentHomeLocationsByRoom(
 
 /** สร้างชุมนุมใหม่ — auto id (ไม่ผูกกับ subjectCode อีกต่อไป) คืนค่า id ที่สร้างให้เรียกใช้ต่อได้ */
 export async function createElectiveActivity(
-  config: { name: string; capacity: number; responsibleTeacherUid: string; responsibleTeacherName: string; createdBy: string },
+  config: {
+    name: string; capacity: number;
+    responsibleTeacherUids: string[]; responsibleTeacherNames: string[];
+    dayOfWeek?: string | null; periodNumber?: number | null; room?: string | null;
+    enrollmentStatus?: 'OPEN' | 'CLOSED';
+    createdBy: string;
+  },
   firestoreDb: Firestore = db,
 ): Promise<string> {
   const ref = doc(collection(firestoreDb, 'elective_activities_config'));
@@ -1718,8 +1724,12 @@ export async function createElectiveActivity(
       id: ref.id,
       name: config.name,
       capacity: config.capacity,
-      responsibleTeacherUid: config.responsibleTeacherUid,
-      responsibleTeacherName: config.responsibleTeacherName,
+      responsibleTeacherUids: config.responsibleTeacherUids,
+      responsibleTeacherNames: config.responsibleTeacherNames,
+      dayOfWeek: config.dayOfWeek ?? null,
+      periodNumber: config.periodNumber ?? null,
+      room: config.room ?? null,
+      enrollmentStatus: config.enrollmentStatus ?? 'OPEN',
       createdBy: config.createdBy,
       createdAt: serverTimestamp(),
     });
@@ -1732,7 +1742,9 @@ export async function createElectiveActivity(
 /** แก้ไขชุมนุมที่มีอยู่ (ชื่อ/จำนวนรับ/ครูรับผิดชอบ) — ไม่แตะ createdAt/createdBy เดิม */
 export async function updateElectiveActivity(
   id: string,
-  updates: Partial<Pick<ElectiveActivityConfig, 'name' | 'capacity' | 'responsibleTeacherUid' | 'responsibleTeacherName'>>,
+  updates: Partial<Pick<ElectiveActivityConfig,
+    'name' | 'capacity' | 'responsibleTeacherUids' | 'responsibleTeacherNames' |
+    'dayOfWeek' | 'periodNumber' | 'room' | 'enrollmentStatus'>>,
   firestoreDb: Firestore = db,
 ): Promise<void> {
   try {
