@@ -634,6 +634,8 @@ export interface GradebookScoreRecord {
   final: number;
   total: number;
   grade: string;
+  // TASK 2 (วิชากิจกรรม — ผ่าน/ไม่ผ่าน) — ดู StudentScore.passFailResult ใน types.ts สำหรับเหตุผล
+  passFailResult?: 'PASS' | 'FAIL' | null;
   updatedAt?: any;
 }
 
@@ -738,6 +740,57 @@ export async function getGradebookScoresByClass(
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Gradebook hidden courses (TASK 3) — คาบกิจกรรมที่ไม่ต้องประเมิน (เช่น PLC, พักกลางวัน)
+ * ครูซ่อนออกจาก dropdown สมุดบันทึกคะแนนของตัวเองได้ (preference ส่วนตัวต่อครูคนเดียว ไม่ลบข้อมูลจริง
+ * ไม่กระทบครูคนอื่น) — เลือก schema นี้แทนการเพิ่ม flag ที่ elective_activities_config เพราะคาบแบบ
+ * PLC/พักกลางวัน/HR ไม่ได้มาจาก collection นั้นเลย (นั่นมีไว้เฉพาะชุมนุมที่นักเรียนสมัครเอง) แต่มาจาก
+ * schedules ที่ import ตรงๆ — เพิ่ม flag บน schedules เองเสี่ยงโดนโครงสร้าง sync/replace ของการ import
+ * ลบ/เขียนทับตอน import รอบถัดไป จึงแยกเป็น collection ต่างหากที่ผูกกับครู+courseId แทน
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const GRADEBOOK_HIDDEN_COURSES_COL = 'gradebook_hidden_courses';
+
+export function subscribeHiddenGradebookCourses(
+  teacherUid: string,
+  onUpdate: (hiddenCourseIds: Set<string>) => void
+): () => void {
+  try {
+    const q = query(collection(db, GRADEBOOK_HIDDEN_COURSES_COL), where('teacherUid', '==', teacherUid));
+    return onSnapshot(q, (snap) => {
+      const ids = new Set<string>();
+      snap.forEach(d => { const courseId = d.data().courseId; if (courseId) ids.add(courseId); });
+      onUpdate(ids);
+    }, (error) => {
+      console.warn('[subscribeHiddenGradebookCourses] Listener error:', error.message);
+    });
+  } catch (error) {
+    console.warn('[subscribeHiddenGradebookCourses] Setup error:', error);
+    return () => {};
+  }
+}
+
+export async function hideGradebookCourse(teacherUid: string, courseId: string, courseName: string): Promise<void> {
+  const docId = `${teacherUid}_${courseId}`;
+  try {
+    await setDoc(doc(db, GRADEBOOK_HIDDEN_COURSES_COL, docId), {
+      teacherUid, courseId, courseName,
+      hiddenAt: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${GRADEBOOK_HIDDEN_COURSES_COL}/${docId}`);
+  }
+}
+
+export async function unhideGradebookCourse(teacherUid: string, courseId: string): Promise<void> {
+  const docId = `${teacherUid}_${courseId}`;
+  try {
+    await deleteDoc(doc(db, GRADEBOOK_HIDDEN_COURSES_COL, docId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${GRADEBOOK_HIDDEN_COURSES_COL}/${docId}`);
+  }
+}
+
 /**
  * Save student self-assessment record to 'student_self_assessments'
  */
@@ -769,6 +822,33 @@ export async function getSelfAssessmentRecord(studentId: string): Promise<Studen
     return null;
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, `${collectionPath}/${studentId}`);
+  }
+}
+
+/**
+ * TASK 9 (ExecutivePortal Learner Analytics): real-time listener ของ self-assessment ทั้งโรงเรียน —
+ * เดิม ExecutivePortal อ่าน selfAssessments จาก Zustand store ที่ไม่มี listener ผูกไว้เลย (ว่างเปล่า
+ * เสมอเมื่อเปิดหน้าใหม่/ล็อกอินใหม่) ต่างจาก getAllSelfAssessmentRecords() ด้านล่างที่ fetch ครั้งเดียว —
+ * ฟังก์ชันนี้ใช้ได้เพราะ firestore.rules เพิ่ม EXECUTIVE อ่านได้แล้ว
+ */
+export function subscribeAllSelfAssessments(
+  onUpdate: (assessments: Record<string, StudentSelfAssessment>) => void
+): () => void {
+  try {
+    return onSnapshot(collection(db, 'student_self_assessments'), (snap) => {
+      const map: Record<string, StudentSelfAssessment> = {};
+      snap.docs.forEach(d => {
+        const data = d.data() as StudentSelfAssessment;
+        map[data.studentId || d.id] = data;
+      });
+      onUpdate(map);
+    }, (error) => {
+      console.warn('[subscribeAllSelfAssessments] listener error:', error.message);
+      onUpdate({});
+    });
+  } catch (error) {
+    console.warn('[subscribeAllSelfAssessments] setup error:', error);
+    return () => {};
   }
 }
 
@@ -1282,6 +1362,60 @@ export function subscribeSDQAssessments(
 }
 
 /**
+ * TASK 5 (ExecutivePortal Health, สรุปภาพรวมโรงเรียน): อ่านผลคัดกรอง/ประเมินทั้งโรงเรียนแบบไม่ scope
+ * รายบุคคล — ต่างจาก subscribeSDQAssessments ด้านบนที่ต้องระบุ studentUid/respondentUid เสมอ
+ * (สำหรับมุมมองนักเรียน/ผู้ปกครอง/ครู) ฟังก์ชันกลุ่มนี้ใช้กับ EXECUTIVE เท่านั้น (firestore.rules
+ * อนุญาตอ่านทั้ง collection แล้ว) ฝั่ง UI ต้องรวมเป็นจำนวน/เปอร์เซ็นต์เท่านั้น ห้ามโชว์ผลรายบุคคล
+ */
+export function subscribeAll2QScreenings(
+  onUpdate: (screenings: TwoQuestionScreening[]) => void
+): () => void {
+  try {
+    return onSnapshot(collection(db, 'student_screenings_2q'), (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as TwoQuestionScreening)));
+    }, (error) => {
+      console.warn('[subscribeAll2QScreenings] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeAll2QScreenings] setup error:', error);
+    return () => {};
+  }
+}
+
+export function subscribeAllPHQ9Screenings(
+  onUpdate: (screenings: PHQ9Screening[]) => void
+): () => void {
+  try {
+    return onSnapshot(collection(db, 'student_screenings_phq9'), (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as PHQ9Screening)));
+    }, (error) => {
+      console.warn('[subscribeAllPHQ9Screenings] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeAllPHQ9Screenings] setup error:', error);
+    return () => {};
+  }
+}
+
+export function subscribeAllSDQAssessments(
+  onUpdate: (assessments: SDQAssessment[]) => void
+): () => void {
+  try {
+    return onSnapshot(collection(db, 'student_assessments_sdq'), (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as SDQAssessment)));
+    }, (error) => {
+      console.warn('[subscribeAllSDQAssessments] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeAllSDQAssessments] setup error:', error);
+    return () => {};
+  }
+}
+
+/**
  * Parent Engagement Persistence (Billing, Messages, Appointments)
  *
  * ขอบเขตงานจริง (ยืนยันจากโรงเรียน): "แจ้งค่าใช้จ่าย + ส่งใบเสร็จ เท่านั้น" ไม่ใช่ระบบบัญชีเต็มรูปแบบ
@@ -1686,6 +1820,28 @@ export function subscribeStudentHomeLocationsByRoom(
     });
   } catch (error) {
     console.warn('[subscribeStudentHomeLocationsByRoom] Setup error:', error);
+    return () => {};
+  }
+}
+
+/**
+ * TASK 4 (ExecutivePortal GIS): ผู้บริหารดูพิกัดบ้านนักเรียนทั้งโรงเรียน (ไม่ scope ห้อง) —
+ * ต่างจาก subscribeStudentHomeLocationsByRoom ที่ query ทีละห้องสำหรับครูที่ปรึกษา ฟังก์ชันนี้
+ * อ่านทั้ง collection ตรงๆ ต้องอาศัย firestore.rules อนุญาต EXECUTIVE อ่านได้แล้ว (ดู TASK 4 rules)
+ * ฝั่ง UI ต้องรวมเป็นจุดพิกัด/สรุป ไม่โชว์ชื่อ-นามสกุลนักเรียนรายคนตรงๆ บนแผนที่ผู้บริหาร
+ */
+export function subscribeAllStudentHomeLocations(
+  onUpdate: (locs: StudentHomeLocation[]) => void
+): () => void {
+  try {
+    return onSnapshot(collection(db, HOME_LOCATION_COL), (snap) => {
+      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as StudentHomeLocation)));
+    }, (error) => {
+      console.warn('[subscribeAllStudentHomeLocations] Listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeAllStudentHomeLocations] Setup error:', error);
     return () => {};
   }
 }

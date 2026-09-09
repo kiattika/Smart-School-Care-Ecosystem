@@ -1,16 +1,28 @@
 import { cn } from "./lib/utils";
-import { mockExecutiveData } from "./data/mockData";
-import React, { useState, useEffect } from 'react';
-import { subscribeLateAttendanceRequests } from './services/firestoreService';
-import { LateAttendanceRequestRecord } from './types';
-import { 
-  LayoutDashboard, 
-  FileSpreadsheet, 
-  UploadCloud, 
+// TASK 1-8 (audit ข้อมูลปลอม): ExecutivePortal เดิมใช้ mockExecutiveData แทบทุก tab — หลังแก้ครบทุก
+// TASK แล้วไม่มีจุดไหนอ่านจาก mockExecutiveData อีกเลย (ทุก tab ใช้ Firestore จริงหรือถูกลบออกเพราะ
+// ไม่มีข้อมูลจริงรองรับ) จึงลบ import นี้ทิ้ง
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from './lib/firebase';
+import { format } from 'date-fns';
+import {
+  subscribeLateAttendanceRequests,
+  subscribeAllStudentHomeLocations,
+  subscribeAll2QScreenings,
+  subscribeAllPHQ9Screenings,
+  subscribeAllSDQAssessments,
+  subscribeInfirmaryVisits,
+  subscribeActiveLearningLogs,
+  subscribeAllSelfAssessments,
+} from './services/firestoreService';
+import { isNonStudentSession } from './utils/teacherLoadReportParser';
+import { LateAttendanceRequestRecord, StudentHomeLocation, TwoQuestionScreening, PHQ9Screening, SDQAssessment, InfirmaryVisit, ActiveLearningRecord, StudentSelfAssessment } from './types';
+import {
+  LayoutDashboard,
   Map as MapIcon,
   Activity,
   AlertTriangle,
-  CheckCircle,
   FileText,
   Heart,
   Users,
@@ -21,8 +33,6 @@ import {
   TrendingDown,
   Stethoscope,
   Scale,
-  Gavel,
-  Check,
   Inbox,
   Clock,
   X,
@@ -45,11 +55,10 @@ import { ExecutiveLearnerAnalytics } from './components/ExecutiveLearnerAnalytic
 import { ExecutiveEngagementDashboard } from './components/ExecutiveEngagementDashboard';
 import { useStore } from './store';
 import { useRealStudents } from './hooks/useRealStudents';
-import { 
+import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   BarChart, Bar,
   PieChart, Pie, Cell,
-  ScatterChart, Scatter, ZAxis
 } from 'recharts';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
@@ -62,14 +71,21 @@ import { motion, AnimatePresence } from 'motion/react';
 // ================= Mock Data =================
 
 
-const getPinColor = (pin: any) => {
-  if (pin.riskStatus === 'critical') return '#ef4444'; // Rose
-  if (pin.riskStatus === 'warning') return '#fbbf24'; // Amber
-  if (pin.isScholarship) return '#8b5cf6'; // Violet
+// TASK 4 (ExecutivePortal GIS, audit): เดิม pin ใช้ riskStatus/isScholarship/commuteDistance
+// แบบสมมติ (ดึงจาก mock data เดิมของหน้านี้ทั้งหมด) ไม่มีข้อมูลจริงรองรับเลยสักฟิลด์ — ตรวจสอบแล้ว
+// StudentHomeLocation ไม่มีฟิลด์เหล่านี้ และไม่มี scholarship field จริงในระบบเลย (grep ทั้งโปรเจกต์)
+// จึงตัด isScholarship/commuteDistance ออกตามคำสั่ง ("ถ้าไม่มีข้อมูลจริงรองรับ ให้เอาออก") แต่สถานะเสี่ยง
+// มีข้อมูลจริงรองรับ (Student.riskLevel — เก็บที่ students/{id}.riskLevel จริง อัปเดตผ่าน
+// updateBehaviorScoreAndTriggerAlert) จึงใช้แทนได้โดยไม่ผิดกฎ
+type GisPin = { id: string; lat: number; lng: number; name: string; riskLevel: 'NORMAL' | 'WARNING' | 'CRITICAL' };
+
+const getPinColor = (pin: GisPin) => {
+  if (pin.riskLevel === 'CRITICAL') return '#ef4444'; // Rose
+  if (pin.riskLevel === 'WARNING') return '#fbbf24'; // Amber
   return '#10b981'; // Emerald
 };
 
-const createCustomIcon = (pin: any) => L.divIcon({
+const createCustomIcon = (pin: GisPin) => L.divIcon({
   className: 'custom-map-pin',
   html: `<div style="background-color: ${getPinColor(pin)}; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 15px ${getPinColor(pin)};"></div>`,
   iconSize: [16, 16],
@@ -78,23 +94,105 @@ const createCustomIcon = (pin: any) => L.divIcon({
 
 
 export function ExecutivePortal() {
-  const {
-    homeVisits,
-    schoolDuties,
-    administrativeTasks,
-    postTeachingRecords,
-    selfAssessments,
-    activeLearningPoints,
-    activeLearningLogs
-  } = useStore();
+  const { postTeachingRecords } = useStore();
   // นักเรียนจาก Firestore สด — store แบบ session-local ทำให้ผู้บริหารเห็น 0 คนเมื่อไม่ได้ import เอง
   const { students } = useRealStudents();
+
+  // TASK 9 (audit): เดิม selfAssessments/activeLearningPoints/activeLearningLogs อ่านจาก Zustand
+  // store ที่ไม่มี Firestore listener ผูกไว้เลย (ว่างเปล่าเสมอเมื่อเปิดหน้าใหม่/ล็อกอินใหม่ ตรงกับ
+  // pattern บั๊กเดียวกับที่แก้ไปแล้วใน AdvisorPortal/TeacherPortal — ดู CLAUDE.md) แต่การเขียนจริง
+  // (addActiveLearningPoints/saveSelfAssessment ใน store.ts) เขียนลง Firestore จริงอยู่แล้ว
+  // (active_learning_logs, student_self_assessments) จึงแค่ต้องเพิ่ม listener อ่านกลับ
+  const [activeLearningLogs, setActiveLearningLogs] = useState<ActiveLearningRecord[]>([]);
+  useEffect(() => subscribeActiveLearningLogs(setActiveLearningLogs), []);
+  const activeLearningPoints = useMemo(() => {
+    const totals: Record<string, number> = {};
+    activeLearningLogs.forEach(log => {
+      totals[log.studentId] = Math.max(0, (totals[log.studentId] || 0) + log.points);
+    });
+    return totals;
+  }, [activeLearningLogs]);
+
+  const [selfAssessments, setSelfAssessments] = useState<Record<string, StudentSelfAssessment>>({});
+  useEffect(() => subscribeAllSelfAssessments(setSelfAssessments), []);
+
+  // TASK 4 (GIS): พิกัดบ้านนักเรียนจริงทั้งโรงเรียน (firestore.rules เพิ่ม EXECUTIVE อ่านได้แล้ว)
+  const [homeLocations, setHomeLocations] = useState<StudentHomeLocation[]>([]);
+  useEffect(() => subscribeAllStudentHomeLocations(setHomeLocations), []);
+
+  // TASK 5 (Health tab): ข้อมูลสุขภาพจริงทั้งโรงเรียน (firestore.rules เพิ่ม EXECUTIVE อ่านได้แล้ว) —
+  // ใช้แค่สรุปจำนวน/เปอร์เซ็นต์ระดับโรงเรียน ไม่โชว์ผลรายบุคคล ตามคำสั่ง TASK 5
+  const [screenings2Q, setScreenings2Q] = useState<TwoQuestionScreening[]>([]);
+  const [screeningsPhq9, setScreeningsPhq9] = useState<PHQ9Screening[]>([]);
+  const [sdqAssessments, setSdqAssessments] = useState<SDQAssessment[]>([]);
+  const [infirmaryVisits, setInfirmaryVisits] = useState<InfirmaryVisit[]>([]);
+  useEffect(() => subscribeAll2QScreenings(setScreenings2Q), []);
+  useEffect(() => subscribeAllPHQ9Screenings(setScreeningsPhq9), []);
+  useEffect(() => subscribeAllSDQAssessments(setSdqAssessments), []);
+  useEffect(() => subscribeInfirmaryVisits(setInfirmaryVisits), []);
+
+  const healthSummary = useMemo(() => {
+    const positive2Q = screenings2Q.filter(s => s.isPositive).length;
+    const phq9Elevated = screeningsPhq9.filter(s => s.riskLevel !== 'NORMAL' && s.riskLevel !== 'MILD').length;
+    const sdqAtRisk = sdqAssessments.filter(s => s.triagingStatus === 'AT_RISK' || s.triagingStatus === 'VULNERABLE').length;
+    const thisMonthStr = format(new Date(), 'yyyy-MM');
+    const infirmaryThisMonth = infirmaryVisits.filter(v => (v.visitDate || '').startsWith(thisMonthStr));
+    return {
+      total2Q: screenings2Q.length,
+      positive2Q,
+      positive2QPercent: screenings2Q.length > 0 ? Math.round((positive2Q / screenings2Q.length) * 100) : null,
+      totalPhq9: screeningsPhq9.length,
+      phq9Elevated,
+      phq9ElevatedPercent: screeningsPhq9.length > 0 ? Math.round((phq9Elevated / screeningsPhq9.length) * 100) : null,
+      totalSdq: sdqAssessments.length,
+      sdqAtRisk,
+      sdqAtRiskPercent: sdqAssessments.length > 0 ? Math.round((sdqAtRisk / sdqAssessments.length) * 100) : null,
+      infirmaryVisitsThisMonth: infirmaryThisMonth.length,
+      infirmaryUrgentThisMonth: infirmaryThisMonth.filter(v => v.isUrgentAlert).length,
+    };
+  }, [screenings2Q, screeningsPhq9, sdqAssessments, infirmaryVisits]);
 
   // คำขอเช็คชื่อย้อนหลัง — อ่านจาก Firestore สด (อนุมัติจริงทำที่หน้ารองผู้อำนวยการฝ่ายวิชาการ)
   const [lateAttendanceRequests, setLateAttendanceRequests] = useState<LateAttendanceRequestRecord[]>([]);
   useEffect(() => subscribeLateAttendanceRequests(setLateAttendanceRequests), []);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'policy' | 'reports' | 'import' | 'approvals' | 'analytics'>('dashboard');
+  // TASK 2 (Academic Discipline pillar): คาบเรียนวันนี้ทั้งโรงเรียนที่ "มีนักเรียน" จริง (ไม่นับ PLC/
+  // ประชุม/พักกลางวัน) เทียบกับจำนวนบันทึกหลังสอนที่ส่งแล้ว — postTeachingRecords มาจาก useSubstituteSync
+  // (subscribe ที่ App.tsx ระดับ root ให้ผู้ใช้ที่ล็อกอินทุกคนเสมอ ดู CLAUDE.md) จึงเป็นข้อมูลจริงอยู่แล้ว
+  // แต่ตัวส่วน (คาบเรียนวันนี้ทั้งโรงเรียน) ต้อง fetch schedules เองเพราะ ExecutivePortal ไม่เคยดึงมาก่อน
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const [todayScheduledPeriodCount, setTodayScheduledPeriodCount] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+        const todayName = dayNames[new Date().getDay()];
+        const snap = await getDocs(collection(db, 'schedules'));
+        if (cancelled) return;
+        const count = snap.docs.filter(d => {
+          const v = d.data() as any;
+          const dow = typeof v.scheduleDay === 'number' ? dayNames[v.scheduleDay] : String(v.dayOfWeek || '').toLowerCase();
+          if (dow !== todayName) return false;
+          return !isNonStudentSession(v.subjectName || v.courseName || '', v.subjectCode || v.courseCode || '', v.level);
+        }).length;
+        setTodayScheduledPeriodCount(count);
+      } catch (err) {
+        console.warn('[ExecutivePortal] today schedule count fetch notice:', err);
+        setTodayScheduledPeriodCount(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const todayCompletedPostTeachingCount = useMemo(
+    () => postTeachingRecords.filter(r => r.date === todayStr).length,
+    [postTeachingRecords, todayStr]
+  );
+  const academicDisciplinePercent = todayScheduledPeriodCount && todayScheduledPeriodCount > 0
+    ? Math.min(100, Math.round((todayCompletedPostTeachingCount / todayScheduledPeriodCount) * 100))
+    : null;
+
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'approvals' | 'analytics'>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -106,53 +204,49 @@ export function ExecutivePortal() {
     { id: 'analytics', label: 'บทสรุปผู้เรียน', fullLabel: 'บทสรุปผู้เรียน (Learner DNA)', icon: Users, badge: null, color: 'text-blue-400' },
     { id: 'gis', label: 'แผนที่สารสนเทศ', fullLabel: 'แผนที่สารสนเทศ (GIS)', icon: MapIcon, badge: null, color: 'text-emerald-400' },
     { id: 'health', label: 'สุขภาวะ', fullLabel: 'สุขภาวะ (Health & Safety)', icon: Stethoscope, badge: null, color: 'text-emerald-400' },
-    { id: 'policy', label: 'กำหนดนโยบาย', fullLabel: 'กำหนดนโยบาย (Policy Action)', icon: Gavel, badge: null, color: 'text-emerald-400' },
-    { id: 'reports', label: 'รายงาน', fullLabel: 'รายงาน (Report Center)', icon: FileSpreadsheet, badge: null, color: 'text-emerald-400' },
-    { id: 'import', label: 'ศูนย์ข้อมูล', fullLabel: 'ศูนย์ข้อมูล (Master Data)', icon: UploadCloud, badge: null, color: 'text-emerald-400' },
     { id: 'approvals', label: 'กล่องคำขอ', fullLabel: 'กล่องคำขอ (Approvals)', icon: Inbox, badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : null, color: 'text-amber-400' },
   ] as const;
   
-  // States for Import & Reports
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processed, setProcessed] = useState(false);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-
   // States for GIS Filter
-  const [gisFilter, setGisFilter] = useState<'all' | 'risk' | 'scholarship'>('all');
+  const [gisFilter, setGisFilter] = useState<'all' | 'risk'>('all');
   const [showHeatmap, setShowHeatmap] = useState(false);
 
-  // States for Policy Actions
-  const [actionStatuses, setActionStatuses] = useState<Record<string, 'approved' | 'reviewed' | null>>({});
+  // TASK 6 (audit): เดิมมี state actionStatuses + handleAction สำหรับ "Policy Action Center" (ปุ่ม
+  // approve/review proposal ปลอมที่ดึงจาก mock data (policyProposals) ทั้งหมด ไม่มีระบบ
+  // นโยบาย/งบประมาณจริงในระบบเลย) — เอา tab นี้ออกทั้งหมด ตรงกับที่เคยตัดสินใจกับ tab เกินขอบเขต
+  // ใน FinancePortal มาก่อน (ดูคำสั่ง TASK 6)
 
-  // States for Executive Report
-  const [showReportModal, setShowReportModal] = useState(false);
-  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  // TASK 4 (GIS): pin จริงจาก student_home_locations + students (ชื่อ/riskLevel) — ตัด nameไม่เจอนักเรียน
+  // (studentId ไม่ match กับ students ที่มีอยู่ตอนนี้ เช่น import ไม่ครบ) ออกแทนการโชว์ "ไม่ทราบชื่อ"
+  const gisPins = useMemo<GisPin[]>(() => {
+    return homeLocations
+      .map(loc => {
+        const student = students.find(s => s.studentId === loc.studentId);
+        if (!student) return null;
+        return {
+          id: loc.id,
+          lat: loc.latitude,
+          lng: loc.longitude,
+          name: student.name,
+          riskLevel: student.riskLevel || 'NORMAL',
+        } as GisPin;
+      })
+      .filter((p): p is GisPin => p !== null);
+  }, [homeLocations, students]);
 
-  const filteredPins = mockExecutiveData.gisStudents.filter(pin => {
+  const filteredPins = gisPins.filter(pin => {
     if (gisFilter === 'all') return true;
-    if (gisFilter === 'risk') return pin.riskStatus === 'warning' || pin.riskStatus === 'critical';
-    if (gisFilter === 'scholarship') return pin.isScholarship;
+    if (gisFilter === 'risk') return pin.riskLevel === 'WARNING' || pin.riskLevel === 'CRITICAL';
     return true;
   });
 
-  const handleAction = (id: string, action: 'approved' | 'reviewed') => {
-    setActionStatuses(prev => ({ ...prev, [id]: action }));
-  };
+  // TASK 8 (audit): เดิมมี handleProcessData — ปุ่ม "Synchronize Data" ในตาราง Master Data Management
+  // เป็น setTimeout ปลอมล้วน (ไม่เขียน Firestore จริง) ลบพร้อมกับ tab นี้ทั้งหมด (ดูเหตุผลเต็มที่จุด tab)
 
-  const handleProcessData = () => {
-    setIsProcessing(true);
-    setTimeout(() => {
-      setIsProcessing(false);
-      setProcessed(true);
-    }, 2000);
-  };
-
-  const handleDownload = (id: string) => {
-    setDownloadingId(id);
-    setTimeout(() => {
-      setDownloadingId(null);
-    }, 1500);
-  };
+  // TASK 7 (audit): เดิมมี handleDownload — ปุ่ม "Export Report" ในตาราง Report Center เป็น
+  // setTimeout ปลอมล้วน (ไม่มีไฟล์ PDF ออกจริง) ผูกกับตารางห้องเรียน/ครูที่ปรึกษา hardcode เอง
+  // (ไม่ใช่ students/staff จริงด้วยซ้ำ) — ผิดกฎ CLAUDE.md "ห้ามใช้ setTimeout แทนการเขียน/สร้างผลลัพธ์จริง"
+  // เอา tab ออกทั้งหมดเหมือน TASK 6
 
   return (
     <div className="flex h-screen w-full bg-[#05070a] text-slate-100 font-sans selection:bg-emerald-500/30 overflow-hidden">
@@ -343,9 +437,6 @@ export function ExecutivePortal() {
               {activeTab === 'analytics' && 'Executive Learner Insights'}
               {activeTab === 'gis' && 'Spatial Intelligence (School GIS)'}
               {activeTab === 'health' && 'Student Wellness & Analytics'}
-              {activeTab === 'policy' && 'Policy Action Center'}
-              {activeTab === 'reports' && 'Automated PDF Reporting'}
-              {activeTab === 'import' && 'Master Data Management'}
               {activeTab === 'approvals' && 'Approval Inbox (กล่องคำขออนุมัติ)'}
             </h2>
           </div>
@@ -389,106 +480,65 @@ export function ExecutivePortal() {
               {activeTab === 'dashboard' && (
             <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
               
+              {/* TASK 3: ปุ่มเดิม (setShowReportModal) เปิด modal ที่ดึงตัวเลขจาก mockExecutiveData
+                  ล้วนๆ และปุ่ม "Download PDF" ข้างในก็เป็นแค่ setTimeout ไม่มีไฟล์ออกจริง — ยังไม่มี
+                  ระบบสร้าง PDF จริงในรอบนี้ (ไม่มี lib สร้าง PDF ในโปรเจกต์) ปิดปุ่มไว้ก่อนพร้อมข้อความ
+                  ตรงไปตรงมาแทนการโชว์รายงานปลอม (ตาม CLAUDE.md: ห้ามใช้ setTimeout จำลอง "สำเร็จ") */}
               <div className="flex justify-end">
-                <button 
-                  onClick={() => setShowReportModal(true)}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-lg font-bold flex items-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.3)] transition-all"
+                <button
+                  disabled
+                  title="ฟีเจอร์นี้ยังไม่เปิดใช้งาน — อยู่ระหว่างพัฒนา"
+                  className="bg-white/5 text-slate-500 border border-white/10 px-6 py-2.5 rounded-lg font-bold flex items-center gap-2 cursor-not-allowed"
                 >
                   <FileText className="w-5 h-5" />
-                  ส่งออกรายงานสรุปผู้บริหาร (PDF)
+                  ส่งออกรายงานสรุปผู้บริหาร (PDF) — เร็วๆ นี้
                 </button>
               </div>
 
-              {/* 360° Care Score Dashboard */}
+              {/* 360° Care Score Dashboard
+                  TASK 1/2 (audit): เดิมมี "5 KPI Pillars" + "Annual Rewards & Promotions Shortlist"
+                  (ตารางจัดอันดับครู) ที่เป็นข้อมูลปลอม 100% ตรวจสอบแล้วว่าในระบบไม่มีที่เก็บผลประเมิน
+                  PA/KPI รายบุคคลของครูเลย (grep ทั้งโปรเจกต์ไม่เจอ collection ที่เกี่ยวข้อง) — เอา
+                  ตารางจัดอันดับออกทั้งหมด (ดีกว่าโชว์ชื่อครู+คะแนนที่แต่งขึ้น) บันทึกไว้เป็นรายการที่ต้อง
+                  ออกแบบระบบเก็บข้อมูลใหม่ถ้าต้องการฟีเจอร์นี้จริง (ต้องมีแหล่งข้อมูลผลประเมิน PA ก่อน)
+
+                  จาก 5 pillar เดิม ตรวจสอบแหล่งข้อมูลจริงทีละตัว: Classroom Engagement
+                  (activeLearningPoints/Logs) และ Home Visit Progress/School Duty/Admin Task
+                  (homeVisits/schoolDuties/administrativeTasks) ล้วนเป็น Zustand state แบบ
+                  session-local ล้วนๆ (initial [] ไม่มี Firestore listener เลย ตรวจสอบใน store.ts แล้ว)
+                  เอาออกทั้ง 4 ตัว เหลือไว้แค่ "Academic Discipline" ที่คำนวณจากข้อมูลจริง 2 แหล่ง:
+                  postTeachingRecords (subscribe จริงที่ App.tsx ระดับ root ให้ผู้ใช้ทุกคนผ่าน
+                  useSubstituteSync — ดู CLAUDE.md) เทียบกับจำนวนคาบเรียนวันนี้ทั้งโรงเรียนที่ query
+                  จาก schedules สด (ไม่นับคาบไม่มีนักเรียนเช่น PLC/ประชุม/พักกลางวัน)
+
+                  หมายเหตุ TASK 9: activeLearningPoints/Logs ข้างต้น (ตอนตรวจสอบรอบแรก) เป็น
+                  session-local จริง — ตอนนี้แก้แล้ว (ดู subscribeActiveLearningLogs ด้านบน) จึงเป็น
+                  ข้อมูลจริงที่ใช้ใน tab "engagement" ได้แล้ว แค่ไม่ได้เอากลับมาใส่ในการ์ด KPI ที่นี่เพราะ
+                  ยังไม่มี business logic ที่ยืนยันว่าควรนับเป็น pillar ประเมินภาพรวมโรงเรียน */}
               <div className="space-y-6">
                 <div>
-                  <h3 className="text-sm font-medium text-slate-400 uppercase tracking-widest mb-4">360° Executive Evaluation (5 KPI Pillars)</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                    {[
-                      { label: 'Academic Discipline', icon: FileText, score: '94%', desc: 'Post-teaching compliance' },
-                      { label: 'Classroom Engagement', icon: Star, score: '88%', desc: 'Active scoring tools' },
-                      { label: 'Home Visit Progress', icon: MapIcon, score: `${homeVisits.filter(v => v.geoVerified).length}/2`, desc: 'Geo-verified visits' },
-                      { label: 'School Duty Punctuality', icon: Clock, score: '90%', desc: 'Gate & area check-ins' },
-                      { label: 'Admin Task Delivery', icon: CheckCircle2, score: '95%', desc: 'Department tasks' },
-                    ].map((kpi, idx) => (
-                      <div key={idx} className="bg-[#0f1219] border border-white/10 rounded-2xl p-5 shadow-xl relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-                          <kpi.icon className="w-16 h-16 text-indigo-500" />
-                        </div>
-                        <div className="text-3xl font-black text-indigo-400 mb-1">{kpi.score}</div>
-                        <h3 className="text-xs font-bold text-slate-200 mb-1">{kpi.label}</h3>
-                        <p className="text-[10px] text-slate-500">{kpi.desc}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="bg-[#0f1219] border border-white/10 rounded-2xl shadow-xl flex flex-col overflow-hidden">
-                  <div className="p-6 border-b border-white/10 flex items-center justify-between">
-                    <div>
-                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                        <Trophy className="w-5 h-5 text-amber-400" /> Annual Rewards & Promotions Shortlist
-                      </h3>
-                      <p className="text-xs text-slate-400 mt-1">Teacher ranking based on aggregated 360° Care Scores</p>
+                  <h3 className="text-sm font-medium text-slate-400 uppercase tracking-widest mb-4">Academic Discipline (ข้อมูลจริงจาก Firestore)</h3>
+                  <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-5 shadow-xl relative overflow-hidden group max-w-xs">
+                    <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                      <FileText className="w-16 h-16 text-indigo-500" />
                     </div>
-                    <div className="flex items-center gap-3">
-                      <div className="relative">
-                        <Search className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input type="text" placeholder="Filter by Department..." className="bg-black/20 border border-white/10 rounded-lg pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 w-48" />
-                      </div>
-                      <button className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors">
-                        <Filter className="w-4 h-4" /> Sort: Highest KPI
-                      </button>
+                    <div className="text-3xl font-black text-indigo-400 mb-1">
+                      {academicDisciplinePercent !== null ? `${academicDisciplinePercent}%` : '—'}
                     </div>
+                    <h3 className="text-xs font-bold text-slate-200 mb-1">Post-teaching compliance (วันนี้)</h3>
+                    <p className="text-[10px] text-slate-500">
+                      {todayScheduledPeriodCount !== null
+                        ? `บันทึกหลังสอนแล้ว ${todayCompletedPostTeachingCount}/${todayScheduledPeriodCount} คาบ (ทั้งโรงเรียน)`
+                        : 'กำลังโหลดข้อมูลตารางสอนวันนี้...'}
+                    </p>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm text-slate-300">
-                      <thead className="text-xs uppercase bg-black/40 text-slate-400">
-                        <tr>
-                          <th className="px-6 py-4 font-medium">Rank</th>
-                          <th className="px-6 py-4 font-medium">Teacher</th>
-                          <th className="px-6 py-4 font-medium">Department</th>
-                          <th className="px-6 py-4 font-medium">Total KPI</th>
-                          <th className="px-6 py-4 font-medium text-center">Pillar 1</th>
-                          <th className="px-6 py-4 font-medium text-center">Pillar 2</th>
-                          <th className="px-6 py-4 font-medium text-center">Pillar 3</th>
-                          <th className="px-6 py-4 font-medium text-center">Pillar 4</th>
-                          <th className="px-6 py-4 font-medium text-center">Pillar 5</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/5">
-                        {[
-                          { rank: 1, name: 'คุณครู สมใจ รักสอน', dept: 'วิทยาศาสตร์', score: 96, p1: '98%', p2: '95%', p3: '100%', p4: '92%', p5: '100%' },
-                          { rank: 2, name: 'คุณครู มานะ บากบั่น', dept: 'คณิตศาสตร์', score: 92, p1: '95%', p2: '88%', p3: '90%', p4: '95%', p5: '92%' },
-                          { rank: 3, name: 'คุณครู วีณา รื่นรมย์', dept: 'ศิลปะ', score: 85, p1: '80%', p2: '92%', p3: '70%', p4: '88%', p5: '95%' },
-                          { rank: 4, name: 'นาย ก', dept: 'ภาษาไทย', score: 78, p1: '75%', p2: '80%', p3: '60%', p4: '85%', p5: '90%' },
-                        ].map((teacher, idx) => (
-                          <tr key={idx} className="hover:bg-white/5 transition-colors">
-                            <td className="px-6 py-4">
-                              <div className={cn("w-6 h-6 rounded flex items-center justify-center font-bold text-xs", teacher.rank === 1 ? "bg-amber-500 text-white" : teacher.rank === 2 ? "bg-slate-300 text-slate-800" : teacher.rank === 3 ? "bg-amber-700 text-white" : "bg-white/10")}>
-                                {teacher.rank}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 font-medium text-white">{teacher.name}</td>
-                            <td className="px-6 py-4 text-slate-400">{teacher.dept}</td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-2">
-                                <span className={cn("font-bold", teacher.score >= 90 ? "text-emerald-400" : teacher.score >= 80 ? "text-amber-400" : "text-rose-400")}>{teacher.score}</span>
-                                <div className="w-16 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                                  <div className={cn("h-full rounded-full", teacher.score >= 90 ? "bg-emerald-400" : teacher.score >= 80 ? "bg-amber-400" : "bg-rose-400")} style={{ width: `${teacher.score}%` }}></div>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-center text-xs text-slate-400">{teacher.p1}</td>
-                            <td className="px-6 py-4 text-center text-xs text-slate-400">{teacher.p2}</td>
-                            <td className="px-6 py-4 text-center text-xs text-slate-400">{teacher.p3}</td>
-                            <td className="px-6 py-4 text-center text-xs text-slate-400">{teacher.p4}</td>
-                            <td className="px-6 py-4 text-center text-xs text-slate-400">{teacher.p5}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <p className="text-[10px] text-slate-600 mt-3 max-w-2xl">
+                    หมายเหตุ: เดิมหน้านี้มี "5 KPI Pillars" + ตารางจัดอันดับครูรายบุคคล (Annual Rewards
+                    Shortlist) — ตรวจสอบแล้วมีข้อมูลจริงรองรับแค่ตัวเดียว (ด้านบน) อีก 4 ตัว
+                    (Classroom Engagement, Home Visit Progress, School Duty Punctuality, Admin Task
+                    Delivery) และตารางจัดอันดับครูทั้งตารางไม่มีแหล่งข้อมูลจริงในระบบเลย จึงเอาออกแทนที่จะ
+                    โชว์ตัวเลข/รายชื่อที่แต่งขึ้น — ต้องออกแบบระบบเก็บข้อมูลเพิ่มก่อนถึงจะทำได้จริง
+                  </p>
                 </div>
 
                 {/* Grade-Level Engagement Trends Spotlight (Recharts) */}
@@ -613,10 +663,10 @@ export function ExecutivePortal() {
                           <div className="w-3 h-3 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>
                           <span className="font-medium text-sm">นักเรียนทั้งหมด</span>
                         </div>
-                        <span className="text-xs bg-black/30 px-2 py-1 rounded-md">{mockExecutiveData.gisStudents.length}</span>
+                        <span className="text-xs bg-black/30 px-2 py-1 rounded-md">{gisPins.length}</span>
                       </button>
 
-                      <button 
+                      <button
                         onClick={() => setGisFilter('risk')}
                         className={cn("w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all", gisFilter === 'risk' ? "bg-rose-500/10 border-rose-500/50 text-rose-300" : "bg-white/5 border-transparent text-slate-400 hover:bg-white/10")}
                       >
@@ -624,19 +674,11 @@ export function ExecutivePortal() {
                           <div className="w-3 h-3 rounded-full bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]"></div>
                           <span className="font-medium text-sm">กลุ่มเสี่ยง (At-Risk)</span>
                         </div>
-                        <span className="text-xs bg-black/30 px-2 py-1 rounded-md">{mockExecutiveData.gisStudents.filter(p => p.riskStatus === 'warning' || p.riskStatus === 'critical').length}</span>
+                        <span className="text-xs bg-black/30 px-2 py-1 rounded-md">{gisPins.filter(p => p.riskLevel === 'WARNING' || p.riskLevel === 'CRITICAL').length}</span>
                       </button>
-
-                      <button 
-                        onClick={() => setGisFilter('scholarship')}
-                        className={cn("w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all", gisFilter === 'scholarship' ? "bg-violet-500/10 border-violet-500/50 text-violet-300" : "bg-white/5 border-transparent text-slate-400 hover:bg-white/10")}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-3 h-3 rounded-full bg-violet-500 shadow-[0_0_8px_rgba(139,92,246,0.8)]"></div>
-                          <span className="font-medium text-sm">นักเรียนทุน คสศ.</span>
-                        </div>
-                        <span className="text-xs bg-black/30 px-2 py-1 rounded-md">{mockExecutiveData.gisStudents.filter(p => p.isScholarship).length}</span>
-                      </button>
+                      {/* TASK 4 (audit): เดิมมีปุ่มกรอง "นักเรียนทุน คสศ." (isScholarship) — ไม่มีฟิลด์
+                          scholarship จริงในระบบเลย (grep ทั้งโปรเจกต์ไม่เจอ) เอาออกตามกฎ ห้ามแสดงข้อมูล
+                          ที่ไม่มีข้อมูลจริงรองรับ */}
                     </div>
                   </div>
 
@@ -665,10 +707,10 @@ export function ExecutivePortal() {
                     />
                     
                     {filteredPins.map(pin => (
-                      <Marker 
-                        key={pin.id} 
-                        position={[pin.lat, pin.lng]} 
-                        icon={showHeatmap && (pin.riskStatus === 'critical' || pin.riskStatus === 'warning') ? L.divIcon({
+                      <Marker
+                        key={pin.id}
+                        position={[pin.lat, pin.lng]}
+                        icon={showHeatmap && (pin.riskLevel === 'CRITICAL' || pin.riskLevel === 'WARNING') ? L.divIcon({
                           className: 'heatmap-pin',
                           html: `<div style="background: radial-gradient(circle, rgba(239,68,68,0.8) 0%, rgba(239,68,68,0) 70%); width: 60px; height: 60px; border-radius: 50%; transform: translate(-20px, -20px);"></div>`,
                           iconSize: [20, 20],
@@ -678,10 +720,8 @@ export function ExecutivePortal() {
                         <Popup className="custom-popup">
                           <div className="p-1 font-sans">
                             <h4 className="font-bold text-slate-800 text-sm mb-1">{pin.name.replace(/^[นายด.ช.ญ.\s]+/, 'Student #')}</h4>
-                            <p className="text-xs text-slate-600 mb-1">ระยะทาง: {pin.commuteDistance}</p>
                             <p className="text-xs text-slate-600">
-                              สถานะ: {pin.riskStatus === 'safe' ? 'ปลอดภัย' : pin.riskStatus === 'warning' ? 'เฝ้าระวัง' : 'วิกฤต'}
-                              {pin.isScholarship && ' (ทุน คสศ.)'}
+                              สถานะ: {pin.riskLevel === 'NORMAL' ? 'ปกติ' : pin.riskLevel === 'WARNING' ? 'เฝ้าระวัง' : 'วิกฤต'}
                             </p>
                           </div>
                         </Popup>
@@ -709,302 +749,79 @@ export function ExecutivePortal() {
             </div>
           )}
 
-          {activeTab === 'import' && (
-            <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
-              <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-10 shadow-xl">
-                <h3 className="text-2xl font-bold text-white mb-2">Master Data Management</h3>
-                <p className="text-slate-400 text-sm mb-8">Import official student rosters to auto-generate school credentials and directory links.</p>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-                  <div className="border-2 border-dashed border-slate-700 rounded-2xl p-10 flex flex-col items-center justify-center bg-slate-900/50 hover:bg-slate-900/80 hover:border-emerald-500/50 transition-colors cursor-pointer group">
-                    <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                      <UploadCloud className="w-8 h-8 text-emerald-400" />
-                    </div>
-                    <p className="text-slate-200 font-medium mb-1">Drag and drop CSV here</p>
-                    <p className="text-slate-500 text-xs mb-6">Supports .csv files up to 10MB</p>
-                    <button className="px-6 py-2 bg-white/5 border border-white/10 hover:bg-white/10 rounded-lg text-sm font-medium transition-colors">
-                      Browse Files
-                    </button>
-                  </div>
-
-                  <div className="flex flex-col justify-center space-y-4">
-                    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                      <div className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-1">Field Name</div>
-                      <div className="text-sm text-slate-300">Student ID (5-digit)</div>
-                      <div className="text-[10px] text-slate-500 mt-1">Source: Academic Office (CSV)</div>
-                    </div>
-                    <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                      <div className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1">Field Name</div>
-                      <div className="text-sm text-slate-300">Email (@utd.ac.th)</div>
-                      <div className="text-[10px] text-slate-500 mt-1">Source: Auto-generated System</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-end pt-6 border-t border-white/10">
-                  <button 
-                    onClick={handleProcessData}
-                    disabled={isProcessing || processed}
-                    className={cn(
-                      "flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-bold transition-all shadow-lg",
-                      processed 
-                        ? "bg-emerald-600 text-white" 
-                        : isProcessing
-                          ? "bg-emerald-600/50 text-white/70 cursor-not-allowed"
-                          : "bg-[#deff9a] text-[#05070a] hover:bg-[#c9f076] shadow-[0_0_20px_rgba(222,255,154,0.2)]"
-                    )}
-                  >
-                    {isProcessing ? (
-                      <>
-                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Processing...
-                      </>
-                    ) : processed ? (
-                      <>
-                        <CheckCircle className="w-5 h-5" />
-                        System Synchronized
-                      </>
-                    ) : (
-                      <>
-                        Synchronize Data
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* TASK 8 (audit): tab "import" (Master Data Management) ถูกลบออกทั้งหมด — เดิม UI ลาก-วาง
+              ไฟล์ไม่มี input/handler รับไฟล์จริงเลย และปุ่ม "Synchronize Data" (handleProcessData) เป็น
+              setTimeout ปลอม ไม่เขียน Firestore จริง ซ้ำซ้อนกับ BulkDataImportModal.tsx ที่ทำงานจริงอยู่แล้ว
+              ใน AdminPortal — เลือก "ลบทิ้ง" แทน "ลิงก์ไปหน้า import จริง" เพราะตรวจสอบ firestore.rules
+              แล้วพบว่า EXECUTIVE ไม่มีสิทธิ์เขียน students/staff เลย (allow write เฉพาะ SUPER_ADMIN/
+              HOMEROOM_TEACHER) การฝัง BulkDataImportModal ในหน้านี้จะยังใช้งานไม่ได้จริงอยู่ดีถ้าไม่ขยาย
+              สิทธิ์เขียนข้อมูลนักเรียน/บุคลากรทั้งโรงเรียนให้ EXECUTIVE เพิ่ม — ซึ่งเป็นการขยายสิทธิ์เขียน
+              ข้อมูลหลักที่ใหญ่กว่าการอนุญาตอ่านเพื่อสรุปภาพรวมใน TASK 4/5 มาก และไม่มีความต้องการทางธุรกิจ
+              ที่ยืนยันว่า EXECUTIVE ต้อง import ข้อมูลเอง (เป็นงานปฏิบัติการที่ AdminPortal ทำอยู่แล้ว) */}
 
           {activeTab === 'health' && (
             <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
-              
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                {/* Health Risks KPI */}
-                <div className="lg:col-span-1 flex flex-col gap-4">
-                  <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl">
-                    <h3 className="text-sm font-medium text-slate-400 mb-6 uppercase tracking-widest">Prevalent Health Risks</h3>
-                    <div className="space-y-4">
-                      <div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-slate-300">Malnutrition</span>
-                          <span className="text-rose-400 font-bold">{mockExecutiveData.healthRisks.malnutrition}%</span>
-                        </div>
-                        <div className="w-full bg-white/5 rounded-full h-2">
-                          <div className="bg-rose-500 h-2 rounded-full" style={{ width: `${mockExecutiveData.healthRisks.malnutrition}%` }}></div>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-slate-300">Dental Issues</span>
-                          <span className="text-orange-400 font-bold">{mockExecutiveData.healthRisks.dentalIssues}%</span>
-                        </div>
-                        <div className="w-full bg-white/5 rounded-full h-2">
-                          <div className="bg-orange-500 h-2 rounded-full" style={{ width: `${mockExecutiveData.healthRisks.dentalIssues}%` }}></div>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-slate-300">Vision Impairment</span>
-                          <span className="text-amber-400 font-bold">{mockExecutiveData.healthRisks.visionIssues}%</span>
-                        </div>
-                        <div className="w-full bg-white/5 rounded-full h-2">
-                          <div className="bg-amber-400 h-2 rounded-full" style={{ width: `${mockExecutiveData.healthRisks.visionIssues}%` }}></div>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-slate-300">Mental Stress</span>
-                          <span className="text-indigo-400 font-bold">{mockExecutiveData.healthRisks.mentalStress}%</span>
-                        </div>
-                        <div className="w-full bg-white/5 rounded-full h-2">
-                          <div className="bg-indigo-500 h-2 rounded-full" style={{ width: `${mockExecutiveData.healthRisks.mentalStress}%` }}></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+              {/* TASK 5 (audit): เดิม tab นี้ทั้งหมดเป็นข้อมูลปลอม — malnutrition/dental/vision % คงที่
+                  (ไม่มีฟิลด์จริงในระบบเลย, ตรวจสอบแล้ว SemesterHealthRecord/height/weight/bmi มาจาก
+                  mockStudentParentData.ts เท่านั้น ไม่เคยเขียนลง Firestore จริง), กราฟแจกแจงดัชนีมวลกาย
+                  และกราฟกระจายระยะทาง-ผลการเรียน (ไม่มี commute distance จริงเหมือนที่พบใน TASK 4) —
+                  เอาออกทั้งหมด แทนที่ด้วยสรุปภาพรวมจากข้อมูลจริงที่มีอยู่ (คัดกรอง 2Q/PHQ-9, ประเมิน SDQ,
+                  บันทึกห้องพยาบาล) นับจำนวน/เปอร์เซ็นต์ระดับโรงเรียนเท่านั้น ไม่โชว์ผลรายบุคคล ตามคำสั่ง TASK 5 */}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl">
+                  <h3 className="text-sm font-medium text-slate-400 mb-2 uppercase tracking-widest">คัดกรองสุขภาพจิต (2Q)</h3>
+                  {healthSummary.total2Q > 0 ? (
+                    <>
+                      <p className="text-4xl font-bold text-white mb-1">{healthSummary.positive2QPercent}%</p>
+                      <p className="text-xs text-slate-400">พบความเสี่ยง {healthSummary.positive2Q} จาก {healthSummary.total2Q} คนที่คัดกรองแล้ว</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-500">ยังไม่มีข้อมูลคัดกรอง 2Q ในระบบ</p>
+                  )}
                 </div>
 
-                {/* BMI Distribution */}
-                <div className="lg:col-span-1 bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl flex flex-col h-[350px]">
-                  <h3 className="text-lg font-medium text-white mb-6">BMI Distribution</h3>
-                  <div className="flex-1 w-full min-h-0">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={mockExecutiveData.bmiDistribution} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                        <XAxis dataKey="category" stroke="#475569" tick={{fill: '#94a3b8', fontSize: 11}} axisLine={false} tickLine={false} />
-                        <YAxis stroke="#475569" tick={{fill: '#94a3b8', fontSize: 12}} axisLine={false} tickLine={false} />
-                        <RechartsTooltip 
-                          cursor={{fill: '#ffffff05'}}
-                          contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                          itemStyle={{ color: '#deff9a' }}
-                        />
-                        <Bar dataKey="count" fill="#8b5cf6" radius={[4, 4, 0, 0]}>
-                          {mockExecutiveData.bmiDistribution.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={index === 1 ? '#10b981' : index === 0 ? '#fbbf24' : '#ef4444'} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
+                <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl">
+                  <h3 className="text-sm font-medium text-slate-400 mb-2 uppercase tracking-widest">คัดกรองซึมเศร้า (PHQ-9)</h3>
+                  {healthSummary.totalPhq9 > 0 ? (
+                    <>
+                      <p className="text-4xl font-bold text-white mb-1">{healthSummary.phq9ElevatedPercent}%</p>
+                      <p className="text-xs text-slate-400">ระดับปานกลางขึ้นไป {healthSummary.phq9Elevated} จาก {healthSummary.totalPhq9} คนที่คัดกรองแล้ว</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-500">ยังไม่มีข้อมูลคัดกรอง PHQ-9 ในระบบ</p>
+                  )}
                 </div>
 
-                {/* Commute vs Performance Scatter */}
-                <div className="lg:col-span-2 bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl flex flex-col h-[350px]">
-                  <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-lg font-medium text-white">Commute vs. Performance Analysis</h3>
-                    <span className="text-xs text-slate-400 bg-white/5 px-2 py-1 rounded">Distance (km) vs Attendance (%)</span>
-                  </div>
-                  <div className="flex-1 w-full min-h-0">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ScatterChart margin={{ top: 10, right: 20, left: -20, bottom: 10 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" />
-                        <XAxis type="number" dataKey="distance" name="Distance" unit="km" stroke="#475569" tick={{fill: '#94a3b8', fontSize: 12}} axisLine={false} tickLine={false} />
-                        <YAxis type="number" dataKey="attendance" name="Attendance" unit="%" stroke="#475569" tick={{fill: '#94a3b8', fontSize: 12}} axisLine={false} tickLine={false} domain={['dataMin - 5', 100]} />
-                        <ZAxis type="number" dataKey="late" range={[50, 400]} name="Late Days" />
-                        <RechartsTooltip 
-                          cursor={{strokeDasharray: '3 3'}}
-                          contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                          itemStyle={{ color: '#deff9a' }}
-                        />
-                        <Scatter name="Students" data={mockExecutiveData.correlationData} fill="#deff9a" opacity={0.6} />
-                      </ScatterChart>
-                    </ResponsiveContainer>
-                  </div>
+                <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl">
+                  <h3 className="text-sm font-medium text-slate-400 mb-2 uppercase tracking-widest">ประเมินพฤติกรรม (SDQ)</h3>
+                  {healthSummary.totalSdq > 0 ? (
+                    <>
+                      <p className="text-4xl font-bold text-white mb-1">{healthSummary.sdqAtRiskPercent}%</p>
+                      <p className="text-xs text-slate-400">กลุ่มเสี่ยง/ต้องดูแล {healthSummary.sdqAtRisk} จาก {healthSummary.totalSdq} ฉบับที่ประเมินแล้ว</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-500">ยังไม่มีข้อมูลประเมิน SDQ ในระบบ</p>
+                  )}
                 </div>
 
+                <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl">
+                  <h3 className="text-sm font-medium text-slate-400 mb-2 uppercase tracking-widest">ห้องพยาบาล (เดือนนี้)</h3>
+                  <p className="text-4xl font-bold text-white mb-1">{healthSummary.infirmaryVisitsThisMonth}</p>
+                  <p className="text-xs text-slate-400">
+                    ครั้ง{healthSummary.infirmaryUrgentThisMonth > 0 ? ` · แจ้งเตือนด่วน ${healthSummary.infirmaryUrgentThisMonth} ครั้ง` : ''}
+                  </p>
+                </div>
               </div>
             </div>
           )}
 
-          {activeTab === 'policy' && (
-            <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
-              <div className="flex flex-col mb-8">
-                <h3 className="text-2xl font-bold text-white mb-2">Policy Action Center</h3>
-                <p className="text-slate-400 text-sm">Review data-driven proposals and allocate resources effectively.</p>
-              </div>
+          {/* TASK 6 (audit): tab "policy" (Policy Action Center) ถูกลบออกทั้งหมด — ไม่มีระบบนโยบาย/
+              งบประมาณจริงในระบบเลย ปุ่ม Approve/Review เดิมแค่แก้ state ในเครื่อง ไม่เขียน Firestore
+              จริง ตรงกับที่เคยตัดสินใจกับ tab เกินขอบเขตใน FinancePortal มาก่อน */}
 
-              <div className="space-y-6">
-                {mockExecutiveData.policyProposals.map((proposal) => {
-                  const status = actionStatuses[proposal.id];
-                  return (
-                    <div key={proposal.id} className="bg-[#0f1219] border border-white/10 rounded-2xl p-8 shadow-xl relative overflow-hidden">
-                      {status === 'approved' && <div className="absolute inset-0 bg-emerald-500/5 pointer-events-none border border-emerald-500/20 rounded-2xl"></div>}
-                      <div className="flex flex-col md:flex-row gap-6 justify-between items-start">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-3">
-                            <span className="px-2 py-1 bg-white/5 rounded text-xs font-mono text-slate-400">{proposal.id}</span>
-                            <h4 className="text-xl font-bold text-white">{proposal.title}</h4>
-                          </div>
-                          <p className="text-slate-300 text-sm leading-relaxed mb-6">{proposal.description}</p>
-                          
-                          <div className="flex gap-6">
-                            <div className="bg-white/5 px-4 py-2 rounded-lg border border-white/5">
-                              <div className="text-xs text-slate-500 mb-1 uppercase tracking-wider">Affected Students</div>
-                              <div className="text-lg font-bold text-indigo-400">{proposal.affectedStudents}</div>
-                            </div>
-                            <div className="bg-white/5 px-4 py-2 rounded-lg border border-white/5">
-                              <div className="text-xs text-slate-500 mb-1 uppercase tracking-wider">Est. Budget</div>
-                              <div className="text-lg font-bold text-amber-400">{proposal.estimatedBudget}</div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="w-full md:w-auto flex flex-col gap-3 shrink-0">
-                          {status ? (
-                            <div className={cn(
-                              "flex items-center justify-center gap-2 px-6 py-3 rounded-xl border text-sm font-bold w-48",
-                              status === 'approved' ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-400" : "bg-slate-800 border-slate-600 text-slate-300"
-                            )}>
-                              <Check className="w-4 h-4" />
-                              {status === 'approved' ? 'Approved' : 'Reviewed'}
-                            </div>
-                          ) : (
-                            <>
-                              <button 
-                                onClick={() => handleAction(proposal.id, 'approved')}
-                                className="flex items-center justify-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-emerald-600/20 w-full md:w-48"
-                              >
-                                <CheckCircle2 className="w-4 h-4" /> Approve Resource
-                              </button>
-                              <button 
-                                onClick={() => handleAction(proposal.id, 'reviewed')}
-                                className="flex items-center justify-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 rounded-xl text-sm font-bold transition-all w-full md:w-48"
-                              >
-                                Mark as Reviewed
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'reports' && (
-            <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
-              <div className="flex items-center justify-between mb-8">
-                <div>
-                  <h3 className="text-2xl font-bold text-white mb-2">Automated PDF Reporting</h3>
-                  <p className="text-slate-400 text-sm">One-Click Export: Generate academic and behavioral summaries in seconds.</p>
-                </div>
-              </div>
-
-              <div className="bg-[#0f1219] border border-white/10 rounded-2xl overflow-hidden shadow-xl">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-[#05070a] border-b border-white/10 text-slate-400">
-                    <tr>
-                      <th className="px-6 py-5 font-medium">Classroom</th>
-                      <th className="px-6 py-5 font-medium">Homeroom Advisor</th>
-                      <th className="px-6 py-5 font-medium text-center">Total Students</th>
-                      <th className="px-6 py-5 font-medium text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-white/5">
-                    {[
-                      { id: '1', class: 'Grade 7 (ม.1/1)', advisor: 'ครูสมปอง ใจดี', students: 45 },
-                      { id: '2', class: 'Grade 7 (ม.1/2)', advisor: 'ครูวิภาดา รักเรียน', students: 42 },
-                      { id: '3', class: 'Grade 8 (ม.2/1)', advisor: 'ครูมานะ อดทน', students: 48 },
-                      { id: '4', class: 'Grade 9 (ม.3/1)', advisor: 'ครูปิติ ยินดี', students: 40 },
-                    ].map(row => (
-                      <tr key={row.id} className="hover:bg-white/5 transition-colors">
-                        <td className="px-6 py-5 font-bold text-slate-200">{row.class}</td>
-                        <td className="px-6 py-5 text-slate-400">{row.advisor}</td>
-                        <td className="px-6 py-5 text-center text-slate-300 font-mono">{row.students}</td>
-                        <td className="px-6 py-5 text-right">
-                          <button 
-                            onClick={() => handleDownload(row.id)}
-                            disabled={downloadingId === row.id}
-                            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-xl text-xs font-bold transition-colors w-44"
-                          >
-                            {downloadingId === row.id ? (
-                              <>
-                                <svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                Generating PDF...
-                              </>
-                            ) : (
-                              <>
-                                <FileText className="w-4 h-4" />
-                                Export Report
-                              </>
-                            )}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          {/* TASK 7 (audit): tab "reports" (Report Center) ถูกลบออกทั้งหมด — ตารางห้องเรียน/ครูที่
+              ปรึกษา hardcode เอง (ไม่ใช่ students/staff จริง) ปุ่ม "Export Report" เป็น setTimeout
+              ปลอมล้วนไม่มีไฟล์ PDF ออกจริง ผิดกฎ CLAUDE.md */}
 
           {activeTab === 'approvals' && (
             <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
@@ -1089,170 +906,6 @@ export function ExecutivePortal() {
           
         </div>
 
-        {/* Executive Report Modal */}
-        {showReportModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-[#f8fafc] text-slate-900 rounded-lg w-[800px] h-[90vh] flex flex-col shadow-2xl overflow-hidden relative">
-              
-              {/* Toolbar */}
-              <div className="bg-slate-900 text-white p-4 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-emerald-600 rounded flex items-center justify-center font-bold">E</div>
-                  <h2 className="font-bold text-lg">Executive Summary Report (Preview)</h2>
-                </div>
-                <div className="flex items-center gap-4">
-                  <button 
-                    onClick={() => {
-                      setIsGeneratingReport(true);
-                      setTimeout(() => setIsGeneratingReport(false), 2000);
-                    }}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded font-medium flex items-center gap-2 transition-all"
-                  >
-                    {isGeneratingReport ? (
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <FileText className="w-4 h-4" />
-                    )}
-                    {isGeneratingReport ? 'Generating PDF...' : 'Download PDF'}
-                  </button>
-                  <button onClick={() => setShowReportModal(false)} className="text-slate-400 hover:text-white transition-colors">
-                    <X className="w-6 h-6" />
-                  </button>
-                </div>
-              </div>
-
-              {/* A4 Document Area */}
-              <div className="flex-1 overflow-y-auto p-8 bg-slate-200">
-                <div className="max-w-[210mm] min-h-[297mm] mx-auto bg-white shadow-xl p-12 print:shadow-none print:p-0 relative font-sans text-slate-800">
-                  
-                  {/* Header */}
-                  <div className="border-b-4 border-emerald-600 pb-6 mb-8 flex justify-between items-end">
-                    <div>
-                      <h1 className="text-3xl font-black text-slate-900 tracking-tight">EXECUTIVE SUMMARY</h1>
-                      <h2 className="text-lg text-emerald-700 font-bold mt-1">Student Attendance & Wellness Intelligence</h2>
-                    </div>
-                    <div className="text-right text-sm text-slate-500 font-medium">
-                      Report Date: {new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })}<br/>
-                      Generated via Executive IQ
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-8 mb-8">
-                    {/* Section 1: KPI */}
-                    <div className="col-span-2 flex justify-between bg-slate-50 p-6 rounded-lg border border-slate-100">
-                      <div className="text-center">
-                        <div className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">School-wide Attendance</div>
-                        <div className="text-4xl font-black text-emerald-600">{mockExecutiveData.globalKPIs.avgAttendance}%</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Avg Behavior Score</div>
-                        <div className="text-4xl font-black text-slate-800">{mockExecutiveData.globalKPIs.avgBehavior}</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Critical Alerts</div>
-                        <div className="text-4xl font-black text-red-500">{mockExecutiveData.globalKPIs.criticalAlerts}</div>
-                      </div>
-                    </div>
-
-                    {/* Section 2: Charts (Static visual representation for print) */}
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b pb-2">Attendance Trends (Last 5 Months)</h3>
-                      <div className="h-48">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={mockExecutiveData.attendanceTrends}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                            <XAxis dataKey="month" tick={{fill: '#64748b', fontSize: 12}} axisLine={false} tickLine={false} />
-                            <YAxis domain={[80, 100]} tick={{fill: '#64748b', fontSize: 12}} axisLine={false} tickLine={false} />
-                            <Area type="monotone" dataKey="attendance" stroke="#059669" fill="#10b981" fillOpacity={0.2} strokeWidth={2} />
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b pb-2">Risk Heatmap Distribution</h3>
-                      <div className="h-48 flex items-center justify-center">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={mockExecutiveData.riskProfile}
-                              innerRadius={60}
-                              outerRadius={80}
-                              paddingAngle={5}
-                              dataKey="value"
-                            >
-                              {mockExecutiveData.riskProfile.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
-                              ))}
-                            </Pie>
-                            <RechartsTooltip />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Section 3: Wellness */}
-                  <div className="mb-8">
-                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b pb-2">Student Wellness Indicators</h3>
-                    <div className="grid grid-cols-2 gap-4">
-                      {Object.entries(mockExecutiveData.healthRisks).map(([key, val]) => (
-                        <div key={key} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-100 rounded">
-                          <span className="text-sm font-medium text-slate-600 capitalize">{key.replace(/([A-Z])/g, ' $1').trim()}</span>
-                          <span className="text-sm font-bold text-slate-800">{val}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Section 4: Flagged Students */}
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 border-b pb-2 text-red-600 flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4" /> 
-                      Students Flagged by Emergency Toggles
-                    </h3>
-                    <div className="overflow-hidden border border-slate-200 rounded-lg">
-                      <table className="w-full text-sm text-left">
-                        <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-xs">
-                          <tr>
-                            <th className="px-4 py-3">Masked ID</th>
-                            <th className="px-4 py-3">Grade</th>
-                            <th className="px-4 py-3">Flag Reason</th>
-                            <th className="px-4 py-3">Priority</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-200">
-                          {mockExecutiveData.gisStudents.filter(s => s.riskStatus !== 'safe').map((student, idx) => (
-                            <tr key={idx} className="bg-white">
-                              <td className="px-4 py-3 font-mono font-medium text-slate-700">***{student.id.slice(-2)}</td>
-                              <td className="px-4 py-3 text-slate-600">{student.grade}</td>
-                              <td className="px-4 py-3 text-slate-600">
-                                {student.riskStatus === 'critical' ? 'Critical Attendance/Wellness Drop' : 'High Absence Rate (Warning)'}
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className={cn(
-                                  "px-2 py-1 rounded text-xs font-bold",
-                                  student.riskStatus === 'critical' ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"
-                                )}>
-                                  {student.riskStatus.toUpperCase()}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {/* Footer */}
-                  <div className="absolute bottom-12 left-12 right-12 border-t pt-4 text-center text-xs text-slate-400">
-                    Confidential & Proprietary • Do not distribute without authorization • Generated by Executive IQ System
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
       </main>
     </div>

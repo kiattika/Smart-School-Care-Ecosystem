@@ -89,12 +89,26 @@ export function ElectiveActivityManagerPage() {
     return unsub;
   }, []);
 
+  // ครูที่รับผิดชอบชุมนุมอื่นอยู่แล้ว (ไม่นับชุมนุมที่กำลังแก้ไขอยู่ตอนนี้) — ตัดออกจากรายชื่อที่
+  // เลือกเพิ่มได้ เพราะ 1 คาบเวลาสอนจริง 1 คนสอนได้แค่ที่เดียว เลือกซ้ำจะกลายเป็นสอน 2 ชุมนุมพร้อมกัน
+  // ในคาบเดียวกันซึ่งเป็นไปไม่ได้จริง — ตัดสินใจกรองแบบ "มีชุมนุมอื่นอยู่แล้วก็ตัดออกทันที ไม่ว่าจะ
+  // คนละคาบเวลาจริงหรือไม่" (ไม่เช็คว่าคาบชนกันจริงไหมแบบเจาะจง) เพราะครูตามธรรมชาติของงานไม่ควร
+  // รับผิดชอบชุมนุม 2 ตัวพร้อมกันอยู่แล้ว ง่ายกว่าและปลอดภัยกว่าการเช็ค overlap ของช่วงคาบ
+  const teacherUidsWithOtherClub = useMemo(() => {
+    const set = new Set<string>();
+    configs.forEach(c => {
+      if (c.id === editingId) return; // ชุมนุมที่กำลังแก้ไขอยู่ — ไม่นับครูของชุมนุมนี้เป็น "ชุมนุมอื่น"
+      (c.responsibleTeacherUids || []).forEach(uid => set.add(uid));
+    });
+    return set;
+  }, [configs, editingId]);
+
   const filteredTeachers = useMemo(() => {
     const q = teacherSearch.trim().toLowerCase();
-    const base = teachers.filter(t => !teacherUidsInput.includes(t.uid));
+    const base = teachers.filter(t => !teacherUidsInput.includes(t.uid) && !teacherUidsWithOtherClub.has(t.uid));
     if (!q) return base;
     return base.filter(t => t.name.toLowerCase().includes(q));
-  }, [teachers, teacherSearch, teacherUidsInput]);
+  }, [teachers, teacherSearch, teacherUidsInput, teacherUidsWithOtherClub]);
 
   const selectedTeachers = useMemo(
     () => teacherUidsInput.map(uid => teachers.find(t => t.uid === uid)).filter((t): t is TeacherOption => !!t),
@@ -296,6 +310,7 @@ export function ElectiveActivityManagerPage() {
 
         <div className="space-y-1.5">
           <span className="text-xs text-slate-400">ครูรับผิดชอบ (เลือกได้หลายคน — ครูร่วมสอน)</span>
+          <p className="text-[10px] text-slate-500 -mt-1">ไม่แสดงครูที่รับผิดชอบชุมนุมอื่นอยู่แล้ว (1 คนรับผิดชอบได้ทีละ 1 ชุมนุมเท่านั้น)</p>
           {selectedTeachers.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-1.5">
               {selectedTeachers.map(t => (

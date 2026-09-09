@@ -188,6 +188,14 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('student_self_assessments/assess-01').get());
     });
 
+    it('TASK 9 (ExecutivePortal Learner Analytics): EXECUTIVE role อ่านได้ทั้งโรงเรียน (สรุปกราฟ/เปอร์เซ็นต์ ไม่โชว์รายบุคคล)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_self_assessments/assess-01').set({ studentUid: 'std-uid-1', score: 9 });
+      });
+
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('student_self_assessments/assess-01').get());
+    });
+
     it('allows GUIDANCE_COUNSELOR and student self to write self assessment', async () => {
       await assertSucceeds(
         asRole('GUIDANCE_COUNSELOR').firestore().doc('student_self_assessments/assess-g').set({ score: 10 })
@@ -405,6 +413,66 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       });
 
       await assertFails(asAnonymous().firestore().doc('gradebook_scores/score-01').get());
+    });
+  });
+
+  // 8.1 gradebook_hidden_courses (TASK 3 — คาบกิจกรรมที่ไม่ต้องประเมิน ครูซ่อนเป็นรายบุคคล)
+  describe('gradebook_hidden_courses collection', () => {
+    it('allows a teacher to hide (create) and unhide (delete) their own course', async () => {
+      const teacher = asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore();
+      await assertSucceeds(
+        teacher.doc('gradebook_hidden_courses/teacher-uid-1_course-plc').set({
+          teacherUid: 'teacher-uid-1', courseId: 'course-plc', courseName: 'PLC'
+        })
+      );
+      await assertSucceeds(teacher.doc('gradebook_hidden_courses/teacher-uid-1_course-plc').delete());
+    });
+
+    it('denies creating a hidden-course doc under someone else\'s teacherUid (spoofing)', async () => {
+      const teacher = asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore();
+      await assertFails(
+        teacher.doc('gradebook_hidden_courses/teacher-uid-2_course-plc').set({
+          teacherUid: 'teacher-uid-2', courseId: 'course-plc', courseName: 'PLC'
+        })
+      );
+    });
+
+    it('allows a teacher to list only their own hidden courses, not another teacher\'s', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gradebook_hidden_courses/teacher-uid-1_course-plc').set({
+          teacherUid: 'teacher-uid-1', courseId: 'course-plc', courseName: 'PLC'
+        });
+        await ctx.firestore().doc('gradebook_hidden_courses/teacher-uid-2_course-lunch').set({
+          teacherUid: 'teacher-uid-2', courseId: 'course-lunch', courseName: 'พักกลางวัน'
+        });
+      });
+
+      const teacher1 = asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore();
+      const ownSnap = await teacher1.collection('gradebook_hidden_courses').where('teacherUid', '==', 'teacher-uid-1').get();
+      expect(ownSnap.size).toBe(1);
+
+      await assertFails(
+        teacher1.collection('gradebook_hidden_courses').where('teacherUid', '==', 'teacher-uid-2').get()
+      );
+    });
+
+    it('denies unauthenticated access to gradebook_hidden_courses', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gradebook_hidden_courses/teacher-uid-1_course-plc').set({
+          teacherUid: 'teacher-uid-1', courseId: 'course-plc', courseName: 'PLC'
+        });
+      });
+      await assertFails(asAnonymous().firestore().doc('gradebook_hidden_courses/teacher-uid-1_course-plc').get());
+    });
+
+    it('denies update (must delete + recreate instead — doc is effectively immutable once written)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gradebook_hidden_courses/teacher-uid-1_course-plc').set({
+          teacherUid: 'teacher-uid-1', courseId: 'course-plc', courseName: 'PLC'
+        });
+      });
+      const teacher = asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore();
+      await assertFails(teacher.doc('gradebook_hidden_courses/teacher-uid-1_course-plc').update({ courseName: 'changed' }));
     });
   });
 
@@ -973,6 +1041,13 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertFails(asRole('SUBJECT_TEACHER').firestore().doc(`student_home_locations/${STU_ID}`).get());
       await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_home_locations/${STU_ID}`).get());
     });
+    it('TASK 4 (ExecutivePortal GIS): EXECUTIVE role อ่านได้ทั้งโรงเรียน (ไม่ scope ห้อง) เพื่อสรุปแผนที่ผู้บริหาร', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_home_locations/${STU_ID}`).set(loc());
+      });
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc(`student_home_locations/${STU_ID}`).get());
+    });
     it('denies deleting a home location', async () => {
       await seed();
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
@@ -1330,6 +1405,21 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
       await assertFails(asUser(OTHER_UID, ['STUDENT']).firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
     });
+
+    it('TASK 5 (ExecutivePortal Health): EXECUTIVE role อ่านได้เพื่อสรุปภาพรวมโรงเรียน (นับจำนวน ไม่ระบุตัวบุคคล)', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_screenings_2q/${STU_ID}`).set({
+          id: '2q-3', studentId: STU_ID, q1Depressed: true, q2Hopeless: false, isPositive: true, conductedAt: '2026-09-01',
+        });
+        await ctx.firestore().doc(`student_screenings_phq9/${STU_ID}`).set({
+          id: 'phq-4', studentId: STU_ID, answers: [1, 1, 1, 1, 1, 1, 1, 1, 1], totalScore: 9, riskLevel: 'MODERATE',
+          recommendation: 'ทดสอบ', conductedAt: '2026-09-01',
+        });
+      });
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc(`student_screenings_2q/${STU_ID}`).get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
+    });
   });
 
   // student_assessments_sdq — read access baseline (write path ยังมีปัญหา evaluator self-check
@@ -1347,6 +1437,7 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc('student_assessments_sdq/sdq-1').get());
       await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('student_assessments_sdq/sdq-1').get());
       await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('student_assessments_sdq/sdq-1').get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('student_assessments_sdq/sdq-1').get());
       await assertFails(asUser('unrelated-uid', ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-1').get());
     });
 
@@ -1556,6 +1647,13 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('infirmary_visits/inf-5').get());
       await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('infirmary_visits/inf-5').get());
       await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('infirmary_visits/inf-5').get());
+    });
+    it('TASK 5 (ExecutivePortal Health): EXECUTIVE role อ่านได้เพื่อสรุปภาพรวมโรงเรียน', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('infirmary_visits/inf-8').set(baseVisit({ id: 'inf-8' }));
+      });
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('infirmary_visits/inf-8').get());
     });
 
     it('lets the linked parent acknowledge (parentAcknowledged/acknowledgedAt only); denies changing other fields or an unrelated parent acknowledging', async () => {
