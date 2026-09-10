@@ -9,7 +9,7 @@ import { storage } from '../lib/firebase';
  * คืน download URL (มี token) — เก็บลง Firestore. ผู้ที่อ่าน Firestore doc ได้ (gate ด้วย
  * firestore.rules) จึงจะได้ URL นี้ไปเปิดดู
  */
-export type StudentPhotoFolder = 'student_home_photos' | 'student_portfolio_photos';
+export type StudentPhotoFolder = 'student_home_photos' | 'student_portfolio_photos' | 'student_profile_photos';
 
 export async function uploadStudentPhoto(
   folder: StudentPhotoFolder,
@@ -29,6 +29,11 @@ export const uploadHomePhoto = (ownerUid: string, blob: Blob) =>
 /** ภาพประกอบแฟ้มสะสมผลงาน */
 export const uploadPortfolioPhoto = (ownerUid: string, blob: Blob) =>
   uploadStudentPhoto('student_portfolio_photos', ownerUid, blob);
+
+/** รูปโปรไฟล์ (หน้าตรง) ที่นักเรียนอัปโหลด/เปลี่ยนเอง — ownerUid = Firebase Auth UID ของนักเรียน
+ *  URL ถูกเขียนกลับเข้า students/{id}.photoUrl (ครู/ผู้ปกครองเปิดดูผ่าน download URL ที่เก็บใน doc) */
+export const uploadProfilePhoto = (ownerUid: string, blob: Blob) =>
+  uploadStudentPhoto('student_profile_photos', ownerUid, blob);
 
 /**
  * แนบใบงาน/ใบความรู้/แบบทดสอบ สำหรับคาบสอนแทนที่ครูสอนแทนเป็นแบบ "ควบคุมชั้นเรียนอย่างเดียว"

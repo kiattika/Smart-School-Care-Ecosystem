@@ -915,6 +915,8 @@ export const useStore = create<StoreState>((set, get) => ({
         id: `gate-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         studentId,
         studentName,
+        ...(studentUid ? { studentUid } : {}),
+        ...(parentUid ? { parentUid } : {}),
         type,
         timestamp: timeStr,
         date: dateStr,
@@ -1256,10 +1258,15 @@ export const useStore = create<StoreState>((set, get) => ({
       let updatedCheckInRecords = { ...state.schoolCheckInRecords };
 
       if (log.userId && log.userId.startsWith('695')) {
+        const matchedStudent = state.students.find(s => s.studentId === log.userId || s.id === log.userId);
         const gateLog: GateAttendanceRecord = {
           id: `gate-gps-${Date.now()}`,
           studentId: log.userId,
           studentName: log.userName,
+          ...(matchedStudent?.studentUid ? { studentUid: matchedStudent.studentUid } : {}),
+          ...((matchedStudent?.parentUid || matchedStudent?.parentId)
+            ? { parentUid: (matchedStudent.parentUid || matchedStudent.parentId) as string }
+            : {}),
           type: log.type,
           timestamp: log.timestamp,
           date: log.date,

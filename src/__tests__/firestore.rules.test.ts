@@ -158,6 +158,28 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertSucceeds(getDocs(query(collection(studentDb, 'students'), where('studentUid', '==', 'stu-uid-1'))));
       await assertFails(getDocs(collection(studentDb, 'students')));
     });
+
+    // TASK (รูปโปรไฟล์นักเรียน): นักเรียนแก้ photoUrl ของตัวเองได้ แต่แก้ field อื่นไม่ได้
+    it('allows a STUDENT to update ONLY photoUrl / photoUpdatedAt on their own record', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/69501').set({ studentId: '69501', studentUid: 'stu-uid-1', name: 'Me', photoUrl: 'old.jpg' });
+      });
+      const studentDb = asUser('stu-uid-1', ['STUDENT']).firestore();
+      await assertSucceeds(studentDb.doc('students/69501').update({ photoUrl: 'new.jpg', photoUpdatedAt: '2026-09-10T00:00:00Z' }));
+      // แก้ field อื่นพ่วงมาด้วย → ปฏิเสธ
+      await assertFails(studentDb.doc('students/69501').update({ photoUrl: 'x.jpg', name: 'Hacked' }));
+      await assertFails(studentDb.doc('students/69501').update({ behaviorScore: 0 }));
+    });
+
+    it('denies a STUDENT updating another student photoUrl, and denies create/delete', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/69502').set({ studentId: '69502', studentUid: 'stu-uid-2', name: 'Other', photoUrl: 'o.jpg' });
+      });
+      const studentDb = asUser('stu-uid-1', ['STUDENT']).firestore();
+      await assertFails(studentDb.doc('students/69502').update({ photoUrl: 'evil.jpg' }));
+      await assertFails(studentDb.doc('students/69599').set({ studentId: '69599', studentUid: 'stu-uid-1', photoUrl: 'p.jpg' }));
+      await assertFails(studentDb.doc('students/69502').delete());
+    });
   });
 
   // 2. student_self_assessments (PHQ-9, SDQ)
@@ -1957,6 +1979,108 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
         return invoiceNumber;
       }));
       expect(new Set(invoiceNumbers).size).toBe(3);
+    });
+  });
+
+  // student_semester_health — น้ำหนัก/ส่วนสูงรายภาคเรียน (นักเรียนกรอกเอง ภาคเรียนละ 1 ครั้ง)
+  describe('student_semester_health collection', () => {
+    const SID = '69777';
+    const STU_UID = 'sem-stu-uid';
+    const PARENT_UID = 'sem-parent-uid';
+    const DOC_ID = `${SID}_2569_1`;
+    const goodDoc = {
+      studentId: SID, studentUid: STU_UID, parentUid: PARENT_UID,
+      academicYear: '2569', term: '1', semester: '1/2569',
+      height: 165, weight: 55, bmi: 20.2, bmiCategory: 'NORMAL', bloodType: 'O',
+      recordedByUid: STU_UID, recordedByRole: 'STUDENT', recordedAt: '2026-09-10T00:00:00Z',
+    };
+
+    beforeEach(async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${SID}`).set({ studentId: SID, studentUid: STU_UID, parentUid: PARENT_UID, room: 'ม.5/8' });
+      });
+    });
+
+    it('allows a STUDENT to self-report once for the current semester', async () => {
+      const studentDb = asUser(STU_UID, ['STUDENT']).firestore();
+      await assertSucceeds(studentDb.doc(`student_semester_health/${DOC_ID}`).set(goodDoc));
+    });
+
+    it('denies a second self-report for the same semester (create over an existing doc)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_semester_health/${DOC_ID}`).set(goodDoc);
+      });
+      const studentDb = asUser(STU_UID, ['STUDENT']).firestore();
+      await assertFails(studentDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, weight: 99 }));
+      // นักเรียนแก้ย้อนหลังเองก็ไม่ได้
+      await assertFails(studentDb.doc(`student_semester_health/${DOC_ID}`).update({ weight: 99 }));
+    });
+
+    it('denies a doc id that does not match studentId_academicYear_term', async () => {
+      const studentDb = asUser(STU_UID, ['STUDENT']).firestore();
+      await assertFails(studentDb.doc(`student_semester_health/${SID}_bogus`).set(goodDoc));
+    });
+
+    it('denies self-report with a mismatched studentUid / parentUid denormalization', async () => {
+      const studentDb = asUser(STU_UID, ['STUDENT']).firestore();
+      await assertFails(studentDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, parentUid: 'someone-else' }));
+      const otherStudentDb = asUser('other-stu-uid', ['STUDENT']).firestore();
+      await assertFails(otherStudentDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, studentUid: 'other-stu-uid', recordedByUid: 'other-stu-uid' }));
+    });
+
+    it('allows INFIRMARY_STAFF to create and to override (update) an existing record', async () => {
+      const nurseDb = asRole('INFIRMARY_STAFF').firestore();
+      await assertSucceeds(nurseDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, recordedByUid: 'test-uid', recordedByRole: 'INFIRMARY_STAFF' }));
+      await assertSucceeds(nurseDb.doc(`student_semester_health/${DOC_ID}`).update({ weight: 58, bmi: 21.3 }));
+    });
+
+    it('lets the owner student, linked parent, homeroom teacher and nurse read; denies an unrelated user', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_semester_health/${DOC_ID}`).set(goodDoc);
+      });
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_semester_health/${DOC_ID}`).get());
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc(`student_semester_health/${DOC_ID}`).get());
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc(`student_semester_health/${DOC_ID}`).get());
+      await assertSucceeds(asRole('INFIRMARY_STAFF').firestore().doc(`student_semester_health/${DOC_ID}`).get());
+      await assertFails(asUser('random-uid', ['STUDENT']).firestore().doc(`student_semester_health/${DOC_ID}`).get());
+    });
+  });
+
+  // gate_attendance_logs — การผ่านประตูโรงเรียน (ครูที่ปรึกษา/ผู้ปกครอง/นักเรียน อ่านผ่าน denormalized uid)
+  describe('gate_attendance_logs collection', () => {
+    const LOG = {
+      studentId: '69501', studentName: 'Somchai', studentUid: 'gate-stu-uid', parentUid: 'gate-parent-uid',
+      type: 'ENTRY', timestamp: '07:28 น.', date: '2026-09-10', gateName: 'ประตู 1', method: 'GPS_GEOFENCE',
+      status: 'ON_TIME', parentNotified: true,
+    };
+
+    it('lets homeroom teacher / EXECUTIVE read; lets the linked parent and the student self read via denormalized uid', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gate_attendance_logs/g1').set(LOG);
+      });
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('gate_attendance_logs/g1').get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('gate_attendance_logs/g1').get());
+      await assertSucceeds(asUser('gate-parent-uid', ['PARENT']).firestore().doc('gate_attendance_logs/g1').get());
+      await assertSucceeds(asUser('gate-stu-uid', ['STUDENT']).firestore().doc('gate_attendance_logs/g1').get());
+      await assertFails(asUser('unrelated-uid', ['STUDENT']).firestore().doc('gate_attendance_logs/g1').get());
+    });
+
+    it('lets a parent LIST by parentUid and a student LIST by studentUid; denies an unfiltered list', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gate_attendance_logs/g1').set(LOG);
+        await ctx.firestore().doc('gate_attendance_logs/g2').set({ ...LOG, studentId: '69502', studentUid: 'x', parentUid: 'y' });
+      });
+      const parentDb = asUser('gate-parent-uid', ['PARENT']).firestore();
+      await assertSucceeds(getDocs(query(collection(parentDb, 'gate_attendance_logs'), where('parentUid', '==', 'gate-parent-uid'))));
+      await assertFails(getDocs(collection(parentDb, 'gate_attendance_logs')));
+      const studentDb = asUser('gate-stu-uid', ['STUDENT']).firestore();
+      await assertSucceeds(getDocs(query(collection(studentDb, 'gate_attendance_logs'), where('studentUid', '==', 'gate-stu-uid'))));
+    });
+
+    it('lets a student write their own gate log (studentUid == auth.uid); denies writing for another student', async () => {
+      const studentDb = asUser('gate-stu-uid', ['STUDENT']).firestore();
+      await assertSucceeds(studentDb.doc('gate_attendance_logs/gs1').set(LOG));
+      await assertFails(studentDb.doc('gate_attendance_logs/gs2').set({ ...LOG, studentUid: 'someone-else' }));
     });
   });
 

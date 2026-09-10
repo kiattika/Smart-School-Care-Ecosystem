@@ -44,6 +44,7 @@ import { AcademicHomeworkModule } from './components/student-parent/AcademicHome
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
 import { StudentSelfAssessmentForm } from './components/StudentSelfAssessmentForm';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
+import { StudentProfilePhotoEditor } from './components/student-parent/StudentProfilePhotoEditor';
 
 export function StudentPortal() {
   const {
@@ -64,6 +65,7 @@ export function StudentPortal() {
 
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [viewDetailModal, setViewDetailModal] = useState(false);
+  const [showPhotoEditor, setShowPhotoEditor] = useState(false);
 
   // Student resolution — โดยปกติ STUDENT จะเห็น record เดียว (ของตัวเอง);
   // selectedStudentId ใช้เฉพาะ DEV profile switcher ถ้ามีมากกว่าหนึ่ง
@@ -121,11 +123,20 @@ export function StudentPortal() {
       <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-xl shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <div className="relative">
-            <img 
-              src={student.photoUrl || student.avatar} 
-              alt={student.name} 
+            <img
+              src={student.photoUrl || student.avatar}
+              alt={student.name}
               className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-indigo-500 shadow-xl bg-slate-950"
             />
+            {user?.uid && student.studentUid === user.uid && (
+              <button
+                onClick={() => setShowPhotoEditor(true)}
+                title="เปลี่ยนรูปโปรไฟล์"
+                className="absolute -top-1.5 -left-1.5 w-7 h-7 rounded-full bg-indigo-600 hover:bg-indigo-500 border-2 border-slate-900 flex items-center justify-center text-white shadow-lg transition-colors"
+              >
+                <Camera className="w-3.5 h-3.5" />
+              </button>
+            )}
             <span className="absolute -bottom-1.5 -right-1.5 px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black shadow">
               ONLINE
             </span>
@@ -559,6 +570,15 @@ export function StudentPortal() {
         )}
 
       </div>
+
+      {/* เปลี่ยนรูปโปรไฟล์ (นักเรียนเจ้าของบัญชีเท่านั้น) */}
+      {showPhotoEditor && user?.uid && (
+        <StudentProfilePhotoEditor
+          student={student}
+          studentUid={user.uid}
+          onClose={() => setShowPhotoEditor(false)}
+        />
+      )}
 
       {/* Student Self-Assessment Detail Modal */}
       {viewDetailModal && student && (

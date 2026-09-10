@@ -82,6 +82,28 @@ describe('Storage Security Rules — student_home_photos', () => {
     await assertFails(asPromise(own.ref('student_portfolio_photos/stu-2/p.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
     await assertFails(asPromise(own.ref('student_portfolio_photos/stu-1/p.pdf').put(new Uint8Array([1]), { contentType: 'application/pdf' })));
   });
+
+  it('applies the same owner + image + size rules to student_profile_photos', async () => {
+    const own = testEnv.authenticatedContext('stu-1', { roles: ['STUDENT'] }).storage();
+    // owner uploads their own profile photo
+    await assertSucceeds(asPromise(own.ref('student_profile_photos/stu-1/me.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
+    // cannot write under someone else's uid prefix
+    await assertFails(asPromise(own.ref('student_profile_photos/stu-2/me.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
+    // non-image rejected
+    await assertFails(asPromise(own.ref('student_profile_photos/stu-1/me.pdf').put(new Uint8Array([1]), { contentType: 'application/pdf' })));
+    // > 5MB rejected
+    const big = new Uint8Array(5 * 1024 * 1024 + 16);
+    await assertFails(asPromise(own.ref('student_profile_photos/stu-1/big.jpg').put(big, { contentType: 'image/jpeg' })));
+  });
+
+  it('denies an unauthenticated profile-photo upload and direct read by another user', async () => {
+    await assertFails(asPromise(testEnv.unauthenticatedContext().storage().ref('student_profile_photos/stu-1/me.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.storage().ref('student_profile_photos/stu-1/me.jpg').put(tinyPng, { contentType: 'image/jpeg' });
+    });
+    await assertSucceeds(testEnv.authenticatedContext('stu-1', { roles: ['STUDENT'] }).storage().ref('student_profile_photos/stu-1/me.jpg').getDownloadURL());
+    await assertFails(testEnv.authenticatedContext('stu-9', { roles: ['STUDENT'] }).storage().ref('student_profile_photos/stu-1/me.jpg').getDownloadURL());
+  });
 });
 
 describe('Storage Security Rules — substitute_worksheets', () => {
