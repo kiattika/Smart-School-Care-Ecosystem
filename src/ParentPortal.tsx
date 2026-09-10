@@ -2,8 +2,8 @@ import { cn } from "./lib/utils";
 import React, { useEffect, useState } from 'react';
 import { useStore } from './store';
 import { useRealStudents } from './hooks/useRealStudents';
-import { subscribeBillingInvoices } from './services/firestoreService';
-import { BillingInvoice } from './types';
+import { subscribeBillingInvoices, subscribeGateAttendanceLogs } from './services/firestoreService';
+import { BillingInvoice, GateAttendanceRecord } from './types';
 import { attendanceStatsFromCounts } from './lib/studentAttendanceStats';
 import { 
   Calendar, 
@@ -41,7 +41,6 @@ export function ParentPortal() {
   const {
     user,
     attendanceRecords,
-    gateAttendanceLogs,
     parentTeacherMessages,
     selfAssessments
   } = useStore();
@@ -55,6 +54,14 @@ export function ParentPortal() {
     if (!user?.uid) { setBillingInvoices([]); return; }
     const unsubscribe = subscribeBillingInvoices(setBillingInvoices, { parentUid: user.uid });
     return () => unsubscribe();
+  }, [user?.uid]);
+
+  // การผ่านประตูโรงเรียนจริงจาก Firestore แบบ real-time — เดิมอ่านจาก store.gateAttendanceLogs
+  // (session-local: ผู้ปกครองเห็นเฉพาะเซสชันเดียวกับที่นักเรียนเช็คอินเท่านั้น) filter ด้วย parentUid
+  const [gateAttendanceLogs, setGateAttendanceLogs] = useState<GateAttendanceRecord[]>([]);
+  useEffect(() => {
+    if (!user?.uid) { setGateAttendanceLogs([]); return; }
+    return subscribeGateAttendanceLogs(setGateAttendanceLogs, { parentUid: user.uid });
   }, [user?.uid]);
 
   // Selected student state (ผู้ปกครองมีบุตรหลานได้หลายคน — เริ่มที่คนแรก)
@@ -86,7 +93,10 @@ export function ParentPortal() {
 
   // Unpaid invoices count
   const pendingInvoices = billingInvoices.filter(i => i.studentId === student.studentId && i.status !== 'PAID');
-  const recentGateLog = gateAttendanceLogs.find(g => g.studentId === student.studentId);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const studentGateLogs = gateAttendanceLogs.filter(g => g.studentId === student.studentId);
+  const recentGateLog = studentGateLogs[0];
+  const todayEntryLog = studentGateLogs.find(g => g.date === todayStr && g.type === 'ENTRY');
 
   return (
     <div className="w-full max-w-7xl mx-auto p-3 sm:p-6 text-slate-100 min-h-screen space-y-6">
@@ -261,22 +271,45 @@ export function ParentPortal() {
         {/* TIMELINE / REAL-TIME PARENT FEED */}
         {activeTab === 'timeline' && (
           <div className="space-y-6">
-            {/* Live Gate Entry Banner */}
-            <div className="bg-gradient-to-r from-emerald-950/60 via-slate-900 to-slate-900 border border-emerald-500/30 rounded-3xl p-5 sm:p-6 backdrop-blur-xl shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            {/* Live Gate Entry Banner — จากข้อมูล gate_attendance_logs จริง (real-time, ไม่มี mock) */}
+            <div className={cn(
+              "bg-gradient-to-r via-slate-900 to-slate-900 border rounded-3xl p-5 sm:p-6 backdrop-blur-xl shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4",
+              todayEntryLog ? "from-emerald-950/60 border-emerald-500/30" : "from-slate-800/60 border-slate-700/50"
+            )}>
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
-                  <CheckCircle2 className="w-6 h-6" />
+                <div className={cn(
+                  "w-12 h-12 rounded-2xl border flex items-center justify-center shrink-0",
+                  todayEntryLog ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400" : "bg-slate-700/40 border-slate-600 text-slate-400"
+                )}>
+                  {todayEntryLog ? <CheckCircle2 className="w-6 h-6" /> : <Clock className="w-6 h-6" />}
                 </div>
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 block mb-0.5">
-                    REAL-TIME GATE LOG • เข้าประตูโรงเรียนเรียบร้อยแล้ว
+                  <span className={cn(
+                    "text-[10px] font-bold uppercase tracking-wider block mb-0.5",
+                    todayEntryLog ? "text-emerald-400" : "text-slate-400"
+                  )}>
+                    REAL-TIME GATE LOG • การเข้าโรงเรียนวันนี้
                   </span>
-                  <h3 className="text-base font-bold text-white">
-                    {student.name} สแกนใบหน้า/NFC เข้าโรงเรียนเวลา 07:28 น.
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    อุณหภูมิร่างกาย 36.5°C • ประตู 1 (อาคารหน้า) • สถานะ: ปกติ (ตรงเวลา)
-                  </p>
+                  {todayEntryLog ? (
+                    <>
+                      <h3 className="text-base font-bold text-white">
+                        {student.name} เข้าโรงเรียนเวลา {todayEntryLog.timestamp}
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        {todayEntryLog.temperature ? `อุณหภูมิร่างกาย ${todayEntryLog.temperature.toFixed(1)}°C • ` : ''}
+                        {todayEntryLog.gateName} • สถานะ: {todayEntryLog.status === 'LATE' ? 'มาสาย' : 'ตรงเวลา'}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <h3 className="text-base font-bold text-white">ยังไม่มีข้อมูลการเข้าโรงเรียนของวันนี้</h3>
+                      <p className="text-xs text-slate-400">
+                        {recentGateLog
+                          ? `ผ่านประตูล่าสุด: ${recentGateLog.type === 'ENTRY' ? 'เข้า' : 'ออก'} ${recentGateLog.timestamp} (${recentGateLog.date})`
+                          : 'ยังไม่พบประวัติการผ่านประตูของนักเรียนคนนี้'}
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
 

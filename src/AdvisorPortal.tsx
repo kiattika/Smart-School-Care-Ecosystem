@@ -21,6 +21,7 @@ import { StudentAnalyticsDashboard } from './components/StudentAnalyticsDashboar
 import { AdvisorPortfolioReview } from './components/portfolio/AdvisorPortfolioReview';
 import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
 import { AdvisorGpsCheckInPanel } from './components/homevisit/AdvisorGpsCheckInPanel';
+import { AdvisorGateCheckInPanel } from './components/student-parent/AdvisorGateCheckInPanel';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -664,6 +665,9 @@ export function AdvisorPortal() {
                   <div className="w-10 h-10 bg-rose-500/10 rounded-lg flex items-center justify-center text-rose-400 text-lg font-bold">✗</div>
                 </div>
               </div>
+
+              {/* เช็คอินเข้าโรงเรียนผ่านประตู (gate_attendance_logs) — real-time, เห็นภาพรวมทั้งห้อง */}
+              <AdvisorGateCheckInPanel students={myStudents} />
 
               {/* GPS check-in ของนักเรียน (ย้ายมาจากหน้าครูประจำวิชา) */}
               <AdvisorGpsCheckInPanel students={myStudents} />

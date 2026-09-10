@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Scan, 
   CreditCard, 
@@ -23,18 +23,30 @@ import {
 import { useStore } from '../../store';
 import { GateAttendanceRecord, DetailedLeaveRequest, AttendanceStatus, Student } from '../../types';
 import { GPSGeofenceCheckinModal } from '../GPSGeofenceCheckinModal';
+import { subscribeGateAttendanceLogs } from '../../services/firestoreService';
 
 export function GateAttendanceTracker({ studentId, isParentView = false }: { studentId: string; isParentView?: boolean }) {
-  const { 
-    gateAttendanceLogs, 
-    recordGateAttendance, 
-    detailedLeaveRequests, 
-    submitDetailedLeave, 
+  const {
+    recordGateAttendance,
+    detailedLeaveRequests,
+    submitDetailedLeave,
     approveDetailedLeave,
     students,
     courses,
     user
   } = useStore();
+
+  // ประวัติผ่านประตูจริงจาก Firestore แบบ real-time — เดิมอ่านจาก store.gateAttendanceLogs
+  // (session-local: ผู้ปกครองเห็นเฉพาะรายการที่เช็คอินในเซสชันเดียวกันเท่านั้น เปิดหน้าใหม่แล้วหาย)
+  // filter ฝั่ง query ให้ผ่าน firestore.rules: parentUid สำหรับผู้ปกครอง, studentUid สำหรับนักเรียน
+  const [gateAttendanceLogs, setGateAttendanceLogs] = useState<GateAttendanceRecord[]>([]);
+  useEffect(() => {
+    if (!user?.uid) { setGateAttendanceLogs([]); return; }
+    return subscribeGateAttendanceLogs(
+      setGateAttendanceLogs,
+      isParentView ? { parentUid: user.uid } : { studentUid: user.uid },
+    );
+  }, [user?.uid, isParentView]);
 
   const defaultStudent: Student = {
     id: studentId || 'default-student',

@@ -537,6 +537,10 @@ export interface GateAttendanceRecord {
   id: string;
   studentId: string;
   studentName: string;
+  // denormalize — ให้ครูที่ปรึกษา (query ทั้งวัน) และผู้ปกครอง (query by parentUid) อ่านผ่าน
+  // firestore.rules ได้จริงข้ามเซสชัน/เครื่อง (ไม่พึ่ง Zustand store ที่ session-local)
+  studentUid?: string;
+  parentUid?: string;
   type: 'ENTRY' | 'EXIT';
   timestamp: string; // e.g. "07:28 น."
   date: string; // e.g. "2026-08-20"

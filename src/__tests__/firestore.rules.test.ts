@@ -2046,6 +2046,44 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
+  // gate_attendance_logs — การผ่านประตูโรงเรียน (ครูที่ปรึกษา/ผู้ปกครอง/นักเรียน อ่านผ่าน denormalized uid)
+  describe('gate_attendance_logs collection', () => {
+    const LOG = {
+      studentId: '69501', studentName: 'Somchai', studentUid: 'gate-stu-uid', parentUid: 'gate-parent-uid',
+      type: 'ENTRY', timestamp: '07:28 น.', date: '2026-09-10', gateName: 'ประตู 1', method: 'GPS_GEOFENCE',
+      status: 'ON_TIME', parentNotified: true,
+    };
+
+    it('lets homeroom teacher / EXECUTIVE read; lets the linked parent and the student self read via denormalized uid', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gate_attendance_logs/g1').set(LOG);
+      });
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('gate_attendance_logs/g1').get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('gate_attendance_logs/g1').get());
+      await assertSucceeds(asUser('gate-parent-uid', ['PARENT']).firestore().doc('gate_attendance_logs/g1').get());
+      await assertSucceeds(asUser('gate-stu-uid', ['STUDENT']).firestore().doc('gate_attendance_logs/g1').get());
+      await assertFails(asUser('unrelated-uid', ['STUDENT']).firestore().doc('gate_attendance_logs/g1').get());
+    });
+
+    it('lets a parent LIST by parentUid and a student LIST by studentUid; denies an unfiltered list', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gate_attendance_logs/g1').set(LOG);
+        await ctx.firestore().doc('gate_attendance_logs/g2').set({ ...LOG, studentId: '69502', studentUid: 'x', parentUid: 'y' });
+      });
+      const parentDb = asUser('gate-parent-uid', ['PARENT']).firestore();
+      await assertSucceeds(getDocs(query(collection(parentDb, 'gate_attendance_logs'), where('parentUid', '==', 'gate-parent-uid'))));
+      await assertFails(getDocs(collection(parentDb, 'gate_attendance_logs')));
+      const studentDb = asUser('gate-stu-uid', ['STUDENT']).firestore();
+      await assertSucceeds(getDocs(query(collection(studentDb, 'gate_attendance_logs'), where('studentUid', '==', 'gate-stu-uid'))));
+    });
+
+    it('lets a student write their own gate log (studentUid == auth.uid); denies writing for another student', async () => {
+      const studentDb = asUser('gate-stu-uid', ['STUDENT']).firestore();
+      await assertSucceeds(studentDb.doc('gate_attendance_logs/gs1').set(LOG));
+      await assertFails(studentDb.doc('gate_attendance_logs/gs2').set({ ...LOG, studentUid: 'someone-else' }));
+    });
+  });
+
   // 15. Default Deny Catch-All (Regression Test 5)
   describe('Default Deny Catch-All (Undeclared paths)', () => {
     it('REGRESSION: denies authenticated user with no matching role from reading or writing undeclared collections', async () => {

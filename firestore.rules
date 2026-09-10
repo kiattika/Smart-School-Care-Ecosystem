@@ -256,16 +256,20 @@ service cloud.firestore {
     }
 
     // 15. Gate Attendance Logs
+    // record มี studentUid/parentUid denormalize ไว้ (ดู store.recordGateAttendance) — ครูที่ปรึกษา
+    // query ทั้งวันได้ (HOMEROOM_TEACHER), ผู้ปกครอง query where('parentUid','==',uid), นักเรียน
+    // query where('studentUid','==',uid) — studentId เป็นรหัส 5 หลัก ไม่ใช่ auth.uid จึงต้องเทียบ
+    // ผ่าน studentUid/parentUid ที่ denormalize มา
     match /gate_attendance_logs/{logId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('EXECUTIVE') || 
-                     hasRole('HOMEROOM_TEACHER') || 
-                     hasRole('SUBJECT_TEACHER') || 
-                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('HOMEROOM_TEACHER') || 
-                      hasRole('SUBJECT_TEACHER') || 
-                      (isSignedIn() && (request.resource.data.studentId == request.auth.uid || request.resource.data.userId == request.auth.uid));
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('EXECUTIVE') ||
+                     hasRole('HOMEROOM_TEACHER') ||
+                     hasRole('SUBJECT_TEACHER') ||
+                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
+      allow write: if hasRole('SUPER_ADMIN') ||
+                      hasRole('HOMEROOM_TEACHER') ||
+                      hasRole('SUBJECT_TEACHER') ||
+                      (isSignedIn() && (request.resource.data.studentId == request.auth.uid || request.resource.data.studentUid == request.auth.uid || request.resource.data.userId == request.auth.uid));
     }
 
     // 16. Detailed Leave Requests

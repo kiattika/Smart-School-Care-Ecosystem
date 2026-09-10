@@ -965,6 +965,39 @@ export async function saveGateAttendanceRecordFirestore(record: GateAttendanceRe
 }
 
 /**
+ * real-time listener ของ gate_attendance_logs — แทนการอ่านจาก Zustand store (session-local
+ * เห็นเฉพาะสิ่งที่เกิดในเซสชันเบราว์เซอร์เดียวกัน). ต้อง filter ฝั่ง query ให้ผ่าน firestore.rules:
+ *  - { date }       → ครูที่ปรึกษาดูทั้งวัน (HOMEROOM_TEACHER อ่านได้ตาม role) แล้วกรองห้องฝั่ง UI
+ *  - { parentUid }  → ผู้ปกครองดูของบุตรหลาน (rules เทียบ resource.data.parentUid)
+ *  - { studentUid } → นักเรียนดูของตัวเอง (rules เทียบ resource.data.studentUid)
+ */
+export function subscribeGateAttendanceLogs(
+  onUpdate: (logs: GateAttendanceRecord[]) => void,
+  filter: { date?: string; parentUid?: string; studentUid?: string },
+): () => void {
+  try {
+    const col = collection(db, 'gate_attendance_logs');
+    const clauses = [];
+    if (filter.date) clauses.push(where('date', '==', filter.date));
+    if (filter.parentUid) clauses.push(where('parentUid', '==', filter.parentUid));
+    if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
+    if (clauses.length === 0) { onUpdate([]); return () => {}; }
+    return onSnapshot(query(col, ...clauses), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as GateAttendanceRecord));
+      // ใหม่สุดก่อน — เรียงตาม date แล้ว timestamp ("HH:MM น.")
+      list.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.timestamp || '').localeCompare(a.timestamp || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeGateAttendanceLogs] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeGateAttendanceLogs] setup error:', error);
+    return () => {};
+  }
+}
+
+/**
  * Detailed Leave Requests Persistence
  */
 export async function saveDetailedLeaveRequestFirestore(request: DetailedLeaveRequest): Promise<void> {
