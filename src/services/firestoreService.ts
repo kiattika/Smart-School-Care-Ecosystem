@@ -931,6 +931,23 @@ export async function updateStudentProfileFirestore(
 }
 
 /**
+ * TASK (รูปโปรไฟล์นักเรียน): นักเรียนอัปโหลด/เปลี่ยนรูปโปรไฟล์ของตัวเอง → เขียนกลับเข้า
+ * students/{id}.photoUrl. firestore.rules อนุญาตให้ STUDENT แตะได้แค่ photoUrl/photoUpdatedAt
+ * (ตรวจ isSelfStudent) — จึงห้ามใส่ updatedAt/serverTimestamp ที่นี่ (จะทำให้ affectedKeys เกิน
+ * แล้ว rules ปฏิเสธ). ปล่อย error ต่อ (ไม่กลืนเงียบ) เพื่อให้ UI แสดง "บันทึกไม่สำเร็จ" ได้จริง
+ */
+export async function updateStudentPhotoUrl(studentId: string, photoUrl: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'students', studentId), {
+      photoUrl,
+      photoUpdatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `students/${studentId}.photoUrl`);
+  }
+}
+
+/**
  * Gate Attendance Persistence
  */
 export async function saveGateAttendanceRecordFirestore(record: GateAttendanceRecord): Promise<void> {

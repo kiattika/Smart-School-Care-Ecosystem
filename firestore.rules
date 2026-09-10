@@ -62,7 +62,15 @@ service cloud.firestore {
                      hasRole('INSTRUCTIONAL_SUPERVISOR') ||
                      (isSignedIn() && resource.data.parentUid == request.auth.uid) ||
                      (isSignedIn() && resource.data.studentUid == request.auth.uid);
-      allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
+      allow create, delete: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
+      // TASK (รูปโปรไฟล์นักเรียน): นักเรียนแก้รูปของตัวเองได้เท่านั้น — จำกัดให้แตะได้แค่ photoUrl/
+      // photoUpdatedAt (ตรวจ "ตัวเอง" ผ่าน isSelfStudent() เดียวกับที่ใช้ที่อื่น: students/{id}.studentUid
+      // == auth.uid) ห้ามแก้ field อื่นของทะเบียนนักเรียน
+      allow update: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') ||
+                       (
+                         isSelfStudent(studentId) &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['photoUrl', 'photoUpdatedAt'])
+                       );
     }
 
     // 2. Mental Health & Counseling Self-Assessments (PHQ-9, SDQ)

@@ -158,6 +158,28 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertSucceeds(getDocs(query(collection(studentDb, 'students'), where('studentUid', '==', 'stu-uid-1'))));
       await assertFails(getDocs(collection(studentDb, 'students')));
     });
+
+    // TASK (รูปโปรไฟล์นักเรียน): นักเรียนแก้ photoUrl ของตัวเองได้ แต่แก้ field อื่นไม่ได้
+    it('allows a STUDENT to update ONLY photoUrl / photoUpdatedAt on their own record', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/69501').set({ studentId: '69501', studentUid: 'stu-uid-1', name: 'Me', photoUrl: 'old.jpg' });
+      });
+      const studentDb = asUser('stu-uid-1', ['STUDENT']).firestore();
+      await assertSucceeds(studentDb.doc('students/69501').update({ photoUrl: 'new.jpg', photoUpdatedAt: '2026-09-10T00:00:00Z' }));
+      // แก้ field อื่นพ่วงมาด้วย → ปฏิเสธ
+      await assertFails(studentDb.doc('students/69501').update({ photoUrl: 'x.jpg', name: 'Hacked' }));
+      await assertFails(studentDb.doc('students/69501').update({ behaviorScore: 0 }));
+    });
+
+    it('denies a STUDENT updating another student photoUrl, and denies create/delete', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/69502').set({ studentId: '69502', studentUid: 'stu-uid-2', name: 'Other', photoUrl: 'o.jpg' });
+      });
+      const studentDb = asUser('stu-uid-1', ['STUDENT']).firestore();
+      await assertFails(studentDb.doc('students/69502').update({ photoUrl: 'evil.jpg' }));
+      await assertFails(studentDb.doc('students/69599').set({ studentId: '69599', studentUid: 'stu-uid-1', photoUrl: 'p.jpg' }));
+      await assertFails(studentDb.doc('students/69502').delete());
+    });
   });
 
   // 2. student_self_assessments (PHQ-9, SDQ)
