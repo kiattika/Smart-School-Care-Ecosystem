@@ -21,13 +21,16 @@ import {
   GraduationCap
 } from 'lucide-react';
 import { useStore } from '../../store';
-import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits, subscribeSDQAssessments } from '../../services/firestoreService';
+import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits, subscribeSDQAssessments, subscribeSemesterHealthLogs } from '../../services/firestoreService';
+import { useCurrentSemester } from '../../hooks/useCurrentSemester';
+import { BMI_CATEGORY_LABEL } from '../../lib/utils';
+import { SemesterHealthSelfReportForm } from './SemesterHealthSelfReportForm';
 import {
-  SemesterHealthRecord,
   InfirmaryVisit,
   TwoQuestionScreening,
   PHQ9Screening,
   SDQAssessment,
+  SemesterHealthLog,
   Student
 } from '../../types';
 
@@ -38,7 +41,6 @@ export function HealthMentalWellbeingModule({
 }: { studentId: string; student?: Student; isParentView?: boolean }) {
   const user = useStore(s => s.user);
   const {
-    semesterHealthLogs,
     chronicIllnesses,
     allergies,
     specialCareNeeds,
@@ -77,6 +79,19 @@ export function HealthMentalWellbeingModule({
     return () => unsubscribe();
   }, [user?.uid, isParentView]);
 
+  // น้ำหนัก/ส่วนสูงรายภาคเรียน — real-time จาก Firestore (student_semester_health) แทนตัวเลข mock
+  // ตายตัวเดิม (175cm/65kg). นักเรียนกรอกเอง (ยืนยันจากโรงเรียน) — ดู SemesterHealthSelfReportForm
+  const currentSemester = useCurrentSemester();
+  const [semHealthLogs, setSemHealthLogs] = useState<SemesterHealthLog[]>([]);
+  useEffect(() => {
+    if (!user?.uid) { setSemHealthLogs([]); return; }
+    const unsubscribe = subscribeSemesterHealthLogs(
+      setSemHealthLogs,
+      isParentView ? { parentUid: user.uid } : { studentUid: user.uid }
+    );
+    return () => unsubscribe();
+  }, [user?.uid, isParentView]);
+
   const defaultStudent: Student = {
     id: studentId || 'default-student',
     studentId: studentId || '69501',
@@ -101,7 +116,12 @@ export function HealthMentalWellbeingModule({
   // แทนการค้นจาก state.students ของ Zustand (session-local ไม่เคยมี listener ผูกไว้ — ค่า studentUid/
   // parentUid ที่ต้องใช้ยืนยันตัวตนตอนเขียน Firestore จริงจะไม่มีวันครบถ้วนถ้าพึ่ง state นี้)
   const student = studentProp || students.find(s => s.studentId === studentId) || students[0] || defaultStudent;
-  const healthLogs = semesterHealthLogs[student.studentId] || [];
+  // เฉพาะของนักเรียนคนนี้ (listener filter ด้วย studentUid/parentUid ของผู้ใช้อยู่แล้ว แต่ผู้ปกครอง
+  // ที่มีบุตรหลานหลายคนจะได้หลาย record — กรองตาม studentId ที่กำลังดูอีกชั้น) เรียงเก่า→ใหม่
+  const healthLogs = semHealthLogs.filter(l => l.studentId === student.studentId);
+  const currentSemHealth = healthLogs.find(
+    l => l.academicYear === currentSemester.academicYear && l.term === currentSemester.term
+  ) || null;
   const studentIllnesses = chronicIllnesses[student.studentId] || [];
   const studentAllergies = allergies[student.studentId] || [];
   const studentSpecialCare = specialCareNeeds[student.studentId] || [];
@@ -137,17 +157,9 @@ export function HealthMentalWellbeingModule({
   const [savedPHQError, setSavedPHQError] = useState<string | null>(null);
   const [sdqSubmitError, setSdqSubmitError] = useState<string | null>(null);
 
-  const latestHealth = healthLogs[healthLogs.length - 1] || {
-    semester: '1/2569',
-    height: 175,
-    weight: 65,
-    bmi: 21.2,
-    bmiCategory: 'NORMAL',
-    bloodType: 'O (Rh+)',
-    systolicBp: 120,
-    diastolicBp: 80,
-    recordedAt: '2026-06-10'
-  };
+  // ตัวเลขล่าสุดจาก Firestore จริง — ไม่มี fallback mock อีกต่อไป (null = ยังไม่เคยกรอก → แสดง empty state)
+  const latestHealth: SemesterHealthLog | null = healthLogs[healthLogs.length - 1] || null;
+  const canSelfReport = !isParentView && !!user?.uid && !!student.studentUid && student.studentUid === user.uid;
 
   const phqQuestions = [
     '1. เบื่อ ไม่สนใจ หรือไม่เพลิดเพลินในการทำสิ่งต่างๆ',
@@ -283,45 +295,69 @@ export function HealthMentalWellbeingModule({
 
       {activeTab === 'physical' && (
         <div className="space-y-6">
-          {/* Key Metric Cards */}
+          {/* ฟอร์มให้นักเรียนกรอกน้ำหนัก/ส่วนสูงเอง ภาคเรียนละ 1 ครั้ง (ยืนยันจากโรงเรียน) */}
+          {canSelfReport && student.studentUid && (
+            <SemesterHealthSelfReportForm
+              student={student}
+              studentUid={student.studentUid}
+              currentSemester={currentSemester}
+              existing={currentSemHealth}
+            />
+          )}
+
+          {/* Key Metric Cards — จากข้อมูลที่นักเรียนกรอกจริง (ไม่มี fallback mock) */}
+          {latestHealth ? (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4">
-              <span className="text-[11px] text-slate-400 block mb-1">ส่วนสูงปัจจุบัน</span>
+              <span className="text-[11px] text-slate-400 block mb-1">ส่วนสูงล่าสุด</span>
               <div className="flex items-baseline gap-1.5">
                 <span className="text-2xl font-black text-white">{latestHealth.height}</span>
                 <span className="text-xs text-slate-400">ซม.</span>
               </div>
-              <span className="text-[10px] text-emerald-400 mt-1 block">⬆️ +7 ซม. จาก ม.4</span>
+              <span className="text-[10px] text-slate-400 mt-1 block">ภาคเรียน {latestHealth.semester}</span>
             </div>
 
             <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4">
-              <span className="text-[11px] text-slate-400 block mb-1">น้ำหนักปัจจุบัน</span>
+              <span className="text-[11px] text-slate-400 block mb-1">น้ำหนักล่าสุด</span>
               <div className="flex items-baseline gap-1.5">
                 <span className="text-2xl font-black text-white">{latestHealth.weight}</span>
                 <span className="text-xs text-slate-400">กก.</span>
               </div>
-              <span className="text-[10px] text-emerald-400 mt-1 block">⚖️ อัตราส่วนสมดุล</span>
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                บันทึกเมื่อ {new Date(latestHealth.recordedAt).toLocaleDateString('th-TH')}
+              </span>
             </div>
 
             <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4">
               <span className="text-[11px] text-slate-400 block mb-1">ดัชนีมวลกาย (BMI)</span>
               <div className="flex items-baseline gap-1.5">
                 <span className="text-2xl font-black text-emerald-400">{latestHealth.bmi}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">สมส่วน</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">
+                  {BMI_CATEGORY_LABEL[latestHealth.bmiCategory]}
+                </span>
               </div>
-              <span className="text-[10px] text-slate-400 mt-1 block">เกณฑ์มาตรฐาน 18.5 - 22.9</span>
+              <span className="text-[10px] text-slate-400 mt-1 block">เกณฑ์สมส่วน 18.5 - 22.9</span>
             </div>
 
             <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4">
               <span className="text-[11px] text-slate-400 block mb-1">หมู่เลือด & ความดัน</span>
               <div className="flex items-baseline gap-1.5">
-                <span className="text-xl font-bold text-white">{latestHealth.bloodType}</span>
+                <span className="text-xl font-bold text-white">{latestHealth.bloodType || '—'}</span>
               </div>
               <span className="text-[10px] text-slate-400 mt-1 block">
-                BP: {latestHealth.systolicBp}/{latestHealth.diastolicBp} mmHg
+                {latestHealth.systolicBp && latestHealth.diastolicBp
+                  ? `BP: ${latestHealth.systolicBp}/${latestHealth.diastolicBp} mmHg`
+                  : 'ยังไม่มีข้อมูลความดัน'}
               </span>
             </div>
           </div>
+          ) : (
+            <div className="border border-dashed border-slate-800 rounded-2xl p-6 text-center text-xs text-slate-500">
+              {isParentView
+                ? 'นักเรียนยังไม่ได้กรอกน้ำหนัก/ส่วนสูงของภาคเรียนนี้'
+                : 'ยังไม่มีข้อมูลน้ำหนัก/ส่วนสูง — กรอกในแบบฟอร์มด้านบนเพื่อเริ่มบันทึก'}
+            </div>
+          )}
 
           {/* Historical Growth Chart & Health Conditions */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -331,7 +367,7 @@ export function HealthMentalWellbeingModule({
                 <Activity className="w-4 h-4 text-emerald-400" />
                 ประวัติการเจริญเติบโตรายภาคเรียน (Growth Trends)
               </h3>
-              <p className="text-[11px] text-slate-400 mb-4">บันทึกตรวจสุขภาพโดยงานอนามัยโรงเรียน</p>
+              <p className="text-[11px] text-slate-400 mb-4">นักเรียนกรอกเองรายภาคเรียน (พยาบาลบันทึกแทน/แก้ไขกรณีพิเศษ)</p>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
@@ -345,15 +381,17 @@ export function HealthMentalWellbeingModule({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
-                    {healthLogs.map((h, i) => (
-                      <tr key={i} className="hover:bg-slate-800/30">
+                    {healthLogs.length === 0 ? (
+                      <tr><td colSpan={5} className="py-4 text-center text-slate-500">ยังไม่มีบันทึก</td></tr>
+                    ) : healthLogs.map((h) => (
+                      <tr key={h.id} className="hover:bg-slate-800/30">
                         <td className="py-2.5 font-bold text-slate-200">{h.semester}</td>
                         <td className="py-2.5 text-slate-300">{h.height}</td>
                         <td className="py-2.5 text-slate-300">{h.weight}</td>
                         <td className="py-2.5 font-mono font-bold text-emerald-400">{h.bmi}</td>
                         <td className="py-2.5 text-right">
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
-                            สมส่วน
+                            {BMI_CATEGORY_LABEL[h.bmiCategory]}
                           </span>
                         </td>
                       </tr>

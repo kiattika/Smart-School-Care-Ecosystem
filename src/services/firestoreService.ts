@@ -52,7 +52,8 @@ import {
   GuidanceCounselingCase,
   InfirmaryVisit,
   ParentNotification,
-  SchoolCalendarEvent
+  SchoolCalendarEvent,
+  SemesterHealthLog
 } from '../types';
 import { SchoolGeofenceConfig } from '../utils/geoUtils';
 
@@ -2449,3 +2450,95 @@ export function subscribeInfirmaryVisits(
 }
 
 
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Semester Health Log (student_semester_health/{studentId}_{academicYear}_{term})
+ * ยืนยันจากโรงเรียน: นักเรียนกรอกน้ำหนัก/ส่วนสูงเอง "ภาคเรียนละ 1 ครั้ง" (ลดภาระงานพยาบาล)
+ * พยาบาล (INFIRMARY_STAFF) บันทึกแทน/แก้ไขได้กรณีพิเศษ. ครูที่ปรึกษา/ผู้ปกครอง อ่านได้
+ * doc id ผูกภาคเรียน → กรอกซ้ำภาคเรียนเดิมชนกับ doc เดิม (firestore.rules บังคับ 1 ครั้ง/ภาคเรียน)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const SEMESTER_HEALTH_COL = 'student_semester_health';
+
+export function semesterHealthDocId(studentId: string, academicYear: string, term: '1' | '2'): string {
+  return `${studentId}_${academicYear}_${term}`;
+}
+
+export type SemesterHealthInput = Pick<
+  SemesterHealthLog,
+  'studentId' | 'studentUid' | 'parentUid' | 'academicYear' | 'term' |
+  'height' | 'weight' | 'bmi' | 'bmiCategory' | 'bloodType' | 'systolicBp' | 'diastolicBp' | 'semester'
+> & { recordedByRole: SemesterHealthLog['recordedByRole'] };
+
+/**
+ * นักเรียน (หรือพยาบาล) บันทึกน้ำหนัก/ส่วนสูงของภาคเรียนหนึ่ง — ปล่อย error ต่อ (ไม่กลืนเงียบ)
+ * เพื่อให้ UI แสดง "บันทึกไม่สำเร็จ" ได้จริง. isNurseOverride = true → พยาบาลแก้ทับ record เดิมได้
+ */
+export async function saveSemesterHealthLog(
+  input: SemesterHealthInput,
+  recordedByUid: string,
+  isNurseOverride = false,
+): Promise<string> {
+  const id = semesterHealthDocId(input.studentId, input.academicYear, input.term);
+  const payload: SemesterHealthLog = {
+    id,
+    studentId: input.studentId,
+    studentUid: input.studentUid,
+    parentUid: input.parentUid ?? null,
+    academicYear: input.academicYear,
+    term: input.term,
+    semester: input.semester,
+    height: input.height,
+    weight: input.weight,
+    bmi: input.bmi,
+    bmiCategory: input.bmiCategory,
+    bloodType: input.bloodType || '',
+    ...(input.systolicBp !== undefined ? { systolicBp: input.systolicBp } : {}),
+    ...(input.diastolicBp !== undefined ? { diastolicBp: input.diastolicBp } : {}),
+    recordedByUid,
+    recordedByRole: input.recordedByRole,
+    recordedAt: new Date().toISOString(),
+  };
+  try {
+    const ref = doc(db, SEMESTER_HEALTH_COL, id);
+    if (isNurseOverride) {
+      await setDoc(ref, payload, { merge: true });
+    } else {
+      // create เท่านั้น — ถ้ามี doc ภาคเรียนนี้แล้ว rules/`create` จะปฏิเสธ (บังคับ 1 ครั้ง/ภาคเรียน)
+      await setDoc(ref, payload);
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${SEMESTER_HEALTH_COL}/${id}`);
+  }
+  return id;
+}
+
+/**
+ * real-time listener — ต้อง filter ฝั่ง query ให้ผ่าน firestore.rules:
+ *  - { studentUid } → นักเรียนเจ้าของ (ทุกภาคเรียน)
+ *  - { parentUid }  → ผู้ปกครองของบุตรหลาน
+ * ครู/พยาบาล/แอดมิน ที่มี role อ่านได้ ส่ง filter ตัวใดตัวหนึ่งเพื่อ scope ให้แคบก็ได้
+ */
+export function subscribeSemesterHealthLogs(
+  onUpdate: (logs: SemesterHealthLog[]) => void,
+  filter: { studentUid?: string; parentUid?: string },
+): () => void {
+  try {
+    const col = collection(db, SEMESTER_HEALTH_COL);
+    const clauses = [];
+    if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
+    if (filter.parentUid) clauses.push(where('parentUid', '==', filter.parentUid));
+    if (clauses.length === 0) { onUpdate([]); return () => {}; }
+    return onSnapshot(query(col, ...clauses), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as SemesterHealthLog));
+      list.sort((a, b) => `${a.academicYear}/${a.term}`.localeCompare(`${b.academicYear}/${b.term}`));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeSemesterHealthLogs] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeSemesterHealthLogs] setup error:', error);
+    return () => {};
+  }
+}

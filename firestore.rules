@@ -641,6 +641,41 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 32. Semester Health Log — น้ำหนัก/ส่วนสูงรายภาคเรียน
+    // ยืนยันจากโรงเรียน: นักเรียนกรอกเอง "ภาคเรียนละ 1 ครั้ง" (ลดภาระงานพยาบาลที่ดูแลทั้งโรงเรียน)
+    // doc id = {studentId}_{academicYear}_{term} → กรอกซ้ำภาคเรียนเดิมชนกับ doc เดิม create ไม่ผ่าน
+    // (exists) = บังคับ 1 ครั้ง/ภาคเรียนที่ layer นี้ด้วย. พยาบาล (INFIRMARY_STAFF) บันทึกแทน/แก้ไข
+    // ได้กรณีพิเศษ (นักเรียนลืมกรอก/กรอกผิด). ครูที่ปรึกษา/แนะแนว/ผู้ปกครอง อ่านได้
+    match /student_semester_health/{docId} {
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('INFIRMARY_STAFF') ||
+                     hasRole('HOMEROOM_TEACHER') ||
+                     hasRole('GUIDANCE_COUNSELOR') ||
+                     (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
+
+      // studentUid/parentUid ต้อง denormalize ตรงกับ students/{studentId} จริงเสมอ (กันส่งข้อมูล
+      // ไปให้ครอบครัวอื่นเห็น) + docId ต้องเป็น {studentId}_{academicYear}_{term} เป๊ะ
+      // (กันนักเรียนตั้ง id มั่วเพื่อกรอกหลายครั้งต่อภาคเรียน)
+      allow create: if request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__') &&
+                       request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', null) &&
+                       docId == request.resource.data.studentId + '_' + request.resource.data.academicYear + '_' + request.resource.data.term &&
+                       (
+                         hasRole('SUPER_ADMIN') ||
+                         hasRole('INFIRMARY_STAFF') ||
+                         (
+                           isSelfStudent(request.resource.data.studentId) &&
+                           request.resource.data.recordedByUid == request.auth.uid
+                         )
+                       );
+
+      // แก้ไข/บันทึกแทน: พยาบาล/แอดมิน เท่านั้น (นักเรียนแก้ย้อนหลังเองไม่ได้) — ห้ามย้ายเจ้าของ
+      allow update: if (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF')) &&
+                       request.resource.data.studentId == resource.data.studentId &&
+                       request.resource.data.studentUid == resource.data.studentUid;
+
+      allow delete: if hasRole('SUPER_ADMIN');
+    }
+
     // Default Deny All Catch-All for unknown paths
     match /{document=**} {
       allow read, write: if false;

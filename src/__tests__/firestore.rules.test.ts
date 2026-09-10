@@ -1982,6 +1982,70 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
     });
   });
 
+  // student_semester_health — น้ำหนัก/ส่วนสูงรายภาคเรียน (นักเรียนกรอกเอง ภาคเรียนละ 1 ครั้ง)
+  describe('student_semester_health collection', () => {
+    const SID = '69777';
+    const STU_UID = 'sem-stu-uid';
+    const PARENT_UID = 'sem-parent-uid';
+    const DOC_ID = `${SID}_2569_1`;
+    const goodDoc = {
+      studentId: SID, studentUid: STU_UID, parentUid: PARENT_UID,
+      academicYear: '2569', term: '1', semester: '1/2569',
+      height: 165, weight: 55, bmi: 20.2, bmiCategory: 'NORMAL', bloodType: 'O',
+      recordedByUid: STU_UID, recordedByRole: 'STUDENT', recordedAt: '2026-09-10T00:00:00Z',
+    };
+
+    beforeEach(async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${SID}`).set({ studentId: SID, studentUid: STU_UID, parentUid: PARENT_UID, room: 'ม.5/8' });
+      });
+    });
+
+    it('allows a STUDENT to self-report once for the current semester', async () => {
+      const studentDb = asUser(STU_UID, ['STUDENT']).firestore();
+      await assertSucceeds(studentDb.doc(`student_semester_health/${DOC_ID}`).set(goodDoc));
+    });
+
+    it('denies a second self-report for the same semester (create over an existing doc)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_semester_health/${DOC_ID}`).set(goodDoc);
+      });
+      const studentDb = asUser(STU_UID, ['STUDENT']).firestore();
+      await assertFails(studentDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, weight: 99 }));
+      // นักเรียนแก้ย้อนหลังเองก็ไม่ได้
+      await assertFails(studentDb.doc(`student_semester_health/${DOC_ID}`).update({ weight: 99 }));
+    });
+
+    it('denies a doc id that does not match studentId_academicYear_term', async () => {
+      const studentDb = asUser(STU_UID, ['STUDENT']).firestore();
+      await assertFails(studentDb.doc(`student_semester_health/${SID}_bogus`).set(goodDoc));
+    });
+
+    it('denies self-report with a mismatched studentUid / parentUid denormalization', async () => {
+      const studentDb = asUser(STU_UID, ['STUDENT']).firestore();
+      await assertFails(studentDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, parentUid: 'someone-else' }));
+      const otherStudentDb = asUser('other-stu-uid', ['STUDENT']).firestore();
+      await assertFails(otherStudentDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, studentUid: 'other-stu-uid', recordedByUid: 'other-stu-uid' }));
+    });
+
+    it('allows INFIRMARY_STAFF to create and to override (update) an existing record', async () => {
+      const nurseDb = asRole('INFIRMARY_STAFF').firestore();
+      await assertSucceeds(nurseDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, recordedByUid: 'test-uid', recordedByRole: 'INFIRMARY_STAFF' }));
+      await assertSucceeds(nurseDb.doc(`student_semester_health/${DOC_ID}`).update({ weight: 58, bmi: 21.3 }));
+    });
+
+    it('lets the owner student, linked parent, homeroom teacher and nurse read; denies an unrelated user', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_semester_health/${DOC_ID}`).set(goodDoc);
+      });
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_semester_health/${DOC_ID}`).get());
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc(`student_semester_health/${DOC_ID}`).get());
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc(`student_semester_health/${DOC_ID}`).get());
+      await assertSucceeds(asRole('INFIRMARY_STAFF').firestore().doc(`student_semester_health/${DOC_ID}`).get());
+      await assertFails(asUser('random-uid', ['STUDENT']).firestore().doc(`student_semester_health/${DOC_ID}`).get());
+    });
+  });
+
   // 15. Default Deny Catch-All (Regression Test 5)
   describe('Default Deny Catch-All (Undeclared paths)', () => {
     it('REGRESSION: denies authenticated user with no matching role from reading or writing undeclared collections', async () => {

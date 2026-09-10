@@ -598,6 +598,23 @@ export interface SemesterHealthRecord {
   recordedAt: string;
 }
 
+/**
+ * บันทึกน้ำหนัก/ส่วนสูงรายภาคเรียน (Firestore: student_semester_health/{studentId}_{academicYear}_{term})
+ * ยืนยันจากโรงเรียน: "นักเรียนกรอกเอง ภาคเรียนละ 1 ครั้ง" (ลดภาระงานพยาบาลทั้งโรงเรียน) —
+ * พยาบาล (INFIRMARY_STAFF) บันทึกแทน/แก้ไขได้กรณีพิเศษ (นักเรียนลืมกรอก/กรอกผิด)
+ * doc id ที่ผูกภาคเรียนไว้ทำให้ "กรอกซ้ำภาคเรียนเดิม" ชนกับ doc เดิม → บังคับ 1 ครั้ง/ภาคเรียนที่ rules
+ */
+export interface SemesterHealthLog extends SemesterHealthRecord {
+  id: string;
+  studentId: string;              // รหัสนักเรียน 5 หลัก
+  studentUid: string;             // Firebase Auth UID ของนักเรียน (denormalize — ตรวจกับ students จริง)
+  parentUid: string | null;       // denormalize — ให้ผู้ปกครองอ่านของบุตรหลานได้
+  academicYear: string;           // เช่น "2569"
+  term: '1' | '2';                // ภาคเรียน
+  recordedByUid: string;          // ผู้บันทึกจริง (นักเรียนเอง หรือ พยาบาล)
+  recordedByRole: 'STUDENT' | 'INFIRMARY_STAFF' | 'SUPER_ADMIN';
+}
+
 export interface ChronicIllness {
   id: string;
   name: string;

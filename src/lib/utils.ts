@@ -128,4 +128,25 @@ export function formatCourseTitle(name?: string, level?: string, room?: string):
   return out;
 }
 
+export type BmiCategory = 'UNDERWEIGHT' | 'NORMAL' | 'OVERWEIGHT' | 'OBESE';
+
+/** BMI + เกณฑ์แปลผล (เกณฑ์เอเชีย: <18.5 ผอม, <23 สมส่วน, <25 ท้วม, ≥25 อ้วน) */
+export function computeBmi(heightCm: number, weightKg: number): { bmi: number; category: BmiCategory } {
+  const m = heightCm / 100;
+  if (!m || m <= 0 || !weightKg || weightKg <= 0) return { bmi: 0, category: 'NORMAL' };
+  const bmi = Math.round((weightKg / (m * m)) * 10) / 10;
+  const category: BmiCategory =
+    bmi < 18.5 ? 'UNDERWEIGHT' :
+    bmi < 23 ? 'NORMAL' :
+    bmi < 25 ? 'OVERWEIGHT' : 'OBESE';
+  return { bmi, category };
+}
+
+export const BMI_CATEGORY_LABEL: Record<BmiCategory, string> = {
+  UNDERWEIGHT: 'น้ำหนักน้อย / ผอม',
+  NORMAL: 'สมส่วน',
+  OVERWEIGHT: 'ท้วม / น้ำหนักเกิน',
+  OBESE: 'อ้วน',
+};
+
 
