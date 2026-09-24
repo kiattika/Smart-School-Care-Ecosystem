@@ -91,6 +91,11 @@ export const assignUserRole = functions.https.onCall(async (data, context) => {
       primaryRole: roles[0] || 'SUBJECT_TEACHER'
     });
 
+    // 4. Revoke existing refresh tokens so any session the target user already has
+    // open is forced to re-authenticate (and pick up the new custom claims) the
+    // next time it refreshes its ID token, rather than staying valid for up to 1hr.
+    await auth.revokeRefreshTokens(targetUid);
+
     return { success: true, targetUid, roles };
   } catch (error: any) {
     throw new functions.https.HttpsError('internal', error.message);
