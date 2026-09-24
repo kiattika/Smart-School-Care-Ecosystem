@@ -189,15 +189,11 @@ export async function buildAppUser(fbUser: FirebaseUser): Promise<User> {
     // Ignore if firestore not yet seeded/rules deny
   }
 
-  // 3. Fallback matching with predefined staff list if in dev or during initial bootstrap
+  // 3. Email-substring role guess for users with no claims and no staff doc.
+  //    (ไม่ใช้ MOCK_MULTI_ROLE_USERS ที่นี่ — role/profile ต้องมาจาก custom claims หรือ
+  //    staff/{uid} จริงเท่านั้น; บัญชี emulator ที่ seed ไว้มีทั้งสองอย่างอยู่แล้ว)
   if (roles.length === 0 && fbUser.email) {
-    const matched = MOCK_MULTI_ROLE_USERS.find(
-      u => u.email.toLowerCase() === fbUser.email?.toLowerCase()
-    );
-    if (matched) {
-      roles = matched.roles;
-      userProfile = matched;
-    } else if (fbUser.email.toLowerCase().includes('parent')) {
+    if (fbUser.email.toLowerCase().includes('parent')) {
       roles = ['PARENT' as UserRole];
     } else if (fbUser.email.toLowerCase().includes('student')) {
       roles = ['STUDENT' as UserRole];
