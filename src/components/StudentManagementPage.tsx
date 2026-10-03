@@ -39,6 +39,7 @@ import { recomputeStudentAttendanceStats } from '../services/firestoreService';
 import { Student } from '../types';
 import { BulkDataImportModal, ImportType } from './BulkDataImportModal';
 import { isSameRoom } from '../lib/utils';
+import { normalizeEmail } from '../lib/normalizeEmail';
 
 export interface StudentRecord {
   id: string;
@@ -373,13 +374,14 @@ export function StudentManagementPage() {
         fullName: fullName,
         nickname: formNickname.trim(),
         // ถ้าไม่ได้กรอกเอง ใช้รูปแบบ it{รหัสประจำตัว}@utd.ac.th เป็นค่าเริ่มต้น (ที่ตกลงกันไว้)
-        email: formEmail.trim() || `it${cleanId}@utd.ac.th`,
+        // normalizeEmail = ตัดอักขระล่องหน + trim + lowercase (blocking function ค้น students ด้วย email ตรงตัว)
+        email: normalizeEmail(formEmail) || `it${cleanId}@utd.ac.th`,
         room: formRoom.trim(),
         className: formRoom.trim(),
         grade: formRoom.includes('/') ? formRoom.split('/')[0] : formRoom,
         parentUid: parentUidValue,
         parentId: parentUidValue,
-        parentEmail: formParentEmail.trim(),
+        parentEmail: normalizeEmail(formParentEmail),
         parentMobile: formParentMobile.trim(),
         photoUrl: formPhotoUrl.trim(),
         avatar: formPhotoUrl.trim(),

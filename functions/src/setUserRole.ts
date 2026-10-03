@@ -3,6 +3,7 @@ import * as admin from 'firebase-admin';
 // FieldValue ต้อง import จาก subpath นี้ — `admin.firestore.FieldValue` เป็น undefined ใน Functions emulator
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { FIRESTORE_DATABASE_ID } from './config';
+import { selfDemotionError } from './roleGuards';
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -59,6 +60,18 @@ export const assignUserRole = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', err?.message || String(err));
       }
     }
+  }
+
+  // 2.1 กันล็อกตัวเองออก: SUPER_ADMIN ถอน SUPER_ADMIN ของตัวเองไม่ได้ — ตรวจก่อนเขียนอะไรทั้งสิ้น
+  const selfError = selfDemotionError({
+    callerUid: context.auth.uid,
+    callerStaffId: context.auth.token.staffId,
+    targetStaffId: staffId,
+    targetUid: targetUser?.uid ?? null,
+    newRoles: roles,
+  });
+  if (selfError) {
+    throw new functions.https.HttpsError('failed-precondition', selfError);
   }
 
   try {
