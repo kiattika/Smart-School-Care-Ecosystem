@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 /**
  * TASK 3: ครูซ่อนคาบกิจกรรมที่ไม่ต้องประเมิน (เช่น PLC, พักกลางวัน) ออกจาก dropdown สมุดบันทึกคะแนน
@@ -13,9 +13,9 @@ import * as path from 'path';
  * จำนวนมาก (ตามรูปแบบเดิมของโปรเจกต์)
  */
 describe('Gradebook TASK 3: ซ่อนคาบกิจกรรมที่ไม่ต้องประเมินออกจากรายการ', () => {
-  const teacherPortalSrc = fs.readFileSync(path.resolve(__dirname, '../TeacherPortal.tsx'), 'utf8');
-  const firestoreServiceSrc = fs.readFileSync(path.resolve(__dirname, '../services/firestoreService.ts'), 'utf8');
-  const rulesSrc = fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8');
+  const teacherPortalSrc = readSource(path.resolve(__dirname, '../TeacherPortal.tsx'));
+  const firestoreServiceSrc = readSource(path.resolve(__dirname, '../services/firestoreService.ts'));
+  const rulesSrc = readSource(path.resolve(__dirname, '../../firestore.rules'));
 
   it('firestoreService มี subscribe/hide/unhide ครบ ผูกกับ collection gradebook_hidden_courses', () => {
     expect(firestoreServiceSrc).toContain("const GRADEBOOK_HIDDEN_COURSES_COL = 'gradebook_hidden_courses';");

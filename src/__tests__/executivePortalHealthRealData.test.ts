@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 /**
  * ExecutivePortal TASK 5 (audit ข้อมูลปลอม, Health tab): เดิม tab นี้ทั้งหมดเป็นข้อมูลปลอม —
@@ -12,8 +12,8 @@ import * as path from 'path';
  * ไม่โชว์ผลรายบุคคล ผูกกับ firestore.rules ที่เพิ่ม EXECUTIVE อ่านได้แล้ว (commit ก่อนหน้า)
  */
 describe('ExecutivePortal TASK 5: Health tab ใช้ข้อมูลสุขภาพจริงแทนข้อมูลปลอม', () => {
-  const src = fs.readFileSync(path.resolve(__dirname, '../ExecutivePortal.tsx'), 'utf8');
-  const firestoreServiceSrc = fs.readFileSync(path.resolve(__dirname, '../services/firestoreService.ts'), 'utf8');
+  const src = readSource(path.resolve(__dirname, '../ExecutivePortal.tsx'));
+  const firestoreServiceSrc = readSource(path.resolve(__dirname, '../services/firestoreService.ts'));
 
   it('firestoreService มี subscribe school-wide สำหรับ 2Q/PHQ-9/SDQ (ต่างจากฟังก์ชันเดิมที่ต้อง scope studentUid/respondentUid)', () => {
     expect(firestoreServiceSrc).toContain('export function subscribeAll2QScreenings(');

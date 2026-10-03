@@ -17,12 +17,27 @@ service cloud.firestore {
       return isSignedIn() && (request.auth.uid == userId || request.auth.token.email == userId);
     }
 
-    // ครูที่ปรึกษา (HOMEROOM_TEACHER) ของห้องที่ระบุ — เทียบ staff/{uid}.assignments.homeroomClass
-    // (staff อ่านได้โดย signed-in ทุกคนอยู่แล้ว จึง get() ได้; ใช้ .get(k, default) กัน field ไม่มี)
+    // มีบทบาทอย่างน้อย 1 อย่างใน custom claims — claims ออกโดย blocking functions
+    // (beforeUserCreated/beforeUserSignedIn) เท่านั้น: signed-in แต่ไม่มี roles = ไม่ใช่บุคลากร/นักเรียนในทะเบียน
+    function hasAnyRole() {
+      return isSignedIn()
+        && request.auth.token.get('roles', []) is list
+        && request.auth.token.get('roles', []).size() > 0;
+    }
+
+    // staff doc id ของผู้ใช้ (teacherId จากไฟล์ import — ไม่ใช่ Auth UID) จาก claim staffId
+    function myStaffId() {
+      return request.auth.token.get('staffId', '');
+    }
+
+    // ครูที่ปรึกษา (HOMEROOM_TEACHER) ของห้องที่ระบุ — เทียบ staff/{claims.staffId}.assignments.homeroomClass
+    // (เดิมอ่าน staff/{auth.uid} ซึ่งไม่ตรงกับ staff ที่ import จริง — key เป็น teacherId)
+    // ใช้ .get(k, default) กัน field ไม่มี
     function isHomeroomTeacherOf(roomValue) {
       return hasRole('HOMEROOM_TEACHER')
-        && exists(/databases/$(database)/documents/staff/$(request.auth.uid))
-        && get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('assignments', {}).get('homeroomClass', '') == roomValue;
+        && myStaffId() is string && myStaffId() != ''
+        && exists(/databases/$(database)/documents/staff/$(myStaffId()))
+        && get(/databases/$(database)/documents/staff/$(myStaffId())).data.get('assignments', {}).get('homeroomClass', '') == roomValue;
     }
 
     // ค่าจาก students/{studentId} จริง — ใช้ตอน create เพื่อกันนักเรียน denormalize ผิด
@@ -222,13 +237,15 @@ service cloud.firestore {
 
     // 11. Staff Directory
     match /staff/{staffId} {
-      allow read: if isSignedIn();
+      // ต้องมี roles ใน claims — signed-in เฉยๆ (ไม่อยู่ในทะเบียน) อ่านรายชื่อบุคลากรไม่ได้
+      allow read: if hasAnyRole();
       allow write: if hasRole('SUPER_ADMIN');
     }
 
     // 12. Teachers Directory
     match /teachers/{teacherId} {
-      allow read: if isSignedIn();
+      // ต้องมี roles ใน claims — เหมือน staff
+      allow read: if hasAnyRole();
       allow write: if hasRole('SUPER_ADMIN');
     }
 

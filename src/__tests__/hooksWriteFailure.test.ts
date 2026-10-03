@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 // Mock firebase modules
 vi.mock('../lib/firebase', () => {
@@ -40,7 +40,7 @@ describe('Task 4: Write Failure Handling & Auto-seed Removal', () => {
   });
 
   it('verifies setLogLevel is set to "error" in src/lib/firebase.ts', () => {
-    const firebaseTs = fs.readFileSync(path.join(process.cwd(), 'src/lib/firebase.ts'), 'utf8');
+    const firebaseTs = readSource(path.join(process.cwd(), 'src/lib/firebase.ts'));
     expect(firebaseTs).toContain("setLogLevel('error')");
     expect(firebaseTs).not.toContain("setLogLevel('silent')");
   });
@@ -50,7 +50,7 @@ describe('Task 4: Write Failure Handling & Auto-seed Removal', () => {
     const { useTeacherFirestoreSchedule } = await import('../hooks/useTeacherFirestoreSchedule');
     
     // Check source code directly to ensure no mount seeding
-    const hookSource = fs.readFileSync(path.join(process.cwd(), 'src/hooks/useTeacherFirestoreSchedule.ts'), 'utf8');
+    const hookSource = readSource(path.join(process.cwd(), 'src/hooks/useTeacherFirestoreSchedule.ts'));
     expect(hookSource).not.toContain('getDocs(');
     // setDoc should only exist in the update functions, not within useEffect
     const useEffectSection = hookSource.substring(hookSource.indexOf('useEffect('), hookSource.indexOf('const updateScheduleAttendance'));
@@ -58,7 +58,7 @@ describe('Task 4: Write Failure Handling & Auto-seed Removal', () => {
   });
 
   it('verifies updateScheduleAttendance and updatePartnerAttendance revert state on Firestore error', async () => {
-    const hookSource = fs.readFileSync(path.join(process.cwd(), 'src/hooks/useTeacherFirestoreSchedule.ts'), 'utf8');
+    const hookSource = readSource(path.join(process.cwd(), 'src/hooks/useTeacherFirestoreSchedule.ts'));
     
     // Ensure both functions have optimistic update followed by revert in catch block
     expect(hookSource).toContain('updateScheduleAttendance');
@@ -69,14 +69,14 @@ describe('Task 4: Write Failure Handling & Auto-seed Removal', () => {
   });
 
   it('verifies seedEmulatorAuth seeds admin_periods_config and school_settings/periods_config', () => {
-    const seedSource = fs.readFileSync(path.join(process.cwd(), 'scripts/seedEmulatorAuth.ts'), 'utf8');
+    const seedSource = readSource(path.join(process.cwd(), 'scripts/seedEmulatorAuth.ts'));
     expect(seedSource).toContain('admin_periods_config');
     expect(seedSource).toContain('school_settings');
     expect(seedSource).toContain('periods_config');
   });
 
   it('verifies useTeacherFirestoreSchedule initializes schedules as [] and exposes isSchedulesEmpty', () => {
-    const hookSource = fs.readFileSync(path.join(process.cwd(), 'src/hooks/useTeacherFirestoreSchedule.ts'), 'utf8');
+    const hookSource = readSource(path.join(process.cwd(), 'src/hooks/useTeacherFirestoreSchedule.ts'));
     // schedules state must initialize with empty array []
     expect(hookSource).toContain('const [schedules, setSchedules] = useState<ScheduleItem[]>([]);');
     expect(hookSource).not.toContain('useState<ScheduleItem[]>(() => getSchedulesToSeed());');
@@ -88,7 +88,7 @@ describe('Task 4: Write Failure Handling & Auto-seed Removal', () => {
   });
 
   it('verifies TeacherPortal displays emptySchedulesMessage and avoids silent fake schedule fallback', () => {
-    const teacherPortalSource = fs.readFileSync(path.join(process.cwd(), 'src/TeacherPortal.tsx'), 'utf8');
+    const teacherPortalSource = readSource(path.join(process.cwd(), 'src/TeacherPortal.tsx'));
     expect(teacherPortalSource).toContain('isSchedulesEmpty');
     expect(teacherPortalSource).toContain('emptySchedulesMessage');
     expect(teacherPortalSource).toContain('id="empty-schedules-banner"');

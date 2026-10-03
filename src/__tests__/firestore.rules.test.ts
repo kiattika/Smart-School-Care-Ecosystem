@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
 import {
   initializeTestEnvironment,
@@ -9,18 +8,28 @@ import {
 } from '@firebase/rules-unit-testing';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { enrollInActivity, withdrawFromActivity, createBillingInvoice, createBillingInvoicesBulk, recordInfirmaryVisit, createParentNotification } from '../services/firestoreService';
+import { readSource } from './helpers/readSource';
 
 let testEnv: RulesTestEnvironment;
 
-// เคารพ FIRESTORE_EMULATOR_HOST ที่ `firebase emulators:exec` ตั้งให้ (เช่นตอนรันบน
-// พอร์ตสำรองเพราะ emulator หลักติดพอร์ต 8080 อยู่) — fallback เป็น 127.0.0.1:8080 ตามเดิม
-const [EMU_HOST, EMU_PORT] = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080').split(':');
+// ใช้ FIRESTORE_EMULATOR_HOST ที่ `firebase emulators:exec` ตั้งให้ (npm run emulators:exec /
+// emulators:exec:isolated) เท่านั้น — ไม่มี = ไม่มี emulator (เช่น `npm test` เฉยๆ) → skip ทั้ง suite
+// แทนที่จะ fail ด้วย "fetch failed" (และไม่ยิงไปที่ :8080 ซึ่งอาจเป็น emulator dev ที่มีข้อมูลอยู่)
+const EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST;
+const SKIP_REASON = 'ไม่มี FIRESTORE_EMULATOR_HOST — Firestore rules tests ต้องรันบน emulator จริง: npm run emulators:exec (หรือ emulators:exec:isolated)';
+const [EMU_HOST, EMU_PORT] = (EMULATOR_HOST || ':').split(':');
+
+describe.runIf(!EMULATOR_HOST)('Firestore Security Rules (skipped)', () => {
+  it.skip(SKIP_REASON, () => {});
+});
+if (!EMULATOR_HOST) console.warn(`[firestore.rules.test] SKIPPED: ${SKIP_REASON}`);
 
 beforeAll(async () => {
+  if (!EMULATOR_HOST) return;
   testEnv = await initializeTestEnvironment({
     projectId: 'kiattisak-project-001',
     firestore: {
-      rules: fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8'),
+      rules: readSource(path.resolve(__dirname, '../../firestore.rules')),
       host: EMU_HOST,
       port: Number(EMU_PORT),
     },
@@ -34,6 +43,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  if (!EMULATOR_HOST) return;
   await testEnv.clearFirestore();
 });
 
@@ -41,15 +51,15 @@ function asRole(...roles: string[]) {
   return testEnv.authenticatedContext('test-uid', { roles });
 }
 
-function asUser(uid: string, roles: string[] = []) {
-  return testEnv.authenticatedContext(uid, { roles });
+function asUser(uid: string, roles: string[] = [], extraClaims: Record<string, unknown> = {}) {
+  return testEnv.authenticatedContext(uid, { roles, ...extraClaims });
 }
 
 function asAnonymous() {
   return testEnv.unauthenticatedContext();
 }
 
-describe('Firestore Security Rules Engine Unit Tests', () => {
+describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', () => {
   // 1. students collection
   describe('students collection', () => {
     it('allows SUPER_ADMIN, EXECUTIVE, HOMEROOM_TEACHER, and SUBJECT_TEACHER to read', async () => {
@@ -575,6 +585,54 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await assertFails(asAnonymous().firestore().doc('staff/staff-001').get());
     });
 
+    // ผู้ใช้ที่ signed-in แต่ไม่มี roles ใน claims (ไม่อยู่ในทะเบียน — blocking function ไม่ออก claims ให้)
+    it('REGRESSION: denies a signed-in user with no roles claim from reading staff / teachers', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('staff/staff-001').set({ name: 'Teacher Sompong' });
+        await ctx.firestore().doc('teachers/staff-001').set({ name: 'Teacher Sompong' });
+      });
+      const noRoleNoClaim = testEnv.authenticatedContext('outsider-uid').firestore();
+      const noRoleEmpty = asUser('outsider-uid', []).firestore();
+      for (const db of [noRoleNoClaim, noRoleEmpty]) {
+        await assertFails(db.doc('staff/staff-001').get());
+        await assertFails(getDocs(collection(db, 'staff')));
+        await assertFails(db.doc('teachers/staff-001').get());
+      }
+      // primaryRole อย่างเดียวโดยไม่มี roles ก็ไม่พอ
+      await assertFails(testEnv.authenticatedContext('outsider-uid', { primaryRole: 'SUBJECT_TEACHER' }).firestore().doc('staff/staff-001').get());
+      // ส่วนผู้มี roles (รวมนักเรียน) ยังอ่านได้
+      await assertSucceeds(asUser('stu-uid', ['STUDENT'], { studentId: '38501' }).firestore().doc('staff/staff-001').get());
+    });
+
+    // staff ที่ import จริงใช้ teacherId เป็น doc id (ไม่ใช่ Auth UID) — isHomeroomTeacherOf ต้องอ่านผ่าน claim staffId
+    describe('isHomeroomTeacherOf via staffId claim', () => {
+      const ROOM = 'ม.5/8';
+      const TEACHER_ID = 'teacher-07';          // doc id จากไฟล์ import
+      const TEACHER_UID = 'firebase-uid-xyz';    // Auth UID — ไม่เท่ากับ doc id
+      beforeEach(async () => {
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc(`staff/${TEACHER_ID}`).set({ email: 'hr@utd.ac.th', roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+          await ctx.firestore().doc('student_home_locations/38501').set({ studentId: '38501', studentUid: 'stu-1', homeroomClass: ROOM, lat: 17.6, lng: 100.1 });
+        });
+      });
+
+      it('lets the homeroom teacher through when claims.staffId = teacherId (doc keyed by teacherId, not uid)', async () => {
+        await assertSucceeds(asUser(TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: TEACHER_ID }).firestore().doc('student_home_locations/38501').get());
+      });
+
+      it('REGRESSION: denies the same teacher without a staffId claim (no fallback to staff/{uid})', async () => {
+        await assertFails(asUser(TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_home_locations/38501').get());
+      });
+
+      it('REGRESSION: denies a staffId claim pointing at a staff doc of a different room / a missing doc', async () => {
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc('staff/teacher-08').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+        });
+        await assertFails(asUser(TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: 'teacher-08' }).firestore().doc('student_home_locations/38501').get());
+        await assertFails(asUser(TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: 'no-such-teacher' }).firestore().doc('student_home_locations/38501').get());
+      });
+    });
+
     it('allows SUPER_ADMIN to write to staff and denies non-admin', async () => {
       await assertSucceeds(
         asRole('SUPER_ADMIN').firestore().doc('staff/staff-new').set({ name: 'New Staff' })
@@ -964,14 +1022,14 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
         await ctx.firestore().doc('student_portfolio_entries/e5').set(baseEntry({ status: 'PENDING' }));
       });
       await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('student_portfolio_entries/e5').get());
-      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_portfolio_entries/e5').get());
+      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc('student_portfolio_entries/e5').get());
     });
     it('denies a homeroom teacher of a different room from reading', async () => {
       await seed();
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('student_portfolio_entries/e6').set(baseEntry());
       });
-      await assertFails(asUser('other-hr', ['HOMEROOM_TEACHER']).firestore().doc('student_portfolio_entries/e6').get());
+      await assertFails(asUser('other-hr', ['HOMEROOM_TEACHER'], { staffId: 'other-hr' }).firestore().doc('student_portfolio_entries/e6').get());
     });
     it('lets a parent read only APPROVED entries of their child', async () => {
       await seed();
@@ -988,7 +1046,7 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('student_portfolio_entries/e8').set(baseEntry());
       });
-      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_portfolio_entries/e8').set(
+      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc('student_portfolio_entries/e8').set(
         baseEntry({ status: 'APPROVED', reviewedBy: HR_TEACHER_UID, reviewedByName: 'ครูที่ปรึกษา', reviewedAt: '2026-08-03T00:00:00.000Z' })
       ));
     });
@@ -997,7 +1055,7 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('student_portfolio_entries/e9').set(baseEntry());
       });
-      await assertFails(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_portfolio_entries/e9').set(
+      await assertFails(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc('student_portfolio_entries/e9').set(
         baseEntry({ status: 'APPROVED', reviewedBy: HR_TEACHER_UID, title: 'ครูแก้ชื่อเรื่อง' })
       ));
     });
@@ -1015,7 +1073,7 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('student_portfolio_entries/e11').set(baseEntry());
       });
-      await assertFails(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_portfolio_entries/e11').delete());
+      await assertFails(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc('student_portfolio_entries/e11').delete());
     });
   });
 
@@ -1058,7 +1116,7 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc(`student_home_locations/${STU_ID}`).set(loc());
       });
-      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc(`student_home_locations/${STU_ID}`).get());
+      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc(`student_home_locations/${STU_ID}`).get());
       await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc(`student_home_locations/${STU_ID}`).get());
       await assertFails(asRole('SUBJECT_TEACHER').firestore().doc(`student_home_locations/${STU_ID}`).get());
       await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_home_locations/${STU_ID}`).get());
@@ -1081,7 +1139,7 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
       await seed();
       // ไม่มี doc — get ต้องผ่านแบบ "ไม่มีข้อมูล" ไม่ใช่ rule error
       await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('student_home_locations/never-created').get());
-      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_home_locations/never-created').get());
+      await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc('student_home_locations/never-created').get());
     });
   });
 
@@ -1518,7 +1576,7 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
 
       it('PATH 3: lets the real homeroom teacher of that room create', async () => {
         await seed();
-        await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER']).firestore().doc('student_assessments_sdq/sdq-p3').set(
+        await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc('student_assessments_sdq/sdq-p3').set(
           sdqDoc({ id: 'sdq-p3', respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครูที่ปรึกษา' })
         ));
       });
@@ -1531,7 +1589,7 @@ describe('Firestore Security Rules Engine Unit Tests', () => {
         await assertFails(asUser('other-parent-uid', ['PARENT']).firestore().doc('student_assessments_sdq/sdq-d2').set(
           sdqDoc({ id: 'sdq-d2', respondentUid: 'other-parent-uid', evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครองคนอื่น' })
         ));
-        await assertFails(asUser('other-hr', ['HOMEROOM_TEACHER']).firestore().doc('student_assessments_sdq/sdq-d3').set(
+        await assertFails(asUser('other-hr', ['HOMEROOM_TEACHER'], { staffId: 'other-hr' }).firestore().doc('student_assessments_sdq/sdq-d3').set(
           sdqDoc({ id: 'sdq-d3', respondentUid: 'other-hr', evaluatorType: 'TEACHER', evaluatorName: 'ครูห้องอื่น' })
         ));
       });

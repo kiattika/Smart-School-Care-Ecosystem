@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 /**
  * ExecutivePortal TASK 9 (audit ข้อมูลปลอม): ExecutiveEngagementDashboard/ExecutiveLearnerAnalytics
@@ -14,9 +14,9 @@ import * as path from 'path';
  * isSignedIn() ตามที่ CLAUDE.md อนุญาตสำหรับ read บน collection ไม่อ่อนไหว)
  */
 describe('ExecutivePortal TASK 9: Engagement/Analytics tabs ใช้ข้อมูลจริงแทน session-local state', () => {
-  const src = fs.readFileSync(path.resolve(__dirname, '../ExecutivePortal.tsx'), 'utf8');
-  const firestoreServiceSrc = fs.readFileSync(path.resolve(__dirname, '../services/firestoreService.ts'), 'utf8');
-  const rulesSrc = fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8');
+  const src = readSource(path.resolve(__dirname, '../ExecutivePortal.tsx'));
+  const firestoreServiceSrc = readSource(path.resolve(__dirname, '../services/firestoreService.ts'));
+  const rulesSrc = readSource(path.resolve(__dirname, '../../firestore.rules'));
 
   it('firestoreService มี subscribeAllSelfAssessments ใหม่ (school-wide live listener)', () => {
     expect(firestoreServiceSrc).toContain('export function subscribeAllSelfAssessments(');

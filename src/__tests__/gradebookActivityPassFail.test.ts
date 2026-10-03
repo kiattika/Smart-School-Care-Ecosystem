@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 /**
  * TASK 2: วิชากิจกรรม (ACTIVITY) บันทึกแค่ผ่าน (ผ) / ไม่ผ่าน (มผ) แทนคะแนนตัวเลข 4 ช่องแบบวิชาหลัก
@@ -8,9 +8,9 @@ import * as path from 'path';
  * (ตามรูปแบบเดิมของโปรเจกต์)
  */
 describe('Gradebook TASK 2: วิชากิจกรรมบันทึกผ่าน/ไม่ผ่าน แทนคะแนนตัวเลข', () => {
-  const teacherPortalSrc = fs.readFileSync(path.resolve(__dirname, '../TeacherPortal.tsx'), 'utf8');
-  const typesSrc = fs.readFileSync(path.resolve(__dirname, '../types.ts'), 'utf8');
-  const firestoreServiceSrc = fs.readFileSync(path.resolve(__dirname, '../services/firestoreService.ts'), 'utf8');
+  const teacherPortalSrc = readSource(path.resolve(__dirname, '../TeacherPortal.tsx'));
+  const typesSrc = readSource(path.resolve(__dirname, '../types.ts'));
+  const firestoreServiceSrc = readSource(path.resolve(__dirname, '../services/firestoreService.ts'));
 
   it('Course/GlobalCourse มี subjectType ให้แยกวิชาหลัก/กิจกรรม', () => {
     expect(typesSrc).toContain("subjectType?: 'MAIN' | 'ACTIVITY';");

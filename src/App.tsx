@@ -19,23 +19,27 @@ import { NavbarWithRoleSwitcher } from './components/NavbarWithRoleSwitcher';
 import { QuickActionHub } from './components/QuickActionHub';
 import { UserRole, Role } from './types';
 import { setupAuthListener, signOutUser } from './lib/auth';
+import { describeAuthError } from './lib/authErrors';
 import { useSubstituteSync } from './hooks/useSubstituteSync';
 
 export default function App() {
   const { user, setUser } = useStore();
   const [authInitializing, setAuthInitializing] = useState(true);
+  // เหตุผลที่ session ค้างใช้ต่อไม่ได้ (เช่น ถูกถอนบทบาท → AUTH_NO_ROLE) — แสดงบนหน้า Login
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   // เชื่อม Firestore real-time (staff / substitute_assignments / post_teaching_records) เข้ากับ store
   useSubstituteSync(!!user);
 
   useEffect(() => {
     const unsubscribe = setupAuthListener((firebaseAppUser) => {
-      // Only overwrite store if user logged in via Firebase
-      if (firebaseAppUser) {
-        setUser(firebaseAppUser);
-      }
+      // Firebase Auth คือแหล่งความจริงของ session — sign-out (null) ต้องล้าง store ด้วย
+      // (เดิมข้าม null ไป → หลัง signOutUser() ตอนแก้สิทธิ์ตัวเอง, token ถูก revoke, หรือ
+      // buildAppUser ล้ม UI ยังค้างอยู่ใน portal เดิมทั้งที่ Firebase ออกจากระบบแล้ว และทุก write ถูก deny)
+      setUser(firebaseAppUser);
+      if (firebaseAppUser) setSessionError(null);
       setAuthInitializing(false);
-    });
+    }, (err) => setSessionError(describeAuthError(err)));
 
     return () => unsubscribe();
   }, [setUser]);
@@ -50,7 +54,7 @@ export default function App() {
   }
 
   if (!user) {
-    return <LoginPage />;
+    return <LoginPage initialError={sessionError} />;
   }
 
   const handleLogout = async () => {
@@ -147,10 +151,13 @@ export default function App() {
               </div>
             ) : user.role === 'admin' ? (
               <AdminPortal />
-            ) : (
+            ) : user.role === 'parent' && (user.profile?.roles || []).includes('PARENT') ? (
               <div className="min-h-[100dvh] w-full bg-slate-950 sm:bg-slate-900 flex items-center justify-center p-0 sm:p-4">
                 <ParentPortal />
               </div>
+            ) : (
+              // เดิมทุกกรณีที่ไม่เข้าเงื่อนไขข้างบนตกไป ParentPortal — ตอนนี้ต้องมีบทบาท PARENT จริงเท่านั้น
+              <NoAccessScreen onLogout={handleLogout} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -158,6 +165,27 @@ export default function App() {
 
       {/* Floating Quick Action Navigation & GPS Hub */}
       <QuickActionHub />
+    </div>
+  );
+}
+
+/** บทบาทใน claims ไม่ตรงกับ portal ใดเลย — ไม่เดา portal ให้ (เดิมตกไป ParentPortal) */
+function NoAccessScreen({ onLogout }: { onLogout: () => void }) {
+  return (
+    <div className="min-h-[100dvh] w-full bg-slate-900 flex items-center justify-center p-4">
+      <div className="bg-[#151921] border border-white/10 rounded-2xl p-6 w-full max-w-md text-center space-y-4">
+        <h1 className="text-lg font-bold text-white">ไม่มีสิทธิ์เข้าใช้งาน</h1>
+        <p className="text-sm text-slate-400">
+          บทบาทของบัญชีนี้ยังไม่มีหน้าใช้งานในระบบ กรุณาติดต่อผู้ดูแลระบบเพื่อตรวจสอบสิทธิ์
+        </p>
+        <button
+          onClick={onLogout}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-full text-xs font-medium cursor-pointer"
+        >
+          <LogOut className="w-3.5 h-3.5" />
+          ออกจากระบบ
+        </button>
+      </div>
     </div>
   );
 }

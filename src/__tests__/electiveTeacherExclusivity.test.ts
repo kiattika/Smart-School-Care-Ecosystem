@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 /**
  * ElectiveActivityManagerPage.tsx: ครูที่รับผิดชอบชุมนุมอื่นอยู่แล้วต้องไม่ปรากฏในรายชื่อที่เลือก
@@ -9,9 +9,8 @@ import * as path from 'path';
  * พึ่ง Firestore listener จำนวนมาก (ตามรูปแบบเดิมของโปรเจกต์)
  */
 describe('ElectiveActivityManagerPage: กรองครูที่มีชุมนุมอื่นอยู่แล้วออกจากตัวเลือก', () => {
-  const src = fs.readFileSync(
-    path.resolve(__dirname, '../components/admin/ElectiveActivityManagerPage.tsx'), 'utf8'
-  );
+  const src = readSource(
+    path.resolve(__dirname, '../components/admin/ElectiveActivityManagerPage.tsx'));
 
   it('คำนวณ teacherUidsWithOtherClub จาก configs ทั้งหมด ยกเว้นชุมนุมที่กำลังแก้ไขอยู่ (editingId)', () => {
     expect(src).toContain('if (c.id === editingId) return;');

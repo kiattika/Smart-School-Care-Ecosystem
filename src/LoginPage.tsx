@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useStore } from './store';
 import { LogIn, AlertCircle, Loader2, KeyRound, Sparkles } from 'lucide-react';
 import { signInWithGoogle, signInWithEmailPassword } from './lib/auth';
+import { describeAuthError } from './lib/authErrors';
 
 const EMULATOR_TEST_USERS = [
   { email: 'kiattika@utd.ac.th', label: 'ผู้ดูแลระบบ (นายเกียรติศักดิ์ แก้วหล้า)', roleTag: 'SUPER_ADMIN', desc: 'ผู้ดูแลระบบสูงสุด (Admin)' },
@@ -16,14 +17,18 @@ const EMULATOR_TEST_USERS = [
   { email: 'guidance.test@utd.ac.th', label: 'ครูแนะแนว / จิตวิทยา', roleTag: 'GUIDANCE_COUNSELOR', desc: 'ดร.สุดา (สิทธิ์เข้าถึง PHQ-9)' },
   { email: 'finance.test@utd.ac.th', label: 'ฝ่ายการเงิน', roleTag: 'FINANCE_STAFF', desc: 'นางศิริพร การเงินพัสดุ' },
   { email: 'infirmary.test@utd.ac.th', label: 'ห้องพยาบาล', roleTag: 'INFIRMARY_STAFF', desc: 'น.ส.กนกวรรณ พยาบาล' },
-  { email: 'parent.test@gmail.com', label: 'ผู้ปกครอง (ของ นายยศกร)', roleTag: 'PARENT', desc: 'ผู้ปกครองนักเรียน 38501' },
+  { email: 'parent.test@gmail.com', label: 'ผู้ปกครอง (ของ นายยศกร)', roleTag: 'PARENT', desc: 'ถูกปฏิเสธโดยเซิร์ฟเวอร์ (ไม่ใช่ @utd.ac.th) จนกว่าจะมีระบบ LINE' },
   { email: 'student.test@utd.ac.th', label: 'นักเรียน (ม.5/8)', roleTag: 'STUDENT', desc: 'นายยศกร รักเรียน (38501)' },
 ];
 
-export function LoginPage() {
+export function LoginPage({ initialError = null }: { initialError?: string | null } = {}) {
   const { setUser } = useStore();
   const [loading, setLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // initialError: session ที่ค้างอยู่ใช้ต่อไม่ได้ (เช่น ถูกถอนบทบาท) — App ส่งเหตุผลมาให้แสดง
+  const [errorMessage, setErrorMessage] = useState<string | null>(initialError);
+  useEffect(() => {
+    if (initialError) setErrorMessage(initialError);
+  }, [initialError]);
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('test1234');
   const [showManualEmailForm, setShowManualEmailForm] = useState(false);
@@ -44,15 +49,8 @@ export function LoginPage() {
       }
 
       console.error('Google Sign-In Error:', err);
-      if (err.message?.includes('AUTH_DOMAIN_RESTRICTED')) {
-        setErrorMessage('กรุณาใช้อีเมล Google Workspace ของโรงเรียน (@utd.ac.th) เท่านั้น');
-      } else if (err.code === 'auth/unauthorized-domain') {
-        setErrorMessage('โดเมนนี้ยังไม่ได้รับอนุญาตใน Firebase Console (Authorized Domains)');
-      } else if (err.code === 'auth/popup-blocked') {
-        setErrorMessage('เบราว์เซอร์บล็อกหน้าต่างป๊อปอัป กรุณาอนุญาตป๊อปอัปเพื่อเข้าสู่ระบบ');
-      } else {
-        setErrorMessage(err.message || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบด้วย Google');
-      }
+      // รวมกรณีถูกปฏิเสธโดย blocking function (ไม่ใช่ @utd.ac.th / ไม่อยู่ในทะเบียน / ไม่มีบทบาท)
+      setErrorMessage(describeAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -66,7 +64,7 @@ export function LoginPage() {
       setUser(appUser);
     } catch (err: any) {
       console.warn('Sign-In Notice:', err);
-      setErrorMessage(`เข้าสู่ระบบไม่สำเร็จ (${err.message || 'กรุณาลองใหม่อีกครั้ง'})`);
+      setErrorMessage(describeAuthError(err));
     } finally {
       setLoading(false);
     }
@@ -155,7 +153,7 @@ export function LoginPage() {
                 className="p-3 bg-slate-800/60 rounded-xl border border-slate-700/60 text-left space-y-2"
               >
                 <div>
-                  <label className="text-[10px] text-slate-300 block mb-1">Email (@utd.ac.th / @gmail.com)</label>
+                  <label className="text-[10px] text-slate-300 block mb-1">Email (@utd.ac.th)</label>
                   <input 
                     type="email" 
                     value={emailInput}

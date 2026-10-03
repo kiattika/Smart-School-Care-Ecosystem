@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 /**
  * TASK 3 (ครูร่วมสอน — ยืนยันจากข้อมูลจริง Teacher_Load_Report: HR ม.5/8 มี 2 ครูรับผิดชอบร่วมกัน)
@@ -11,18 +11,14 @@ import * as path from 'path';
  * ที่ใช้กับ substituteAssignmentGranularity.test.ts แทน เพื่อป้องกัน regression ของจุดที่แก้ไปแล้ว
  */
 describe('TASK 3: schedules.teacherIds — ทุกจุดที่กรอง/จับคู่ครูต้องรองรับครูร่วมสอนหลายคนต่อคาบ', () => {
-  const teacherPortalSrc = fs.readFileSync(
-    path.resolve(__dirname, '../TeacherPortal.tsx'), 'utf8'
-  );
-  const teachingLoadTableSrc = fs.readFileSync(
-    path.resolve(__dirname, '../components/TeachingLoadTable.tsx'), 'utf8'
-  );
-  const bulkImportSrc = fs.readFileSync(
-    path.resolve(__dirname, '../components/BulkDataImportModal.tsx'), 'utf8'
-  );
-  const scheduleSyncSrc = fs.readFileSync(
-    path.resolve(__dirname, '../lib/scheduleSyncReplace.ts'), 'utf8'
-  );
+  const teacherPortalSrc = readSource(
+    path.resolve(__dirname, '../TeacherPortal.tsx'));
+  const teachingLoadTableSrc = readSource(
+    path.resolve(__dirname, '../components/TeachingLoadTable.tsx'));
+  const bulkImportSrc = readSource(
+    path.resolve(__dirname, '../components/BulkDataImportModal.tsx'));
+  const scheduleSyncSrc = readSource(
+    path.resolve(__dirname, '../lib/scheduleSyncReplace.ts'));
 
   it('scheduleDocIdFor: ไม่ฝัง teacherKey ให้ ACTIVITY ที่มีห้องเรียนจริง (ครูร่วมสอนต้อง merge เป็น doc เดียว)', () => {
     expect(scheduleSyncSrc).toContain('const hasRealRoom = !!(room && String(room).trim());');
@@ -63,9 +59,8 @@ describe('TASK 3: schedules.teacherIds — ทุกจุดที่กรอ�
   });
 
   it('post_teaching_records ยังคงผูกกับ courseId+date (ไม่ผูกกับครูคนใดคนหนึ่ง) — ทุกคนในทีมแก้ record เดียวกันได้', () => {
-    const firestoreServiceSrc = fs.readFileSync(
-      path.resolve(__dirname, '../services/firestoreService.ts'), 'utf8'
-    );
+    const firestoreServiceSrc = readSource(
+      path.resolve(__dirname, '../services/firestoreService.ts'));
     expect(firestoreServiceSrc).toContain("const docId = `${record.courseId}_${record.date}`;");
   });
 });

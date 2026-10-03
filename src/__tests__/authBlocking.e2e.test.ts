@@ -1,0 +1,125 @@
+import { describe, it, expect, beforeAll } from 'vitest';
+import { initializeApp as initClientApp, deleteApp } from 'firebase/app';
+import {
+  getAuth as getClientAuth,
+  connectAuthEmulator,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth';
+import { initializeApp as initAdminApp, getApps } from 'firebase-admin/app';
+import { getAuth as getAdminAuth } from 'firebase-admin/auth';
+import firebaseConfig from '../../firebase-applet-config.json';
+import { describeAuthError } from '../lib/authErrors';
+import { DENY_MESSAGES } from '../../functions/src/access';
+
+/**
+ * E2E ของ blocking functions (beforeCreate/beforeSignIn) บน Auth + Functions + Firestore emulator จริง
+ * รันด้วย `npm run emulators:exec:auth` (firebase.authtest.json พอร์ตแยก 9399/8299/5299 —
+ * ไม่ชน emulator หลัก). รัน vitest ธรรมดา (ไม่มี emulator) = skip
+ */
+const AUTH_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST;
+const FS_HOST = process.env.FIRESTORE_EMULATOR_HOST;
+const PROJECT_ID = 'kiattisak-project-001';
+const FS_BASE = `http://${FS_HOST}/v1/projects/${PROJECT_ID}/databases/${firebaseConfig.firestoreDatabaseId}/documents`;
+const PASSWORD = 'test1234';
+
+function toValue(v: unknown): unknown {
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(toValue) } };
+  if (typeof v === 'string') return { stringValue: v };
+  if (v && typeof v === 'object') {
+    return { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, toValue(x)])) } };
+  }
+  return { nullValue: null };
+}
+
+// เขียนผ่าน REST (admin SDK เขียน named DB ของ emulator แล้ว lock ค้าง — ดู seedEmulatorAuth.ts)
+async function fsPut(path: string, data: Record<string, unknown>) {
+  const fields = Object.fromEntries(Object.entries(data).map(([k, v]) => [k, toValue(v)]));
+  const res = await fetch(`${FS_BASE}/${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+    body: JSON.stringify({ fields }),
+  });
+  if (!res.ok) throw new Error(`fsPut ${path}: ${res.status} ${await res.text()}`);
+}
+
+async function fsGetField(path: string, field: string): Promise<string | undefined> {
+  const res = await fetch(`${FS_BASE}/${path}`, { headers: { Authorization: 'Bearer owner' } });
+  if (!res.ok) return undefined;
+  const json = await res.json();
+  return json.fields?.[field]?.stringValue;
+}
+
+describe.skipIf(!AUTH_HOST || !FS_HOST)('auth blocking functions (emulator E2E)', () => {
+  const clientApp = initClientApp({ apiKey: 'emulator-key', projectId: PROJECT_ID, authDomain: `${PROJECT_ID}.firebaseapp.com` }, 'e2e');
+  const clientAuth = getClientAuth(clientApp);
+  let studentUid = '';
+
+  beforeAll(async () => {
+    connectAuthEmulator(clientAuth, `http://${AUTH_HOST}`, { disableWarnings: true });
+    if (!getApps().length) initAdminApp({ projectId: PROJECT_ID });
+    const adminAuth = getAdminAuth();
+
+    await fsPut('staff/teacher-07', { email: 'hr.e2e@utd.ac.th', roles: ['HOMEROOM_TEACHER', 'SUBJECT_TEACHER'] });
+    await fsPut('staff/teacher-08', { email: 'noroles.e2e@utd.ac.th', roles: [] });
+    await fsPut('students/38599', { studentId: '38599', name: 'นักเรียน E2E' });
+
+    // admin SDK createUser ไม่ผ่าน beforeCreate (เหมือน production) — ใช้สร้างบัญชีที่ verify แล้ว
+    for (const email of ['hr.e2e@utd.ac.th', 'noroles.e2e@utd.ac.th', 'it38599@utd.ac.th', 'outsider.e2e@gmail.com', 'nobody.e2e@utd.ac.th']) {
+      const u = await adminAuth.createUser({ email, password: PASSWORD, emailVerified: true });
+      if (email.startsWith('it38599')) studentUid = u.uid;
+    }
+  }, 60_000);
+
+  async function signInError(email: string): Promise<unknown> {
+    try {
+      await signInWithEmailAndPassword(clientAuth, email, PASSWORD);
+    } catch (err) {
+      return err;
+    }
+    await signOut(clientAuth);
+    throw new Error(`expected sign-in of ${email} to be rejected`);
+  }
+
+  it('staff: issues {roles, primaryRole, staffId} from staff/{teacherId}', async () => {
+    const cred = await signInWithEmailAndPassword(clientAuth, 'hr.e2e@utd.ac.th', PASSWORD);
+    const { claims } = await cred.user.getIdTokenResult(true);
+    expect(claims.roles).toEqual(['HOMEROOM_TEACHER', 'SUBJECT_TEACHER']);
+    expect(claims.primaryRole).toBe('HOMEROOM_TEACHER');
+    expect(claims.staffId).toBe('teacher-07');
+    await signOut(clientAuth);
+  });
+
+  it('student (it{studentId} pattern): issues {roles:[STUDENT], studentId} and links students/{id}.studentUid', async () => {
+    const cred = await signInWithEmailAndPassword(clientAuth, 'it38599@utd.ac.th', PASSWORD);
+    const { claims } = await cred.user.getIdTokenResult(true);
+    expect(claims.roles).toEqual(['STUDENT']);
+    expect(claims.studentId).toBe('38599');
+    expect(claims.staffId).toBeUndefined();
+    expect(await fsGetField('students/38599', 'studentUid')).toBe(studentUid);
+    await signOut(clientAuth);
+  });
+
+  it('rejects a non-utd.ac.th account with the Thai message, readable via describeAuthError', async () => {
+    const err = await signInError('outsider.e2e@gmail.com');
+    expect(describeAuthError(err)).toBe(DENY_MESSAGES.DOMAIN_NOT_ALLOWED);
+  });
+
+  it('rejects a staff member with empty roles and an unregistered @utd.ac.th account', async () => {
+    expect(describeAuthError(await signInError('noroles.e2e@utd.ac.th'))).toBe(DENY_MESSAGES.STAFF_NO_ROLES);
+    expect(describeAuthError(await signInError('nobody.e2e@utd.ac.th'))).toBe(DENY_MESSAGES.NOT_REGISTERED);
+  });
+
+  it('beforeCreate rejects self sign-up (email/password = unverified email)', async () => {
+    let err: unknown;
+    try {
+      await createUserWithEmailAndPassword(clientAuth, 'selfsignup.e2e@utd.ac.th', PASSWORD);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(describeAuthError(err)).toBe(DENY_MESSAGES.EMAIL_NOT_VERIFIED);
+    await deleteApp(clientApp);
+  });
+});

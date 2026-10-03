@@ -20,3 +20,5 @@ MORNING-STATUS-*.md
 AFTERNOON-STATUS-*.md
 EVENING-STATUS-*.md
 STATUS-*.md
+
+.firebase/

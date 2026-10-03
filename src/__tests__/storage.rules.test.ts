@@ -1,6 +1,6 @@
 import { describe, it, beforeAll, afterAll, beforeEach } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 import {
   initializeTestEnvironment,
   RulesTestEnvironment,
@@ -8,10 +8,16 @@ import {
   assertFails,
 } from '@firebase/rules-unit-testing';
 
-// เคารพ STORAGE_EMULATOR_HOST ที่ `firebase emulators:exec` ตั้งให้ (พอร์ตสำรอง)
-const [SH_HOST, SH_PORT] = (process.env.FIREBASE_STORAGE_EMULATOR_HOST
-  || process.env.STORAGE_EMULATOR_HOST
-  || '127.0.0.1:9199').replace(/^https?:\/\//, '').split(':');
+// ใช้ FIREBASE_STORAGE_EMULATOR_HOST ที่ `firebase emulators:exec` ตั้งให้ (npm run emulators:exec:storage)
+// เท่านั้น — ไม่มี = ไม่มี emulator (เช่น `npm test` เฉยๆ) → skip ทั้ง suite แทนที่จะ fail ด้วย "fetch failed"
+const EMULATOR_HOST = process.env.FIREBASE_STORAGE_EMULATOR_HOST || process.env.STORAGE_EMULATOR_HOST;
+const SKIP_REASON = 'ไม่มี FIREBASE_STORAGE_EMULATOR_HOST — Storage rules tests ต้องรันบน emulator จริง: npm run emulators:exec:storage';
+const [SH_HOST, SH_PORT] = (EMULATOR_HOST || ':').replace(/^https?:\/\//, '').split(':');
+
+describe.runIf(!EMULATOR_HOST)('Storage Security Rules (skipped)', () => {
+  it.skip(SKIP_REASON, () => {});
+});
+if (!EMULATOR_HOST) console.warn(`[storage.rules.test] SKIPPED: ${SKIP_REASON}`);
 
 let testEnv: RulesTestEnvironment;
 
@@ -22,10 +28,11 @@ const tinyPng = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 
 const asPromise = <T,>(p: PromiseLike<T>): Promise<T> => Promise.resolve(p);
 
 beforeAll(async () => {
+  if (!EMULATOR_HOST) return;
   testEnv = await initializeTestEnvironment({
     projectId: 'kiattisak-project-001',
     storage: {
-      rules: fs.readFileSync(path.resolve(__dirname, '../../storage.rules'), 'utf8'),
+      rules: readSource(path.resolve(__dirname, '../../storage.rules')),
       host: SH_HOST,
       port: Number(SH_PORT),
     },
@@ -33,9 +40,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => { if (testEnv) await testEnv.cleanup(); });
-beforeEach(async () => { await testEnv.clearStorage(); });
+beforeEach(async () => { if (EMULATOR_HOST) await testEnv.clearStorage(); });
 
-describe('Storage Security Rules — student_home_photos', () => {
+describe.skipIf(!EMULATOR_HOST)('Storage Security Rules — student_home_photos', () => {
   it('lets the owner upload an image under their own uid prefix', async () => {
     const s = testEnv.authenticatedContext('stu-1', { roles: ['STUDENT'] }).storage();
     await assertSucceeds(asPromise(s.ref('student_home_photos/stu-1/a.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
@@ -106,7 +113,7 @@ describe('Storage Security Rules — student_home_photos', () => {
   });
 });
 
-describe('Storage Security Rules — substitute_worksheets', () => {
+describe.skipIf(!EMULATOR_HOST)('Storage Security Rules — substitute_worksheets', () => {
   it('lets the owner (proposing teacher) upload a PDF worksheet under their own uid prefix', async () => {
     const t = testEnv.authenticatedContext('teacher-1', { roles: ['SUBJECT_TEACHER'] }).storage();
     await assertSucceeds(asPromise(t.ref('substitute_worksheets/teacher-1/worksheet.pdf').put(new Uint8Array([1, 2, 3]), { contentType: 'application/pdf' })));

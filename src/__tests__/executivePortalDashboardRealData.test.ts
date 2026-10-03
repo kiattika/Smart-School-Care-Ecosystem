@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 /**
  * ExecutivePortal TASK 1-3 (audit ข้อมูลปลอม): dashboard tab เดิมมี "Annual Rewards & Promotions
@@ -11,7 +11,7 @@ import * as path from 'path';
  * + schedules สด) ใช้ source-inspection เพราะ mount เต็มรูปแบบต้องพึ่ง Firestore listener จำนวนมาก
  */
 describe('ExecutivePortal TASK 1-3: dashboard tab เอาข้อมูลปลอมออก เหลือแค่ KPI ที่มีข้อมูลจริงรองรับ', () => {
-  const src = fs.readFileSync(path.resolve(__dirname, '../ExecutivePortal.tsx'), 'utf8');
+  const src = readSource(path.resolve(__dirname, '../ExecutivePortal.tsx'));
 
   it('TASK 1: ไม่มีตารางจัดอันดับครู/รายชื่อครูปลอมหลงเหลืออยู่ (ชื่อฟีเจอร์เดิมอาจยังอยู่ในคอมเมนต์อธิบายเหตุผลได้)', () => {
     expect(src).not.toContain('คุณครู สมใจ รักสอน');
