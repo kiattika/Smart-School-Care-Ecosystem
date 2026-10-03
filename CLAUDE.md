@@ -16,6 +16,7 @@
 - อีเมลที่เขียนลง `staff` / `teachers` / `students` (รวม `parentEmail`) ต้องผ่าน `normalizeEmail()` (`src/lib/normalizeEmail.ts`: ตัดอักขระล่องหน + trim + lowercase) เสมอ — blocking function ค้นด้วย email แบบตรงตัว
 - สคริปต์ maintenance (`npx tsx scripts/<name>.ts`): `normalizeEmails.ts` (แก้อีเมลใน doc เดิม + รายงานอีเมลซ้ำ), `resetAuthClaims.ts` (ล้าง claims + revoke ทุกบัญชี, `--keep <email>` ได้หลายครั้ง) — ทั้งคู่มี `--dry-run` และ**ปฏิเสธการรันถ้าไม่มี emulator env** เว้นแต่ส่ง `--confirm-production <projectId>` (Claude ห้ามรันกับ production เอง)
 - Node.js local คือ v24 แต่ Cloud Functions Gen 1 ต้องการ ≤ Node 20 — ระวังเวลา deploy Functions
+- **Region ของ Functions / โควตา Cloud Run:** โควตา Cloud Run "Number of regions" ของโปรเจกต์เต็ม 3/3 — function รุ่นที่ 2 (รันบน Cloud Run) deploy ไป region ใหม่ไม่ได้ (us-central1 ล้มด้วย `ProjectInitFailedQuotaExceeded`) จึงให้ blocking functions (`beforeCreate`/`beforeSignIn`) อยู่ `asia-southeast1` ซึ่งใช้อยู่แล้ว; `assignUserRole` (รุ่นแรก ไม่ใช้ Cloud Run) และ client ที่เรียกมันอยู่ `us-central1` ตามเดิม. function รุ่นที่ 2 ตัวใหม่ต้องใช้ region ที่มี Cloud Run อยู่แล้วเท่านั้น (test `functionsRegion.test.ts`)
 
 ---
 
