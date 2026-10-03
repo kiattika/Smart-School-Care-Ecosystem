@@ -141,6 +141,13 @@ describe('no-fake-data guard — simulation tools are DEV-only (item 3)', () => 
     expect((s.match(/setShowConfigModal\(true\)/g) || []).length).toBe(1);
   });
 
+  it('"Simulated Time" label appears only behind import.meta.env.DEV (production shows "เวลาปัจจุบัน")', () => {
+    const hits = scan([/Simulated Time/]);
+    expect(hits.length).toBeGreaterThan(0);
+    for (const h of hits) expect(h, h).toContain('import.meta.env.DEV');
+    expect(readSource(path.join(srcDir, 'TeacherPortal.tsx'))).toContain("'เวลาจำลอง (Simulated Time):' : 'เวลาปัจจุบัน:'");
+  });
+
   it('GPS check-in "Simulation Quick Testing" presets render only under import.meta.env.DEV', () => {
     const s = readSource(path.join(srcDir, 'components/GPSGeofenceCheckinModal.tsx'));
     const dev = s.indexOf('{import.meta.env.DEV && (', s.indexOf('Simulation & Preset Location Buttons'));

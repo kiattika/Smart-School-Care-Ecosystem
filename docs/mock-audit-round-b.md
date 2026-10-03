@@ -32,6 +32,7 @@
 | `src/components/student-parent/AcademicHomeworkModule.tsx:47` (`submitHomework`) | แจ้งส่งการบ้านสำเร็จ แต่เก็บแค่ local state | ยังไม่มี data path |
 | `src/components/student-parent/AcademicHomeworkModule.tsx:42` | ชื่อไฟล์การบ้านตั้งไว้ล่วงหน้า (`รายงาน_ฟิสิกส์_…`) | ไฟล์ที่ผู้ใช้เลือกจริง |
 | `src/components/student-parent/BehaviorDisciplineModule.tsx:49` (`handleAwardSubmit`) | แจ้งบันทึกคะแนนความประพฤติสำเร็จก่อน Firestore เขียนเสร็จ (fire-and-forget, error แค่ `console.warn`) | `await` การเขียนจริงแล้วค่อยแจ้งสำเร็จ / แสดง error |
+| `src/store.ts:426` (`submitPostTeachingRecord`) | แจ้ง "บันทึกหลังสอนเรียบร้อยแล้ว" ก่อน Firestore เขียนเสร็จ (fire-and-forget, error แค่ `console.warn`) | `await` `savePostTeachingRecordFirestore` แล้วค่อยแจ้งสำเร็จ / แสดง error |
 | `src/components/student-parent/ParentEngagementServices.tsx:96` | ชื่อครูประจำชั้น "ครูกิตติศักดิ์" ตายตัวในฟอร์ม/รายการ | `staff` (ครูประจำชั้นของห้องนักเรียน) |
 | `src/ParentPortal.tsx:129` | "ครูประจำชั้น: ครูกิตติศักดิ์ • เบอร์โทรฉุกเฉินโรงเรียน: 02-123-4567" ตายตัว | `staff` ครูประจำชั้น + `school_settings` (เบอร์โรงเรียน) |
 | `src/ParentPortal.tsx:448` | ข้อความจาก "ครูกิตติศักดิ์ (ครูประจำชั้น ม.5/8)" เวลา "วันนี้ 08:15 น." ตายตัว | `parent_teacher_messages` |

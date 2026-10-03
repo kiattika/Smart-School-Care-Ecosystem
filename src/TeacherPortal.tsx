@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
 import { isStaffAssigned, isStaffIn } from './lib/staffIdentity';
 import { useDepartments } from './hooks/useDepartments';
+import { writeTimestamp } from './lib/appClock';
 import { useSchoolCalendar } from './hooks/useSchoolCalendar';
 import { DatePicker } from './components/shared/DatePicker';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
@@ -53,7 +54,9 @@ export function TeacherPortal() {
     setAttendanceStatus,
     adjustBehaviorScore,
     moveStudentSeat,
-    setCurrentDate,
+    isTimeSimulated,
+    setSimulatedTime,
+    clearTimeSimulation,
     setScheduleConfig,
     courses,
     activeLearningPoints,
@@ -78,24 +81,7 @@ export function TeacherPortal() {
   const myDepartmentId = user?.profile?.assignments?.departmentId || '';
   const myDepartmentName = myDepartmentId ? departmentNameOf(myDepartmentId) : '';
 
-  // currentDate ใน Zustand store ตั้งค่าครั้งเดียวตอนโหลด module — ถ้าแท็บค้างข้ามวัน "วัน" จะค้างที่วันเก่า
-  // แก้จริง: sync ส่วน "วัน" (ปี/เดือน/วัน) ของ currentDate ให้ตรงเวลาจริงเสมอ โดยยังคง
-  // ชั่วโมง/นาทีที่ถูกจำลองไว้จาก Time Simulation modal ไว้เหมือนเดิม (ไม่ทับการทดสอบที่ทำอยู่ตรงๆ
-  // แค่ป้องกันไม่ให้ "วัน" ค้างข้ามวันจริงแบบเงียบๆ) เช็คทุก 1 นาทีพอสำหรับตรวจจับตอนข้ามเที่ยงคืน
-  const currentDateRef = React.useRef(currentDate);
-  currentDateRef.current = currentDate;
-  useEffect(() => {
-    const syncDateIfStale = () => {
-      const now = new Date();
-      if (now.toDateString() !== currentDateRef.current.toDateString()) {
-        const synced = new Date(now);
-        synced.setHours(currentDateRef.current.getHours(), currentDateRef.current.getMinutes(), 0, 0);
-        setCurrentDate(synced);
-      }
-    };
-    const interval = setInterval(syncDateIfStale, 60000);
-    return () => clearInterval(interval);
-  }, [setCurrentDate]);
+  // นาฬิกา (currentDate) เดินตามเวลาจริงจาก useAppClock ที่ App — DEV จำลองเวลาได้ผ่าน setSimulatedTime
 
   // --- บันทึกหลังสอนแทน (deadline ก่อน 24:00 น. ของวันที่สอน) ---
   const [subCompleteTarget, setSubCompleteTarget] = useState<SubstituteAssignment | null>(null);
@@ -695,12 +681,14 @@ export function TeacherPortal() {
     e.preventDefault();
     if (!postTeachingCourse) return;
 
-    const teachingDateStr = ptDate || format(currentDate, 'yyyy-MM-dd');
-    const submittedAtIso = currentDate.toISOString();
+    // เวลาตอนกดบันทึกจริง (ไม่ใช่ค่าใน store) — ยกเว้น DEV ที่กำลังจำลองเวลา (ดู src/lib/appClock.ts)
+    const submittedAt = writeTimestamp(currentDate, new Date(), isTimeSimulated, import.meta.env.DEV);
+    const teachingDateStr = ptDate || format(submittedAt, 'yyyy-MM-dd');
+    const submittedAtIso = submittedAt.toISOString();
 
     const dateParts = teachingDateStr.split('-').map(Number);
     const teachingMidnight = new Date(dateParts[0], dateParts[1] - 1, dateParts[2], 23, 59, 59, 999);
-    const isLate = isAfter(currentDate, teachingMidnight);
+    const isLate = isAfter(submittedAt, teachingMidnight);
 
     submitPostTeachingRecord({
       courseId: postTeachingCourse.id,
@@ -2623,10 +2611,19 @@ export function TeacherPortal() {
                     const [hours, minutes] = e.target.value.split(':').map(Number);
                     const newDate = new Date(currentDate);
                     newDate.setHours(hours, minutes, 0, 0);
-                    setCurrentDate(newDate);
+                    setSimulatedTime(newDate);
                   }}
                   className="w-full bg-[#0b0f19] border border-slate-800/80 rounded-lg p-2.5 text-sm text-white focus:border-emerald-500 outline-none transition-all font-mono"
                 />
+                {isTimeSimulated && (
+                  <button
+                    type="button"
+                    onClick={clearTimeSimulation}
+                    className="mt-2 text-xs text-emerald-400 hover:text-emerald-300 underline"
+                  >
+                    กลับไปใช้เวลาจริง
+                  </button>
+                )}
               </div>
 
               <div>
@@ -2720,7 +2717,7 @@ export function TeacherPortal() {
                       />
                     </div>
                     <div className="text-left sm:text-right">
-                      <div className="text-[10px] text-slate-400 font-medium">เวลาจำลอง (Simulated Time):</div>
+                      <div className="text-[10px] text-slate-400 font-medium">{import.meta.env.DEV && isTimeSimulated ? 'เวลาจำลอง (Simulated Time):' : 'เวลาปัจจุบัน:'}</div>
                       <div className="text-xs font-mono text-slate-200 font-bold">{format(currentDate, 'dd MMM yyyy HH:mm', { locale: th })} น.</div>
                     </div>
                   </div>

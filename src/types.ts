@@ -1050,7 +1050,9 @@ export interface ParentAppointment {
 
 export interface StoreState {
   user: User | null;
+  // นาฬิกาของแอป — production = เวลาจริง (useAppClock), DEV จำลองได้ผ่าน setSimulatedTime (ดู src/lib/appClock.ts)
   currentDate: Date;
+  isTimeSimulated: boolean;
   currentPeriod: string;
   students: Student[];
   courses: Course[];
@@ -1128,7 +1130,11 @@ export interface StoreState {
   // Actions
   addActiveLearningPoints: (studentId: string, points: number, category?: ActiveLearningCategory, note?: string, courseId?: string) => void;
   setUser: (user: User | null) => void;
-  setCurrentDate: (date: Date) => void;
+  /** เดินนาฬิกา (เรียกโดย useAppClock) — production = เวลาจริงเสมอ */
+  tickClock: (now?: Date) => void;
+  /** DEV เท่านั้น: จำลองเวลา (Time Simulation modal) — ไม่มีผลใน production */
+  setSimulatedTime: (date: Date) => void;
+  clearTimeSimulation: () => void;
   setCurrentPeriod: (period: string) => void;
   cycleAttendanceStatus: (courseId: string, studentId: string) => void;
   setAttendanceStatus: (courseId: string, studentId: string, status: AttendanceStatus) => void;
