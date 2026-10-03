@@ -110,6 +110,7 @@ export interface FirestoreSchedule {
   periodNumber: number;
   subjectCode: string;
   subjectType: 'MAIN' | 'ACTIVITY';
+  // ⚠️ เก็บ staff doc id (teacherId จากไฟล์ import) ไม่ใช่ Firebase Auth UID — เทียบกับผู้ใช้ผ่าน src/lib/staffIdentity.ts (user.staffId) เท่านั้น
   teacherIds: string[];
   room: string;
 }

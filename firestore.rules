@@ -56,10 +56,13 @@ service cloud.firestore {
     // ใช้ให้ครูถอนชื่อนักเรียนออกจากชุมนุม/กิจกรรม ELECTIVE ของตัวเองเท่านั้น (activity_enrollments)
     // (เดิมเทียบผ่าน schedules/{scheduleId}.teacherId — ออกแบบใหม่แล้วชุมนุมไม่ผูกกับ schedules อีกต่อไป)
     // รองรับครูร่วมสอนหลายคนต่อชุมนุม — responsibleTeacherUids เป็น array (เดิมเป็นค่าเดียว)
+    // ⚠️ ชื่อฟิลด์มีคำว่า Uid แต่เก็บ staff doc id (teacherId) ไม่ใช่ Auth UID — เทียบด้วย myStaffId() เท่านั้น
+    // ไม่มี fallback ไป request.auth.uid; ไม่มี claim staffId (นักเรียน/ผู้ปกครอง) = ไม่ผ่าน
     function isResponsibleTeacherOfActivity(activityId) {
       return isSignedIn()
+        && myStaffId() is string && myStaffId() != ''
         && exists(/databases/$(database)/documents/elective_activities_config/$(activityId))
-        && request.auth.uid in get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('responsibleTeacherUids', []);
+        && myStaffId() in get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('responsibleTeacherUids', []);
     }
 
     // 1. Students Collection

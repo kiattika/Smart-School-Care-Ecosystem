@@ -28,6 +28,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useStore } from '../store';
 import { cn, isSameRoom } from '../lib/utils';
+import { isSameStaff, staffIdOf } from '../lib/staffIdentity';
 import {
   UserRole,
   SubstituteAssignment,
@@ -218,12 +219,13 @@ export function SubstituteTeachingModule() {
   // สาระไหนยังไม่ได้กำหนดตัวสำรองไว้เลย ให้ ACADEMIC_HEAD เป็น fallback สุดท้าย (ยืนยันจากโรงเรียนแล้ว
   // — ไม่ใช่เพราะ ACADEMIC_HEAD ควรทำเรื่องนี้ปกติ แต่กันไม่ให้คำขอค้างเมื่อยังไม่มีใครถูกตั้งค่าไว้)
   const myBackupApproverDepts = useMemo(() => {
-    if (!user?.uid) return [];
+    // backupApproverUid เก็บ staff doc id (ไม่ใช่ Auth UID) — ตัวตนบุคลากร = user.staffId เท่านั้น
+    if (!staffIdOf(user)) return [];
     return departments.filter(d => {
-      if (d.backupApproverUid) return d.backupApproverUid === user.uid;
+      if (d.backupApproverUid) return isSameStaff(user, d.backupApproverUid);
       return effectiveRole === 'ACADEMIC_HEAD'; // fallback สุดท้ายเมื่อกลุ่มสาระนี้ยังไม่ได้ตั้งค่าไว้
     });
-  }, [departments, user?.uid, effectiveRole]);
+  }, [departments, user?.staffId, effectiveRole]);
   const isActingAsBackupApprover = effectiveRole !== 'HEAD_OF_DEPARTMENT' && myBackupApproverDepts.length > 0;
   // กลุ่มสาระที่กำลังปฏิบัติหน้าที่แทนอยู่ตอนนี้ — ไม่ใช่กลุ่มสาระของตัวเอง (ownDeptId) เพราะผู้รับมอบ
   // อาจสังกัดคนละกลุ่มสาระกับหัวหน้าที่ลาป่วยก็ได้ (เช่น รองหัวหน้าที่ตั้งไว้ล่วงหน้าอาจย้ายไปช่วยกลุ่มอื่น)

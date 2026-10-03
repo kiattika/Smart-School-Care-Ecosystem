@@ -7,6 +7,7 @@ process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '12
 
 import firebaseConfig from '../firebase-applet-config.json';
 import { DEFAULT_DEPARTMENTS } from '../src/lib/departments';
+import { seedStaffIdFor } from './lib/seedStaffId';
 
 // Initialize Firebase Admin with the matching project ID (Auth only — Firestore ใช้ REST ด้านล่าง)
 const projectId = process.env.GCLOUD_PROJECT || firebaseConfig.projectId || 'kiattisak-project-001';
@@ -366,8 +367,10 @@ export async function seedEmulatorAuth() {
       //    ตั้งไว้ตรงนี้ด้วยเพื่อให้ token ที่ออกก่อนหน้า/การทดสอบที่ไม่ผ่าน login ใช้โครงสร้างเดียวกัน)
       const isStaff = !userDef.studentInfo;
       const isStudent = userDef.roles.includes('STUDENT');
-      // staff doc id ของบัญชีทดสอบ = uid ที่กำหนดไว้ (ของจริงจากไฟล์ import = teacherId) — claim staffId ชี้ doc นี้
-      const staffId = userRecord.uid;
+      // staff doc id ของบัญชีทดสอบ = id แบบ teacherId ที่ไม่เท่ากับ uid (เหมือน production ที่ key ด้วย teacherId
+      // จากไฟล์ import) — claim staffId ชี้ doc นี้. เดิมใช้ uid เป็น doc id ทำให้บั๊กเทียบ staff id กับ user.uid
+      // ไม่เคยโผล่บน emulator (ดู src/lib/staffIdentity.ts)
+      const staffId = seedStaffIdFor(userRecord.uid);
       const claims: Record<string, unknown> = { roles: userDef.roles };
       if (userDef.roles.length > 0) claims.primaryRole = userDef.roles[0];
       if (isStaff) claims.staffId = staffId;
@@ -380,6 +383,10 @@ export async function seedEmulatorAuth() {
       //    email query เจอ 2 doc) และ staff/{uid} ของนักเรียน/ผู้ปกครอง (จะถูกนับเป็นบุคลากร)
       await fsDelete(`staff/${encodeURIComponent(userDef.email)}`);
       await fsDelete(`teachers/${encodeURIComponent(userDef.email)}`);
+      // + staff/{uid} รุ่นเก่า (ก่อนเปลี่ยนมาใช้ id แบบ teacherId) — ถ้าค้างไว้ อีเมลเดียวกันจะมี 2 staff doc
+      //   แล้ว blocking function ปฏิเสธการ login (AMBIGUOUS_RECORD)
+      await fsDelete(`staff/${encodeURIComponent(userRecord.uid)}`);
+      await fsDelete(`teachers/${encodeURIComponent(userRecord.uid)}`);
       if (isStaff) {
         await db.collection('staff').doc(staffId).set({
           id: staffId,
@@ -393,8 +400,6 @@ export async function seedEmulatorAuth() {
           assignments: userDef.assignments || {},
           updatedAt: FieldValue.serverTimestamp()
         }, { merge: true });
-      } else {
-        await fsDelete(`staff/${encodeURIComponent(userRecord.uid)}`);
       }
 
       // 4. If student/parent info is attached, LINK the test account to a REAL student doc.

@@ -1,6 +1,7 @@
 import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/utils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
+import { isStaffAssigned, isStaffIn } from './lib/staffIdentity';
 import { useSchoolCalendar } from './hooks/useSchoolCalendar';
 import { DatePicker } from './components/shared/DatePicker';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
@@ -250,8 +251,9 @@ export function TeacherPortal() {
         // 1. Is original teacher — TASK 3: ตรวจทั้ง email ของครูคนแรก/หลัก (backward compat) และ
         // teacherIds ทั้งอาร์เรย์ (ครูร่วมสอนคนอื่นที่ไม่ใช่ครูคนแรกในไฟล์ import ก็ต้องเห็นวิชานี้
         // ในตารางสอน/สมุดคะแนนของตัวเองด้วย — ไม่ใช่แค่คนที่ email ตรงกับ teacherEmail เท่านั้น)
+        // teacherIds เก็บ staff doc id (ไม่ใช่ Auth UID) — เทียบผ่าน staffIdentity เท่านั้น
         const isOriginal = isTeacherEmailMatch(gc.teacherEmail, user?.email) ||
-          (!!user?.uid && (gc.teacherIds || []).includes(user.uid));
+          isStaffIn(user, gc.teacherIds);
 
         // 2. Is substitute teacher today
         const isSub = substituteAssignments.some(sa => 
@@ -1025,8 +1027,7 @@ export function TeacherPortal() {
                     })
                     .filter(item =>
                       (isTeacherEmailMatch(item.teacherEmail, user?.email) ||
-                        (user?.uid && (item.teacherId === user.uid ||
-                          (Array.isArray(item.teacherIds) && item.teacherIds.includes(user.uid))))) &&
+                        isStaffAssigned(user, item)) &&
                       item.scheduleDay === targetDayOfWeek
                     )
                 : [];
@@ -1146,7 +1147,7 @@ export function TeacherPortal() {
               electiveConfigs
                 .filter(cfg =>
                   cfg.enrollmentStatus === 'CLOSED' &&
-                  !!user?.uid && (cfg.responsibleTeacherUids || []).includes(user.uid) &&
+                  isStaffIn(user, cfg.responsibleTeacherUids) &&
                   !!cfg.dayOfWeek && DAY_NAME_TO_NUM[cfg.dayOfWeek] === targetDayOfWeek &&
                   cfg.periodNumber !== null && cfg.periodNumber !== undefined
                 )

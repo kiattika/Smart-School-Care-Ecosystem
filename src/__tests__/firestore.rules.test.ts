@@ -1248,7 +1248,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       );
       // ครูรับผิดชอบชุมนุมถอนได้จริง
       await assertSucceeds(
-        asUser('teacher-club-uid', ['SUBJECT_TEACHER']).firestore().doc('activity_enrollments/club-1_std-e1').update({
+        asUser('teacher-club-uid', ['SUBJECT_TEACHER'], { staffId: 'teacher-club-uid' }).firestore().doc('activity_enrollments/club-1_std-e1').update({
           removedAt: new Date().toISOString(), removedBy: 'teacher-club-uid', removedReason: 'ไม่ผ่านคัดเลือก นศท',
         })
       );
@@ -1264,10 +1264,46 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       });
       // teacher-club-uid-2 คือครูร่วมสอนคนที่ 2 ใน responsibleTeacherUids ของ club-1 (ไม่ใช่คนแรก)
       await assertSucceeds(
-        asUser('teacher-club-uid-2', ['SUBJECT_TEACHER']).firestore().doc('activity_enrollments/club-1_std-e2').update({
+        asUser('teacher-club-uid-2', ['SUBJECT_TEACHER'], { staffId: 'teacher-club-uid-2' }).firestore().doc('activity_enrollments/club-1_std-e2').update({
           removedAt: new Date().toISOString(), removedBy: 'teacher-club-uid-2', removedReason: 'ทดสอบครูร่วมสอน',
         })
       );
+    });
+
+    // responsibleTeacherUids เก็บ staff doc id (teacherId) ไม่ใช่ Auth UID — ตัวตนครู = claim staffId เท่านั้น
+    describe('isResponsibleTeacherOfActivity matches claim staffId, never auth.uid', () => {
+      const STAFF_ID = 'teacher-17';          // doc id จากไฟล์ import (อยู่ใน responsibleTeacherUids)
+      const REAL_UID = 'firebase-uid-k9x';    // Auth UID ของครูคนเดียวกัน — ไม่เท่ากับ staffId
+      const seedClub = async () => {
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc('students/std-s1').set({ studentId: 'std-s1', studentUid: 'stu-s1-uid', name: 'นักเรียน S1' });
+          await ctx.firestore().doc('elective_activities_config/club-s').set({ name: 'ชุมนุม S', capacity: 10, responsibleTeacherUids: [STAFF_ID], responsibleTeacherNames: ['ครู S'], enrollmentStatus: 'OPEN' });
+          await ctx.firestore().doc('activity_enrollments/club-s_std-s1').set({
+            activityId: 'club-s', studentId: 'std-s1', studentUid: 'stu-s1-uid',
+            removedAt: null, removedBy: null, removedReason: null,
+          });
+        });
+      };
+      const withdraw = (removedBy: string) => ({ removedAt: new Date().toISOString(), removedBy, removedReason: 'ทดสอบ staffId' });
+
+      it('lets the teacher whose staffId is in responsibleTeacherUids withdraw (uid ≠ staffId)', async () => {
+        await seedClub();
+        await assertSucceeds(
+          asUser(REAL_UID, ['SUBJECT_TEACHER'], { staffId: STAFF_ID }).firestore().doc('activity_enrollments/club-s_std-s1').update(withdraw(REAL_UID))
+        );
+      });
+
+      it('REGRESSION: denies a user whose uid equals the listed id but whose staffId does not', async () => {
+        await seedClub();
+        // uid ตรงกับค่าใน responsibleTeacherUids แต่ staffId เป็นคนอื่น → ห้าม
+        await assertFails(
+          asUser(STAFF_ID, ['SUBJECT_TEACHER'], { staffId: 'teacher-99' }).firestore().doc('activity_enrollments/club-s_std-s1').update(withdraw(STAFF_ID))
+        );
+        // uid ตรงแต่ไม่มี claim staffId เลย (ไม่มี fallback ไป uid) → ห้าม
+        await assertFails(
+          asUser(STAFF_ID, ['SUBJECT_TEACHER']).firestore().doc('activity_enrollments/club-s_std-s1').update(withdraw(STAFF_ID))
+        );
+      });
     });
 
     it('นักเรียนถอนตัวเอง (removedBy ต้องเป็น null) สำเร็จ — ปลอม removedBy เป็นคนอื่นไม่ได้', async () => {
@@ -1431,7 +1467,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await enrollInActivity({ activityId: 'club-ra', studentId: 'std-r1', studentUid: 'r-uid-1', capacity: 5 }, dbR as any);
 
       // ครูรับผิดชอบ club-ra ถอนนักเรียนคนนี้ (ไม่ผ่านคัดเลือก)
-      const dbTeacher = asUser('teacher-ra-uid', ['SUBJECT_TEACHER']).firestore();
+      const dbTeacher = asUser('teacher-ra-uid', ['SUBJECT_TEACHER'], { staffId: 'teacher-ra-uid' }).firestore();
       await withdrawFromActivity({ activityId: 'club-ra', studentId: 'std-r1', removedBy: 'teacher-ra-uid', removedReason: 'ไม่ผ่านคัดเลือก นศท' }, dbTeacher as any);
 
       // นักเรียนคนเดิมสมัครชุมนุมอื่นที่ยังว่างได้
