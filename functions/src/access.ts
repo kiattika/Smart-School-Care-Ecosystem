@@ -24,6 +24,13 @@ export interface StaffRecord {
   /** document id ของ staff (= teacherId จากไฟล์ import ไม่ใช่ Auth UID) */
   id: string;
   roles?: unknown;
+  /** 'ACTIVE' | 'INACTIVE' — ไม่มี field = ACTIVE (ข้อมูลเดิมก่อนมีระบบปิดการใช้งาน) */
+  status?: unknown;
+}
+
+/** บุคลากรถูกปิดการใช้งานหรือไม่ — เฉพาะ status === 'INACTIVE' เท่านั้น (ไม่มี field / ค่าอื่น = ใช้งานได้) */
+export function isStaffInactive(status: unknown): boolean {
+  return status === 'INACTIVE';
 }
 
 export interface StudentRecord {
@@ -44,6 +51,7 @@ export type DenyReason =
   | 'EMAIL_NOT_VERIFIED'
   | 'DOMAIN_NOT_ALLOWED'
   | 'STAFF_NO_ROLES'
+  | 'STAFF_INACTIVE'
   | 'AMBIGUOUS_RECORD'
   | 'NOT_REGISTERED';
 
@@ -59,6 +67,7 @@ export const DENY_MESSAGES: Record<DenyReason, string> = {
   EMAIL_NOT_VERIFIED: 'อีเมลของบัญชีนี้ยังไม่ได้รับการยืนยัน จึงเข้าใช้งานระบบไม่ได้ กรุณาติดต่อผู้ดูแลระบบ',
   DOMAIN_NOT_ALLOWED: `ระบบนี้รองรับเฉพาะบัญชี Google Workspace ของโรงเรียน (@${ALLOWED_EMAIL_DOMAIN}) เท่านั้น หากเป็นบุคลากรหรือนักเรียนของโรงเรียน กรุณาติดต่อผู้ดูแลระบบ`,
   STAFF_NO_ROLES: 'บัญชีนี้ยังไม่ได้รับการกำหนดบทบาทในระบบ กรุณาติดต่อผู้ดูแลระบบ',
+  STAFF_INACTIVE: 'บัญชีบุคลากรนี้ถูกปิดการใช้งานแล้ว จึงเข้าใช้งานระบบไม่ได้ กรุณาติดต่อผู้ดูแลระบบ',
   AMBIGUOUS_RECORD: 'พบข้อมูลบุคคลซ้ำซ้อนสำหรับอีเมลนี้ ระบบจึงไม่อนุญาตให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ',
   NOT_REGISTERED: 'ไม่พบบัญชีนี้ในทะเบียนบุคลากรหรือนักเรียนของโรงเรียน กรุณาติดต่อผู้ดูแลระบบ',
 };
@@ -107,6 +116,8 @@ export async function resolveAccess(
   const staff = (await lookups.findStaffByEmail(email)).filter((s) => s.id.toLowerCase() !== email);
   if (staff.length > 1) return { allowed: false, reason: 'AMBIGUOUS_RECORD' };
   if (staff.length === 1) {
+    // ปิดการใช้งาน (setStaffActive) — ตรวจก่อน roles: คนที่ถูกปิดต้องได้ข้อความนี้เสมอ ไม่ไหลไปเป็นนักเรียน
+    if (isStaffInactive(staff[0].status)) return { allowed: false, reason: 'STAFF_INACTIVE' };
     const roles = normalizeRoles(staff[0].roles);
     if (roles.length === 0) return { allowed: false, reason: 'STAFF_NO_ROLES' };
     return { allowed: true, kind: 'staff', staffId: staff[0].id, roles, primaryRole: roles[0] };

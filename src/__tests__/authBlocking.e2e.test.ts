@@ -12,7 +12,7 @@ import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { describeAuthError } from '../lib/authErrors';
 import { DENY_MESSAGES } from '../../functions/src/access';
-import { SELF_DEMOTION_MESSAGE } from '../../functions/src/roleGuards';
+import { SELF_DEMOTION_MESSAGE, DEACTIVATE_SELF_MESSAGE } from '../../functions/src/roleGuards';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
 import authTestConfig from '../../firebase.authtest.json';
 
@@ -191,5 +191,103 @@ describe.skipIf(!AUTH_HOST || !FS_HOST)('assignUserRole self-demotion guard (emu
     expect(await fsGetRoles('staff/admin-01')).toEqual(['SUPER_ADMIN', 'EXECUTIVE']);
     await signOut(clientAuth);
     await deleteApp(app);
+  });
+});
+
+/**
+ * createStaffMember + setStaffActive บน Functions emulator จริง — บัญชีที่ถูกปิดการใช้งาน login ไม่ได้
+ * (blocking function ปฏิเสธด้วย STAFF_INACTIVE) และเปิดใช้งานแล้วกลับมา login ได้
+ */
+describe.skipIf(!AUTH_HOST || !FS_HOST)('staff create / deactivate / reactivate (emulator E2E)', () => {
+  const adminApp = initClientApp({ apiKey: 'emulator-key', projectId: PROJECT_ID, authDomain: `${PROJECT_ID}.firebaseapp.com` }, 'e2e-staff-admin');
+  const adminAuth = getClientAuth(adminApp);
+  const fns = getFunctions(adminApp, 'us-central1');
+  const createStaffMember = httpsCallable(fns, 'createStaffMember');
+  const setStaffActive = httpsCallable(fns, 'setStaffActive');
+  const assignUserRoleFn = httpsCallable(fns, 'assignUserRole');
+  // บัญชีของบุคลากรที่ถูกสร้าง/ปิด — app แยก ไม่ให้กระทบ session ของ admin
+  const targetApp = initClientApp({ apiKey: 'emulator-key', projectId: PROJECT_ID, authDomain: `${PROJECT_ID}.firebaseapp.com` }, 'e2e-staff-target');
+  const targetAuth = getClientAuth(targetApp);
+  const TARGET_EMAIL = 't55.e2e@utd.ac.th';
+
+  beforeAll(async () => {
+    connectAuthEmulator(adminAuth, `http://${AUTH_HOST}`, { disableWarnings: true });
+    connectAuthEmulator(targetAuth, `http://${AUTH_HOST}`, { disableWarnings: true });
+    connectFunctionsEmulator(fns, '127.0.0.1', authTestConfig.emulators.functions.port);
+    if (!getApps().length) initAdminApp({ projectId: PROJECT_ID });
+
+    await fsPut('staff/admin-77', { email: 'admin77.e2e@utd.ac.th', roles: ['SUPER_ADMIN'] });
+    await getAdminAuth().createUser({ email: 'admin77.e2e@utd.ac.th', password: PASSWORD, emailVerified: true });
+    const cred = await signInWithEmailAndPassword(adminAuth, 'admin77.e2e@utd.ac.th', PASSWORD);
+    expect((await cred.user.getIdTokenResult(true)).claims.staffId).toBe('admin-77');
+  }, 60_000);
+
+  async function callError(fn: typeof setStaffActive, data: Record<string, unknown>) {
+    try { await fn(data); } catch (err) { return err as { code?: string; message?: string }; }
+    throw new Error(`expected ${JSON.stringify(data)} to be rejected`);
+  }
+
+  async function targetSignIn(): Promise<{ ok: true; staffId: unknown } | { ok: false; err: unknown }> {
+    try {
+      const cred = await signInWithEmailAndPassword(targetAuth, TARGET_EMAIL, PASSWORD);
+      const { claims } = await cred.user.getIdTokenResult(true);
+      await signOut(targetAuth);
+      return { ok: true, staffId: claims.staffId };
+    } catch (err) {
+      return { ok: false, err };
+    }
+  }
+
+  it('createStaffMember writes staff + teachers (status ACTIVE) and rejects a duplicate id', async () => {
+    const res = await createStaffMember({
+      staffId: 'teacher-55', email: ' T55.e2e@UTD.ac.th ', roles: ['SUBJECT_TEACHER'],
+      prefix: 'นาย', firstName: 'ทดสอบ', lastName: 'ปิดใช้งาน', position: 'ครู',
+    });
+    expect(res.data).toMatchObject({ success: true, staffId: 'teacher-55', email: TARGET_EMAIL });
+    expect(await fsGetField('staff/teacher-55', 'status')).toBe('ACTIVE');
+    expect(await fsGetField('staff/teacher-55', 'email')).toBe(TARGET_EMAIL);
+    expect(await fsGetField('teachers/teacher-55', 'status')).toBe('ACTIVE');
+
+    const dup = await callError(createStaffMember, { staffId: 'teacher-55', email: 'other.e2e@utd.ac.th', roles: ['SUBJECT_TEACHER'], firstName: 'ก', lastName: 'ข' });
+    expect(dup.code).toBe('functions/already-exists');
+    const dupEmail = await callError(createStaffMember, { staffId: 'teacher-56', email: TARGET_EMAIL, roles: ['SUBJECT_TEACHER'], firstName: 'ก', lastName: 'ข' });
+    expect(dupEmail.code).toBe('functions/already-exists');
+  });
+
+  it('the new staff member can log in (claims staffId = teacher-55)', async () => {
+    await getAdminAuth().createUser({ email: TARGET_EMAIL, password: PASSWORD, emailVerified: true });
+    expect(await targetSignIn()).toEqual({ ok: true, staffId: 'teacher-55' });
+  });
+
+  it('a SUPER_ADMIN cannot deactivate themselves', async () => {
+    const err = await callError(setStaffActive, { staffId: 'admin-77', active: false, reason: 'ทดสอบ' });
+    expect(err.code).toBe('functions/failed-precondition');
+    expect(err.message).toContain(DEACTIVATE_SELF_MESSAGE);
+    expect(await fsGetField('staff/admin-77', 'status')).toBeUndefined();
+  });
+
+  it('deactivated: status INACTIVE + reason, claims cleared, login rejected with STAFF_INACTIVE, roles cannot be changed', async () => {
+    await setStaffActive({ staffId: 'teacher-55', active: false, reason: 'ย้ายไปโรงเรียนอื่น' });
+    expect(await fsGetField('staff/teacher-55', 'status')).toBe('INACTIVE');
+    expect(await fsGetField('staff/teacher-55', 'deactivationReason')).toBe('ย้ายไปโรงเรียนอื่น');
+    const user = await getAdminAuth().getUserByEmail(TARGET_EMAIL);
+    expect(user.customClaims ?? {}).toEqual({});
+
+    const login = await targetSignIn();
+    expect(login.ok).toBe(false);
+    expect(login.ok === false && describeAuthError(login.err)).toBe(DENY_MESSAGES.STAFF_INACTIVE);
+
+    const roleErr = await callError(assignUserRoleFn, { staffId: 'teacher-55', roles: ['HOMEROOM_TEACHER'] });
+    expect(roleErr.code).toBe('functions/failed-precondition');
+  });
+
+  it('reactivated: status ACTIVE and the staff member can log in again', async () => {
+    await setStaffActive({ staffId: 'teacher-55', active: true, reason: '' });
+    expect(await fsGetField('staff/teacher-55', 'status')).toBe('ACTIVE');
+    expect(await fsGetField('staff/teacher-55', 'deactivationReason')).toBeUndefined();
+    expect(await targetSignIn()).toEqual({ ok: true, staffId: 'teacher-55' });
+    await signOut(adminAuth);
+    await deleteApp(targetApp);
+    await deleteApp(adminApp);
   });
 });

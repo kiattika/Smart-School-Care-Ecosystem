@@ -41,6 +41,7 @@ export function useSubstituteSync(enabled: boolean) {
             lastName: data.lastName || '',
             position: data.position || 'ครูผู้สอน',
             roles,
+            status: data.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
             assignments: data.assignments || {
               departmentId: data.departmentId || '',
               homeroomClass: data.homeroomClass || '',

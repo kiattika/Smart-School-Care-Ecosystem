@@ -30,7 +30,7 @@ const BLOCKING_OPTS = { region: 'asia-southeast1', timeoutSeconds: 7 } as const;
 const lookups: AccessLookups = {
   async findStaffByEmail(email) {
     const snap = await db.collection('staff').where('email', '==', email).limit(5).get();
-    return snap.docs.map((d) => ({ id: d.id, roles: d.get('roles') }));
+    return snap.docs.map((d) => ({ id: d.id, roles: d.get('roles'), status: d.get('status') }));
   },
   async findStudentsByEmail(email) {
     const snap = await db.collection('students').where('email', '==', email).limit(5).get();
