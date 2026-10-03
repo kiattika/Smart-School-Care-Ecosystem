@@ -21,6 +21,7 @@ import { UserRole, Role } from './types';
 import { setupAuthListener, signOutUser } from './lib/auth';
 import { describeAuthError } from './lib/authErrors';
 import { useSubstituteSync } from './hooks/useSubstituteSync';
+import { useAppClock } from './hooks/useAppClock';
 
 export default function App() {
   const { user, setUser } = useStore();
@@ -30,6 +31,9 @@ export default function App() {
 
   // เชื่อม Firestore real-time (staff / substitute_assignments / post_teaching_records) เข้ากับ store
   useSubstituteSync(!!user);
+
+  // นาฬิกาของแอป (store.currentDate) เดินตามเวลาจริง — ทุก 30 วินาที + ทันทีเมื่อกลับมาที่แท็บ
+  useAppClock();
 
   useEffect(() => {
     const unsubscribe = setupAuthListener((firebaseAppUser) => {

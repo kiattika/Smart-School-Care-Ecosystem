@@ -39,7 +39,7 @@ export const TakeAttendanceModal: React.FC<TakeAttendanceModalProps> = ({
   students,
   currentDate = new Date(),
   initialAttendance = {},
-  teacherId = 'teacher_001',
+  teacherId,
   teacherName = 'ครูผู้สอน',
   onAttendanceSaved
 }) => {
@@ -124,11 +124,20 @@ export const TakeAttendanceModal: React.FC<TakeAttendanceModalProps> = ({
   };
 
   const handleSaveToFirestore = async () => {
+    // ไม่มีตัวตนผู้เช็คชื่อ / ไม่มีห้อง = ไม่เขียน (ห้ามเติม id ครูหรือห้องปลอม — CLAUDE.md กฎ no-fake-data)
+    if (!teacherId) {
+      setErrorMessage('ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ — ยกเลิกการบันทึกการเช็คชื่อ กรุณาเข้าสู่ระบบใหม่');
+      return;
+    }
+    if (!course.room) {
+      setErrorMessage('รายวิชานี้ไม่มีข้อมูลห้องเรียน — ยกเลิกการบันทึกการเช็คชื่อ');
+      return;
+    }
     setIsSaving(true);
     setErrorMessage(null);
     try {
       const dateStr = format(currentDate, 'yyyy-MM-dd');
-      const rawRoom = course.room || 'ม.5/8';
+      const rawRoom = course.room;
       const roomStr = rawRoom.replace('/', '-');
       // คาบ 0 (โฮมรูม) เป็นคาบจริง — ห้าม falsy check (`|| 1`) ไม่งั้น record ถูกเขียนผิดคาบ
       // แล้ว TeacherPortal จับคู่ไม่เจอ → คาบที่เช็คแล้วกลับไปโชว์ "ขอเช็คชื่อย้อนหลัง"

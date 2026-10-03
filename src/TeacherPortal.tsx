@@ -2,6 +2,8 @@ import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/util
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
 import { isStaffAssigned, isStaffIn } from './lib/staffIdentity';
+import { useDepartments } from './hooks/useDepartments';
+import { writeTimestamp } from './lib/appClock';
 import { useSchoolCalendar } from './hooks/useSchoolCalendar';
 import { DatePicker } from './components/shared/DatePicker';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
@@ -52,7 +54,9 @@ export function TeacherPortal() {
     setAttendanceStatus,
     adjustBehaviorScore,
     moveStudentSeat,
-    setCurrentDate,
+    isTimeSimulated,
+    setSimulatedTime,
+    clearTimeSimulation,
     setScheduleConfig,
     courses,
     activeLearningPoints,
@@ -72,45 +76,12 @@ export function TeacherPortal() {
   // ใช้ในผังห้องเรียน (ClassroomSeatingManager), สุ่มนักเรียน, gradebook, Early Warning
   const { students } = useRealStudents();
 
-  // TASK 1 (แก้บั๊กวันที่ผิด) — พิสูจน์ก่อนแก้: currentDate ใน Zustand store (store.ts) กำหนดค่าแค่
-  // ครั้งเดียวตอน store module ถูกโหลด (`currentDate: new Date()`) แล้วไม่มีจุดไหนใน codebase sync
-  // กับเวลาจริงอัตโนมัติอีกเลย — จุดเดียวที่เคยเรียก setCurrentDate() คือ modal "Time Simulation"
-  // ด้านล่าง (จำลองแค่ชั่วโมง/นาทีของ "วันเดียวกับตอนโหลดหน้า" ไม่เคยขยับวันเลย) ผลคือถ้าเปิดแท็บ/
-  // dev server ค้างข้ามวัน (Vite HMR ไม่รีเซ็ต state เวลาแก้โค้ดไฟล์อื่น) currentDate จะค้างอยู่ที่วันเก่า
-  // ไปเรื่อยๆ จนกว่าจะโหลดหน้าใหม่ทั้งหมด (hard reload) — ตรงกับอาการที่รายงานเป๊ะ (เห็นวันจันทร์ทั้งที่
-  // จริงเป็นวันอังคารแล้ว) log ค่าจริงไว้ยืนยันก่อนเชื่อ ไม่เดาเฉยๆ
-  useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log('[TASK1-DATE-DEBUG] mount check:', {
-      'new Date().toString()': new Date().toString(),
-      'new Date().getDay()': new Date().getDay(),
-      'Intl timeZone': Intl.DateTimeFormat().resolvedOptions().timeZone,
-      'store.currentDate (ค่าที่ component ใช้จริง)': currentDate.toString(),
-      'store.currentDate.getDay()': currentDate.getDay(),
-      'ตรงกันไหม (ควรเป็น true เสมอตอนเพิ่งโหลดหน้าใหม่)': new Date().toDateString() === currentDate.toDateString(),
-    });
-  }, []);
+  // ชื่อกลุ่มสาระของครูจาก profile จริง — ไม่มี departmentId = ไม่แสดง (ห้ามฝังชื่อกลุ่มสาระตายตัว)
+  const { nameOf: departmentNameOf } = useDepartments();
+  const myDepartmentId = user?.profile?.assignments?.departmentId || '';
+  const myDepartmentName = myDepartmentId ? departmentNameOf(myDepartmentId) : '';
 
-  // แก้จริง: sync ส่วน "วัน" (ปี/เดือน/วัน) ของ currentDate ให้ตรงเวลาจริงเสมอ โดยยังคง
-  // ชั่วโมง/นาทีที่ถูกจำลองไว้จาก Time Simulation modal ไว้เหมือนเดิม (ไม่ทับการทดสอบที่ทำอยู่ตรงๆ
-  // แค่ป้องกันไม่ให้ "วัน" ค้างข้ามวันจริงแบบเงียบๆ) เช็คทุก 1 นาทีพอสำหรับตรวจจับตอนข้ามเที่ยงคืน
-  const currentDateRef = React.useRef(currentDate);
-  currentDateRef.current = currentDate;
-  useEffect(() => {
-    const syncDateIfStale = () => {
-      const now = new Date();
-      if (now.toDateString() !== currentDateRef.current.toDateString()) {
-        const synced = new Date(now);
-        synced.setHours(currentDateRef.current.getHours(), currentDateRef.current.getMinutes(), 0, 0);
-        console.warn('[TASK1-DATE-DEBUG] currentDate ค้างข้ามวัน — sync ให้ตรงวันจริงอัตโนมัติ:', {
-          before: currentDateRef.current.toString(), after: synced.toString(),
-        });
-        setCurrentDate(synced);
-      }
-    };
-    const interval = setInterval(syncDateIfStale, 60000);
-    return () => clearInterval(interval);
-  }, [setCurrentDate]);
+  // นาฬิกา (currentDate) เดินตามเวลาจริงจาก useAppClock ที่ App — DEV จำลองเวลาได้ผ่าน setSimulatedTime
 
   // --- บันทึกหลังสอนแทน (deadline ก่อน 24:00 น. ของวันที่สอน) ---
   const [subCompleteTarget, setSubCompleteTarget] = useState<SubstituteAssignment | null>(null);
@@ -153,8 +124,7 @@ export function TeacherPortal() {
     isSchedulesEmpty,
     emptySchedulesMessage,
     clearError: clearFsError,
-    updateScheduleAttendance,
-    updatePartnerAttendance
+    updateScheduleAttendance
   } = useTeacherFirestoreSchedule();
 
   // ปฏิทินโรงเรียน (school_calendar_events) — วันหยุดพิเศษ + วันเปิด-ปิดภาคเรียน เรียกที่ระดับบนสุด
@@ -245,6 +215,12 @@ export function TeacherPortal() {
     });
   }, [fsSchedules]);
 
+  const countStudentsInRoom = React.useCallback((room?: string): number | undefined => {
+    if (!room) return undefined;
+    const n = students.filter(s => isSameRoom(s.room, room) || isSameRoom((s as any).className, room)).length;
+    return n > 0 ? n : undefined;
+  }, [students]);
+
   const myCourses: Course[] = useMemo(() => {
     const rawList = globalCourses
       .filter(gc => {
@@ -294,7 +270,8 @@ export function TeacherPortal() {
           room: gc.roomName,
           level: levelStr,
           term: '1/2569',
-          studentsCount: gc.roomName.includes('5/8') ? 40 : gc.roomName.includes('5/9') ? 38 : gc.roomName.includes('5/11') ? 42 : 35,
+          // จำนวนนักเรียนจริงจาก students (Firestore สด) ที่อยู่ห้องนี้ — ไม่มีข้อมูล = undefined (ห้ามเติมตัวเลขปลอม)
+          studentsCount: countStudentsInRoom(gc.roomName),
           schedule: gc.scheduleString,
           attendanceTaken: isTaken,
           teacherName: gc.teacherName,
@@ -315,7 +292,7 @@ export function TeacherPortal() {
     });
 
     return uniqueCourses;
-  }, [globalCourses, user?.email, substituteAssignments, todayStr, courses]);
+  }, [globalCourses, user?.email, substituteAssignments, todayStr, courses, countStudentsInRoom]);
 
   // รายวิชาสำหรับ "สมุดบันทึกคะแนน" — ต้องเป็นวิชาที่ครูคนนี้เป็นผู้สอนหลักจริงเท่านั้น
   // (ไม่รวมคาบสอนแทน/สลับคาบ — คนสอนแทนไม่ใช่ผู้ให้คะแนน) และจัดกลุ่มตาม "รหัสวิชา + ห้อง"
@@ -347,7 +324,8 @@ export function TeacherPortal() {
 
   const isHrActive = !!(activeCourse && (activeCourse.code === 'HR' || activeCourse.name?.toLowerCase().includes('homeroom')));
   const hrTodayStr = format(currentDate, 'yyyy-MM-dd');
-  const activeHrRoom = isHrActive ? (activeCourse?.room || 'ม.5/8') : 'ม.5/8';
+  // ไม่ใช่คาบโฮมรูม / ไม่มีห้อง = '' → useHomeroomAttendance ไม่ query และไม่เขียน (เดิม fallback 'ม.5/8' query ทุกครั้งที่เปิดหน้า)
+  const activeHrRoom = isHrActive ? (activeCourse?.room ?? '') : '';
 
   const {
     record: hrRecord,
@@ -567,17 +545,6 @@ export function TeacherPortal() {
     );
   }, [activeCourse?.room, students, activeCourseIsElective, electiveEnrollments]);
 
-  const isM58 = isSameRoom(activeCourse?.room, 'ม.5/8');
-  const layout = isM58 ? {
-    totalRows: 5,
-    totalCols: 8,
-    aisleAfterCols: [2, 4, 6]
-  } : {
-    totalRows: 5,
-    totalCols: 10,
-    aisleAfterCols: [] as number[]
-  };
-
   const unassignedStudents = courseStudents.filter(s => s.seatIndex === null);
   
   const [toast, setToast] = useState<string | null>(null);
@@ -714,12 +681,14 @@ export function TeacherPortal() {
     e.preventDefault();
     if (!postTeachingCourse) return;
 
-    const teachingDateStr = ptDate || format(currentDate, 'yyyy-MM-dd');
-    const submittedAtIso = currentDate.toISOString();
+    // เวลาตอนกดบันทึกจริง (ไม่ใช่ค่าใน store) — ยกเว้น DEV ที่กำลังจำลองเวลา (ดู src/lib/appClock.ts)
+    const submittedAt = writeTimestamp(currentDate, new Date(), isTimeSimulated, import.meta.env.DEV);
+    const teachingDateStr = ptDate || format(submittedAt, 'yyyy-MM-dd');
+    const submittedAtIso = submittedAt.toISOString();
 
     const dateParts = teachingDateStr.split('-').map(Number);
     const teachingMidnight = new Date(dateParts[0], dateParts[1] - 1, dateParts[2], 23, 59, 59, 999);
-    const isLate = isAfter(currentDate, teachingMidnight);
+    const isLate = isAfter(submittedAt, teachingMidnight);
 
     submitPostTeachingRecord({
       courseId: postTeachingCourse.id,
@@ -748,6 +717,20 @@ export function TeacherPortal() {
   const [isSavingAttendance, setIsSavingAttendance] = useState(false);
 
   const handleAttendanceDone = async (courseId: string) => {
+    // ไม่มีตัวตนผู้เช็คชื่อ / ไม่มีห้อง = ไม่เขียนลง Firestore และแจ้ง error ที่ผู้ใช้เห็น
+    // (ห้ามเติมอีเมล/ชื่อครู/ห้องปลอมแทน — CLAUDE.md กฎ no-fake-data)
+    const teacherId = user?.email;
+    const attendanceRoom = activeCourse?.room;
+    if (!teacherId) {
+      setToast('❌ ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ — ยกเลิกการบันทึกการเช็คชื่อ กรุณาเข้าสู่ระบบใหม่');
+      setTimeout(() => setToast(null), 5000);
+      return;
+    }
+    if (!attendanceRoom) {
+      setToast('❌ รายวิชานี้ไม่มีข้อมูลห้องเรียน — ยกเลิกการบันทึกการเช็คชื่อ');
+      setTimeout(() => setToast(null), 5000);
+      return;
+    }
     setIsSavingAttendance(true);
     try {
       const studentStatuses: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'> = {};
@@ -756,10 +739,9 @@ export function TeacherPortal() {
         studentStatuses[student.studentId] = (status === 'UNMARKED' ? 'PRESENT' : status) as any;
       });
 
-      const teacherId = user?.email || 'kiattika@utd.ac.th';
-      const teacherName = user?.displayName || user?.email?.split('@')[0] || 'Mr.Kiattisak';
+      const teacherName = user?.displayName || teacherId.split('@')[0];
       const dateStr = format(currentDate, 'yyyy-MM-dd');
-      const roomStr = (activeCourse?.room || 'ม.5/8').replace('/', '-');
+      const roomStr = attendanceRoom.replace('/', '-');
       const periodNum = activeCourse?.periodIndex || 0;
       const recordId = `${dateStr}_${roomStr}_p${periodNum}`;
 
@@ -767,7 +749,7 @@ export function TeacherPortal() {
       await saveAttendanceRecord({
         id: recordId,
         date: dateStr,
-        room: activeCourse?.room || 'ม.5/8',
+        room: attendanceRoom,
         checkedByTeacherId: teacherId,
         checkedByName: teacherName,
         periodNumber: periodNum,
@@ -880,28 +862,33 @@ export function TeacherPortal() {
         </button>
 
         <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-          {/* Config Modal Trigger Button */}
-          <button 
-            onClick={() => setShowConfigModal(true)}
-            title="ตั้งค่าชั่วโมง/ตารางกิจกรรม"
-            className="flex items-center gap-1.5 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 px-2 sm:px-2.5 py-1.5 rounded-lg text-xs text-blue-400 transition-colors font-medium cursor-pointer"
-          >
-            <Settings className="w-3.5 h-3.5 text-blue-300" />
-            <span className="hidden sm:inline">ตั้งค่ากิจกรรม</span>
-            {scheduleConfig.isActivityDay && (
-              <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 rounded ml-0.5 border border-amber-500/30">
-                -{scheduleConfig.shortenMinutes}m
-              </span>
-            )}
-          </button>
+          {/* Config Modal Trigger Button — DEV เท่านั้น: เปิด Time Simulation (จำลองเวลา/วันกิจกรรม) ห้ามเห็นใน production */}
+          {import.meta.env.DEV && (
+            <button 
+              onClick={() => setShowConfigModal(true)}
+              title="ตั้งค่าชั่วโมง/ตารางกิจกรรม"
+              className="flex items-center gap-1.5 bg-[#1b2a4a] hover:bg-[#23365d] border border-blue-900/50 px-2 sm:px-2.5 py-1.5 rounded-lg text-xs text-blue-400 transition-colors font-medium cursor-pointer"
+            >
+              <Settings className="w-3.5 h-3.5 text-blue-300" />
+              <span className="hidden sm:inline">ตั้งค่ากิจกรรม</span>
+              {scheduleConfig.isActivityDay && (
+                <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 rounded ml-0.5 border border-amber-500/30">
+                  -{scheduleConfig.shortenMinutes}m
+                </span>
+              )}
+            </button>
+          )}
 
           <div className="flex items-center gap-2.5 pl-2 border-l border-slate-800">
             <div className="w-8 h-8 rounded-full bg-slate-800/80 border border-emerald-800/50 flex items-center justify-center text-xs font-bold text-emerald-400">
-              {user?.displayName ? (user.displayName.includes('Kiattisak') ? 'K' : user.displayName.slice(0, 2)) : 'K'}
+              {(user?.displayName || user?.email || '').slice(0, 2)}
             </div>
             <div className="hidden md:flex flex-col text-left">
-              <span className="text-xs font-bold text-slate-200">{user?.displayName || 'Mr. Kiattisak'}</span>
-              <span className="text-[10px] text-emerald-400 font-medium">กลุ่มสาระฯ คณิตศาสตร์</span>
+              <span className="text-xs font-bold text-slate-200">{user?.displayName || user?.email || ''}</span>
+              {/* กลุ่มสาระจาก profile จริง (staff.assignments.departmentId) — ไม่มีก็ไม่แสดง */}
+              {myDepartmentName && (
+                <span className="text-[10px] text-emerald-400 font-medium">{myDepartmentName}</span>
+              )}
             </div>
           </div>
         </div>
@@ -1089,18 +1076,6 @@ export function TeacherPortal() {
                     isSameRoom
                   );
 
-                  if (import.meta.env.DEV) {
-                    // [DEBUG-ATT] ยังคงไว้ชั่วคราวเพื่อพิสูจน์ regression คาบ 7 หลัง emulator กลับมาใช้งานได้
-                    // (ต้องเช็คชื่อคาบ 7 จริงแล้วดู log ว่า expectedRecordIds ตรงกับ todayDocs id ไหม) — ลบออกเมื่อยืนยันแล้ว
-                    // eslint-disable-next-line no-console
-                    console.log('[DEBUG-ATT]', {
-                      period: item.periodNumber, code: item.courseCode, classLevel: item.classLevel, room: item.room, targetClass: item.targetClass,
-                      firestoreChecked, isAttendanceTaken,
-                      expectedRecordIds: [...expectedRecordIds],
-                      todayDocs: todayAttendanceDocs.map(a => `${a.id}(p${a.periodNumber}@${a.room})`),
-                    });
-                  }
-
                   const recordDate = format(targetDate, 'yyyy-MM-dd');
                   // จับคู่ด้วย id ที่ชัดเจนเท่านั้น (courseId ที่ derive จาก schedule / scheduleId)
                   // ไม่จับคู่หลวมด้วย subjectCode+room — เจอ false positive กับ record เก่าที่ courseId คนละรูปแบบ
@@ -1124,12 +1099,13 @@ export function TeacherPortal() {
                     subjectName: item.courseName,
                     className: item.classLevel || item.targetClass,
                     level: item.classLevel || item.targetClass,
-                    room: item.room || (item.targetClass.includes('5/8') ? '[943] HR 5/8' : item.targetClass.includes('5/9') ? '[935] HR 5/9' : 'ห้องเรียน ' + item.targetClass),
+                    // ห้องกายภาพจากตารางสอนจริง (schedules.room) — ไม่มีก็ว่าง ห้ามเดาป้ายห้องจากชื่อชั้น
+                    room: item.room || '',
                     attendanceTaken: isAttendanceTaken,
                     lateRequestStatus: lateReq ? lateReq.status : null,
                     hasPostTeachingRecord: !!existingRecord,
                     roleLabel: item.type === 'ACTIVITY' ? 'กิจกรรม' : matchedCourse?.roleLabel || 'วิชาการ',
-                    studentsCount: item.studentsCount || 40,
+                    studentsCount: item.studentsCount,
                     type: item.type,
                     teachingPartner: item.teachingPartner,
                     partnerCheckedAttendance: item.partnerCheckedAttendance,
@@ -1236,7 +1212,7 @@ export function TeacherPortal() {
                     room: periodItem.className,
                     level: periodItem.className,
                     term: '1/2569',
-                    studentsCount: periodItem.studentsCount || 40,
+                    studentsCount: periodItem.studentsCount,
                     attendanceTaken: !!periodItem.attendanceTaken,
                     periodIndex: periodItem.periodNumber
                   };
@@ -1296,44 +1272,6 @@ export function TeacherPortal() {
                     </div>
                   )}
 
-                  <div className="flex justify-end">
-                    <button
-                      onClick={async () => {
-                        if (mappedPeriods.length > 0) {
-                          let hasError = false;
-                          for (const p of mappedPeriods) {
-                            markAttendanceDone(p.courseId);
-                            if (p.id) {
-                              markAttendanceDone(p.id);
-                              try {
-                                await updateScheduleAttendance(p.id, true);
-                              } catch(e) {
-                                hasError = true;
-                                console.error("Could not update firestore schedule attendance:", e);
-                              }
-                            }
-                            if (p.subjectCode) {
-                              markAttendanceDone(p.subjectCode);
-                            }
-                          }
-                          
-                          if (hasError) {
-                            setToast('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
-                          } else {
-                            setToast('จำลองเช็คชื่อสำเร็จแล้ว (ทุกคาบเรียน)');
-                          }
-                          setTimeout(() => setToast(null), 3000);
-                        } else {
-                          setToast('ไม่มีคาบเรียนให้จำลองเช็คชื่อ');
-                          setTimeout(() => setToast(null), 3000);
-                        }
-                      }}
-                      className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold text-sm shadow-lg flex items-center gap-2"
-                    >
-                      <CheckCircle className="w-4 h-4" />
-                      จำลองเช็คชื่อสำเร็จ (Simulate)
-                    </button>
-                  </div>
                   <TeacherScheduleList
                     periods={mappedPeriods}
                     currentDate={currentDate}
@@ -1400,17 +1338,6 @@ export function TeacherPortal() {
                         ));
                       if (existingRecord) {
                         setViewingRecord(existingRecord);
-                      }
-                    }}
-                    onTogglePartnerAttendance={async (periodId, currentStatus) => {
-                      try {
-                        await updatePartnerAttendance(periodId, currentStatus);
-                        setToast('ซิงค์ข้อมูลผู้สอนร่วมเรียบร้อยแล้ว!');
-                        setTimeout(() => setToast(null), 3000);
-                      } catch (err) {
-                        console.error("Failed to toggle partner attendance:", err);
-                        setToast('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
-                        setTimeout(() => setToast(null), 4000);
                       }
                     }}
                     onEnterClassroom={(periodId) => {
@@ -1832,7 +1759,7 @@ export function TeacherPortal() {
                       สรุปรายวิชา คาบสอนวิชาการ คาบกิจกรรม และตารางห้องเรียนตามประกาศตารางสอนของโรงเรียน
                     </p>
                   </div>
-                  <TeachingLoadTable initialTeacherName={user?.displayName || 'Mr. Kiattisak'} />
+                  <TeachingLoadTable initialTeacherName={user?.displayName || undefined} />
                 </div>
               </div>
             )}
@@ -1926,17 +1853,6 @@ export function TeacherPortal() {
                   </div>
                 </div>
 
-                {/* Features Banner */}
-                <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    <span>ระบบป้องกันการจำลองพิกัดเสมือน (Anti-Mock Location) และบันทึกประวัติเวลา Real-time</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Radio className="w-4 h-4 text-indigo-400" />
-                    <span>เชื่อมต่อกับระบบเช็คชื่อรายวิชาและแจ้งเตือนผู้ปกครองผ่าน LINE ทันที</span>
-                  </div>
-                </div>
               </div>
             )}
 
@@ -2672,8 +2588,8 @@ export function TeacherPortal() {
       )}
 
 
-      {/* Admin Schedule Config Simulation Modal */}
-      {showConfigModal && (
+      {/* Admin Schedule Config Simulation Modal — DEV เท่านั้น (Time Simulation ห้ามเห็นใน production) */}
+      {import.meta.env.DEV && showConfigModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
           <div className="bg-[#161f30] border border-slate-800/80 rounded-xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col">
             <div className="p-4 border-b border-slate-800/80 flex justify-between items-center bg-[#0b0f19]">
@@ -2695,10 +2611,19 @@ export function TeacherPortal() {
                     const [hours, minutes] = e.target.value.split(':').map(Number);
                     const newDate = new Date(currentDate);
                     newDate.setHours(hours, minutes, 0, 0);
-                    setCurrentDate(newDate);
+                    setSimulatedTime(newDate);
                   }}
                   className="w-full bg-[#0b0f19] border border-slate-800/80 rounded-lg p-2.5 text-sm text-white focus:border-emerald-500 outline-none transition-all font-mono"
                 />
+                {isTimeSimulated && (
+                  <button
+                    type="button"
+                    onClick={clearTimeSimulation}
+                    className="mt-2 text-xs text-emerald-400 hover:text-emerald-300 underline"
+                  >
+                    กลับไปใช้เวลาจริง
+                  </button>
+                )}
               </div>
 
               <div>
@@ -2792,7 +2717,7 @@ export function TeacherPortal() {
                       />
                     </div>
                     <div className="text-left sm:text-right">
-                      <div className="text-[10px] text-slate-400 font-medium">เวลาจำลอง (Simulated Time):</div>
+                      <div className="text-[10px] text-slate-400 font-medium">{import.meta.env.DEV && isTimeSimulated ? 'เวลาจำลอง (Simulated Time):' : 'เวลาปัจจุบัน:'}</div>
                       <div className="text-xs font-mono text-slate-200 font-bold">{format(currentDate, 'dd MMM yyyy HH:mm', { locale: th })} น.</div>
                     </div>
                   </div>
@@ -2960,9 +2885,7 @@ export function TeacherPortal() {
 
       {/* Footer */}
       <footer className="h-8 bg-[#0b0f19] border-t border-slate-800/80 flex items-center justify-between px-4 text-[10px] text-slate-500 shrink-0">
-        <div>Real-time Sync Status: <span className="text-emerald-500">Connected</span></div>
         <div className="flex gap-4">
-          <span>Backend: Zustand Mock</span>
           <span>Zustand Context: {activeCourse ? activeCourse.code + '_' + activeCourse.room : 'dashboard'}</span>
         </div>
       </footer>

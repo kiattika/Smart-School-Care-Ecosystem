@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { format } from 'date-fns';
+import { nextClockValue } from './lib/appClock';
 import {
   StoreState, 
   AttendanceStatus, 
@@ -104,6 +105,7 @@ function buildSubstituteApprovalChain(
 export const useStore = create<StoreState>((set, get) => ({
   user: null,
   currentDate: new Date(),
+  isTimeSimulated: false,
   currentPeriod: 'คาบ 1',
   students: [],
   courses: [],
@@ -159,7 +161,16 @@ export const useStore = create<StoreState>((set, get) => ({
   administrativeTasks: [],
 
   setUser: (user) => set({ user }),
-  setCurrentDate: (date: Date) => set({ currentDate: date }),
+  tickClock: (now = new Date()) => set((state) => {
+    const next = nextClockValue(state.currentDate, now, state.isTimeSimulated, import.meta.env.DEV);
+    return next.getTime() === state.currentDate.getTime() ? state : { currentDate: next };
+  }),
+  // production ไม่มีโหมดจำลองเวลา — กันไว้ที่ store ด้วย ไม่ใช่แค่ซ่อน modal
+  setSimulatedTime: (date: Date) => {
+    if (!import.meta.env.DEV) return;
+    set({ currentDate: date, isTimeSimulated: true });
+  },
+  clearTimeSimulation: () => set({ currentDate: new Date(), isTimeSimulated: false }),
   
   setCurrentPeriod: (period: string) => set({ currentPeriod: period }),
   
@@ -334,9 +345,8 @@ export const useStore = create<StoreState>((set, get) => ({
         id: courseId,
         code: gc ? gc.code : courseId.split('-')[0],
         name: gc ? gc.courseName : 'รายวิชา',
-        room: gc ? gc.roomName : 'ม.5/8',
+        room: gc ? gc.roomName : '', // ไม่รู้ห้อง = ว่าง (ห้ามเติมห้อง/จำนวนนักเรียนปลอม)
         term: '1/2569',
-        studentsCount: 40,
         attendanceTaken: true,
         periodIndex: 1,
         schedule: gc ? gc.scheduleString : 'พ0'

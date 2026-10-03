@@ -207,7 +207,8 @@ export function StudentManagementPage() {
   const [formLastName, setFormLastName] = useState('');
   const [formNickname, setFormNickname] = useState('');
   const [formEmail, setFormEmail] = useState('');
-  const [formRoom, setFormRoom] = useState('ม.5/8');
+  // ไม่ตั้งห้องเริ่มต้นให้ — ผู้ใช้ต้องเลือกเอง (save ตรวจห้องว่างอยู่แล้ว) ห้ามเติมห้องปลอม
+  const [formRoom, setFormRoom] = useState('');
   const [formStudentNo, setFormStudentNo] = useState<number>(1);
   const [formPhotoUrl, setFormPhotoUrl] = useState('');
   const [formAddress, setFormAddress] = useState('');
@@ -303,7 +304,7 @@ export function StudentManagementPage() {
     setFormLastName('');
     setFormNickname('');
     setFormEmail('');
-    setFormRoom(selectedRoom !== 'ALL' ? selectedRoom : 'ม.5/8');
+    setFormRoom(selectedRoom !== 'ALL' ? selectedRoom : '');
     setFormStudentNo(studentsList.length + 1);
     setFormPhotoUrl('');
     setFormAddress('');
@@ -323,7 +324,7 @@ export function StudentManagementPage() {
     setFormLastName(student.lastName || '');
     setFormNickname(student.nickname || '');
     setFormEmail(student.email || '');
-    setFormRoom(student.room || student.className || 'ม.5/8');
+    setFormRoom(student.room || student.className || '');
     setFormStudentNo(student.studentNo || student.studentNumber || 1);
     setFormPhotoUrl(student.photoUrl || student.avatar || '');
     setFormAddress(student.address || student.homeLocation?.address || '');

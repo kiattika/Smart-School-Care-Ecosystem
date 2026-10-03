@@ -35,6 +35,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [showSuccessToast, setShowSuccessToast] = useState<boolean>(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Form State initialized with existing assessment or sensible defaults for current student
   const [formData, setFormData] = useState<StudentSelfAssessment>(() => {
@@ -42,14 +43,14 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
       return existingAssessment;
     }
     return {
-      studentId: student.studentId || '38502',
+      studentId: student.studentId || '',
       studentName: student.name || 'นักเรียน',
       isCompleted: false,
       basicInfo: {
         titleFullName: student.name || '',
         nickname: student.nickname || '',
-        gradeRoom: student.className || student.room || 'ม.5/8',
-        studentNo: String(student.studentNo || '1'),
+        gradeRoom: student.className || student.room || '',
+        studentNo: student.studentNo !== undefined && student.studentNo !== null ? String(student.studentNo) : '',
         contactChannels: ['LINE ID / Instagram / Facebook'],
         contactDetail: ''
       },
@@ -143,6 +144,12 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    // ไม่มีรหัสนักเรียนจริง = ไม่บันทึก (เดิม fallback เป็นรหัสปลอม) — CLAUDE.md กฎ no-fake-data
+    if (!student.studentId) {
+      setSubmitError('ไม่พบรหัสนักเรียนของบัญชีนี้ — ยกเลิกการบันทึก กรุณาติดต่อครูประจำชั้นหรือผู้ดูแลระบบ');
+      return;
+    }
+    setSubmitError(null);
     setIsSubmitting(true);
     try {
       const assessmentToSave: StudentSelfAssessment = {
@@ -161,6 +168,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
       }, 1500);
     } catch (err) {
       console.error(err);
+      setSubmitError('บันทึกแบบประเมินไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsSubmitting(false);
     }
@@ -226,7 +234,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
             </div>
             <div className="text-left">
               <div className="text-sm font-semibold text-white">{student.name}</div>
-              <div className="text-xs text-sky-200">รหัสนักเรียน: {student.studentId} | {student.className || student.room || 'ม.5/8'}</div>
+              <div className="text-xs text-sky-200">รหัสนักเรียน: {student.studentId} | {student.className || student.room || '-'}</div>
             </div>
           </div>
         </div>
@@ -277,6 +285,9 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
         )}
 
         <form onSubmit={handleSubmit}>
+          {submitError && (
+            <div role="alert" className="mb-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">{submitError}</div>
+          )}
           {/* SECTION 1: Basic Info */}
           {currentStep === 1 && (
             <div id="section-1-basic-info" className="space-y-6 animate-fadeIn">

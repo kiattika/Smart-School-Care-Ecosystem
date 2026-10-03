@@ -78,7 +78,7 @@ export const StudentAssessmentDetailModal: React.FC<Props> = ({
                 <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30">
                   แบบประเมินตนเอง 30 ข้อ
                 </span>
-                <span className="text-xs text-slate-300">รหัสนักเรียน: {student.studentId} ({student.className || student.room || 'ม.5/8'})</span>
+                <span className="text-xs text-slate-300">รหัสนักเรียน: {student.studentId} {(student.className || student.room) ? `(${student.className || student.room})` : ''}</span>
               </div>
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 {student.name} {assessment.basicInfo?.nickname && <span className="text-sky-300">({assessment.basicInfo.nickname})</span>}
@@ -260,7 +260,7 @@ export const StudentAssessmentDetailModal: React.FC<Props> = ({
                   </div>
                   <div>
                     <span className="text-slate-400 block">ชั้น/ห้อง & เลขที่ (ข้อ 3-4):</span>
-                    <span className="font-semibold text-slate-800">{assessment.basicInfo?.gradeRoom || 'ม.5/8'} เลขที่ {assessment.basicInfo?.studentNo || '1'}</span>
+                    <span className="font-semibold text-slate-800">{assessment.basicInfo?.gradeRoom || '-'} เลขที่ {assessment.basicInfo?.studentNo || '-'}</span>
                   </div>
                   <div>
                     <span className="text-slate-400 block">ช่องทางติดต่อสะดวก (ข้อ 5):</span>

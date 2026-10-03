@@ -982,7 +982,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 const scheduleLabel = `${dayThNames[slot.dayOfWeek] || slot.dayOfWeek} คาบ ${slot.periodNumber}`;
                 // ใช้ต่อจาก scheduleDocId เสมอ (ตัด prefix "sch_" ออก) กันไม่ให้ id คู่นี้ไหลออกจากกันอีก
                 const courseSlotId = `course_${scheduleDocId.slice(4)}`;
-                const finalTeacherEmail = parsedData.matchedTeacherEmail || parsedData.teacherEmail || (parsedData.matchedTeacherId ? `${parsedData.matchedTeacherId}@utd.ac.th` : 'kiattisak@utd.ac.th');
+                const finalTeacherEmail = parsedData.matchedTeacherEmail || parsedData.teacherEmail || '';
 
                 newCoursesToStore.push({
                   id: courseSlotId,
@@ -990,7 +990,6 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                   name: parsedData.subjectName,
                   room: parsedData.room || parsedData.level || '',
                   term: '1/2569',
-                  studentsCount: 40,
                   periodIndex: slot.periodNumber,
                   schedule: scheduleLabel,
                   attendanceTaken: false,
@@ -1040,12 +1039,11 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 name: parsedData.courseName,
                 room: parsedData.room,
                 term: '1/2569',
-                studentsCount: 40,
                 periodIndex: 1,
                 schedule: 'จันทร์ 08:30 - 09:20 น.',
                 attendanceTaken: false,
                 teacherName: parsedData.instructorId || 'ครูผู้สอน',
-                teacherEmail: 'kiattisak@utd.ac.th'
+                teacherEmail: '' // ไฟล์รูปแบบเก่าไม่มีอีเมลครู — ห้ามเติมอีเมลของคนอื่นแทน
               });
 
               newGlobalCoursesToStore.push({
@@ -1053,7 +1051,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 code: parsedData.courseCode,
                 courseName: parsedData.courseName,
                 teacherName: parsedData.instructorId || 'ครูผู้สอน',
-                teacherEmail: 'kiattisak@utd.ac.th',
+                teacherEmail: '',
                 roomName: parsedData.room,
                 scheduleString: 'จันทร์ 08:30 - 09:20 น.',
                 level: parsedData.level
