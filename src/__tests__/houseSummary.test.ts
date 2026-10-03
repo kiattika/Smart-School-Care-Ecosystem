@@ -5,6 +5,7 @@ import {
   roomStatusLabel,
   readableTextColor,
   compareRooms,
+  houseCounts,
   SummaryStudent,
 } from '../lib/houseSummary';
 
@@ -73,6 +74,25 @@ describe('buildHouseSummary', () => {
     expect(buildHouseSummary([], [])).toEqual({ houses: [], unassigned: { total: 0, orphanedCount: 0, rooms: [] }, roomStatuses: [] });
     const noStudents = buildHouseSummary([RED, BLUE], []);
     expect(noStudents.houses.every((b) => b.total === 0 && b.rooms.length === 0)).toBe(true);
+  });
+});
+
+describe('ordering and per-house counts (house list "N ห้อง · M คน")', () => {
+  it('summary blocks follow the order of the houses passed in (= the house list above on the page)', () => {
+    const listOrder = [GREEN, RED, BLUE]; // ไม่ได้เรียงตามชื่อ/สี — ต้องคงลำดับนี้
+    const s = buildHouseSummary(listOrder, make(3, 'ม.2/1', 'h-blue'));
+    expect(s.houses.map((b) => b.house.id)).toEqual(['h-green', 'h-red', 'h-blue']);
+  });
+
+  it('counts named rooms (a mixed room counts for every house in it) and all students incl. no-room ones', () => {
+    const s = buildHouseSummary([RED, BLUE], [
+      ...make(40, 'ม.5/8', 'h-red'),
+      ...make(12, 'ม.4/1', 'h-red'), ...make(28, 'ม.4/1', 'h-blue'),
+      ...make(2, null, 'h-red'),
+    ]);
+    expect(houseCounts(s.houses[0])).toEqual({ rooms: 2, students: 54 });
+    expect(houseCounts(s.houses[1])).toEqual({ rooms: 1, students: 28 });
+    expect(houseCounts(undefined)).toEqual({ rooms: 0, students: 0 });
   });
 });
 

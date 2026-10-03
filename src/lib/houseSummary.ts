@@ -149,3 +149,12 @@ export function readableTextColor(hex: string): string {
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   return luminance > 0.6 ? '#0f172a' : '#ffffff';
 }
+
+/**
+ * ตัวเลข "N ห้อง · M คน" ของคณะในรายการคณะสี — N นับเฉพาะห้องที่มีชื่อ (นักเรียนไม่ระบุห้องนับใน M แต่ไม่นับเป็นห้อง)
+ * ห้องคละคณะนับเป็น 1 ห้องของทุกคณะที่มีนักเรียนอยู่ในห้องนั้น
+ */
+export function houseCounts(block: { total: number; rooms: RoomCount[] } | undefined): { rooms: number; students: number } {
+  if (!block) return { rooms: 0, students: 0 };
+  return { rooms: block.rooms.filter((r) => r.room).length, students: block.total };
+}
