@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   resolveAccess,
   studentIdFromEmail,
+  blockingUserFromEvent,
   AccessLookups,
   StaffRecord,
   StudentRecord,
@@ -143,5 +144,26 @@ describe('studentIdFromEmail', () => {
     expect(studentIdFromEmail('xit38501@utd.ac.th')).toBeNull();
     expect(studentIdFromEmail('it38501@utdxac.th')).toBeNull(); // จุดใน template ต้องไม่เป็น regex wildcard
     expect(studentIdFromEmail('s38501@school.org', 's{studentId}@school.org')).toBe('38501');
+  });
+});
+
+describe('blockingUserFromEvent (fail closed on incomplete blocking events)', () => {
+  it('returns null when event.data is missing or has no uid', () => {
+    expect(blockingUserFromEvent(undefined)).toBeNull();
+    expect(blockingUserFromEvent(null)).toBeNull();
+    expect(blockingUserFromEvent({})).toBeNull();
+    expect(blockingUserFromEvent({ uid: '', email: 'a@utd.ac.th', emailVerified: true })).toBeNull();
+    expect(blockingUserFromEvent({ uid: 42 as unknown as string, email: 'a@utd.ac.th', emailVerified: true })).toBeNull();
+  });
+
+  it('passes uid/email through and treats anything but emailVerified === true as unverified', () => {
+    expect(blockingUserFromEvent({ uid: 'u1', email: 'a@utd.ac.th', emailVerified: true }))
+      .toEqual({ uid: 'u1', email: 'a@utd.ac.th', emailVerified: true });
+    expect(blockingUserFromEvent({ uid: 'u1', email: undefined, emailVerified: 'true' }))
+      .toEqual({ uid: 'u1', email: null, emailVerified: false });
+  });
+
+  it('has a Thai deny message', () => {
+    expect(DENY_MESSAGES.INCOMPLETE_EVENT).toContain('ติดต่อผู้ดูแลระบบ');
   });
 });

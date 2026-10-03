@@ -29,3 +29,50 @@ describe('Cloud Functions regions', () => {
     expect(src('src/lib/firebase.ts')).toContain('export const functions = getFunctions(app);');
   });
 });
+
+/**
+ * Runtime + SDK ของ Cloud Functions (ดู CLAUDE.md)
+ * - Node 22: Node 20 ถูกปิด 30 ต.ค. 2026; Node 24 รองรับเฉพาะรุ่นที่ 2 แต่ assignUserRole เป็นรุ่นแรก
+ * - firebase-functions >= 7.2.2: รุ่นเก่ากว่าปฏิเสธ blocking token ที่ aud เป็น *.cloudfunctions.net
+ *   (Firebase CLI ใช้ตอนสร้าง trigger ครั้งแรก) → ทุกคน login ไม่ได้ (auth/error-code:-47) เคยเกิดบน production
+ * - ตั้งแต่ v6 `import 'firebase-functions'` = v2 → assignUserRole ต้อง import จาก 'firebase-functions/v1'
+ */
+describe('Cloud Functions runtime + SDK', () => {
+  const pkg = JSON.parse(src('functions/package.json'));
+  const lock = JSON.parse(src('functions/package-lock.json'));
+
+  const atLeast = (version: string, min: string) => {
+    const a = version.split('.').map(Number);
+    const b = min.split('.').map(Number);
+    for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+    return true;
+  };
+
+  it('runs on Node 22 (not 20 = retired, not 24 = 2nd gen only)', () => {
+    expect(pkg.engines.node).toBe('22');
+    expect(lock.packages[''].engines.node).toBe('22');
+  });
+
+  it('locks firebase-functions >= 7.2.2 (accepts cloudfunctions.net blocking-token audience)', () => {
+    expect(pkg.dependencies['firebase-functions']).toBe('^7.4.0');
+    const locked = lock.packages['node_modules/firebase-functions'].version as string;
+    expect(atLeast(locked, '7.2.2'), `locked firebase-functions ${locked}`).toBe(true);
+  });
+
+  it('assignUserRole imports the v1 SDK explicitly; blocking functions use v2 identity', () => {
+    expect(src('functions/src/setUserRole.ts')).toMatch(/^import \* as functions from 'firebase-functions\/v1';$/m);
+    expect(src('functions/src/setUserRole.ts')).not.toMatch(/from 'firebase-functions';/);
+    expect(src('functions/src/authBlocking.ts')).toContain("from 'firebase-functions/v2/identity';");
+  });
+
+  it('blocking handler fails closed when the event has no user data (v7: event.data is optional)', () => {
+    const s = src('functions/src/authBlocking.ts');
+    expect(s).toContain('const user = blockingUserFromEvent(event.data);');
+    expect(s).toContain("throw new HttpsError('permission-denied', DENY_MESSAGES.INCOMPLETE_EVENT);");
+    expect(s).not.toContain('= event.data;');
+  });
+
+  it('deploy script names every function (never bare --only functions)', () => {
+    expect(pkg.scripts.deploy).toBe('firebase deploy --only functions:assignUserRole,functions:beforeCreate,functions:beforeSignIn');
+  });
+});

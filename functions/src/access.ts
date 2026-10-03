@@ -39,6 +39,7 @@ export interface AccessLookups {
 }
 
 export type DenyReason =
+  | 'INCOMPLETE_EVENT'
   | 'NO_EMAIL'
   | 'EMAIL_NOT_VERIFIED'
   | 'DOMAIN_NOT_ALLOWED'
@@ -53,6 +54,7 @@ export type AccessDecision =
 
 /** ข้อความที่ผู้ใช้เห็นบนหน้า Login (ส่งผ่าน HttpsError ของ blocking function) */
 export const DENY_MESSAGES: Record<DenyReason, string> = {
+  INCOMPLETE_EVENT: 'ไม่สามารถยืนยันข้อมูลบัญชีที่ใช้เข้าสู่ระบบได้ จึงไม่อนุญาตให้เข้าใช้งาน กรุณาลองใหม่อีกครั้ง หากยังไม่ได้ กรุณาติดต่อผู้ดูแลระบบ',
   NO_EMAIL: 'บัญชีนี้ไม่มีอีเมล จึงเข้าใช้งานระบบไม่ได้ กรุณาติดต่อผู้ดูแลระบบ',
   EMAIL_NOT_VERIFIED: 'อีเมลของบัญชีนี้ยังไม่ได้รับการยืนยัน จึงเข้าใช้งานระบบไม่ได้ กรุณาติดต่อผู้ดูแลระบบ',
   DOMAIN_NOT_ALLOWED: `ระบบนี้รองรับเฉพาะบัญชี Google Workspace ของโรงเรียน (@${ALLOWED_EMAIL_DOMAIN}) เท่านั้น หากเป็นบุคลากรหรือนักเรียนของโรงเรียน กรุณาติดต่อผู้ดูแลระบบ`,
@@ -60,6 +62,21 @@ export const DENY_MESSAGES: Record<DenyReason, string> = {
   AMBIGUOUS_RECORD: 'พบข้อมูลบุคคลซ้ำซ้อนสำหรับอีเมลนี้ ระบบจึงไม่อนุญาตให้เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบ',
   NOT_REGISTERED: 'ไม่พบบัญชีนี้ในทะเบียนบุคลากรหรือนักเรียนของโรงเรียน กรุณาติดต่อผู้ดูแลระบบ',
 };
+
+/**
+ * ข้อมูลผู้ใช้จาก blocking event — ตั้งแต่ firebase-functions v7 `event.data` เป็น `AuthUserRecord | undefined`
+ * ไม่มี data หรือไม่มี uid = null → ผู้เรียกต้องปฏิเสธ (fail closed: ไม่รู้ว่าเป็นใคร = ไม่ให้เข้า)
+ */
+export function blockingUserFromEvent(
+  data: { uid?: unknown; email?: unknown; emailVerified?: unknown } | null | undefined,
+): { uid: string; email: string | null; emailVerified: boolean } | null {
+  if (!data || typeof data.uid !== 'string' || data.uid === '') return null;
+  return {
+    uid: data.uid,
+    email: typeof data.email === 'string' ? data.email : null,
+    emailVerified: data.emailVerified === true,
+  };
+}
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 

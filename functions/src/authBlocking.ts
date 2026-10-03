@@ -7,7 +7,7 @@ import {
   AuthBlockingEvent,
 } from 'firebase-functions/v2/identity';
 import { FIRESTORE_DATABASE_ID } from './config';
-import { AccessLookups, DENY_MESSAGES, resolveAccess } from './access';
+import { AccessLookups, DENY_MESSAGES, blockingUserFromEvent, resolveAccess } from './access';
 
 /** customClaims ที่ blocking function ออกให้ (BeforeCreateResponse ไม่ได้ export จาก v2/identity) */
 type BlockingResponse = { customClaims: Record<string, unknown> };
@@ -43,7 +43,13 @@ const lookups: AccessLookups = {
 };
 
 async function grantAccess(event: AuthBlockingEvent): Promise<BlockingResponse> {
-  const { uid, email, emailVerified } = event.data;
+  // firebase-functions v7: event.data อาจเป็น undefined — ข้อมูลไม่ครบ = ปฏิเสธ (fail closed)
+  const user = blockingUserFromEvent(event.data);
+  if (!user) {
+    console.error(`[authBlocking] ${event.eventType} rejected: event without user data/uid`);
+    throw new HttpsError('permission-denied', DENY_MESSAGES.INCOMPLETE_EVENT);
+  }
+  const { uid, email, emailVerified } = user;
 
   let decision;
   try {
