@@ -6,6 +6,7 @@ import * as admin from 'firebase-admin';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { FIRESTORE_DATABASE_ID } from './config';
 import { selfDemotionError } from './roleGuards';
+import { isStaffInactive } from './access';
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -50,6 +51,10 @@ export const assignUserRole = functions.https.onCall(async (data, context) => {
   const staffSnap = await staffRef.get();
   if (!staffSnap.exists) {
     throw new functions.https.HttpsError('not-found', `No staff record "${staffId}".`);
+  }
+  // บุคลากรที่ถูกปิดการใช้งาน (setStaffActive) แก้บทบาทไม่ได้ — ต้องเปิดใช้งานก่อน
+  if (isStaffInactive(staffSnap.get('status'))) {
+    throw new functions.https.HttpsError('failed-precondition', 'บุคลากรนี้ถูกปิดการใช้งานอยู่ ต้องเปิดใช้งานก่อนจึงจะแก้ไขบทบาทได้');
   }
   const email = String(staffSnap.get('email') || '').trim().toLowerCase();
 

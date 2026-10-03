@@ -25,6 +25,23 @@ describe('Cloud Functions regions', () => {
     expect(s).not.toMatch(/\.region\(|region:/);
   });
 
+  it('createStaffMember / setStaffActive are default-region v1 callables too (no Cloud Run in us-central1)', () => {
+    const s = src('functions/src/staffAdmin.ts');
+    expect(s).toMatch(/^import \* as functions from 'firebase-functions\/v1';$/m);
+    expect(s).not.toMatch(/from 'firebase-functions';|from 'firebase-functions\/v2/);
+    expect(s).toContain('export const createStaffMember = functions.https.onCall(');
+    expect(s).toContain('export const setStaffActive = functions.https.onCall(');
+    expect(s).not.toMatch(/\.region\(|region:/);
+  });
+
+  it('every exported function is listed in the deploy command', () => {
+    const exported = (src('functions/src/index.ts').match(/export \{([^}]+)\}/g) || [])
+      .flatMap((m) => m.replace(/export \{|\}/g, '').split(',').map((x) => x.trim()).filter(Boolean));
+    const pkg = JSON.parse(src('functions/package.json'));
+    const deployed = String(pkg.scripts.deploy).replace('firebase deploy --only ', '').split(',').map((x) => x.replace('functions:', ''));
+    expect([...exported].sort()).toEqual([...deployed].sort());
+  });
+
   it('the client calls functions in the default region (us-central1)', () => {
     expect(src('src/lib/firebase.ts')).toContain('export const functions = getFunctions(app);');
   });
@@ -73,6 +90,6 @@ describe('Cloud Functions runtime + SDK', () => {
   });
 
   it('deploy script names every function (never bare --only functions)', () => {
-    expect(pkg.scripts.deploy).toBe('firebase deploy --only functions:assignUserRole,functions:beforeCreate,functions:beforeSignIn');
+    expect(pkg.scripts.deploy).toBe('firebase deploy --only functions:assignUserRole,functions:createStaffMember,functions:setStaffActive,functions:beforeCreate,functions:beforeSignIn');
   });
 });

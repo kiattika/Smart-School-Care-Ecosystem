@@ -5,6 +5,7 @@ import { Users, Save, Trash2, Loader2, Search, Info, Pencil, X, Lock, Unlock, Ca
 import { useElectiveActivities } from '../../hooks/useElectiveActivities';
 import { createElectiveActivity, updateElectiveActivity, removeElectiveActivityConfig } from '../../services/firestoreService';
 import { useStore } from '../../store';
+import { isStaffActive } from '../../lib/staffStatus';
 import {
   detectClubSlotsForTeacher,
   mergeClubSlotCandidates,
@@ -15,6 +16,8 @@ import {
 interface TeacherOption {
   uid: string;
   name: string;
+  /** false = ถูกปิดการใช้งาน (status INACTIVE) — ไม่แสดงในตัวเลือกให้เพิ่มใหม่ */
+  active: boolean;
 }
 
 const DAY_OPTIONS: { value: string; label: string }[] = [
@@ -69,10 +72,13 @@ export function ElectiveActivityManagerPage() {
   // ผูกด้วย Firebase Auth UID จริงเสมอ ตาม CLAUDE.md)
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'staff'), (snap) => {
+      // เก็บทุกคน (รวมที่ถูกปิดการใช้งาน) ไว้แสดงชื่อครูที่ถูกเลือกไว้แล้ว — แต่ตัวเลือกให้เพิ่มใหม่ (filteredTeachers)
+      // แสดงเฉพาะคนที่ active (ไม่งั้นแก้ไขชุมนุมเดิมแล้วครูที่ถูกปิดไปจะหายจาก selection แล้วถูกลบออกตอนบันทึก)
       const list: TeacherOption[] = snap.docs.map(d => {
         const data = d.data() as any;
         const name = `${data.prefix || ''}${data.firstName || ''} ${data.lastName || ''}`.trim() || data.email || d.id;
-        return { uid: d.id, name };
+        const active = isStaffActive(data);
+        return { uid: d.id, name: active ? name : `${name} (ปิดการใช้งาน)`, active };
       });
       list.sort((a, b) => a.name.localeCompare(b.name, 'th'));
       setTeachers(list);
@@ -105,7 +111,7 @@ export function ElectiveActivityManagerPage() {
 
   const filteredTeachers = useMemo(() => {
     const q = teacherSearch.trim().toLowerCase();
-    const base = teachers.filter(t => !teacherUidsInput.includes(t.uid) && !teacherUidsWithOtherClub.has(t.uid));
+    const base = teachers.filter(t => t.active && !teacherUidsInput.includes(t.uid) && !teacherUidsWithOtherClub.has(t.uid));
     if (!q) return base;
     return base.filter(t => t.name.toLowerCase().includes(q));
   }, [teachers, teacherSearch, teacherUidsInput, teacherUidsWithOtherClub]);

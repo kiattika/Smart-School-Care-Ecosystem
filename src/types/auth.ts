@@ -39,6 +39,9 @@ export interface UserProfile {
   lastName: string;
   position: string;         // ตำแหน่งทางราชการ เช่น ครู คศ.2
   roles: UserRole[];        // รองรับการเป็นหลายบทบาท เช่น ['HOMEROOM_TEACHER', 'HEAD_OF_DEPARTMENT']
+  /** 'INACTIVE' = ถูกปิดการใช้งาน (callable setStaffActive) — ไม่มี = ใช้งานได้ ดู src/lib/staffStatus.ts */
+  status?: 'ACTIVE' | 'INACTIVE';
+  deactivationReason?: string;
   
   // ข้อมูลผูกพันตามบทบาท (Contextual Assignments)
   assignments?: {

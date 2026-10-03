@@ -29,6 +29,7 @@ import { db } from '../lib/firebase';
 import { useStore } from '../store';
 import { cn, isSameRoom } from '../lib/utils';
 import { isSameStaff, staffIdOf } from '../lib/staffIdentity';
+import { isStaffActive } from '../lib/staffStatus';
 import {
   UserRole,
   SubstituteAssignment,
@@ -377,7 +378,8 @@ export function SubstituteTeachingModule() {
       conflict: checkCandidateConflict(t.email, slot, slot.date),
     });
 
-    const inDept = staffDirectory.filter(t => t.email?.toLowerCase() !== absentLower && t.assignments?.departmentId === deptId);
+    // ผู้ถูกปิดการใช้งาน (status INACTIVE) ไม่อยู่ในรายชื่อครูสอนแทนที่ให้เลือก
+    const inDept = staffDirectory.filter(t => isStaffActive(t) && t.email?.toLowerCase() !== absentLower && t.assignments?.departmentId === deptId);
     const tier1: SubCandidate[] = [];
     const tier2: SubCandidate[] = [];
     inDept.forEach(t => {
@@ -393,6 +395,7 @@ export function SubstituteTeachingModule() {
     const tier3: SubCandidate[] = (tier1Free.length === 0 && tier2Free.length === 0)
       ? staffDirectory
           .filter(t =>
+            isStaffActive(t) &&
             t.email?.toLowerCase() !== absentLower &&
             t.assignments?.departmentId !== deptId &&
             (t.roles.includes('SUBJECT_TEACHER') || t.roles.includes('HOMEROOM_TEACHER'))

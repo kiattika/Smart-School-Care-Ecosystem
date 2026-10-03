@@ -167,3 +167,28 @@ describe('blockingUserFromEvent (fail closed on incomplete blocking events)', ()
     expect(DENY_MESSAGES.INCOMPLETE_EVENT).toContain('ติดต่อผู้ดูแลระบบ');
   });
 });
+
+describe('resolveAccess — deactivated staff (setStaffActive)', () => {
+  it("denies staff whose status is 'INACTIVE' with STAFF_INACTIVE (checked before roles)", async () => {
+    const l = makeLookups({ staff: { 'gone@utd.ac.th': [{ id: 'teacher-30', roles: ['SUPER_ADMIN'], status: 'INACTIVE' }] } });
+    expect(await resolveAccess(verified('gone@utd.ac.th'), l)).toEqual({ allowed: false, reason: 'STAFF_INACTIVE' });
+    const noRoles = makeLookups({ staff: { 'gone2@utd.ac.th': [{ id: 'teacher-31', roles: [], status: 'INACTIVE' }] } });
+    expect(await resolveAccess(verified('gone2@utd.ac.th'), noRoles)).toEqual({ allowed: false, reason: 'STAFF_INACTIVE' });
+    // ถูกปิดแล้วต้องไม่ไหลไปหานักเรียน
+    expect(l.findStudentsByEmail).not.toHaveBeenCalled();
+  });
+
+  it('existing staff without a status field (data before this feature) are ACTIVE', async () => {
+    const l = makeLookups({ staff: { 'old@utd.ac.th': [{ id: 'teacher-32', roles: ['SUBJECT_TEACHER'] }] } });
+    expect(await resolveAccess(verified('old@utd.ac.th'), l)).toMatchObject({ allowed: true, staffId: 'teacher-32' });
+    for (const status of ['ACTIVE', null, '', 'inactive']) {
+      const s = makeLookups({ staff: { 'x@utd.ac.th': [{ id: 'teacher-33', roles: ['SUBJECT_TEACHER'], status }] } });
+      expect(await resolveAccess(verified('x@utd.ac.th'), s), String(status)).toMatchObject({ allowed: true });
+    }
+  });
+
+  it('has a Thai deny message', () => {
+    expect(DENY_MESSAGES.STAFF_INACTIVE).toContain('ปิดการใช้งาน');
+    expect(DENY_MESSAGES.STAFF_INACTIVE).toContain('ติดต่อผู้ดูแลระบบ');
+  });
+});

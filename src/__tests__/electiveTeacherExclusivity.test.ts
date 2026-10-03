@@ -18,8 +18,9 @@ describe('ElectiveActivityManagerPage: กรองครูที่มีช�
   });
 
   it('filteredTeachers ตัดครูที่มีชุมนุมอื่นออกจากรายชื่อค้นหา/เพิ่ม', () => {
+    // t.active: ตัดครูที่ถูกปิดการใช้งาน (status INACTIVE) ออกจากตัวเลือกด้วย — ดู staffStatus.test.ts
     expect(src).toContain(
-      'const base = teachers.filter(t => !teacherUidsInput.includes(t.uid) && !teacherUidsWithOtherClub.has(t.uid));'
+      'const base = teachers.filter(t => t.active && !teacherUidsInput.includes(t.uid) && !teacherUidsWithOtherClub.has(t.uid));'
     );
   });
 

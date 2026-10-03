@@ -5,6 +5,7 @@ import { DepartmentConfig } from '../../types';
 import { saveDepartmentConfig, deactivateDepartmentConfig } from '../../services/firestoreService';
 import { DEFAULT_DEPARTMENTS } from '../../lib/departments';
 import { db } from '../../lib/firebase';
+import { isStaffActive } from '../../lib/staffStatus';
 
 /**
  * เมนูแอดมิน: เพิ่ม/แก้ไข/ปิดใช้งาน กลุ่มสาระฯ/กลุ่มงาน (Firestore: department_config)
@@ -44,7 +45,8 @@ export function DepartmentManagerModal({
   useEffect(() => {
     if (!isOpen) return;
     const unsub = onSnapshot(collection(db, 'staff'), (snap) => {
-      const list = snap.docs.map(d => {
+      // ผู้ถูกปิดการใช้งาน (status INACTIVE) ไม่อยู่ในรายชื่อให้เลือกเป็นผู้รับผิดชอบสำรอง
+      const list = snap.docs.filter(d => isStaffActive(d.data())).map(d => {
         const data = d.data() as any;
         const name = `${data.prefix || ''}${data.firstName || ''} ${data.lastName || ''}`.trim() || data.email || d.id;
         return { uid: d.id, name };

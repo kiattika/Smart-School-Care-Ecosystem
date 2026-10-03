@@ -25,7 +25,10 @@ import {
   FileSpreadsheet,
   Loader2,
   RefreshCw,
-  Layers
+  Layers,
+  UserPlus,
+  Ban,
+  RotateCcw
 } from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -35,6 +38,8 @@ import { useStore } from '../store';
 import { UserProfile, UserRole } from '../types';
 import { useDepartments } from '../hooks/useDepartments';
 import { normalizeEmail } from '../lib/normalizeEmail';
+import { isStaffActive } from '../lib/staffStatus';
+import { callableErrorMessage } from '../lib/callableErrors';
 import { DepartmentManagerModal } from './admin/DepartmentManagerModal';
 
 // พจนานุกรมชื่อภาษาไทยของบทบาท
@@ -119,6 +124,8 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
             lastName: data.lastName || '',
             position: data.position || 'ครูผู้สอน',
             roles: roles,
+            status: data.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
+            deactivationReason: data.deactivationReason || '',
             assignments: data.assignments || {
               departmentId: data.departmentId || '',
               homeroomClass: data.homeroomClass || '',
@@ -177,6 +184,22 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
 
   const [showDeptManager, setShowDeptManager] = useState(false);
 
+  // ตัวกรองสถานะ: ALL (แสดงทุกคน แถวที่ปิดการใช้งานเป็นสีจาง) / ACTIVE / INACTIVE
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
+
+  // เพิ่มบุคลากรรายบุคคล — callable createStaffMember (ตรวจซ้ำ/โดเมน/บทบาทที่ฝั่ง function)
+  const EMPTY_ADD_FORM = { staffId: '', email: '', prefix: '', firstName: '', lastName: '', position: '', departmentId: '', roles: ['SUBJECT_TEACHER'] as UserRole[] };
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addForm, setAddForm] = useState(EMPTY_ADD_FORM);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [isAdding, setIsAdding] = useState(false);
+
+  // ปิด/เปิดการใช้งาน — callable setStaffActive (ไม่ลบ staff doc)
+  const [pendingActive, setPendingActive] = useState<{ staff: UserProfile; active: boolean } | null>(null);
+  const [activeReason, setActiveReason] = useState('');
+  const [activeError, setActiveError] = useState<string | null>(null);
+  const [isTogglingActive, setIsTogglingActive] = useState(false);
+
   // กรองตารางรายชื่อบุคลากรตามเงื่อนไขค้นหา
   const filteredStaff = useMemo(() => {
     return staffList.filter(staff => {
@@ -191,9 +214,77 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
 
       const matchesRole = selectedRole === 'ALL' || staff.roles.includes(selectedRole as UserRole);
 
-      return matchesSearch && matchesDept && matchesRole;
+      const active = isStaffActive(staff);
+      const matchesStatus = statusFilter === 'ALL' || (statusFilter === 'ACTIVE' ? active : !active);
+
+      return matchesSearch && matchesDept && matchesRole && matchesStatus;
     });
-  }, [staffList, searchQuery, selectedDept, selectedRole]);
+  }, [staffList, searchQuery, selectedDept, selectedRole, statusFilter]);
+
+  // ตัวเลข "บุคลากรทั้งหมด" นับเฉพาะคนที่ใช้งานอยู่
+  const activeStaffCount = useMemo(() => staffList.filter(s => isStaffActive(s)).length, [staffList]);
+  const inactiveStaffCount = staffList.length - activeStaffCount;
+
+  const handleCreateStaff = async () => {
+    if (!addForm.staffId.trim() || !addForm.email.trim() || !addForm.firstName.trim() || !addForm.lastName.trim()) {
+      setAddError('กรุณากรอกรหัสบุคลากร อีเมล ชื่อ และนามสกุล');
+      return;
+    }
+    if (addForm.roles.length === 0) {
+      setAddError('ต้องเลือกบทบาทอย่างน้อย 1 บทบาท');
+      return;
+    }
+    setAddError(null);
+    setIsAdding(true);
+    try {
+      const createStaffMemberFn = httpsCallable(functions, 'createStaffMember');
+      await createStaffMemberFn({
+        staffId: addForm.staffId.trim(),
+        email: normalizeEmail(addForm.email),
+        roles: addForm.roles,
+        prefix: addForm.prefix,
+        firstName: addForm.firstName,
+        lastName: addForm.lastName,
+        position: addForm.position,
+        departmentId: addForm.departmentId,
+      });
+      setShowAddModal(false);
+      triggerToast(`เพิ่มบุคลากร ${addForm.prefix}${addForm.firstName} ${addForm.lastName} (${addForm.staffId.trim()}) แล้ว`);
+      setAddForm(EMPTY_ADD_FORM);
+    } catch (err) {
+      // ข้อความภาษาไทยจาก function (รหัสซ้ำ / อีเมลซ้ำ / โดเมนผิด / บทบาทไม่ถูกต้อง ฯลฯ)
+      setAddError(callableErrorMessage(err, 'เพิ่มบุคลากรไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'));
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const openSetActive = (staff: UserProfile, active: boolean) => {
+    setPendingActive({ staff, active });
+    setActiveReason('');
+    setActiveError(null);
+  };
+
+  const handleConfirmSetActive = async () => {
+    if (!pendingActive) return;
+    const { staff, active } = pendingActive;
+    if (!active && !activeReason.trim()) {
+      setActiveError('กรุณาระบุเหตุผลในการปิดการใช้งาน');
+      return;
+    }
+    setActiveError(null);
+    setIsTogglingActive(true);
+    try {
+      const setStaffActiveFn = httpsCallable(functions, 'setStaffActive');
+      await setStaffActiveFn({ staffId: staff.id, active, reason: activeReason.trim() });
+      setPendingActive(null);
+      triggerToast(`${active ? 'เปิดใช้งาน' : 'ปิดการใช้งาน'} ${staff.prefix}${staff.firstName} ${staff.lastName} แล้ว`);
+    } catch (err) {
+      setActiveError(callableErrorMessage(err, 'ทำรายการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'));
+    } finally {
+      setIsTogglingActive(false);
+    }
+  };
 
   // ฟังก์ชันแสดงการแจ้งเตือน
   const triggerToast = (msg: string) => {
@@ -449,6 +540,15 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
 
         {/* Action button and Info stats pill */}
         <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
+          {/* เพิ่มบุคลากรรายบุคคล */}
+          <button
+            onClick={() => { setAddForm(EMPTY_ADD_FORM); setAddError(null); setShowAddModal(true); }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all active:scale-[0.98] cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>เพิ่มบุคลากร</span>
+          </button>
+
           {/* จัดการกลุ่มสาระฯ */}
           <button
             onClick={() => setShowDeptManager(true)}
@@ -464,8 +564,11 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
               <Users className="w-4 h-4" />
             </div>
             <div>
-              <div className="text-[10px] text-slate-400">บุคลากรทั้งหมด</div>
-              <div className="text-sm font-bold text-white font-mono">{staffList.length} รายชื่อ</div>
+              <div className="text-[10px] text-slate-400">บุคลากรทั้งหมด (ใช้งานอยู่)</div>
+              <div className="text-sm font-bold text-white font-mono">{activeStaffCount} รายชื่อ</div>
+              {inactiveStaffCount > 0 && (
+                <div className="text-[10px] text-slate-500">ปิดการใช้งาน {inactiveStaffCount} รายชื่อ</div>
+              )}
             </div>
           </div>
         </div>
@@ -519,6 +622,21 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
             {Object.entries(ROLE_NAMES_TH).map(([roleKey, roleName]) => (
               <option key={roleKey} value={roleKey}>{roleName}</option>
             ))}
+          </select>
+          <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+        </div>
+
+        {/* Filter Status */}
+        <div className="w-full md:w-48 relative">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'ALL' | 'ACTIVE' | 'INACTIVE')}
+            aria-label="สถานะบุคลากร"
+            className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-slate-200 focus:border-indigo-500 outline-none transition-all appearance-none cursor-pointer"
+          >
+            <option value="ALL">สถานะ: ทั้งหมด</option>
+            <option value="ACTIVE">สถานะ: ใช้งานอยู่</option>
+            <option value="INACTIVE">สถานะ: ปิดการใช้งาน</option>
           </select>
           <ChevronDown className="absolute right-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
         </div>
@@ -586,7 +704,7 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                   const currentDeptName = departments.find(d => d.id === staff.assignments?.departmentId)?.name || 'ไม่ได้ระบุสังกัด';
                   
                   return (
-                    <tr key={staff.id} className="hover:bg-white/[0.02] transition-colors group">
+                    <tr key={staff.id} className={`hover:bg-white/[0.02] transition-colors group ${isStaffActive(staff) ? '' : 'opacity-50'}`}>
                       <td className="px-6 py-4 font-mono text-xs">
                         <span className="text-slate-500 text-[10px] block">ID: {staff.id}</span>
                         <span className="text-indigo-400 block max-w-[150px] truncate" title={staff.email}>{staff.email}</span>
@@ -595,6 +713,14 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                         <div className="text-xs font-bold text-slate-100 group-hover:text-white transition-colors">
                           {staff.prefix}{staff.firstName} {staff.lastName}
                         </div>
+                        {!isStaffActive(staff) && (
+                          <span
+                            className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-700/60 border border-slate-600 text-[10px] font-bold text-slate-300"
+                            title={staff.deactivationReason ? `เหตุผล: ${staff.deactivationReason}` : undefined}
+                          >
+                            <Ban className="w-3 h-3" /> ปิดการใช้งาน
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <span className="text-xs text-slate-400">{staff.position || 'ครูผู้สอน'}</span>
@@ -647,13 +773,36 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <button
-                          onClick={() => handleEditClick(staff)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-indigo-600/20 hover:text-indigo-400 border border-slate-700/60 hover:border-indigo-500/30 text-slate-300 text-xs font-semibold rounded-lg transition-all active:scale-[0.97]"
-                        >
-                          <Edit2 className="w-3 h-3" />
-                          <span>แก้ไขสิทธิ์</span>
-                        </button>
+                        <div className="inline-flex flex-wrap justify-end gap-1.5">
+                          {isStaffActive(staff) ? (
+                            <>
+                              <button
+                                onClick={() => handleEditClick(staff)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-indigo-600/20 hover:text-indigo-400 border border-slate-700/60 hover:border-indigo-500/30 text-slate-300 text-xs font-semibold rounded-lg transition-all active:scale-[0.97]"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                                <span>แก้ไขสิทธิ์</span>
+                              </button>
+                              <button
+                                onClick={() => openSetActive(staff, false)}
+                                disabled={!!currentUser?.staffId && currentUser.staffId === staff.id}
+                                title={currentUser?.staffId === staff.id ? 'ปิดการใช้งานบัญชีของตัวเองไม่ได้' : undefined}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-rose-600/20 hover:text-rose-400 border border-slate-700/60 hover:border-rose-500/30 text-slate-300 text-xs font-semibold rounded-lg transition-all active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                <Ban className="w-3 h-3" />
+                                <span>ปิดการใช้งาน</span>
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => openSetActive(staff, true)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-emerald-600/20 hover:text-emerald-400 border border-slate-700/60 hover:border-emerald-500/30 text-slate-300 text-xs font-semibold rounded-lg transition-all active:scale-[0.97]"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>เปิดใช้งาน</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -964,6 +1113,133 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* เพิ่มบุคลากรรายบุคคล */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-40 overflow-y-auto">
+          <div className="bg-[#11151d] border border-white/10 rounded-2xl max-w-xl w-full shadow-2xl my-8 text-slate-200">
+            <div className="p-5 border-b border-white/10 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2"><UserPlus className="w-4 h-4 text-indigo-400" /> เพิ่มบุคลากร</h3>
+              <button onClick={() => setShowAddModal(false)} className="text-slate-400 hover:text-white" aria-label="ปิด"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="space-y-1 block">
+                  <span className="text-slate-400">รหัสบุคลากร (teacherId) *</span>
+                  <input value={addForm.staffId} onChange={e => setAddForm(f => ({ ...f, staffId: e.target.value }))} placeholder="เช่น teacher-41"
+                    className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-indigo-500 font-mono" />
+                </label>
+                <label className="space-y-1 block">
+                  <span className="text-slate-400">อีเมลโรงเรียน (@utd.ac.th) *</span>
+                  <input type="email" value={addForm.email} onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))} placeholder="name@utd.ac.th"
+                    className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-indigo-500" />
+                </label>
+                <label className="space-y-1 block">
+                  <span className="text-slate-400">คำนำหน้า</span>
+                  <input value={addForm.prefix} onChange={e => setAddForm(f => ({ ...f, prefix: e.target.value }))} placeholder="นาย / นาง / นางสาว"
+                    className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-indigo-500" />
+                </label>
+                <label className="space-y-1 block">
+                  <span className="text-slate-400">ตำแหน่ง</span>
+                  <input value={addForm.position} onChange={e => setAddForm(f => ({ ...f, position: e.target.value }))}
+                    className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-indigo-500" />
+                </label>
+                <label className="space-y-1 block">
+                  <span className="text-slate-400">ชื่อ *</span>
+                  <input value={addForm.firstName} onChange={e => setAddForm(f => ({ ...f, firstName: e.target.value }))}
+                    className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-indigo-500" />
+                </label>
+                <label className="space-y-1 block">
+                  <span className="text-slate-400">นามสกุล *</span>
+                  <input value={addForm.lastName} onChange={e => setAddForm(f => ({ ...f, lastName: e.target.value }))}
+                    className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-indigo-500" />
+                </label>
+                <label className="space-y-1 block sm:col-span-2">
+                  <span className="text-slate-400">สังกัดกลุ่มสาระฯ</span>
+                  <select value={addForm.departmentId} onChange={e => setAddForm(f => ({ ...f, departmentId: e.target.value }))}
+                    className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-indigo-500">
+                    <option value="">-- ไม่ระบุ --</option>
+                    {departments.map(dept => <option key={dept.id} value={dept.id}>{dept.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-slate-400">บทบาท * (อย่างน้อย 1)</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                  {(Object.entries(ROLE_NAMES_TH) as [UserRole, string][])
+                    .filter(([roleKey]) => roleKey !== 'STUDENT' && roleKey !== 'PARENT')
+                    .map(([roleKey, roleName]) => (
+                      <label key={roleKey} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-slate-900/60 border border-white/5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={addForm.roles.includes(roleKey)}
+                          onChange={e => setAddForm(f => ({ ...f, roles: e.target.checked ? [...f.roles, roleKey] : f.roles.filter(r => r !== roleKey) }))}
+                        />
+                        <span>{roleName}</span>
+                      </label>
+                    ))}
+                </div>
+              </div>
+              {addError && (
+                <div role="alert" className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /> <span>{addError}</span>
+                </div>
+              )}
+            </div>
+            <div className="p-5 border-t border-white/10 flex justify-end gap-2">
+              <button onClick={() => setShowAddModal(false)} className="px-4 py-2 rounded-lg text-xs font-bold text-slate-300 hover:bg-white/5">ยกเลิก</button>
+              <button onClick={handleCreateStaff} disabled={isAdding}
+                className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 inline-flex items-center gap-1.5">
+                {isAdding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} บันทึก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ยืนยันปิด/เปิดการใช้งาน */}
+      {pendingActive && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-40">
+          <div className="bg-[#11151d] border border-white/10 rounded-2xl max-w-md w-full shadow-2xl text-slate-200">
+            <div className={`p-5 border-b border-white/10 ${pendingActive.active ? 'bg-emerald-950/30' : 'bg-rose-950/30'}`}>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                {pendingActive.active ? <RotateCcw className="w-4 h-4 text-emerald-400" /> : <Ban className="w-4 h-4 text-rose-400" />}
+                {pendingActive.active ? 'ยืนยันเปิดใช้งานบุคลากร' : 'ยืนยันปิดการใช้งานบุคลากร'}
+              </h3>
+            </div>
+            <div className="p-5 space-y-3 text-xs">
+              <p className="text-slate-300">
+                {pendingActive.staff.prefix}{pendingActive.staff.firstName} {pendingActive.staff.lastName}
+                <span className="text-slate-500 font-mono"> ({pendingActive.staff.id} · {pendingActive.staff.email})</span>
+              </p>
+              <p className="text-slate-400">
+                {pendingActive.active
+                  ? 'เมื่อเปิดใช้งาน บุคลากรจะเข้าสู่ระบบได้อีกครั้ง (สิทธิ์จะกลับมาเมื่อ login ครั้งถัดไป)'
+                  : 'เมื่อปิดการใช้งาน บุคลากรจะเข้าสู่ระบบไม่ได้ และถูกออกจากระบบเมื่อ session หมดอายุ (ไม่เกิน 1 ชั่วโมง) — ข้อมูลและประวัติเดิมยังอยู่ครบ ไม่ถูกลบ'}
+              </p>
+              <label className="space-y-1 block">
+                <span className="text-slate-400">เหตุผล{pendingActive.active ? ' (ไม่บังคับ)' : ' *'}</span>
+                <textarea value={activeReason} onChange={e => setActiveReason(e.target.value)} rows={3} maxLength={500}
+                  placeholder={pendingActive.active ? '' : 'เช่น ย้ายไปโรงเรียนอื่น / ลาออก / เกษียณ'}
+                  className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-indigo-500" />
+              </label>
+              {activeError && (
+                <div role="alert" className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /> <span>{activeError}</span>
+                </div>
+              )}
+            </div>
+            <div className="p-5 border-t border-white/10 flex justify-end gap-2">
+              <button onClick={() => setPendingActive(null)} className="px-4 py-2 rounded-lg text-xs font-bold text-slate-300 hover:bg-white/5">ยกเลิก</button>
+              <button onClick={handleConfirmSetActive} disabled={isTogglingActive}
+                className={`px-4 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-60 inline-flex items-center gap-1.5 ${pendingActive.active ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-rose-600 hover:bg-rose-500'}`}>
+                {isTogglingActive && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {pendingActive.active ? 'เปิดใช้งาน' : 'ปิดการใช้งาน'}
+              </button>
+            </div>
           </div>
         </div>
       )}
