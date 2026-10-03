@@ -8,6 +8,10 @@
 
 - Firebase Project ID: `kiattisak-project-001` (ดูจาก `firebase-applet-config.json` field `projectId` — **ห้ามสับสนกับ `firestoreDatabaseId`** ซึ่งเป็นคนละ field คนละวัตถุประสงค์ เคยทำให้ seed script กับ client เชื่อมกันคนละ namespace มาแล้ว)
 - Firestore ใช้ named database (ไม่ใช่ default) — ต้องระบุ `firestoreDatabaseId` ตอนเรียก `getFirestore()`
+  - **Cloud Functions ด้วย:** ห้ามใช้ `admin.firestore()` / `getFirestore()` แบบไม่ระบุ ID (ได้ `(default)` ที่ว่างเปล่า — เคยทำให้ `onUserCreated` หา staff ไม่เจอทุกครั้ง และ `assignUserRole` เขียน `staff.roles` ผิดฐานข้อมูล) ให้ใช้ `getFirestore(admin.app(), FIRESTORE_DATABASE_ID)` จาก `functions/src/config.ts` (มี test `functionsDatabaseId.test.ts` กันค่าเพี้ยนจาก client)
+  - `firebase.json` → `firestore.database` ต้องเป็น ID เดียวกัน ไม่งั้น `firebase deploy --only firestore` ส่ง rules/indexes ไปที่ `(default)` (test เดียวกันตรวจทั้งสองจุด)
+  - ใน Functions ให้ import `FieldValue` จาก `firebase-admin/firestore` — `admin.firestore.FieldValue` เป็น `undefined` ใน Functions emulator
+- การเปลี่ยนบทบาท (roles) ของผู้ใช้ต้องผ่าน callable `assignUserRole` เท่านั้น (เขียน custom claims + `staff.roles` ในที่เดียว) — client ห้ามเขียน `staff.roles` เองตอนแก้สิทธิ์
 - Node.js local คือ v24 แต่ Cloud Functions Gen 1 ต้องการ ≤ Node 20 — ระวังเวลา deploy Functions
 
 ---
@@ -107,7 +111,8 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 
 - **ผูกด้วย Firebase Auth UID หรืออีเมลจริงเท่านั้น** ห้ามสร้าง placeholder เช่น `parent_38501`, `teacher-01` แล้วหวังว่าจะ resolve ทีหลัง
 - Field ชื่อ `parentUid` (ไม่ใช่ `parentId`) ใช้ให้สอดคล้องกันทุก collection
-- Staff/teacher document ID **ต้องเป็น Firebase Auth UID จริง** (`staff/{uid}`) ไม่ใช่ ID จากไฟล์ CSV/Excel ที่ import มา (เช่น `teacher-01`) — เพราะระบบ auth (`buildAppUser`) ค้นหา role จาก `staff/{fbUser.uid}` โดยตรง
+- Staff document ID = `teacherId` จากไฟล์ import (ไม่ใช่ Auth UID) — ผู้ใช้ผูกกับ staff doc ผ่าน custom claim `staffId` ที่ blocking functions (`functions/src/authBlocking.ts`) ออกให้ตอน login; client อ่าน `staff/{claims.staffId}`, rules ใช้ `request.auth.token.staffId` (ห้ามใช้ `staff/{request.auth.uid}`)
+- สิทธิ์เข้าระบบบังคับที่เซิร์ฟเวอร์: `resolveAccess()` (`functions/src/access.ts`) — ต้อง @utd.ac.th + emailVerified + อยู่ใน staff (roles ไม่ว่าง) หรือ students (field email / `it{studentId}@utd.ac.th`) ไม่งั้นปฏิเสธ; client ห้ามเดา role/ห้าม default role. ทดสอบ blocking functions บน emulator จริงด้วย `npm run emulators:exec:auth` (`firebase.authtest.json` พอร์ตแยก 9399/8299/5299)
 - ถ้าจับคู่ตัวตนจากไฟล์ import ไม่ได้ (เช่น หาอีเมล/ชื่อไม่เจอใน staff จริง) **ห้ามเดา/fabricate ID** — ให้บันทึกเป็น `unlinkedTeacherName`/`unlinkedTeacherEmail` พร้อม flag เตือนใน UI ให้ admin ไปเชื่อมเอง
 - เปรียบเทียบชื่อห้อง/ชั้นเรียนด้วย `isSameRoom()` utility (ใน `src/lib/utils.ts`) เสมอ ห้ามใช้ `===` ตรงๆ เพราะข้อมูลเก่าปนกันระหว่างฟอร์แมต `ม.5/8` และ `M.5/8`
 
@@ -123,6 +128,8 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - `.env` ต้องมี `VITE_USE_FIREBASE_EMULATOR=true` และต้อง restart `npm run dev` ทุกครั้งที่แก้ `.env` (Vite อ่านค่าแค่ตอน start)
 
 ### PowerShell (Windows)
+
+- Line ending: repo บังคับ LF ด้วย `.gitattributes` (`* text=auto eol=lf`) แต่ working tree บน Windows อาจยังเป็น CRLF — เทสต์ที่อ่านไฟล์ source มาเทียบข้อความต้องใช้ `readSource()` จาก `src/__tests__/helpers/readSource.ts` (แปลง `\r\n`→`\n`) ห้ามใช้ `fs.readFileSync` ตรงๆ; rules tests skip เองเมื่อไม่มี `FIRESTORE_EMULATOR_HOST`/`FIREBASE_STORAGE_EMULATOR_HOST` (รันจริงผ่าน `emulators:exec*`)
 
 - ใช้ `[System.IO.File]::WriteAllText()` เขียนไฟล์ config เสมอ **ห้ามใช้ `Out-File`/`Set-Content -Encoding utf8`** เพราะ PowerShell 5.1 จะแอบใส่ UTF-8 BOM ทำให้ Firebase CLI parse JSON ไม่ผ่าน
 

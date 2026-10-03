@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 /**
  * ApprovalsPortal.tsx เพิ่มแท็บ "จัดการชุมนุม"/"จัดการคณะสี" ให้เฉพาะ role ที่มีสิทธิ์เขียนจริง
@@ -10,11 +10,10 @@ import * as path from 'path';
  * listener จำนวนมาก (ตามรูปแบบเดิมของโปรเจกต์ เช่น multiTeacherSchedule.test.ts)
  */
 describe('ApprovalsPortal: แท็บเพิ่มเติมต้องตรงกับสิทธิ์จริงใน firestore.rules เท่านั้น', () => {
-  const approvalsPortalSrc = fs.readFileSync(
-    path.resolve(__dirname, '../ApprovalsPortal.tsx'), 'utf8'
-  );
-  const appSrc = fs.readFileSync(path.resolve(__dirname, '../App.tsx'), 'utf8');
-  const rulesSrc = fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8');
+  const approvalsPortalSrc = readSource(
+    path.resolve(__dirname, '../ApprovalsPortal.tsx'));
+  const appSrc = readSource(path.resolve(__dirname, '../App.tsx'));
+  const rulesSrc = readSource(path.resolve(__dirname, '../../firestore.rules'));
 
   it('firestore.rules: มีแค่ ACADEMIC_HEAD (นอกจาก SUPER_ADMIN) ที่เขียน elective_activities_config/house_config ได้', () => {
     const electiveBlock = rulesSrc.match(/match \/elective_activities_config\/\{configId\} \{[\s\S]*?\n {4}\}/)?.[0] || '';

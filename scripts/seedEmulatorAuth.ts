@@ -69,6 +69,14 @@ async function fsSet(path: string, data: Record<string, any>): Promise<void> {
   }
 }
 
+/** ลบ doc (ไม่มีอยู่แล้ว = ไม่เป็นไร) */
+async function fsDelete(path: string): Promise<void> {
+  const res = await fetch(`${FS_BASE}/${path}`, { method: 'DELETE', headers: { Authorization: 'Bearer owner' } });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`fsDelete ${path} → ${res.status} ${(await res.text()).slice(0, 200)}`);
+  }
+}
+
 async function fsGetExists(path: string): Promise<boolean> {
   const res = await fetch(`${FS_BASE}/${path}`, { headers: { Authorization: 'Bearer owner' } });
   return res.ok;
@@ -287,7 +295,10 @@ export const SEEDED_TEST_USERS: TestUserDef[] = [
     firstName: 'ผู้ปกครอง',
     lastName: 'รักเรียน',
     position: 'ผู้ปกครองนักเรียน (นายยศกร รักเรียน ม.5/8 เลขที่ 1)',
-    roles: [],
+    // ⚠️ อีเมลไม่ใช่ @utd.ac.th → blocking function (beforeUserSignedIn) ปฏิเสธการ login เมื่อรัน
+    // Functions emulator อยู่ — ตามกติกาปัจจุบัน ผู้ปกครองจะเข้าได้เมื่อมีระบบ LINE login เท่านั้น
+    // บัญชีนี้ยังใช้เป็นข้อมูลผูก parentUid ของ students/38501 สำหรับทดสอบ rules
+    roles: ['PARENT'],
     studentInfo: {
       studentId: '38501',
       studentNumber: 1,
@@ -349,43 +360,42 @@ export async function seedEmulatorAuth() {
         }
       }
 
-      // 2. Assign Custom User Claims (matching firestore.rules request.auth.token.roles)
-      await auth.setCustomUserClaims(userRecord.uid, {
-        roles: userDef.roles,
-        primaryRole: userDef.roles[0] || (userDef.roles.length === 0 ? 'PARENT' : 'USER'),
-        email: userDef.email,
-        emailVerified: true
-      });
-      console.log(`   🏷️ Set custom claims: roles=[${userDef.roles.join(', ')}]`);
+      // 2. Custom claims — โครงสร้างเดียวกับที่ blocking functions (functions/src/authBlocking.ts) ออกให้:
+      //    บุคลากร { roles, primaryRole, staffId }, นักเรียน { roles, primaryRole, studentId }
+      //    (blocking function จะออก claims ชุดเดียวกันซ้ำตอน login อยู่แล้วเมื่อรัน Functions emulator —
+      //    ตั้งไว้ตรงนี้ด้วยเพื่อให้ token ที่ออกก่อนหน้า/การทดสอบที่ไม่ผ่าน login ใช้โครงสร้างเดียวกัน)
+      const isStaff = !userDef.studentInfo;
+      const isStudent = userDef.roles.includes('STUDENT');
+      // staff doc id ของบัญชีทดสอบ = uid ที่กำหนดไว้ (ของจริงจากไฟล์ import = teacherId) — claim staffId ชี้ doc นี้
+      const staffId = userRecord.uid;
+      const claims: Record<string, unknown> = { roles: userDef.roles };
+      if (userDef.roles.length > 0) claims.primaryRole = userDef.roles[0];
+      if (isStaff) claims.staffId = staffId;
+      if (isStudent && userDef.studentInfo) claims.studentId = userDef.studentInfo.studentId;
+      await auth.setCustomUserClaims(userRecord.uid, claims);
+      console.log(`   🏷️ Set custom claims: ${JSON.stringify(claims)}`);
 
-      // 3. Write Staff/User Profile in Firestore
-      const staffDocRef = db.collection('staff').doc(userRecord.uid);
-      await staffDocRef.set({
-        id: userRecord.uid,
-        email: userDef.email,
-        displayName: userDef.displayName,
-        prefix: userDef.prefix,
-        firstName: userDef.firstName,
-        lastName: userDef.lastName,
-        position: userDef.position,
-        roles: userDef.roles,
-        assignments: userDef.assignments || {},
-        updatedAt: FieldValue.serverTimestamp()
-      }, { merge: true });
-
-      // Also create an alias by email for robust lookups
-      await db.collection('staff').doc(userDef.email).set({
-        id: userRecord.uid,
-        email: userDef.email,
-        displayName: userDef.displayName,
-        prefix: userDef.prefix,
-        firstName: userDef.firstName,
-        lastName: userDef.lastName,
-        position: userDef.position,
-        roles: userDef.roles,
-        assignments: userDef.assignments || {},
-        updatedAt: FieldValue.serverTimestamp()
-      }, { merge: true });
+      // 3. Staff profile (บุคลากรเท่านั้น — นักเรียน/ผู้ปกครองไม่มี staff doc)
+      //    ลบ doc เก่าที่ seed รุ่นก่อนเขียนไว้: alias staff/{email} (ทำให้ staff ซ้ำ 2 แถว และ
+      //    email query เจอ 2 doc) และ staff/{uid} ของนักเรียน/ผู้ปกครอง (จะถูกนับเป็นบุคลากร)
+      await fsDelete(`staff/${encodeURIComponent(userDef.email)}`);
+      await fsDelete(`teachers/${encodeURIComponent(userDef.email)}`);
+      if (isStaff) {
+        await db.collection('staff').doc(staffId).set({
+          id: staffId,
+          email: userDef.email.toLowerCase(),
+          displayName: userDef.displayName,
+          prefix: userDef.prefix,
+          firstName: userDef.firstName,
+          lastName: userDef.lastName,
+          position: userDef.position,
+          roles: userDef.roles,
+          assignments: userDef.assignments || {},
+          updatedAt: FieldValue.serverTimestamp()
+        }, { merge: true });
+      } else {
+        await fsDelete(`staff/${encodeURIComponent(userRecord.uid)}`);
+      }
 
       // 4. If student/parent info is attached, LINK the test account to a REAL student doc.
       //    เดิม seed เขียนทับชื่อ/ชั้น/คะแนนเป็นค่าปลอม ("กิตติคุณ มงคลศิลป์") ทับข้อมูลจริงจากไฟล์ import
@@ -395,12 +405,17 @@ export async function seedEmulatorAuth() {
       if (userDef.studentInfo) {
         const studentDocRef = db.collection('students').doc(userDef.studentInfo.studentId);
         const existing = await studentDocRef.get();
-        const linkFields = {
-          studentUid: userDef.uid,
+        // บัญชีนักเรียน: studentUid + email (blocking function หา students ด้วย field email —
+        // student.test@utd.ac.th ไม่ตรงรูปแบบ it{studentId}@utd.ac.th) / บัญชีผู้ปกครอง: ไม่แตะ studentUid
+        const linkFields: Record<string, any> = {
           parentUid: userDef.studentInfo.parentId,
           parentId: userDef.studentInfo.parentId,
           updatedAt: FieldValue.serverTimestamp(),
         };
+        if (isStudent) {
+          linkFields.studentUid = userRecord.uid;
+          linkFields.email = userDef.email.toLowerCase();
+        }
         if (existing.exists) {
           // ข้อมูลจริงจากไฟล์ import อยู่แล้ว — แตะแค่ field ผูกบัญชี ไม่ยุ่งชื่อ/ชั้น/คะแนน
           await studentDocRef.set(linkFields, { merge: true });

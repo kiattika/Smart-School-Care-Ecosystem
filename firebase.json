@@ -1,10 +1,24 @@
 {
+  "functions": {
+    "source": "functions",
+    "predeploy": [
+      "npm --prefix \"$RESOURCE_DIR\" run build"
+    ]
+  },
   "firestore": {
+    "database": "ai-studio-smartschoolcaree-3b0997bf-b447-4da7-ac95-d7b1332165e0",
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
   "storage": {
     "rules": "storage.rules"
+  },
+  "hosting": {
+    "public": "dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      { "source": "**", "destination": "/index.html" }
+    ]
   },
   "emulators": {
     "auth": {
@@ -17,6 +31,10 @@
     },
     "storage": {
       "port": 9199,
+      "host": "127.0.0.1"
+    },
+    "functions": {
+      "port": 5001,
       "host": "127.0.0.1"
     },
     "ui": {

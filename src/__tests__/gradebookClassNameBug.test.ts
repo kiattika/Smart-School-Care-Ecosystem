@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 /**
  * บั๊ก "รายวิชาไม่ดึงชื่อนักเรียนมาแสดง" ในสมุดบันทึกคะแนน — พิสูจน์ root cause จริงด้วย debug log
@@ -14,7 +14,7 @@ import * as path from 'path';
  * ทุกประการ ก่อนแก้ทั้งคู่คืน 0 คน หลังแก้ทั้งคู่คืนรายชื่อถูกต้อง (HR คืน 36 คนจริงตอน live-test)
  */
 describe('Gradebook: targetClassName ต้องใช้ course.level (ระดับชั้น) ก่อน course.room (ห้องกายภาพ)', () => {
-  const src = fs.readFileSync(path.resolve(__dirname, '../TeacherPortal.tsx'), 'utf8');
+  const src = readSource(path.resolve(__dirname, '../TeacherPortal.tsx'));
 
   it('gradebook effect (ดึงรายชื่อนักเรียน) ใช้ .level ก่อน .room เสมอ', () => {
     const matches = src.match(/const targetClassName = selectedCourse\?\.level \|\| selectedCourse\?\.room \|\| \(selectedCourse as any\)\?\.className \|\| \(selectedCourse as any\)\?\.roomName \|\| '';/g);

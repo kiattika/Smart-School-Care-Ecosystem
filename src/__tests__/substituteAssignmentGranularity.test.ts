@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 /**
  * TASK 5 (ชุดใหญ่ ครูร่วมสอน+สอนแทน/ลา): ยืนยันแล้วว่าระบบมอบหมายสอนแทน/ลา แบบเลือกเฉพาะบางคาบ
@@ -13,10 +13,8 @@ import * as path from 'path';
  * แค่ตรรกะกรองคาบนี้จุดเดียวจะหนักเกินความจำเป็น
  */
 describe('Substitute assignment — per-period granularity (not forced whole-day)', () => {
-  const source = fs.readFileSync(
-    path.join(process.cwd(), 'src/components/SubstituteTeachingModule.tsx'),
-    'utf8'
-  );
+  const source = readSource(
+    path.join(process.cwd(), 'src/components/SubstituteTeachingModule.tsx'));
 
   it('submits only the explicitly-selected slots, not every slot in the leave date range', () => {
     // slots ที่จะส่งคำขอจริงต้องมาจากการกรอง rangeSlots ด้วย selectedSlotKeys เท่านั้น

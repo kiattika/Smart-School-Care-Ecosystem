@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 /**
  * ExecutivePortal TASK 4 (audit ข้อมูลปลอม, GIS tab): เดิม pin แผนที่ดึงจาก
@@ -12,9 +12,9 @@ import * as path from 'path';
  * ทั้งโปรเจกต์ไม่เจอ scholarship field ใดๆ) จึงตัดออกทั้งหมดตามคำสั่ง TASK 4
  */
 describe('ExecutivePortal TASK 4: GIS tab ใช้พิกัดบ้านนักเรียนจริงแทนข้อมูลปลอม', () => {
-  const src = fs.readFileSync(path.resolve(__dirname, '../ExecutivePortal.tsx'), 'utf8');
-  const rulesSrc = fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8');
-  const firestoreServiceSrc = fs.readFileSync(path.resolve(__dirname, '../services/firestoreService.ts'), 'utf8');
+  const src = readSource(path.resolve(__dirname, '../ExecutivePortal.tsx'));
+  const rulesSrc = readSource(path.resolve(__dirname, '../../firestore.rules'));
+  const firestoreServiceSrc = readSource(path.resolve(__dirname, '../services/firestoreService.ts'));
 
   it('firestoreService มี subscribeAllStudentHomeLocations สำหรับอ่านทั้งโรงเรียน (ต่างจาก ByRoom ที่ scope ห้องเดียว)', () => {
     expect(firestoreServiceSrc).toContain('export function subscribeAllStudentHomeLocations(');

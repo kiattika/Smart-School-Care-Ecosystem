@@ -14,6 +14,10 @@ export interface User {
   avatar?: string;
   profile?: UserProfile;
   activeRole?: UserRole;
+  /** custom claim staffId = doc id ของ staff/{staffId} (teacherId จากไฟล์ import ไม่ใช่ Auth UID) */
+  staffId?: string;
+  /** custom claim studentId = doc id ของ students/{studentId} (รหัสนักเรียน) */
+  studentId?: string;
 }
 
 export type AttendanceStatus = 'PRESENT' | 'LATE' | 'LEAVE' | 'ABSENT' | 'UNMARKED';

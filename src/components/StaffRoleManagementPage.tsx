@@ -28,7 +28,10 @@ import {
   Layers
 } from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../lib/firebase';
+import { signOutUser } from '../lib/auth';
+import { useStore } from '../store';
 import { UserProfile, UserRole } from '../types';
 import { BulkDataImportModal, ImportType } from './BulkDataImportModal';
 import { useDepartments } from '../hooks/useDepartments';
@@ -83,6 +86,9 @@ const ROOM_OPTIONS = [
 ];
 
 export function StaffRoleManagementPage() {
+  // ผู้ใช้งานที่ล็อกอินอยู่ปัจจุบัน — ใช้เช็คว่ากำลังแก้ไขสิทธิ์ของตัวเองอยู่หรือไม่
+  const { user: currentUser } = useStore();
+
   // ดึงข้อมูลบุคลากรจริงจาก Firestore 'staff' collection แบบ Real-time
   const [staffList, setStaffList] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -98,9 +104,8 @@ export function StaffRoleManagementPage() {
       (snapshot) => {
         const docs: UserProfile[] = snapshot.docs.map(docSnap => {
           const data = docSnap.data();
-          const roles = Array.isArray(data.roles) && data.roles.length > 0
-            ? (data.roles as UserRole[])
-            : ['SUBJECT_TEACHER' as UserRole];
+          // roles ว่าง = ไม่มีสิทธิ์เข้าระบบจริง (blocking function ปฏิเสธ) — แสดงตามจริง ไม่เติม default
+          const roles = Array.isArray(data.roles) ? (data.roles as UserRole[]) : [];
 
           return {
             id: docSnap.id,
@@ -323,30 +328,58 @@ export function StaffRoleManagementPage() {
       const staffRef = doc(db, 'staff', editingStaff.id);
       const teacherRef = doc(db, 'teachers', editingStaff.id);
 
-      const staffPayload = {
+      // 1. บทบาท (roles) เปลี่ยนผ่าน Cloud Function assignUserRole เท่านั้น — function เขียนทั้ง
+      //    custom claims (ที่ rules ใช้จริง) และ staff.roles/teachers.roles ในที่เดียว; client ห้ามเขียน
+      //    roles เอง (เดิมเขียน Firestore ก่อนแล้วค่อยเรียก function → ถ้า function ล้ม staff.roles
+      //    กับ claims จะไม่ตรงกัน). ถ้า function ล้ม → throw ไป catch ด้านล่าง ไม่มีอะไรถูกเขียน
+      //    ส่ง staffId (= doc id ของ staff, teacherId จากไฟล์ import — ไม่ใช่ Auth UID); function หา
+      //    บัญชี Auth จาก staff.email เอง. ยังไม่เคย login = อัปเดตแค่ staff.roles แล้ว blocking function
+      //    ออก claims ให้ตอน login ครั้งแรก
+      const assignUserRoleFn = httpsCallable(functions, 'assignUserRole');
+      await assignUserRoleFn({
+        staffId: editingStaff.id,
+        roles: formRoles,
+      });
+
+      // 2. ข้อมูลโปรไฟล์/ขอบเขตงาน (ไม่มี roles) — เขียนหลัง function สำเร็จแล้วเท่านั้น
+      const profilePayload = {
         prefix: formPrefix,
         firstName: formFirstName,
         lastName: formLastName,
         fullName: `${formPrefix}${formFirstName} ${formLastName}`.trim(),
         position: formPosition,
-        roles: formRoles,
         assignments: updatedAssignments,
         departmentId: updatedAssignments.departmentId || '',
         homeroomClass: updatedAssignments.homeroomClass || '',
         updatedAt: serverTimestamp()
       };
 
-      await setDoc(staffRef, staffPayload, { merge: true });
-      await setDoc(teacherRef, staffPayload, { merge: true }).catch(() => {});
+      await setDoc(staffRef, profilePayload, { merge: true });
+      await setDoc(teacherRef, profilePayload, { merge: true }).catch(() => {});
 
       setIsModalOpen(false);
 
-      // แจ้งเตือนความสำเร็จในรูปแบบ SweetAlert
-      triggerSweetAlert(
-        'บันทึกสิทธิ์สำเร็จ!',
-        `ระบบได้อัปเดตบทบาทหน้าที่และสิทธิ์การเข้าใช้งานของ ${formPrefix}${formFirstName} ${formLastName} ลงฐานข้อมูล Firestore เรียบร้อยแล้ว`,
-        'success'
-      );
+      const isSelfEdit = !!currentUser?.staffId && currentUser.staffId === editingStaff.id;
+
+      if (isSelfEdit) {
+        // กำลังแก้ไขสิทธิ์ของตัวเอง — บังคับออกจากระบบทันทีเพื่อให้ต้องล็อกอินใหม่
+        // และได้ ID token ใหม่ที่มี custom claims ล่าสุด แทนที่จะรอ token หมดอายุเอง
+        await signOutUser();
+      } else {
+        // กำลังแก้ไขสิทธิ์ของผู้ใช้งานคนอื่น — ฝั่งนี้บังคับออกจากระบบของเขาทันทีไม่ได้
+        // (client-side signOut ทำได้แค่กับ session ของเบราว์เซอร์ปัจจุบันเท่านั้น) ฝั่ง
+        // Cloud Function ได้เรียก revokeRefreshTokens ไว้แล้ว → session เดิมหลุดเมื่อ reload หน้า
+        // หรือรีเฟรช token ครั้งถัดไป ไม่ใช่ทันทีบนหน้าจอของเขา
+        // ⚠️ ข้อจำกัดที่ยอมรับแล้ว (accepted behavior): ID token ที่ออกไปแล้วยังใช้ได้จนหมดอายุ (≤ 1 ชม.)
+        // และ Firestore rules ไม่ตรวจการ revoke — ผู้ใช้ที่ถูก "ลด" สิทธิ์ แต่ยังเปิด tab ค้างไว้โดยไม่ reload
+        // จะยังใช้สิทธิ์เดิมได้สูงสุด ~1 ชม. (ยืนยันแล้วจาก E2E บน emulator). ตั้งใจไม่ปิดช่องนี้ด้วยการให้
+        // rules get() staff doc ทุก request เพราะเพิ่มต้นทุน read ทุกครั้งทั้งระบบ
+        triggerSweetAlert(
+          'บันทึกสิทธิ์สำเร็จ!',
+          `ระบบได้อัปเดตบทบาทหน้าที่และสิทธิ์การเข้าใช้งานของ ${formPrefix}${formFirstName} ${formLastName} ลงฐานข้อมูล Firestore และเพิกถอน session เดิมของผู้ใช้งานคนนี้แล้ว สิทธิ์ใหม่จะมีผลเมื่อผู้ใช้งานคนดังกล่าวรีเฟรช token ครั้งถัดไปหรือเข้าสู่ระบบใหม่ (ไม่ใช่ทันทีบนหน้าจอของเขาในขณะนี้)`,
+          'success'
+        );
+      }
     } catch (error) {
       console.error('Error saving staff roles to Firestore:', error);
       triggerToast(`❌ บันทึกข้อมูลไม่สำเร็จ: ${error instanceof Error ? error.message : String(error)}`);

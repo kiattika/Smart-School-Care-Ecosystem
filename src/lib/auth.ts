@@ -1,242 +1,118 @@
-import { 
-  GoogleAuthProvider, 
-  signInWithPopup, 
+import {
+  GoogleAuthProvider,
+  signInWithPopup,
   signInWithEmailAndPassword,
-  signOut, 
+  signOut,
   onAuthStateChanged,
   User as FirebaseUser,
   getIdTokenResult
 } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { User, UserProfile, UserRole, Role, MOCK_MULTI_ROLE_USERS } from '../types';
+import { User, UserProfile, UserRole, Role } from '../types';
+import { AUTH_NO_PROFILE, AUTH_NO_ROLE } from './authErrors';
 
 const googleProvider = new GoogleAuthProvider();
-// Restrict to Uttaradit School Google Workspace domain
+// hd = แค่ hint ให้หน้าเลือกบัญชีของ Google (UX) — การบังคับโดเมน/ทะเบียนจริงอยู่ที่
+// blocking functions (functions/src/authBlocking.ts) ฝั่งเซิร์ฟเวอร์
 googleProvider.setCustomParameters({
   hd: 'utd.ac.th',
   prompt: 'select_account'
 });
 
+/**
+ * เข้าสู่ระบบด้วย Google — บัญชีที่ไม่ใช่ @utd.ac.th หรือไม่อยู่ใน staff/students ถูกปฏิเสธ
+ * ตั้งแต่ฝั่งเซิร์ฟเวอร์ (signInWithPopup throw พร้อมข้อความจาก blocking function — ดู authErrors.ts)
+ */
 export async function signInWithGoogle(): Promise<User> {
   const result = await signInWithPopup(auth, googleProvider);
-  const fbUser = result.user;
-
-  if (!fbUser.email) {
-    await signOut(auth);
-    throw new Error('AUTH_NO_EMAIL: Email address is required.');
-  }
-
-  // Client-side domain UX verification (Real server-side enforcement handled via Rules & Cloud Functions)
-  const isSchoolDomain = fbUser.email.endsWith('@utd.ac.th') || fbUser.email.endsWith('@school.ac.th');
-  if (!isSchoolDomain && !import.meta.env.DEV) {
-    await signOut(auth);
-    throw new Error('AUTH_DOMAIN_RESTRICTED: กรุณาใช้อีเมล Google Workspace ของโรงเรียน (@utd.ac.th) เท่านั้น');
-  }
-
-  const appUser = await buildAppUser(fbUser);
-  return appUser;
+  return buildAppUser(result.user);
 }
 
 /**
- * Sign in using email and password against Firebase Auth / Emulator,
- * with resilient development fallback for testing all school roles.
+ * Email/password — ใช้กับบัญชีทดสอบใน Firebase Emulator (ปุ่มบน LoginPage gate ด้วย DEV)
+ * ล้มเหลว = throw ตรงๆ ไม่มี fallback ปลอม session
  */
 export async function signInWithEmailPassword(email: string, password: string): Promise<User> {
-  try {
-    const result = await signInWithEmailAndPassword(auth, email, password);
-    const fbUser = result.user;
-    const appUser = await buildAppUser(fbUser);
-    return appUser;
-  } catch (err: any) {
-    // In dev mode / sandbox environments without active Firebase emulator or seeded Auth accounts,
-    // fallback gracefully to generating the corresponding dev user profile so role switching works immediately.
-    if (import.meta.env.DEV) {
-      console.warn('Firebase email/password sign-in unavailable or unseeded. Falling back to Dev Account Profile for:', email);
-      return buildDevUserFromEmail(email);
-    }
-    throw err;
-  }
-}
-
-/**
- * Builds a local dev user profile based on email and role mappings for seamless testing
- */
-export function buildDevUserFromEmail(email: string): User {
-  const lower = email.toLowerCase().trim();
-  
-  // Check if predefined in mock multi-role users
-  const matched = MOCK_MULTI_ROLE_USERS.find(
-    u => u.email.toLowerCase() === lower
-  );
-
-  let roles: UserRole[] = [];
-  let userProfile: UserProfile | undefined = matched;
-  let displayName = '';
-
-  if (matched) {
-    roles = matched.roles;
-    displayName = `${matched.prefix || ''}${matched.firstName} ${matched.lastName}`.trim();
-  } else if (lower.includes('kiattika') || lower.startsWith('admin.') || lower.includes('super_admin')) {
-    roles = ['SUPER_ADMIN', 'SUBJECT_TEACHER'];
-    displayName = lower.includes('kiattika') ? 'นายเกียรติศักดิ์ แก้วหล้า' : 'ผู้ดูแลระบบ (Admin)';
-  } else if (lower.startsWith('exec.') || lower.includes('executive') || lower.includes('director')) {
-    roles = ['EXECUTIVE', 'SUPER_ADMIN'];
-    displayName = 'ดร.สมเกียรติ บริหารวิชาการ (ผู้อำนวยการโรงเรียน)';
-  } else if (lower.startsWith('advisor.') || lower.includes('advisor') || lower.includes('homeroom')) {
-    roles = ['HOMEROOM_TEACHER', 'SUBJECT_TEACHER'];
-    displayName = 'ครูเกียรติศักดิ์ สถิตการุณย์ (ครูประจำชั้น ม.5/8)';
-  } else if (lower.startsWith('guidance.') || lower.includes('guidance') || lower.includes('counselor')) {
-    roles = ['GUIDANCE_COUNSELOR', 'SUBJECT_TEACHER'];
-    displayName = 'ดร.สุดา จิตวิทยา (ครูแนะแนว/ให้คำปรึกษา)';
-  } else if (lower.startsWith('infirmary.') || lower.startsWith('nurse.') || lower.includes('nurse')) {
-    roles = ['INFIRMARY_STAFF'];
-    displayName = 'น.ส.กนกวรรณ พยาบาล (งานพยาบาล)';
-  } else if (lower.startsWith('finance.') || lower.includes('finance')) {
-    roles = ['FINANCE_STAFF'];
-    displayName = 'นางศิริพร การเงินพัสดุ (ฝ่ายการเงิน)';
-  } else if (lower.startsWith('supervisor.')) {
-    roles = ['INSTRUCTIONAL_SUPERVISOR', 'SUPERVISORY_TEACHER'];
-    displayName = 'ดร.ณรงค์ วิชาการ (ศึกษานิเทศก์)';
-  } else if (lower.startsWith('parent.') || lower.includes('parent')) {
-    roles = ['PARENT' as UserRole];
-    displayName = 'คุณพ่อมนตรี มงคลศิลป์ (ผู้ปกครอง)';
-  } else if (lower.startsWith('student.') || lower.includes('student')) {
-    roles = ['STUDENT' as UserRole];
-    displayName = 'นายกิตติคุณ มงคลศิลป์ (นักเรียน ม.5/8)';
-  } else {
-    roles = ['SUBJECT_TEACHER'];
-    displayName = 'ครูสมปอง สอนดี';
-  }
-
-  const activeRole: UserRole = roles[0];
-  let legacyRole: Role = 'teacher';
-  if (activeRole === 'SUPER_ADMIN') legacyRole = 'admin';
-  else if (activeRole === 'EXECUTIVE') legacyRole = 'executive';
-  else if (activeRole === 'HOMEROOM_TEACHER') legacyRole = 'advisor';
-  else if (activeRole === ('PARENT' as any) || roles.includes('PARENT' as any)) legacyRole = 'parent';
-  else if (activeRole === ('STUDENT' as any) || roles.includes('STUDENT' as any)) legacyRole = 'student';
-
-  if (!userProfile) {
-    userProfile = {
-      id: `dev-${lower.replace(/[^a-z0-9]/g, '-')}`,
-      email: email,
-      prefix: '',
-      firstName: displayName.split(' ')[0] || 'User',
-      lastName: displayName.split(' ').slice(1).join(' ') || '',
-      position: 'บุคลากรทางการศึกษา',
-      roles: roles,
-      assignments: {
-        homeroomClass: lower.includes('advisor') || lower.includes('5/8') ? 'M.5/8' : undefined,
-        departmentId: lower.includes('math') ? 'math-dept' : undefined
-      }
-    };
-  }
-
-  return {
-    uid: `dev-${lower.replace(/[^a-z0-9]/g, '-')}`,
-    email: email,
-    displayName: displayName || userProfile.firstName,
-    role: legacyRole,
-    activeRole: activeRole,
-    profile: userProfile
-  };
+  const result = await signInWithEmailAndPassword(auth, email, password);
+  return buildAppUser(result.user);
 }
 
 export async function signOutUser(): Promise<void> {
   await signOut(auth);
 }
 
+function legacyRoleFor(activeRole: UserRole, roles: UserRole[]): Role {
+  if (activeRole === 'SUPER_ADMIN') return 'admin';
+  if (activeRole === 'EXECUTIVE') return 'executive';
+  if (activeRole === 'HOMEROOM_TEACHER') return 'advisor';
+  if (activeRole === 'PARENT' || roles.includes('PARENT')) return 'parent';
+  if (activeRole === 'STUDENT' || roles.includes('STUDENT')) return 'student';
+  return 'teacher';
+}
+
 /**
- * Builds the application user object with verified roles either from custom claims
- * or staff/users collection in Firestore, falling back safely.
+ * สร้าง app user จาก custom claims เท่านั้น (ออกโดย blocking functions / assignUserRole)
+ * - roles: claims.roles — ไม่มี = signOut แล้ว throw AUTH_NO_ROLE (ไม่มี default role, ไม่เดาจากอีเมล)
+ * - บุคลากร: profile จาก staff/{claims.staffId} (doc id = teacherId จากไฟล์ import ไม่ใช่ Auth UID)
+ *   ซึ่งเป็นแหล่งเดียวของ assignments.homeroomClass / departmentId
+ * - นักเรียน: claims.studentId (portal อ่าน students สดผ่าน useRealStudents เอง)
  */
 export async function buildAppUser(fbUser: FirebaseUser): Promise<User> {
-  let claims: Record<string, any> = {};
-  try {
-    const tokenResult = await getIdTokenResult(fbUser, true);
-    claims = tokenResult.claims || {};
-  } catch {
-    // Emulator or offline mode may not return claims
-  }
+  // force refresh — ให้ได้ claims ล่าสุดเสมอ; ถ้าดึง token ไม่ได้ให้ error ขึ้นไปตรงๆ
+  const { claims } = await getIdTokenResult(fbUser, true);
 
-  let roles: UserRole[] = [];
-  let userProfile: UserProfile | undefined = undefined;
-
-  // 1. Check custom claims for roles
-  if (Array.isArray(claims.roles) && claims.roles.length > 0) {
-    roles = claims.roles as UserRole[];
-  } else if (typeof claims.role === 'string') {
-    roles = [claims.role as UserRole];
-  } else if (typeof claims.primaryRole === 'string') {
-    roles = [claims.primaryRole as UserRole];
-  }
-
-  // 2. Fetch staff/user record from Firestore — ต้องทำเสมอ (ไม่ใช่เฉพาะตอน claims ว่าง)
-  //    เพราะ staff doc คือแหล่งเดียวของ `assignments.homeroomClass` / `departmentId`
-  //    ที่ AdvisorPortal ใช้หาห้องประจำชั้น — ถ้าข้ามขั้นนี้ ครูที่ปรึกษาจะได้ "No Room"
-  try {
-    const staffDocRef = doc(db, 'staff', fbUser.uid);
-    const staffSnap = await getDoc(staffDocRef);
-    if (staffSnap.exists()) {
-      const staffData = staffSnap.data();
-      if (roles.length === 0 && Array.isArray(staffData.roles)) {
-        roles = staffData.roles as UserRole[];
-      }
-      userProfile = staffData as UserProfile;
-    }
-  } catch {
-    // Ignore if firestore not yet seeded/rules deny
-  }
-
-  // 3. Email-substring role guess for users with no claims and no staff doc.
-  //    (ไม่ใช้ MOCK_MULTI_ROLE_USERS ที่นี่ — role/profile ต้องมาจาก custom claims หรือ
-  //    staff/{uid} จริงเท่านั้น; บัญชี emulator ที่ seed ไว้มีทั้งสองอย่างอยู่แล้ว)
-  if (roles.length === 0 && fbUser.email) {
-    if (fbUser.email.toLowerCase().includes('parent')) {
-      roles = ['PARENT' as UserRole];
-    } else if (fbUser.email.toLowerCase().includes('student')) {
-      roles = ['STUDENT' as UserRole];
-    }
-  }
-
-  // Default fallback role if no roles assigned
+  const roles: UserRole[] = Array.isArray(claims.roles)
+    ? (claims.roles as unknown[]).filter((r): r is UserRole => typeof r === 'string' && r !== '')
+    : [];
   if (roles.length === 0) {
-    roles = ['SUBJECT_TEACHER'];
+    await signOut(auth);
+    throw new Error(`${AUTH_NO_ROLE}: บัญชีนี้ไม่มีบทบาทในระบบ`);
   }
 
-  const activeRole: UserRole = roles[0];
-  let legacyRole: Role = 'teacher';
-  if (activeRole === 'SUPER_ADMIN') legacyRole = 'admin';
-  else if (activeRole === 'EXECUTIVE') legacyRole = 'executive';
-  else if (activeRole === 'HOMEROOM_TEACHER') legacyRole = 'advisor';
-  else if (activeRole === ('PARENT' as any) || roles.includes('PARENT' as any)) legacyRole = 'parent';
-  else if (activeRole === ('STUDENT' as any) || roles.includes('STUDENT' as any)) legacyRole = 'student';
+  const staffId = typeof claims.staffId === 'string' && claims.staffId ? claims.staffId : undefined;
+  const studentId = typeof claims.studentId === 'string' && claims.studentId ? claims.studentId : undefined;
 
-  if (!userProfile) {
+  let userProfile: UserProfile;
+  if (staffId) {
+    const staffSnap = await getDoc(doc(db, 'staff', staffId));
+    if (!staffSnap.exists()) {
+      await signOut(auth);
+      throw new Error(`${AUTH_NO_PROFILE}: staff/${staffId} ไม่พบ`);
+    }
+    // roles ใน profile ต้องตาม claims (ตัวที่ rules ใช้จริง) ไม่ใช่ staff.roles ที่อาจยังไม่ sync
+    userProfile = { ...(staffSnap.data() as UserProfile), id: staffId, roles };
+  } else {
+    // นักเรียน (และผู้ปกครองในอนาคต) ไม่มี staff doc — profile จากตัวตน Firebase Auth จริง
     userProfile = {
-      id: fbUser.uid,
+      id: studentId || fbUser.uid,
       email: fbUser.email || '',
       prefix: '',
-      firstName: fbUser.displayName?.split(' ')[0] || 'User',
+      firstName: fbUser.displayName?.split(' ')[0] || fbUser.email || '',
       lastName: fbUser.displayName?.split(' ').slice(1).join(' ') || '',
-      position: 'บุคลากรทางการศึกษา',
-      roles: roles
+      position: roles.includes('STUDENT') ? 'นักเรียน' : '',
+      roles,
     };
   }
 
+  const activeRole: UserRole = roles[0];
   return {
     uid: fbUser.uid,
     email: fbUser.email || '',
-    displayName: fbUser.displayName || `${userProfile.prefix}${userProfile.firstName} ${userProfile.lastName}`.trim(),
+    displayName: fbUser.displayName || `${userProfile.prefix || ''}${userProfile.firstName} ${userProfile.lastName}`.trim(),
     avatar: fbUser.photoURL || undefined,
-    role: legacyRole,
-    activeRole: activeRole,
-    profile: userProfile
+    role: legacyRoleFor(activeRole, roles),
+    activeRole,
+    profile: userProfile,
+    staffId,
+    studentId,
   };
 }
 
-export function setupAuthListener(onUserChanged: (user: User | null) => void) {
+/**
+ * onError: ให้หน้า Login แสดงเหตุผลเมื่อ session ที่ค้างอยู่ใช้ต่อไม่ได้ (เช่น ถูกถอนบทบาท)
+ */
+export function setupAuthListener(onUserChanged: (user: User | null) => void, onError?: (err: unknown) => void) {
   return onAuthStateChanged(auth, async (fbUser) => {
     if (fbUser) {
       try {
@@ -244,6 +120,7 @@ export function setupAuthListener(onUserChanged: (user: User | null) => void) {
         onUserChanged(appUser);
       } catch (err) {
         console.error('Error building authenticated user:', err);
+        onError?.(err);
         onUserChanged(null);
       }
     } else {

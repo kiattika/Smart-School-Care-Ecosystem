@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
+import { readSource } from './helpers/readSource';
 
 /**
  * ExecutivePortal TASK 6/7/8 (audit ข้อมูลปลอม): 3 tab ที่ไม่มีทางเชื่อมกับข้อมูลจริงได้เลย เอาออก
@@ -15,7 +15,7 @@ import * as path from 'path';
  *    สิทธิ์เขียนข้อมูลหลักเพิ่ม ซึ่งใหญ่กว่าการอนุญาตอ่านเพื่อสรุปภาพรวมใน TASK 4/5 มาก
  */
 describe('ExecutivePortal TASK 6/7/8: เอา tab ที่ไม่มีข้อมูลจริงรองรับออกทั้งหมด', () => {
-  const src = fs.readFileSync(path.resolve(__dirname, '../ExecutivePortal.tsx'), 'utf8');
+  const src = readSource(path.resolve(__dirname, '../ExecutivePortal.tsx'));
 
   it('TASK 6: ไม่มี tab policy / actionStatuses / handleAction เหลืออยู่', () => {
     expect(src).not.toMatch(/activeTab === 'policy'/);

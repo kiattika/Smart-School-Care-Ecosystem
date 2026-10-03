@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { format } from 'date-fns';
+import { readSource } from './helpers/readSource';
 
 /**
  * บั๊ก .toISOString().split('T')[0] คำนวณ "วันนี้"/วันที่ผิดช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย
@@ -47,7 +48,7 @@ describe('บั๊ก timezone: .toISOString().split(\'T\')[0] ต้องไ�
           if (entry.name === 'node_modules' || entry.name === '__tests__') continue;
           walk(full);
         } else if (/\.(ts|tsx)$/.test(entry.name)) {
-          const content = fs.readFileSync(full, 'utf8');
+          const content = readSource(full);
           if (content.includes(".toISOString().split('T')[0]")) {
             offenders.push(path.relative(srcDir, full));
           }
