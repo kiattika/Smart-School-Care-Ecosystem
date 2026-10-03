@@ -37,7 +37,6 @@ import {
 import { db } from '../lib/firebase';
 import { recomputeStudentAttendanceStats } from '../services/firestoreService';
 import { Student } from '../types';
-import { BulkDataImportModal, ImportType } from './BulkDataImportModal';
 import { isSameRoom } from '../lib/utils';
 import { normalizeEmail } from '../lib/normalizeEmail';
 
@@ -88,7 +87,11 @@ const COMMON_ROOMS = [
   'ม.6/1', 'ม.6/2', 'ม.6/8'
 ];
 
-export function StudentManagementPage() {
+/**
+ * onGoToImport: พาไปเมนู "ระบบนำเข้าข้อมูลขนาดใหญ่" ของ AdminPortal (ชนิด STUDENT) — การนำเข้าข้อมูล
+ * มีที่เดียว (BulkDataImportModal แบบ inline ในเมนู 'import') ไม่เปิด modal ซ้ำในหน้านี้
+ */
+export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => void } = {}) {
   // ดึงข้อมูลนักเรียนจริงจาก Firestore 'students' collection แบบ Real-time
   const [studentsList, setStudentsList] = useState<StudentRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -227,9 +230,6 @@ export function StudentManagementPage() {
     text: string;
     type: 'success' | 'warning' | 'error';
   } | null>(null);
-
-  // Bulk Import state
-  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
 
   // หาห้องเรียนทั้งหมดที่มีข้อมูลในระบบ
   const availableRooms = useMemo(() => {
@@ -518,15 +518,6 @@ export function StudentManagementPage() {
             <span>เพิ่มนักเรียนใหม่</span>
           </button>
 
-          {/* Bulk Import Button */}
-          <button
-            onClick={() => setIsBulkImportOpen(true)}
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-purple-300 hover:text-white font-bold text-xs rounded-xl transition-all border border-purple-500/30 active:scale-[0.98] cursor-pointer"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-purple-400" />
-            <span>นำเข้าข้อมูลชุดใหญ่ (Bulk Import)</span>
-          </button>
-
           {/* Info stats pill */}
           <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl px-4 py-2.5 flex items-center gap-3 shrink-0">
             <div className="w-8 h-8 bg-purple-500/10 text-purple-400 rounded-lg flex items-center justify-center">
@@ -632,16 +623,18 @@ export function StudentManagementPage() {
                       </div>
                       <p className="text-sm font-bold text-slate-200">ยังไม่มีข้อมูลนักเรียนในฐานข้อมูล Firestore</p>
                       <p className="text-xs text-slate-400 leading-relaxed">
-                        ท่านสามารถนำเข้าข้อมูลบัญชีรายชื่อนักเรียนผ่านระบบนำเข้าข้อมูลชุดใหญ่ (Bulk Data Import) เพื่อเริ่มใช้งานระบบดูแลช่วยเหลือนักเรียน
+                        ท่านสามารถนำเข้าข้อมูลบัญชีรายชื่อนักเรียนผ่านเมนู "ระบบนำเข้าข้อมูลขนาดใหญ่" เพื่อเริ่มใช้งานระบบดูแลช่วยเหลือนักเรียน
                       </p>
                       <div className="flex items-center gap-3 pt-2">
-                        <button
-                          onClick={() => setIsBulkImportOpen(true)}
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all cursor-pointer"
-                        >
-                          <FileSpreadsheet className="w-4 h-4" />
-                          <span>นำเข้ารายชื่อนักเรียน (Bulk Import)</span>
-                        </button>
+                        {onGoToImport && (
+                          <button
+                            onClick={onGoToImport}
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-600/30 transition-all cursor-pointer"
+                          >
+                            <FileSpreadsheet className="w-4 h-4" />
+                            <span>ไปที่ระบบนำเข้าข้อมูลขนาดใหญ่ (นักเรียน)</span>
+                          </button>
+                        )}
                         <button
                           onClick={handleAddNewClick}
                           className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-white/10 transition-all cursor-pointer"
@@ -1126,15 +1119,6 @@ export function StudentManagementPage() {
         </div>
       )}
 
-      {/* 5. Bulk Import Modal */}
-      <BulkDataImportModal
-        isOpen={isBulkImportOpen}
-        onClose={() => setIsBulkImportOpen(false)}
-        initialImportType="STUDENT"
-        onImportSuccess={(type, count) => {
-          triggerToast(`🎉 นำเข้าข้อมูล ${type} สำเร็จ (${count} รายการ)`);
-        }}
-      />
     </div>
   );
 }

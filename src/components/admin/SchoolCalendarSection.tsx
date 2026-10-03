@@ -3,6 +3,7 @@ import { CalendarOff, CalendarRange, Plus, Trash2, Loader2 } from 'lucide-react'
 import { useSchoolCalendar } from '../../hooks/useSchoolCalendar';
 import { saveSchoolCalendarEvent, deleteSchoolCalendarEvent } from '../../services/firestoreService';
 import { useStore } from '../../store';
+import { DatePicker } from '../shared/DatePicker';
 
 // แค่ "ชื่อ" ที่พบบ่อยไว้เป็น shortcut กรอกให้เร็วขึ้น — ไม่ผูกวันที่ตายตัว เพราะวันหยุดราชการ/วันหยุด
 // ชดเชยเปลี่ยนแปลงได้ทุกปีตามประกาศรัฐบาล แอดมินต้องเลือกวันที่เองเสมอ
@@ -130,12 +131,7 @@ export function SchoolCalendarSection() {
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-[10px] text-slate-500 space-y-1 block">
             วันที่
-            <input
-              type="date"
-              value={holidayDate}
-              onChange={e => setHolidayDate(e.target.value)}
-              className="block bg-slate-950 border border-white/10 rounded-lg px-2.5 py-2 text-xs text-white outline-none focus:border-rose-500"
-            />
+            <DatePicker value={holidayDate} onChange={setHolidayDate} ariaLabel="วันที่" className="bg-slate-950 border border-white/10 rounded-lg px-2.5 py-2 text-xs text-white outline-none focus:border-rose-500 flex items-center gap-2 text-left cursor-pointer" />
           </label>
           <label className="text-[10px] text-slate-500 space-y-1 block flex-1 min-w-[10rem]">
             ชื่อวันหยุด
@@ -209,21 +205,11 @@ export function SchoolCalendarSection() {
           </label>
           <label className="text-[10px] text-slate-500 space-y-1 block">
             วันเปิดภาคเรียน
-            <input
-              type="date"
-              value={semStart}
-              onChange={e => setSemStart(e.target.value)}
-              className="w-full bg-slate-950 border border-white/10 rounded-lg px-2.5 py-2 text-xs text-white outline-none focus:border-indigo-500"
-            />
+            <DatePicker value={semStart} onChange={setSemStart} ariaLabel="วันเปิดภาคเรียน" className="w-full bg-slate-950 border border-white/10 rounded-lg px-2.5 py-2 text-xs text-white outline-none focus:border-indigo-500 flex items-center gap-2 text-left cursor-pointer" />
           </label>
           <label className="text-[10px] text-slate-500 space-y-1 block">
             วันปิดภาคเรียน
-            <input
-              type="date"
-              value={semEnd}
-              onChange={e => setSemEnd(e.target.value)}
-              className="w-full bg-slate-950 border border-white/10 rounded-lg px-2.5 py-2 text-xs text-white outline-none focus:border-indigo-500"
-            />
+            <DatePicker value={semEnd} onChange={setSemEnd} ariaLabel="วันปิดภาคเรียน" className="w-full bg-slate-950 border border-white/10 rounded-lg px-2.5 py-2 text-xs text-white outline-none focus:border-indigo-500 flex items-center gap-2 text-left cursor-pointer" />
           </label>
         </div>
         <button

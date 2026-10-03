@@ -12,6 +12,7 @@ import { useStore } from '../store';
 import { cn } from '../lib/utils';
 import { SubstituteAssignment } from '../types';
 import { useDepartments } from '../hooks/useDepartments';
+import { DatePicker } from './shared/DatePicker';
 
 const THAI_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#14b8a6', '#f43f5e'];
@@ -394,8 +395,8 @@ export function SubstituteTeachingAnalyticsModule() {
                         <option value="ALL">ครูทุกคน</option>
                         {deptTeachers.map(t => <option key={t.id} value={(t.email || '').toLowerCase()}>{t.firstName} {t.lastName}</option>)}
                       </select>
-                      <input type="date" value={hodStart} onChange={e => setHodStart(e.target.value)} className="bg-slate-950 text-slate-200 border border-slate-800 rounded-lg p-1 px-2 text-[11px] font-mono outline-none" />
-                      <input type="date" value={hodEnd} onChange={e => setHodEnd(e.target.value)} className="bg-slate-950 text-slate-200 border border-slate-800 rounded-lg p-1 px-2 text-[11px] font-mono outline-none" />
+                      <DatePicker clearable value={hodStart} onChange={setHodStart} placeholder="ตั้งแต่วันที่" ariaLabel="ตั้งแต่วันที่" className="bg-slate-950 text-slate-200 border border-slate-800 rounded-lg p-1 px-2 pr-6 text-[11px] font-mono outline-none flex items-center gap-2 text-left cursor-pointer" />
+                      <DatePicker clearable value={hodEnd} onChange={setHodEnd} placeholder="ถึงวันที่" ariaLabel="ถึงวันที่" className="bg-slate-950 text-slate-200 border border-slate-800 rounded-lg p-1 px-2 pr-6 text-[11px] font-mono outline-none flex items-center gap-2 text-left cursor-pointer" />
                       <button onClick={() => exportCsv(hodFiltered, `substitute_${deptName}_${Date.now()}.csv`)}
                         className="ml-auto px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-lg flex items-center gap-1">
                         <FileDown className="w-3.5 h-3.5" /> CSV

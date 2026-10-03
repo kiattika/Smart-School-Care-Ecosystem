@@ -4,6 +4,7 @@ import { db } from '../../lib/firebase';
 import { Bell, Save, Trash2, Loader2, Plus, Info, Search, Wand2, Timer, X } from 'lucide-react';
 import { saveAdminPeriodConfig, deleteAdminPeriodConfig } from '../../services/firestoreService';
 import type { AdminPeriodConfig } from '../../hooks/useTeacherFirestoreSchedule';
+import { TimePicker } from '../shared/TimePicker';
 
 const PERIOD_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: 'MAIN', label: 'MAIN (คาบวิชาการ)' },
@@ -284,18 +285,8 @@ export function AdminPeriodsConfigPage() {
                     placeholder="ชื่อคาบ"
                     className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-indigo-500"
                   />
-                  <input
-                    type="time"
-                    value={draft.startTime}
-                    onChange={e => setDraftField(p, 'startTime', e.target.value)}
-                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-indigo-500"
-                  />
-                  <input
-                    type="time"
-                    value={draft.endTime}
-                    onChange={e => setDraftField(p, 'endTime', e.target.value)}
-                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus:border-indigo-500"
-                  />
+                  <TimePicker value={draft.startTime} onChange={(v) => setDraftField(p, 'startTime', v)} ariaLabel="เวลาเริ่ม" className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus-within:border-indigo-500" />
+                  <TimePicker value={draft.endTime} onChange={(v) => setDraftField(p, 'endTime', v)} ariaLabel="เวลาสิ้นสุด" className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white outline-none focus-within:border-indigo-500" />
                   <select
                     value={draft.periodType}
                     onChange={e => setDraftField(p, 'periodType', e.target.value)}
@@ -356,12 +347,7 @@ export function AdminPeriodsConfigPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="text-xs text-slate-400 space-y-1 block">
             เวลาเริ่มคาบแรก
-            <input
-              type="time"
-              value={autoStartTime}
-              onChange={e => setAutoStartTime(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-500"
-            />
+            <TimePicker value={autoStartTime} onChange={setAutoStartTime} ariaLabel="เวลาเริ่มคาบแรก" className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus-within:border-emerald-500" />
           </label>
           <label className="text-xs text-slate-400 space-y-1 block">
             ระยะเวลาต่อคาบ (นาที)

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { SchoolCalendarSection } from './admin/SchoolCalendarSection';
+import { DatePicker } from './shared/DatePicker';
+import { TimePicker } from './shared/TimePicker';
 import { 
   Calendar, 
   Clock, 
@@ -433,18 +435,8 @@ export function SystemSettingsAndLocksPage() {
                     <div className="space-y-1.5">
                       <label className="block text-[10px] text-slate-400 font-semibold">วัน-เวลาที่เปิดระบบ (Start Window)</label>
                       <div className="flex gap-2">
-                        <input
-                          type="date"
-                          value={config.startDate}
-                          onChange={(e) => handleConfigChange(config.id, 'startDate', e.target.value)}
-                          className="flex-1 bg-slate-950 border border-white/10 rounded-lg p-2 text-xs text-slate-200 outline-none"
-                        />
-                        <input
-                          type="time"
-                          value={config.startTime}
-                          onChange={(e) => handleConfigChange(config.id, 'startTime', e.target.value)}
-                          className="w-24 bg-slate-950 border border-white/10 rounded-lg p-2 text-xs text-slate-200 outline-none"
-                        />
+                        <div className="flex-1"><DatePicker value={config.startDate} onChange={(v) => handleConfigChange(config.id, 'startDate', v)} ariaLabel="วันที่เปิดระบบ" className="w-full bg-slate-950 border border-white/10 rounded-lg p-2 text-xs text-slate-200 outline-none flex items-center gap-2 text-left cursor-pointer" /></div>
+                        <TimePicker value={config.startTime} onChange={(v) => handleConfigChange(config.id, 'startTime', v)} ariaLabel="เวลาเปิดระบบ" className="bg-slate-950 border border-white/10 rounded-lg p-2 text-xs text-slate-200 outline-none" />
                       </div>
                     </div>
 
@@ -452,18 +444,8 @@ export function SystemSettingsAndLocksPage() {
                     <div className="space-y-1.5">
                       <label className="block text-[10px] text-rose-300 font-semibold">วัน-เวลาที่ล็อกระบบ (Auto-Lock Time)</label>
                       <div className="flex gap-2">
-                        <input
-                          type="date"
-                          value={config.endDate}
-                          onChange={(e) => handleConfigChange(config.id, 'endDate', e.target.value)}
-                          className="flex-1 bg-slate-950 border border-white/10 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-rose-500"
-                        />
-                        <input
-                          type="time"
-                          value={config.endTime}
-                          onChange={(e) => handleConfigChange(config.id, 'endTime', e.target.value)}
-                          className="w-24 bg-slate-950 border border-white/10 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-rose-500"
-                        />
+                        <div className="flex-1"><DatePicker value={config.endDate} onChange={(v) => handleConfigChange(config.id, 'endDate', v)} ariaLabel="วันที่ล็อกระบบ" className="w-full bg-slate-950 border border-white/10 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-rose-500 flex items-center gap-2 text-left cursor-pointer" /></div>
+                        <TimePicker value={config.endTime} onChange={(v) => handleConfigChange(config.id, 'endTime', v)} ariaLabel="เวลาล็อกระบบ" className="bg-slate-950 border border-white/10 rounded-lg p-2 text-xs text-slate-200 outline-none focus-within:border-rose-500" />
                       </div>
                     </div>
 

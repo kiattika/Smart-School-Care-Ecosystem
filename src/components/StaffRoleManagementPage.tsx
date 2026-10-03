@@ -33,7 +33,6 @@ import { db, functions } from '../lib/firebase';
 import { signOutUser } from '../lib/auth';
 import { useStore } from '../store';
 import { UserProfile, UserRole } from '../types';
-import { BulkDataImportModal, ImportType } from './BulkDataImportModal';
 import { useDepartments } from '../hooks/useDepartments';
 import { normalizeEmail } from '../lib/normalizeEmail';
 import { DepartmentManagerModal } from './admin/DepartmentManagerModal';
@@ -86,7 +85,11 @@ const ROOM_OPTIONS = [
   'ม.1/1', 'ม.1/2', 'ม.2/3', 'ม.4/1', 'ม.4/2', 'ม.5/1', 'ม.5/2', 'ม.5/8', 'ม.5/9', 'ม.5/11'
 ];
 
-export function StaffRoleManagementPage() {
+/**
+ * onGoToImport: พาไปเมนู "ระบบนำเข้าข้อมูลขนาดใหญ่" ของ AdminPortal (ชนิด TEACHER) — การนำเข้าข้อมูล
+ * มีที่เดียว (BulkDataImportModal แบบ inline ในเมนู 'import') ไม่เปิด modal ซ้ำในหน้านี้
+ */
+export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () => void } = {}) {
   // ผู้ใช้งานที่ล็อกอินอยู่ปัจจุบัน — ใช้เช็คว่ากำลังแก้ไขสิทธิ์ของตัวเองอยู่หรือไม่
   const { user: currentUser } = useStore();
 
@@ -172,8 +175,6 @@ export function StaffRoleManagementPage() {
     type: 'success' | 'warning';
   } | null>(null);
 
-  // Bulk Import state
-  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [showDeptManager, setShowDeptManager] = useState(false);
 
   // กรองตารางรายชื่อบุคลากรตามเงื่อนไขค้นหา
@@ -448,15 +449,6 @@ export function StaffRoleManagementPage() {
 
         {/* Action button and Info stats pill */}
         <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
-          {/* Bulk Import Button */}
-          <button
-            onClick={() => setIsBulkImportOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl transition-all shadow-[0_4px_15px_rgba(99,102,241,0.25)] active:scale-[0.98] cursor-pointer border border-white/10"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span>นำเข้าข้อมูลชุดใหญ่ (Bulk Import)</span>
-          </button>
-
           {/* จัดการกลุ่มสาระฯ */}
           <button
             onClick={() => setShowDeptManager(true)}
@@ -566,15 +558,17 @@ export function StaffRoleManagementPage() {
                       </div>
                       <p className="text-sm font-bold text-slate-200">ยังไม่มีข้อมูลบุคลากรในฐานข้อมูล Firestore</p>
                       <p className="text-xs text-slate-400 leading-relaxed">
-                        ท่านสามารถนำเข้าข้อมูลบัญชีรายชื่อครูและบุคลากรผ่านระบบนำเข้าข้อมูลชุดใหญ่ (Bulk Data Import) เพื่อเริ่มกำหนดบทบาทหน้าที่
+                        ท่านสามารถนำเข้าข้อมูลบัญชีรายชื่อครูและบุคลากรผ่านเมนู "ระบบนำเข้าข้อมูลขนาดใหญ่" เพื่อเริ่มกำหนดบทบาทหน้าที่
                       </p>
-                      <button
-                        onClick={() => setIsBulkImportOpen(true)}
-                        className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
-                      >
-                        <FileSpreadsheet className="w-4 h-4" />
-                        <span>นำเข้ารายชื่อครู/บุคลากร (Bulk Import)</span>
-                      </button>
+                      {onGoToImport && (
+                        <button
+                          onClick={onGoToImport}
+                          className="mt-2 inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
+                        >
+                          <FileSpreadsheet className="w-4 h-4" />
+                          <span>ไปที่ระบบนำเข้าข้อมูลขนาดใหญ่ (ครู/บุคลากร)</span>
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -981,24 +975,6 @@ export function StaffRoleManagementPage() {
         isFallback={deptIsFallback}
       />
 
-      {/* Bulk Data Import Modal component mounting */}
-      <BulkDataImportModal
-        isOpen={isBulkImportOpen}
-        onClose={() => setIsBulkImportOpen(false)}
-        onImportSuccess={(type, count) => {
-          let typeLabel = '';
-          if (type === 'STUDENT') typeLabel = 'รายชื่อนักเรียน';
-          else if (type === 'TEACHER') typeLabel = 'รายชื่อครูผู้สอน/สิทธิ์ประจำตัว';
-          else if (type === 'PARENT') typeLabel = 'ข้อมูลยืนยันตัวตนผู้ปกครอง (สำหรับเชื่อมบัญชี LINE)';
-          else typeLabel = 'รายวิชาและตารางเรียน';
-
-          triggerSweetAlert(
-            'นำเข้าข้อมูลชุดใหญ่สำเร็จ!',
-            `ระบบได้ตรวจสอบและดึงข้อมูลประเภท "${typeLabel}" จำนวน ${count} รายการลงสู่สารบบของโรงเรียนเรียบร้อยแล้ว`,
-            'success'
-          );
-        }}
-      />
 
     </div>
   );

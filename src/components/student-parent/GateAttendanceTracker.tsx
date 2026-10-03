@@ -24,6 +24,7 @@ import { useStore } from '../../store';
 import { GateAttendanceRecord, DetailedLeaveRequest, AttendanceStatus, Student } from '../../types';
 import { GPSGeofenceCheckinModal } from '../GPSGeofenceCheckinModal';
 import { subscribeGateAttendanceLogs } from '../../services/firestoreService';
+import { DatePicker } from '../shared/DatePicker';
 
 export function GateAttendanceTracker({ studentId, isParentView = false }: { studentId: string; isParentView?: boolean }) {
   const {
@@ -376,21 +377,11 @@ export function GateAttendanceTracker({ studentId, isParentView = false }: { stu
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-medium text-slate-300 block mb-1">ตั้งแต่วันที่:</label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-                  />
+                  <DatePicker value={startDate} onChange={setStartDate} ariaLabel="ตั้งแต่วันที่" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 flex items-center gap-2 text-left cursor-pointer" />
                 </div>
                 <div>
                   <label className="text-[11px] font-medium text-slate-300 block mb-1">ถึงวันที่:</label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-                  />
+                  <DatePicker value={endDate} onChange={setEndDate} ariaLabel="ถึงวันที่" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 flex items-center gap-2 text-left cursor-pointer" />
                 </div>
               </div>
 

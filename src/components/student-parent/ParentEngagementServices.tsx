@@ -21,6 +21,7 @@ import {
 import { useStore } from '../../store';
 import { subscribeBillingInvoices } from '../../services/firestoreService';
 import { BillingInvoice, ParentTeacherMessage, ParentAppointment, Student } from '../../types';
+import { DatePicker } from '../shared/DatePicker';
 
 export function ParentEngagementServices({
   studentId,
@@ -512,12 +513,7 @@ export function ParentEngagementServices({
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-slate-300 block mb-1">วันที่นัดหมาย:</label>
-                  <input
-                    type="date"
-                    value={appointmentDate}
-                    onChange={(e) => setAppointmentDate(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                  />
+                  <DatePicker value={appointmentDate} onChange={setAppointmentDate} ariaLabel="วันที่นัดหมาย" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white flex items-center gap-2 text-left cursor-pointer" />
                 </div>
                 <div>
                   <label className="text-slate-300 block mb-1">ช่วงเวลา:</label>
