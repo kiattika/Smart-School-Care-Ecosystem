@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Palette, Plus, Trash2, Loader2, Users, AlertTriangle } from 'lucide-react';
+import { Palette, Plus, Trash2, Loader2, Users, AlertTriangle, LayoutGrid } from 'lucide-react';
 import { useHouseConfig } from '../../hooks/useHouseConfig';
 import { useRealStudents } from '../../hooks/useRealStudents';
 import { saveHouseConfig, deleteHouseConfig, bulkAssignHouseToRoom, assignHouseToStudent } from '../../services/firestoreService';
+import { buildHouseSummary, roomStatusOf, roomStatusLabel, readableTextColor, RoomCount } from '../../lib/houseSummary';
 
 const DEFAULT_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#a855f7', '#ec4899'];
 
@@ -35,6 +36,10 @@ export function HouseManagerPage() {
     students.forEach(s => { if (s.room) roomSet.add(s.room); });
     return Array.from(roomSet).sort((a, b) => a.localeCompare(b, 'th'));
   }, [students]);
+
+  // สรุปการจัดคณะสี — คำนวณจาก students (real-time, students/{id}.houseId) + house_config ชุดเดียวกับที่หน้านี้ใช้
+  const summary = useMemo(() => buildHouseSummary(houses, students), [houses, students]);
+  const houseNameOf = (id: string) => houses.find(h => h.id === id)?.name ?? id;
 
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(null), 3500); };
 
@@ -182,7 +187,12 @@ export function HouseManagerPage() {
         <div className="flex flex-wrap items-center gap-2">
           <select value={selectedRoom} onChange={e => setSelectedRoom(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
             <option value="">-- เลือกห้อง --</option>
-            {rooms.map(r => <option key={r} value={r}>{r}</option>)}
+            {rooms.map(r => (
+              <option key={r} value={r}>
+                {/* คณะปัจจุบันต่อท้ายชื่อห้อง — ซ่อนระหว่างโหลด house_config (ไม่งั้นทุกห้องขึ้น "ยังไม่จัดคณะ" ชั่วขณะ) */}
+                {housesLoading ? r : `${r} — ${roomStatusLabel(roomStatusOf(summary, r), houseNameOf)}`}
+              </option>
+            ))}
           </select>
           <select value={roomHouseId} onChange={e => setRoomHouseId(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
             <option value="">-- เลือกคณะสี --</option>
@@ -197,6 +207,49 @@ export function HouseManagerPage() {
             {selectedRoom && ` (${students.filter(s => s.room === selectedRoom).length} คน)`}
           </button>
         </div>
+      </div>
+
+      {/* สรุปการจัดคณะสี — ผลการ assign จริงจาก students.houseId (real-time) */}
+      <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-5 space-y-3" data-testid="house-summary">
+        <div>
+          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <LayoutGrid className="w-4 h-4 text-pink-400" /> สรุปการจัดคณะสี
+          </h3>
+          <p className="text-[11px] text-slate-500 mt-0.5">อัปเดตทันทีหลัง assign — นับจากข้อมูลนักเรียนจริงในระบบ</p>
+        </div>
+
+        {housesLoading || studentsLoading ? (
+          <div className="py-6 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" /> กำลังโหลด...
+          </div>
+        ) : houses.length === 0 ? (
+          <div className="py-6 text-center text-xs text-slate-500">ยังไม่มีคณะสี — เพิ่มคณะสีด้านบนก่อนจึงจะแสดงสรุปได้</div>
+        ) : students.length === 0 ? (
+          <div className="py-6 text-center text-xs text-slate-500">ยังไม่มีข้อมูลนักเรียนในระบบ</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {summary.houses.map(block => (
+              <HouseSummaryCard
+                key={block.house.id}
+                title={block.house.name}
+                colorHex={block.house.colorHex}
+                total={block.total}
+                rooms={block.rooms}
+                emptyText="ยังไม่มีนักเรียนในคณะนี้"
+              />
+            ))}
+            <HouseSummaryCard
+              title="ยังไม่ได้จัดคณะ"
+              colorHex="#475569"
+              total={summary.unassigned.total}
+              rooms={summary.unassigned.rooms}
+              emptyText="นักเรียนทุกคนมีคณะสีแล้ว"
+              note={summary.unassigned.orphanedCount > 0
+                ? `ในจำนวนนี้ ${summary.unassigned.orphanedCount} คนผูกกับคณะที่ถูกลบไปแล้ว ต้องจัดคณะใหม่`
+                : undefined}
+            />
+          </div>
+        )}
       </div>
 
       {/* Individual assign */}
@@ -263,6 +316,40 @@ export function HouseManagerPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** บล็อกสรุปหนึ่งคณะ — หัวบล็อกใช้สีของคณะ; ห้องที่คณะนี้มีไม่ครบทั้งห้องแสดง จำนวน/ทั้งห้อง (เช่น 12/40) */
+function HouseSummaryCard({ title, colorHex, total, rooms, emptyText, note }: {
+  title: string;
+  colorHex: string;
+  total: number;
+  rooms: RoomCount[];
+  emptyText: string;
+  note?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-slate-900/40 overflow-hidden flex flex-col">
+      <div className="px-3 py-2.5" style={{ backgroundColor: colorHex, color: readableTextColor(colorHex) }}>
+        <div className="text-sm font-bold truncate" title={title}>{title}</div>
+        <div className="text-xs font-semibold opacity-90">{total.toLocaleString()} คน</div>
+      </div>
+      <div className="p-3 space-y-1 max-h-64 overflow-y-auto">
+        {note && <p className="text-[11px] text-amber-300 pb-1">{note}</p>}
+        {rooms.length === 0 ? (
+          <p className="text-[11px] text-slate-500 py-2 text-center">{emptyText}</p>
+        ) : (
+          rooms.map(r => (
+            <div key={r.room || '__no_room__'} className="flex items-center justify-between text-xs">
+              <span className="text-slate-300">{r.room || 'ไม่ระบุห้อง'}</span>
+              <span className="font-mono text-slate-400">
+                {r.count === r.roomTotal ? `${r.count} คน` : `${r.count}/${r.roomTotal} คน`}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
