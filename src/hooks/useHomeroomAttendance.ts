@@ -56,6 +56,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
+// room ว่าง = ไม่มีห้อง → ไม่ query และไม่เขียน (ห้ามเติมห้องปลอมแทน — CLAUDE.md กฎ no-fake-data)
 export function useHomeroomAttendance(date: string, room: string) {
   const [record, setRecord] = useState<HomeroomAttendanceRecord | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -112,8 +113,14 @@ export function useHomeroomAttendance(date: string, room: string) {
   ) => {
     if (!date || !room) return;
 
-    const teacherName = user?.displayName || user?.email?.split('@')[0] || 'Mr.Kiattisak';
-    const teacherEmail = user?.email || 'kiattisak@utd.ac.th';
+    // ไม่มีตัวตนผู้เช็คชื่อ = ไม่เขียน (ห้ามเติมอีเมล/ชื่อครูปลอมแทน) — throw ให้ผู้เรียกแสดง error
+    const teacherEmail = user?.email;
+    if (!teacherEmail) {
+      const msg = 'ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ — ยกเลิกการบันทึกการเช็คชื่อโฮมรูม กรุณาเข้าสู่ระบบใหม่';
+      setError(msg);
+      throw new Error(msg);
+    }
+    const teacherName = user?.displayName || teacherEmail.split('@')[0];
 
     try {
       // เขียน attendance_records + sync students/{id}.attendanceStats (derived cache) คู่กันเสมอ
@@ -160,11 +167,17 @@ export function useHomeroomAttendance(date: string, room: string) {
 
   // Request Edit / Unlock editing
   const requestUnlock = async () => {
+    const requesterEmail = user?.email;
+    if (!requesterEmail) {
+      const msg = 'ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ — ยกเลิกคำขอแก้ไขการเช็คชื่อ กรุณาเข้าสู่ระบบใหม่';
+      setError(msg);
+      throw new Error(msg);
+    }
     try {
       const docRef = doc(db, 'attendance_records', docId);
       await updateDoc(docRef, {
         isLocked: false,
-        requestedEditBy: user?.email || 'kiattika@utd.ac.th',
+        requestedEditBy: requesterEmail,
         unlockedAt: format(new Date(), 'HH:mm')
       });
     } catch (err) {

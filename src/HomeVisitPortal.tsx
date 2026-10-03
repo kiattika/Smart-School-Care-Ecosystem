@@ -85,7 +85,7 @@ export function HomeVisitPortal() {
     if (selectedStudent) {
       submitHomeVisit({
         studentId: selectedStudent.studentId,
-        advisorEmail: user?.email || 'advisor@utd.ac.th',
+        advisorEmail: user?.email || '', // ห้ามเติมอีเมลปลอมแทน
         visitedAt: new Date().toISOString(),
         geoVerified: !!location,
         riskLevel: risks.length > 2 ? 'HIGH' : risks.length > 0 ? 'MEDIUM' : 'LOW',

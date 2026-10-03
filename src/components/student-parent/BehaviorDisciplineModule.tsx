@@ -56,7 +56,7 @@ export function BehaviorDisciplineModule({ student, isParentView = false }: { st
       points,
       category,
       description,
-      user?.displayName || 'ครูกิตติศักดิ์ (หัวหน้างานปกครอง)'
+      user?.displayName || user?.email || ''
     );
 
     setDescription('');
@@ -323,9 +323,6 @@ export function BehaviorDisciplineModule({ student, isParentView = false }: { st
             <PlusCircle className="w-4 h-4 text-indigo-400" />
             บันทึกคะแนนความประพฤติ (สำหรับครูและฝ่ายปกครอง)
           </h3>
-          <p className="text-[11px] text-slate-400">
-            ระบบจะส่งการแจ้งเตือน Real-time พร้อมแต้มคะแนนไปยังแอปพลิเคชันของผู้ปกครองทันที
-          </p>
 
           {awardSuccess && (
             <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">

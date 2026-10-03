@@ -42,7 +42,6 @@ interface TeacherScheduleListProps {
   onRequestLateAttendance: (courseId: string) => void;
   onRecordPostTeaching: (courseId: string) => void;
   onViewPostTeachingRecord: (courseId: string) => void;
-  onTogglePartnerAttendance?: (courseId: string, currentStatus: boolean) => void;
   onEnterClassroom?: (courseId: string) => void;
 }
 
@@ -55,7 +54,6 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
   onRequestLateAttendance,
   onRecordPostTeaching,
   onViewPostTeachingRecord,
-  onTogglePartnerAttendance,
   onEnterClassroom
 }) => {
   const [selectedClass, setSelectedClass] = useState<string>('ALL');
@@ -227,17 +225,6 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
               <Clock className="w-3.5 h-3.5 animate-pulse" /> รอดำเนินการซิงก์จากครูสอนร่วม
             </span>
           )}
-          {onTogglePartnerAttendance && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onTogglePartnerAttendance(period.id, !period.partnerCheckedAttendance);
-              }}
-              className="text-[10px] text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 rounded-md px-2.5 py-1 transition font-bold"
-            >
-              จำลองครูร่วมเช็คชื่อ
-            </button>
-          )}
         </div>
       </div>
     );
@@ -357,7 +344,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                         </div>
                         <p className="text-xs text-slate-300 flex items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5 text-slate-400" /> 
-                          <span className="bg-slate-800/80 text-slate-300 px-2 py-0.5 rounded text-xs font-mono">{period.startTime} - {period.endTime} น.</span> (ผ่านมาแล้ว) • <span className="text-slate-300">{period.room}</span>
+                          <span className="bg-slate-800/80 text-slate-300 px-2 py-0.5 rounded text-xs font-mono">{period.startTime} - {period.endTime} น.</span> (ผ่านมาแล้ว){period.room && <> • <span className="text-slate-300">{period.room}</span></>}
                         </p>
                       </div>
                     </div>
@@ -465,7 +452,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                         </div>
                         <p className="text-xs text-slate-300 font-medium flex items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5 text-emerald-400" /> 
-                          <span className="bg-slate-800/80 text-slate-300 px-2 py-0.5 rounded font-mono text-xs">{period.startTime} - {period.endTime} น.</span> • <span className="text-slate-300">{period.room}</span>
+                          <span className="bg-slate-800/80 text-slate-300 px-2 py-0.5 rounded font-mono text-xs">{period.startTime} - {period.endTime} น.</span>{period.room && <> • <span className="text-slate-300">{period.room}</span></>}
                         </p>
                       </div>
                     </div>
@@ -544,7 +531,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                       </div>
                       <p className="text-xs text-slate-300 flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5 text-emerald-400" /> 
-                        <span className="bg-slate-800/80 text-slate-300 px-2 py-0.5 rounded font-mono text-xs">{period.startTime} - {period.endTime} น.</span> • <span className="text-slate-300">{period.room}</span>
+                        <span className="bg-slate-800/80 text-slate-300 px-2 py-0.5 rounded font-mono text-xs">{period.startTime} - {period.endTime} น.</span>{period.room && <> • <span className="text-slate-300">{period.room}</span></>}
                       </p>
                     </div>
                   </div>

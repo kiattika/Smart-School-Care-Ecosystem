@@ -455,42 +455,44 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
                   </div>
                 )}
 
-                {/* Simulation & Preset Location Buttons (For testing inside sandbox) */}
-                <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-850 space-y-2">
-                  <div className="flex items-center justify-between text-xs text-slate-400">
-                    <span className="font-semibold flex items-center gap-1.5">
-                      <Crosshair className="w-3.5 h-3.5 text-indigo-400" />
-                      จำลองจุดตรวจพิกัด (Simulation Quick Testing):
-                    </span>
-                    <span className="text-[10px] text-slate-500">คลิกเพื่อสลับจุดทดสอบ</span>
+                {/* Simulation & Preset Location Buttons — DEV เท่านั้น (ปลอมพิกัดได้ ห้ามเห็นใน production) */}
+                {import.meta.env.DEV && (
+                  <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-850 space-y-2">
+                    <div className="flex items-center justify-between text-xs text-slate-400">
+                      <span className="font-semibold flex items-center gap-1.5">
+                        <Crosshair className="w-3.5 h-3.5 text-indigo-400" />
+                        จำลองจุดตรวจพิกัด (Simulation Quick Testing):
+                      </span>
+                      <span className="text-[10px] text-slate-500">คลิกเพื่อสลับจุดทดสอบ</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <button
+                        onClick={() => setPresetLocation('GATE_1')}
+                        className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/40 text-slate-300 text-[11px] font-medium transition-all text-center"
+                      >
+                        🚪 ประตู 1 (หน้า รร.)
+                      </button>
+                      <button
+                        onClick={() => setPresetLocation('BUILDING_1')}
+                        className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/40 text-slate-300 text-[11px] font-medium transition-all text-center"
+                      >
+                        🏫 อาคาร 1 (ใจกลาง รร.)
+                      </button>
+                      <button
+                        onClick={() => setPresetLocation('SPORTS_FIELD')}
+                        className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/40 text-slate-300 text-[11px] font-medium transition-all text-center"
+                      >
+                        ⚽ สนามกีฬา/ประตู 3
+                      </button>
+                      <button
+                        onClick={() => setPresetLocation('OFF_CAMPUS')}
+                        className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-rose-500/40 text-rose-300 text-[11px] font-medium transition-all text-center"
+                      >
+                        🚗 นอกโรงเรียน (850 ม.)
+                      </button>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <button
-                      onClick={() => setPresetLocation('GATE_1')}
-                      className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/40 text-slate-300 text-[11px] font-medium transition-all text-center"
-                    >
-                      🚪 ประตู 1 (หน้า รร.)
-                    </button>
-                    <button
-                      onClick={() => setPresetLocation('BUILDING_1')}
-                      className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/40 text-slate-300 text-[11px] font-medium transition-all text-center"
-                    >
-                      🏫 อาคาร 1 (ใจกลาง รร.)
-                    </button>
-                    <button
-                      onClick={() => setPresetLocation('SPORTS_FIELD')}
-                      className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-indigo-500/40 text-slate-300 text-[11px] font-medium transition-all text-center"
-                    >
-                      ⚽ สนามกีฬา/ประตู 3
-                    </button>
-                    <button
-                      onClick={() => setPresetLocation('OFF_CAMPUS')}
-                      className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-rose-500/40 text-rose-300 text-[11px] font-medium transition-all text-center"
-                    >
-                      🚗 นอกโรงเรียน (850 ม.)
-                    </button>
-                  </div>
-                </div>
+                )}
 
                 {/* Additional Note & Photo Selfie Option */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

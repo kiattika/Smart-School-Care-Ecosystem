@@ -467,47 +467,6 @@ export function AdminPortal() {
           {activeTab === 'settings' && (
             <div className="space-y-6">
               <SystemSettingsAndLocksPage />
-              
-              {/* Database Control Card */}
-              <div className="bg-[#0e131f] border border-white/5 rounded-2xl p-6 shadow-xl space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-                    <Database className="w-5 h-5 text-indigo-400" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-white">จัดการระบบฐานข้อมูล Firebase (Firebase Database Manager)</h3>
-                    <p className="text-xs text-slate-400">ควบคุมและตั้งค่าจำลองข้อมูลเริ่มต้นเข้าฐานข้อมูล Firestore</p>
-                  </div>
-                </div>
-                
-                <div className="bg-slate-900/50 rounded-xl p-4 border border-white/5 space-y-2">
-                  <h4 className="text-xs font-bold text-indigo-300">ข้อมูลเริ่มต้นที่จะหยอดเข้าระบบ (Seed Datasets):</h4>
-                  <ul className="text-xs text-slate-400 list-disc list-inside space-y-1">
-                    <li>ข้อมูลคาบเรียน คาบ 0 (โฮมรูม) และ คาบเรียน 1 ถึง 8</li>
-                    <li>ข้อมูลบัญชีครู (Mr.Kiattisak และ Mrs.Koy Koy)</li>
-                    <li>ข้อมูลนักเรียนห้อง ม.5/8 (สมชาย ใจดี, สมหญิง มุ่งมั่น, วิชัย ชัยชนะ) พร้อมคะแนนพฤติกรรมเต็ม 100 คะแนน</li>
-                    <li>ตารางเรียนวิชา ค32101 และ ตารางโฮมรูมของห้อง ม.5/8</li>
-                  </ul>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={async () => {
-                      try {
-                        const { seedDatabaseWeb } = await import('./services/firestoreService');
-                        await seedDatabaseWeb();
-                        alert("🎉 สำเร็จ! หยอดข้อมูลเริ่มต้นเข้าสู่ Firebase Firestore เรียบร้อยแล้วค่ะ");
-                      } catch (err) {
-                        alert("❌ เกิดข้อผิดพลาด: " + (err instanceof Error ? err.message : String(err)));
-                      }
-                    }}
-                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs py-2.5 px-4 rounded-xl shadow-md transition-all active:scale-[0.98] flex items-center gap-2 cursor-pointer"
-                  >
-                    <Database className="w-4 h-4" />
-                    หยอดข้อมูลเริ่มต้น (Seed Database)
-                  </button>
-                </div>
-              </div>
             </div>
           )}
             </motion.div>

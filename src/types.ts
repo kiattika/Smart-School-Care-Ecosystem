@@ -242,7 +242,7 @@ export interface Course {
   name: string;
   room: string;
   term: string;
-  studentsCount: number;
+  studentsCount?: number; // จำนวนนักเรียนจริง — ไม่รู้ = undefined (ห้ามเติมตัวเลขปลอม เช่น 40)
   periodIndex?: number;
   schedule?: string;
   attendanceTaken: boolean;

@@ -99,7 +99,7 @@ export function isSameRoom(r1?: string, r2?: string): boolean {
 }
 
 export function formatRoomName(room?: string): string {
-  if (!room) return 'ม.5/8';
+  if (!room) return ''; // ไม่มีห้อง = ว่าง (ห้ามเติมห้องปลอม — CLAUDE.md กฎ no-fake-data)
   const match = room.match(/(\d+)\s*\/\s*(\d+)/);
   if (match) {
     return `ม.${match[1]}/${match[2]}`;

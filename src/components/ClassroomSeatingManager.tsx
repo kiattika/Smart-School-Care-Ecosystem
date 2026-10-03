@@ -69,8 +69,28 @@ interface ClassroomSeatingManagerProps {
   overrideStudents?: Student[];
 }
 
-export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = ({
-  course: propCourse,
+/**
+ * ไม่มีรายวิชา (course) = แสดง empty state — ไม่สร้างรายวิชาปลอม (เดิม fallback เป็น "ฟิสิกส์ 4 ม.5/8")
+ * และไม่ query/เขียนผังห้องเรียนใดๆ (ดู CLAUDE.md กฎ no-fake-data)
+ */
+export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (props) => {
+  if (!props.course || !props.course.room) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 p-10 text-center text-slate-400" data-testid="seating-no-course">
+        <p className="text-sm">{props.course ? 'รายวิชานี้ยังไม่มีข้อมูลห้องเรียน จึงยังแสดงผังห้องเรียนไม่ได้' : 'ยังไม่ได้เลือกรายวิชา/ห้องเรียน จึงยังแสดงผังห้องเรียนไม่ได้'}</p>
+        {props.onBackToDashboard && (
+          <button onClick={props.onBackToDashboard} className="text-xs text-indigo-400 hover:text-indigo-300 underline">
+            กลับไปหน้าหลัก
+          </button>
+        )}
+      </div>
+    );
+  }
+  return <ClassroomSeatingManagerInner {...props} course={props.course} />;
+};
+
+const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { course: Course }> = ({
+  course,
   students,
   onBackToDashboard,
   onSelectStudentDetail,
@@ -78,17 +98,6 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   attendanceOnly = false,
   overrideStudents
 }) => {
-  const course: Course = propCourse || {
-    id: 'course-m58-default',
-    code: 'ว32204',
-    name: 'ฟิสิกส์ 4',
-    room: 'ม.5/8',
-    level: 'ม.5/8',
-    term: '1/2569',
-    studentsCount: 40,
-    attendanceTaken: false,
-    schedule: 'จ1-2, พ3-4'
-  };
 
   const { 
     user,
@@ -101,7 +110,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   } = useStore();
 
   const courseSubjectId = course?.code || course?.id || 'default-subject';
-  const courseClassId = course?.room || 'ม.5/8';
+  const courseClassId = course.room; // wrapper รับประกันว่ามีห้อง — ไม่มี = empty state ไม่ query/เขียน
   const layoutId = `layout_${courseSubjectId}_${courseClassId.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
   // Filter students for this course/room — ELECTIVE (ชุมนุม) ส่ง overrideStudents มาจาก enrollment
@@ -122,8 +131,8 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
     name: `ผังห้องเรียน ${formatCourseTitle(course.name, course.level, course.room)}`,
     subjectCode: course.code,
     room: course.room,
-    teacherId: user?.uid || 'teacher_001',
-    teacherEmail: user?.email || 'teacher@utd.ac.th',
+    teacherId: user?.uid ?? '',
+    teacherEmail: user?.email ?? '',
     category: 'CLASSROOM',
     isTemplate: false,
     isLocked: false,
@@ -144,6 +153,15 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
+
+  // ตัวตนจริงของผู้บันทึก (assignedBy / teacherId) — ไม่มี user = ยกเลิกการเขียนและแจ้ง error
+  // ห้ามเติม id/อีเมลครูปลอมแทน (ดู CLAUDE.md กฎ no-fake-data)
+  const requireActorUid = (): string | null => {
+    if (user?.uid) return user.uid;
+    setSaveToast('ไม่พบข้อมูลผู้ใช้ที่เข้าสู่ระบบ — ยกเลิกการบันทึก กรุณาเข้าสู่ระบบใหม่');
+    setTimeout(() => setSaveToast(null), 4000);
+    return null;
+  };
   const [zoomScale, setZoomScale] = useState<number>(100);
   const [isLayoutLocked, setIsLayoutLocked] = useState<boolean>(false);
 
@@ -178,7 +196,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
     const fetchAttendance = async () => {
       try {
         const dateStr = format(currentDate || new Date(), 'yyyy-MM-dd');
-        const rawRoom = course?.room || 'ม.5/8';
+        const rawRoom = course.room;
         const roomStr = rawRoom.replace('/', '-');
         // คาบ 0 (โฮมรูม) เป็นคาบจริง — ห้าม falsy check (`|| 1`) ให้ตรงกับตัวเขียน (TakeAttendanceModal)
         const periodNum = (course?.periodIndex !== undefined && course?.periodIndex !== null) ? course.periodIndex : 1;
@@ -312,7 +330,8 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
           // Auto-assign existing course students to default seats initially
           const initialAssign: Record<string, SeatingAssignment> = {};
           let studentIdx = 0;
-          defGroups.forEach(g => {
+          // ไม่มี user = ไม่จัดที่นั่งให้อัตโนมัติ (ไม่มีตัวตนผู้จัดจริงสำหรับ assignedBy)
+          if (user?.uid) defGroups.forEach(g => {
             g.seats.forEach(s => {
               if (studentIdx < courseStudents.length) {
                 const student = courseStudents[studentIdx];
@@ -326,7 +345,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
                   studentNo: student.studentNo,
                   effectiveFrom: new Date().toISOString(),
                   effectiveTo: null,
-                  assignedBy: user?.uid || 'teacher_001'
+                  assignedBy: user!.uid
                 };
                 initialAssign[s.id] = assignment;
                 studentIdx++;
@@ -350,10 +369,14 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
 
   // 4. Save Layout Function
   const handleSaveLayout = async (showNotice: boolean = true) => {
+    const actorUid = requireActorUid();
+    if (!actorUid) return;
     setIsSaving(true);
     try {
       const updatedMeta: SeatingLayout = {
         ...layoutMeta,
+        teacherId: actorUid,
+        teacherEmail: user?.email ?? '',
         totalCapacity,
         zoomScale,
         isLocked: isLayoutLocked,
@@ -511,6 +534,8 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
       return;
     }
 
+    const actorUid = requireActorUid();
+    if (!actorUid) return;
     const previousAssignment = assignments[seat.id];
     const now = new Date().toISOString();
 
@@ -532,7 +557,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
       studentNo: student.studentNo,
       effectiveFrom: now,
       effectiveTo: null,
-      assignedBy: user?.uid || 'teacher_001',
+      assignedBy: actorUid,
       reason: 'คุณครูมอบหมายที่นั่ง'
     };
 
@@ -623,6 +648,8 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
   // Auto-Assign unseated students
   const handleAutoAssignAll = () => {
     if (isLayoutLocked) return;
+    const actorUid = requireActorUid();
+    if (!actorUid) return;
 
     const availableSeats: { seat: SeatingSeat; group: SeatingGroup }[] = [];
     groups.forEach(g => {
@@ -656,7 +683,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
           studentNo: student.studentNo,
           effectiveFrom: now,
           effectiveTo: null,
-          assignedBy: user?.uid || 'teacher_001',
+          assignedBy: actorUid,
           reason: 'จัดที่นั่งอัตโนมัติ'
         };
         newAssignments[seat.id] = assign;
@@ -1382,7 +1409,7 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
         students={courseStudents}
         currentDate={currentDate}
         initialAttendance={attendancePrefill}
-        teacherId={user?.uid || 'teacher_001'}
+        teacherId={user?.uid}
         teacherName={user?.displayName || 'ครูผู้สอน'}
         onAttendanceSaved={(newStatuses) => {
           setFirestoreAttendance(newStatuses);

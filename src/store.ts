@@ -334,9 +334,8 @@ export const useStore = create<StoreState>((set, get) => ({
         id: courseId,
         code: gc ? gc.code : courseId.split('-')[0],
         name: gc ? gc.courseName : 'รายวิชา',
-        room: gc ? gc.roomName : 'ม.5/8',
+        room: gc ? gc.roomName : '', // ไม่รู้ห้อง = ว่าง (ห้ามเติมห้อง/จำนวนนักเรียนปลอม)
         term: '1/2569',
-        studentsCount: 40,
         attendanceTaken: true,
         periodIndex: 1,
         schedule: gc ? gc.scheduleString : 'พ0'

@@ -57,6 +57,9 @@ allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') ||
 - **Zustand store initial state ต้องว่างเปล่า/null เสมอ** (`user: null`, `students: []` ฯลฯ) ห้าม seed ด้วยข้อมูลปลอมตอน initialize — เคยเป็นต้นเหตุของบั๊ก "ผี Mr. Kiattisak" ที่ตามหากันมานาน เพราะ initial state ปลอมโผล่มาก่อน real auth/Firestore listener จะ resolve
 - **ห้ามใช้ `setTimeout` แทนการเขียน Firestore จริง** เพื่อจำลอง "บันทึกสำเร็จ" — ทุกปุ่ม "บันทึก/ยืนยัน/อนุมัติ" ต้องเรียก Firestore write จริง (`setDoc`/`writeBatch`/`updateDoc`) ก่อนแสดงข้อความสำเร็จ
 - ปุ่ม dev/demo ที่ตั้งใจเป็นทางลัดจริงๆ (ไม่ผูก user จริง) ต้อง gate ด้วย `import.meta.env.DEV` และตั้งชื่อให้ตรงไปตรงมา (เช่น "Simulate") ไม่ใช่ทำให้ดูเหมือนงานจริง (เช่น "Mark Done")
+  - ปุ่ม "จำลองสำเร็จ" ที่**เขียน Firestore จริง** (เช็คชื่อ/ครูร่วมเช็คชื่อ/สแกนประตู/หยอด seed) ห้ามมีเลยแม้ใน DEV — ถูกลบไปแล้วในรอบ A; เครื่องมือจำลองที่เหลือ (Time Simulation ใน TeacherPortal, Simulation Quick Testing ใน GPSGeofenceCheckinModal) แสดงเฉพาะ `import.meta.env.DEV`
+- **ค่าสำรองปลอมห้ามมี:** ไม่มี user → ยกเลิกการเขียนและแจ้ง error ที่ผู้ใช้เห็น (ห้ามเติม `teacher_001`/อีเมล/ชื่อครูคนใดแทน); ไม่มีห้อง → empty state ไม่ query ไม่เขียน (ห้ามเติม `'ม.5/8'`); ไม่มีจำนวนนักเรียน/กลุ่มสาระ/ป้ายห้อง → ไม่แสดง (ห้ามฝังตัวเลข/ชื่อ); ห้ามข้อความอ้างฟีเจอร์ที่ยังไม่ได้ทำจริง (เช่น Anti-Mock Location, แจ้งเตือน LINE). ข้อยกเว้นเดียว: รายชื่อบัญชีทดสอบ emulator ใน `LoginPage.tsx` (แสดงเฉพาะ DEV). guard test `noFakeDataGuard.test.ts` สแกน `src/` กันกลับมา
+  - รอบ B (ยังไม่ทำ): `MOCK_VISIT_DATA` (AdvisorPortal), ชุดข้อมูลปลอมใน state (Supervision/Infirmary/SystemSettings/Executive/StudentPortal ฯลฯ) และจุดที่แจ้งสำเร็จโดยไม่ได้บันทึก Firestore จริง
 - ห้ามสร้างฟีเจอร์ import/data-entry ซ้ำซ้อนหลายชุดสำหรับงานเดียวกัน — ถ้ามี component จริงอยู่แล้ว (เช่น `BulkDataImportModal.tsx`) ให้ reuse ไม่สร้างใหม่
 
 ### หน้า portal ต้องอ่าน students/courses จาก Firestore listener สด ไม่ใช่ Zustand store

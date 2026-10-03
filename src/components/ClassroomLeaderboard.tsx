@@ -379,7 +379,7 @@ export const ClassroomLeaderboard: React.FC = () => {
                     </td>
 
                     <td className="py-3 px-3 font-mono text-slate-300">
-                      เลขที่ {student.studentNo || student.number || '-'} ({student.room || 'ม.5/8'})
+                      เลขที่ {student.studentNo || student.number || '-'} {(student.room || student.className) ? ` (${student.room || student.className})` : ''}
                     </td>
 
                     <td className="py-3 px-3 font-mono text-slate-400">

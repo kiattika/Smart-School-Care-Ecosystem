@@ -27,7 +27,6 @@ import { subscribeGateAttendanceLogs } from '../../services/firestoreService';
 
 export function GateAttendanceTracker({ studentId, isParentView = false }: { studentId: string; isParentView?: boolean }) {
   const {
-    recordGateAttendance,
     detailedLeaveRequests,
     submitDetailedLeave,
     approveDetailedLeave,
@@ -73,11 +72,7 @@ export function GateAttendanceTracker({ studentId, isParentView = false }: { stu
   const leaves = detailedLeaveRequests.filter(l => l.studentId === student.studentId);
 
   const [activeTab, setActiveTab] = useState<'gate' | 'subject' | 'leave'>('gate');
-  const [selectedScanMethod, setSelectedScanMethod] = useState<'NFC_CARD' | 'BIOMETRIC_FACE' | 'BIOMETRIC_FINGER' | 'GPS_GEOFENCE'>('GPS_GEOFENCE');
   const [isGPSModalOpen, setIsGPSModalOpen] = useState(false);
-  const [scanType, setScanType] = useState<'ENTRY' | 'EXIT'>('ENTRY');
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanFeedback, setScanFeedback] = useState<string | null>(null);
 
   // e-Leave form state
   const [leaveType, setLeaveType] = useState<'SICK' | 'PERSONAL' | 'ACTIVITY'>('SICK');
@@ -86,17 +81,6 @@ export function GateAttendanceTracker({ studentId, isParentView = false }: { stu
   const [leaveReason, setLeaveReason] = useState('');
   const [attachedFile, setAttachedFile] = useState<string | null>(null);
   const [leaveSubmitSuccess, setLeaveSubmitSuccess] = useState(false);
-
-  const handleSimulateScan = () => {
-    setIsScanning(true);
-    setScanFeedback(null);
-    setTimeout(() => {
-      recordGateAttendance(student.studentId, scanType, selectedScanMethod);
-      setIsScanning(false);
-      setScanFeedback(`บันทึก ${scanType === 'ENTRY' ? 'เข้าโรงเรียน' : 'ออกจากโรงเรียน'} สำเร็จ! ส่งแจ้งเตือนไปยังผู้ปกครองแล้ว 📲`);
-      setTimeout(() => setScanFeedback(null), 4000);
-    }, 900);
-  };
 
   const handleLeaveSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -173,170 +157,8 @@ export function GateAttendanceTracker({ studentId, isParentView = false }: { stu
 
       {activeTab === 'gate' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Simulator Panel */}
-          <div className="lg:col-span-5 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-                    <Scan className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">Smart Gate Simulator</h3>
-                    <p className="text-[11px] text-slate-400">จำลองการสแกนผ่านซุ้มประตูโรงเรียน</p>
-                  </div>
-                </div>
-                <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  ระบบเปิดใช้งาน 24/7
-                </span>
-              </div>
-
-              {/* Student Identification Card */}
-              <div className="bg-gradient-to-br from-slate-800/90 to-slate-800/40 border border-slate-700/60 rounded-2xl p-4 mb-4 flex items-center gap-3.5">
-                <img 
-                  src={student.photoUrl || student.avatar} 
-                  alt={student.name} 
-                  className="w-14 h-14 rounded-2xl object-cover border-2 border-indigo-500/30 bg-slate-900"
-                />
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-mono font-bold">
-                      {student.studentId}
-                    </span>
-                    <span className="text-[11px] text-slate-400">ห้อง ม.{student.room || '5/8'} เลขที่ {student.studentNo}</span>
-                  </div>
-                  <h4 className="text-sm font-bold text-white truncate">{student.name}</h4>
-                  <p className="text-[10px] text-emerald-400 flex items-center gap-1 mt-0.5">
-                    <CheckCircle2 className="w-3 h-3" /> บัตรนักเรียน Smart Digital ID พร้อมใช้งาน
-                  </p>
-                </div>
-              </div>
-
-              {/* Scan Configuration */}
-              <div className="space-y-3 mb-5">
-                <div>
-                  <label className="text-[11px] font-medium text-slate-400 mb-1.5 block">ประเภทการผ่านประตู:</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => setScanType('ENTRY')}
-                      className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
-                        scanType === 'ENTRY'
-                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm'
-                          : 'bg-slate-800/40 border-slate-700 text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      🚶‍♂️ เข้าโรงเรียน (Entry)
-                    </button>
-                    <button
-                      onClick={() => setScanType('EXIT')}
-                      className={`py-2 px-3 rounded-xl text-xs font-semibold border transition-all ${
-                        scanType === 'EXIT'
-                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm'
-                          : 'bg-slate-800/40 border-slate-700 text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      🏃‍♂️ ออกจากโรงเรียน (Exit)
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-[11px] font-medium text-slate-400">ระบบเซนเซอร์ที่ตรวจจับ:</label>
-                    <button
-                      type="button"
-                      onClick={() => setIsGPSModalOpen(true)}
-                      className="text-[10px] text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-semibold"
-                    >
-                      <Satellite className="w-3 h-3 animate-pulse" />
-                      เปิดหน้าจอเรดาร์ดาวเทียม GPS
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    <button
-                      onClick={() => setSelectedScanMethod('GPS_GEOFENCE')}
-                      className={`p-2 rounded-xl text-[11px] font-medium border flex flex-col items-center gap-1 transition-all ${
-                        selectedScanMethod === 'GPS_GEOFENCE'
-                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/40'
-                          : 'bg-slate-800/40 border-slate-700/60 text-slate-400'
-                      }`}
-                    >
-                      <Satellite className="w-4 h-4 text-emerald-400" />
-                      <span>GPS ดาวเทียม</span>
-                    </button>
-                    <button
-                      onClick={() => setSelectedScanMethod('NFC_CARD')}
-                      className={`p-2 rounded-xl text-[11px] font-medium border flex flex-col items-center gap-1 transition-all ${
-                        selectedScanMethod === 'NFC_CARD'
-                          ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300'
-                          : 'bg-slate-800/40 border-slate-700/60 text-slate-400'
-                      }`}
-                    >
-                      <CreditCard className="w-4 h-4" />
-                      <span>NFC RFID</span>
-                    </button>
-                    <button
-                      onClick={() => setSelectedScanMethod('BIOMETRIC_FACE')}
-                      className={`p-2 rounded-xl text-[11px] font-medium border flex flex-col items-center gap-1 transition-all ${
-                        selectedScanMethod === 'BIOMETRIC_FACE'
-                          ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300'
-                          : 'bg-slate-800/40 border-slate-700/60 text-slate-400'
-                      }`}
-                    >
-                      <UserCheck className="w-4 h-4" />
-                      <span>Face AI</span>
-                    </button>
-                    <button
-                      onClick={() => setSelectedScanMethod('BIOMETRIC_FINGER')}
-                      className={`p-2 rounded-xl text-[11px] font-medium border flex flex-col items-center gap-1 transition-all ${
-                        selectedScanMethod === 'BIOMETRIC_FINGER'
-                          ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300'
-                          : 'bg-slate-800/40 border-slate-700/60 text-slate-400'
-                      }`}
-                    >
-                      <Scan className="w-4 h-4" />
-                      <span>Fingerprint</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Action Button & Feedback */}
-            <div>
-              {scanFeedback && (
-                <div className="p-3 mb-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2 animate-fadeIn">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>{scanFeedback}</span>
-                </div>
-              )}
-
-              <button
-                onClick={handleSimulateScan}
-                disabled={isScanning}
-                className="w-full py-3.5 px-4 bg-gradient-to-r from-indigo-600 via-indigo-500 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs sm:text-sm rounded-2xl shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
-              >
-                {isScanning ? (
-                  <>
-                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                    <span>กำลังประมวลผลการสแกน...</span>
-                  </>
-                ) : (
-                  <>
-                    <Scan className="w-4 h-4" />
-                    <span>กดทดสอบสแกนเข้า/ออกประตู (Tap to Check-in)</span>
-                  </>
-                )}
-              </button>
-              <p className="text-[10px] text-slate-500 text-center mt-2">
-                * ข้อมูลจะถูกบันทึกและส่งการแจ้งเตือน Real-time แจ้งผู้ปกครองทาง LINE และแอปพลิเคชันทันที
-              </p>
-            </div>
-          </div>
-
           {/* Real-time Gate Logs Timeline */}
-          <div className="lg:col-span-7 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl flex flex-col">
+          <div className="lg:col-span-12 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-sm font-bold text-white flex items-center gap-2">
