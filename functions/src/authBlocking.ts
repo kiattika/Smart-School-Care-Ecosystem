@@ -19,9 +19,13 @@ if (!admin.apps.length) {
 // Named database เดียวกับ client — ไม่ใช่ (default) ดู functions/src/config.ts
 const db = getFirestore(admin.app(), FIRESTORE_DATABASE_ID);
 
-// region เดียวกับ functions เดิม (assignUserRole ไม่ได้ระบุ = us-central1)
+// region: asia-southeast1 (ไม่ใช่ us-central1 แบบ assignUserRole) — blocking functions เป็นรุ่นที่ 2
+// ซึ่งรันบน Cloud Run และโควตา Cloud Run "Number of regions" ของโปรเจกต์เต็ม 3/3 แล้ว: deploy ไป us-central1
+// ล้มด้วย ProjectInitFailedQuotaExceeded ส่วน asia-southeast1 โปรเจกต์ใช้ Cloud Run อยู่แล้ว (ไม่กินโควตาเพิ่ม)
+// ห้ามย้ายกลับ us-central1 จนกว่าจะขอเพิ่มโควตา. assignUserRole (รุ่นแรก ไม่ใช้ Cloud Run) คงอยู่ us-central1
+// และ client เรียกที่ region นั้นตามเดิม — blocking functions ถูกเรียกโดย Firebase Auth เอง client ไม่ได้เรียกตรง
 // blocking function ต้องตอบภายใน 7 วินาที — lookup ทำทีละขั้นเท่าที่จำเป็น (limit เล็ก) ไม่มีงานหนัก
-const BLOCKING_OPTS = { region: 'us-central1', timeoutSeconds: 7 } as const;
+const BLOCKING_OPTS = { region: 'asia-southeast1', timeoutSeconds: 7 } as const;
 
 const lookups: AccessLookups = {
   async findStaffByEmail(email) {
