@@ -61,6 +61,7 @@ allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') ||
 - **ค่าสำรองปลอมห้ามมี:** ไม่มี user → ยกเลิกการเขียนและแจ้ง error ที่ผู้ใช้เห็น (ห้ามเติม `teacher_001`/อีเมล/ชื่อครูคนใดแทน); ไม่มีห้อง → empty state ไม่ query ไม่เขียน (ห้ามเติม `'ม.5/8'`); ไม่มีจำนวนนักเรียน/กลุ่มสาระ/ป้ายห้อง → ไม่แสดง (ห้ามฝังตัวเลข/ชื่อ); ห้ามข้อความอ้างฟีเจอร์ที่ยังไม่ได้ทำจริง (เช่น Anti-Mock Location, แจ้งเตือน LINE). ข้อยกเว้นเดียว: รายชื่อบัญชีทดสอบ emulator ใน `LoginPage.tsx` (แสดงเฉพาะ DEV). guard test `noFakeDataGuard.test.ts` สแกน `src/` กันกลับมา
   - รอบ B (ยังไม่ทำ): `MOCK_VISIT_DATA` (AdvisorPortal), ชุดข้อมูลปลอมใน state (Supervision/Infirmary/SystemSettings/Executive/StudentPortal ฯลฯ) และจุดที่แจ้งสำเร็จโดยไม่ได้บันทึก Firestore จริง
 - ห้ามสร้างฟีเจอร์ import/data-entry ซ้ำซ้อนหลายชุดสำหรับงานเดียวกัน — ถ้ามี component จริงอยู่แล้ว (เช่น `BulkDataImportModal.tsx`) ให้ reuse ไม่สร้างใหม่
+  - การนำเข้าข้อมูลขนาดใหญ่มี**ที่เดียว**: เมนู `'import'` ("ระบบนำเข้าข้อมูลขนาดใหญ่") ใน `AdminPortal` ที่ render `BulkDataImportModal` แบบ inline — หน้าอื่น (จัดการบุคลากร/นักเรียน/ตารางภาระงานสอน) ห้ามเปิด modal นำเข้าเอง ให้รับ prop `onGoToImport` แล้วให้ AdminPortal `goToImport(type)` พาไปเมนูนั้นพร้อมเลือกชนิด (TEACHER/STUDENT/COURSE) ไว้ให้
 
 ### หน้า portal ต้องอ่าน students/courses จาก Firestore listener สด ไม่ใช่ Zustand store
 
@@ -108,6 +109,16 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - `src/components/admin/HouseManagerPage.tsx`
 - `src/components/ExecutiveEngagementDashboard.tsx`, `src/components/ExecutiveLearnerAnalytics.tsx`
 - `src/components/student-parent/BehaviorDisciplineModule.tsx`, `ParentEngagementServices.tsx`, `PortfolioActivityVault.tsx`
+
+### ช่องวันที่/เวลาใช้ component กลาง (ห้าม `<input type="date">` / `type="time"`)
+
+- วันที่: `src/components/shared/DatePicker` — ค่าเป็น `YYYY-MM-DD` เหมือนเดิม (ห้ามเปลี่ยนรูปแบบข้อมูลใน Firestore); รองรับ `min`/`max`, `required` (validation ของฟอร์มเหมือน input เดิม), `clearable` (ตัวกรองที่ค่าว่าง = ไม่กรอง)
+- เวลา: `src/components/shared/TimePicker` — 24 ชั่วโมง (ชั่วโมง 00-23 + นาที) ค่าเป็น `'HH:mm'` เหมือนเดิม (`<input type="time">` บางเบราว์เซอร์/locale แสดงเป็น AM/PM)
+- ข้อยกเว้นเดียว: ช่องเวลาใน Time Simulation ของ TeacherPortal (DEV-only) — guard test `dateTimeInputsGuard.test.ts` สแกน `src/`
+
+### React: ห้ามใส่ `key` ให้ component ที่ประกาศ props เอง
+
+โปรเจกต์ไม่มี `@types/react` → `<MyCard key={...} />` ล้ม tsc ("Property 'key' does not exist") ให้ห่อด้วย element ที่รับ key ได้ เช่น `<div key={id}><MyCard ... /></div>` — ห้ามติดตั้ง `@types/react` เพื่อแก้เฉพาะหน้า และห้ามใช้ `any` / `@ts-ignore` กลบ
 
 ### แสดงรายวิชา+ระดับชั้น+ห้อง ใช้ `formatCourseTitle()` เสมอ
 

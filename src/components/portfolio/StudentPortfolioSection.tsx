@@ -7,6 +7,7 @@ import {
 } from '../../services/firestoreService';
 import { compressImage, formatBytes, CompressedImage } from '../../lib/imageCompression';
 import { uploadPortfolioPhoto } from '../../services/storageService';
+import { DatePicker } from '../shared/DatePicker';
 
 /**
  * ฟอร์ม + รายการแฟ้มสะสมผลงานฝั่งนักเรียน (เขียนเข้า student_portfolio_entries)
@@ -177,10 +178,9 @@ export function StudentPortfolioSection({ student, studentUid }: { student: Stud
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-xs text-slate-400 flex items-center gap-2">
               วันที่เกิดกิจกรรม
-              <input
-                type="date" value={entryDate} onChange={e => setEntryDate(e.target.value)}
+              <DatePicker value={entryDate} onChange={setEntryDate} ariaLabel="วันที่เกิดกิจกรรม"
                 max={new Date().toISOString().slice(0, 10)}
-                className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white"
+                className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white flex items-center gap-2 text-left cursor-pointer"
               />
             </label>
             <div className="flex-1" />

@@ -22,8 +22,12 @@ export function AdminPortal() {
   const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods' | 'electives' | 'houses'>('teaching-load');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [bulkImportType, setBulkImportType] = useState<ImportType>('COURSE');
+  // การนำเข้าข้อมูลมีที่เดียว: BulkDataImportModal แบบ inline ในเมนู 'import' — หน้าอื่นพามาที่นี่พร้อมเลือกชนิดไว้ให้
+  const goToImport = (type: ImportType) => {
+    setBulkImportType(type);
+    setActiveTab('import');
+  };
   const [toast, setToast] = useState<string | null>(null);
   
   const {
@@ -57,7 +61,7 @@ export function AdminPortal() {
 
   const adminNavItems: AdminNavItem[] = [
     { id: 'teaching-load', label: 'ตารางภาระงานสอน', fullLabel: 'ตารางภาระงานสอนครู (Teaching Load)', icon: Layers, badge: null, color: 'text-blue-400', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
-    { id: 'import', label: 'นำเข้าภาระงานสอน', fullLabel: 'นำเข้าภาระงานสอน (Import Excel)', icon: Upload, badge: null, color: 'text-blue-400', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
+    { id: 'import', label: 'ระบบนำเข้าข้อมูลขนาดใหญ่', fullLabel: 'ระบบนำเข้าข้อมูลขนาดใหญ่ (Bulk Data Import)', icon: Upload, badge: null, color: 'text-blue-400', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
     { id: 'absence-sub', label: 'ลาสอน & ครูสอนแทน', fullLabel: 'ลาสอน & จัดครูสอนแทน (Substitute)', icon: Clock, badge: null, color: 'text-amber-400', badgeColor: 'bg-amber-500', activeStyle: 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-[inset_4px_0_0_rgba(245,158,11,1)]' },
     { id: 'sub-analytics', label: 'วิเคราะห์สอนแทน & PA', fullLabel: 'วิเคราะห์งานสอนแทน & PA', icon: BarChart3, badge: null, color: 'text-indigo-400', activeStyle: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-[inset_4px_0_0_rgba(99,102,241,1)]' },
     { id: 'users', label: 'จัดการสิทธิ์บุคลากร', fullLabel: 'จัดการสิทธิ์บุคลากร (User RBAC)', icon: Users, badge: null, color: 'text-blue-400', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
@@ -315,10 +319,7 @@ export function AdminPortal() {
                       <p className="text-slate-400 mt-1 text-sm">ข้อมูลภาระงานสอนอย่างเป็นทางการจากฐานข้อมูล Firestore ของโรงเรียน</p>
                     </div>
                   </div>
-                  <TeachingLoadTable onOpenImport={() => {
-                    setBulkImportType('COURSE');
-                    setIsBulkImportOpen(true);
-                  }} />
+                  <TeachingLoadTable onOpenImport={() => goToImport('COURSE')} />
                 </div>
               )}
 
@@ -436,13 +437,13 @@ export function AdminPortal() {
 
           {activeTab === 'users' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <StaffRoleManagementPage />
+              <StaffRoleManagementPage onGoToImport={() => goToImport('TEACHER')} />
             </div>
           )}
 
           {activeTab === 'students' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <StudentManagementPage />
+              <StudentManagementPage onGoToImport={() => goToImport('STUDENT')} />
             </div>
           )}
 
@@ -474,15 +475,6 @@ export function AdminPortal() {
         </div>
       </main>
 
-      {/* Real Firestore Bulk Data Import Modal */}
-      <BulkDataImportModal
-        isOpen={isBulkImportOpen}
-        onClose={() => setIsBulkImportOpen(false)}
-        initialImportType={bulkImportType}
-        onImportSuccess={(type, count) => {
-          showToast(`นำเข้าข้อมูล ${type} สำเร็จ (${count} รายการ)`);
-        }}
-      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react';
 
 const THAI_MONTHS = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -16,6 +16,12 @@ interface DatePickerProps {
   placeholder?: string;
   className?: string;
   disabled?: boolean;
+  /** เหมือน <input required> — ค่าว่างจะบล็อกการ submit ฟอร์ม (validation ของเบราว์เซอร์) */
+  required?: boolean;
+  /** แสดงปุ่ม × ล้างค่ากลับเป็น '' (เช่น ตัวกรองช่วงวันที่ที่ว่าง = ไม่กรอง) */
+  clearable?: boolean;
+  /** ข้อความสำหรับ screen reader / validation */
+  ariaLabel?: string;
 }
 
 const parseYmd = (s: string): Date | null => {
@@ -42,7 +48,7 @@ const formatDisplay = (s: string): string => {
  * ปฏิทินชัดเจน) ใช้ในฟอร์มลากิจ/ไปราชการ และเช็คชื่อย้อนหลัง — ค่าที่เก็บ/ส่งออกยังเป็น string
  * รูปแบบ YYYY-MM-DD เหมือนเดิมทุกที่ที่เรียกใช้ ไม่ต้องแก้ตรรกะอื่นที่กินค่านี้ต่อ
  */
-export function DatePicker({ value, onChange, min, max, placeholder, className, disabled }: DatePickerProps) {
+export function DatePicker({ value, onChange, min, max, placeholder, className, disabled, required, clearable, ariaLabel }: DatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const selected = parseYmd(value);
   const [viewDate, setViewDate] = useState(() => selected || parseYmd(min) || new Date());
@@ -96,6 +102,33 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
           {value ? formatDisplay(value) : (placeholder || 'เลือกวันที่')}
         </span>
       </button>
+
+      {/* required: input ซ่อน (โฟกัสได้) ถือค่าไว้ให้ validation ของฟอร์มทำงานเหมือน <input type=date required> เดิม */}
+      {required && (
+        <input
+          tabIndex={-1}
+          aria-hidden="true"
+          aria-label={ariaLabel}
+          required
+          disabled={disabled}
+          value={value}
+          onChange={() => {}}
+          onFocus={() => setIsOpen(true)}
+          className="absolute left-0 bottom-0 w-full h-px opacity-0 pointer-events-none"
+        />
+      )}
+
+      {clearable && value && !disabled && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          aria-label="ล้างวันที่"
+          title="ล้างวันที่"
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-500 hover:text-white hover:bg-slate-800"
+        >
+          <X className="w-3 h-3" />
+        </button>
+      )}
 
       {isOpen && (
         <div className="absolute z-50 mt-1 w-72 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-3">

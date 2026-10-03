@@ -16,6 +16,7 @@ import {
   User
 } from 'lucide-react';
 import { BillingInvoice } from '../../types';
+import { DatePicker } from '../shared/DatePicker';
 
 export function FinancePortal() {
   const user = useStore(s => s.user);
@@ -406,13 +407,7 @@ export function FinancePortal() {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">กำหนดชำระ</label>
-                  <input
-                    type="date"
-                    required
-                    value={newDueDate}
-                    onChange={(e) => setNewDueDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
-                  />
+                  <DatePicker required ariaLabel="กำหนดชำระ" value={newDueDate} onChange={setNewDueDate} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white flex items-center gap-2 text-left cursor-pointer" />
                 </div>
               </div>
 
