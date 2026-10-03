@@ -1,4 +1,6 @@
-import * as functions from 'firebase-functions';
+// ต้องเป็น v1 (รุ่นแรก ไม่ใช้ Cloud Run — ดู CLAUDE.md เรื่องโควตา region) — ตั้งแต่ firebase-functions v6
+// import เปล่า 'firebase-functions' คือ v2 ห้ามเปลี่ยนเป็น v2 onCall
+import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 // FieldValue ต้อง import จาก subpath นี้ — `admin.firestore.FieldValue` เป็น undefined ใน Functions emulator
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
