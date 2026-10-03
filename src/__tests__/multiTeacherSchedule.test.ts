@@ -31,9 +31,11 @@ describe('TASK 3: schedules.teacherIds — ทุกจุดที่กรอ�
     expect(bulkImportSrc).toContain('const teacherIds = merged?.teacherIds.length ? merged.teacherIds : (parsedData.matchedTeacherId ? [parsedData.matchedTeacherId] : []);');
   });
 
-  it('TeacherPortal daily schedule: กรอง todayFsSchedules ด้วยทั้ง teacherId เดี่ยวและ teacherIds array-contains', () => {
+  // teacherId/teacherIds เก็บ staff doc id — เทียบด้วย user.staffId ผ่าน isStaffAssigned (ตรวจทั้ง teacherId เดี่ยว
+  // และ teacherIds array) ไม่ใช่ user.uid (ดู staffIdentity.test.ts สำหรับพฤติกรรมของ helper)
+  it('TeacherPortal daily schedule: กรอง todayFsSchedules ด้วยทั้ง teacherId เดี่ยวและ teacherIds (ผ่าน staffId)', () => {
     expect(teacherPortalSrc).toContain(
-      "(isTeacherEmailMatch(item.teacherEmail, user?.email) ||\n                        (user?.uid && (item.teacherId === user.uid ||\n                          (Array.isArray(item.teacherIds) && item.teacherIds.includes(user.uid))))) &&"
+      "(isTeacherEmailMatch(item.teacherEmail, user?.email) ||\n                        isStaffAssigned(user, item)) &&"
     );
   });
 
@@ -43,9 +45,9 @@ describe('TASK 3: schedules.teacherIds — ทุกจุดที่กรอ�
     );
   });
 
-  it('TeacherPortal myCourses: isOriginal ต้องตรวจ teacherIds.includes(user.uid) ด้วย ไม่ใช่แค่ email ของครูคนแรก (แก้บั๊กครูร่วมสอนหายจากสมุดคะแนน/ตารางสอน)', () => {
+  it('TeacherPortal myCourses: isOriginal ต้องตรวจ teacherIds (ผ่าน staffId) ด้วย ไม่ใช่แค่ email ของครูคนแรก (แก้บั๊กครูร่วมสอนหายจากสมุดคะแนน/ตารางสอน)', () => {
     expect(teacherPortalSrc).toContain(
-      "const isOriginal = isTeacherEmailMatch(gc.teacherEmail, user?.email) ||\n          (!!user?.uid && (gc.teacherIds || []).includes(user.uid));"
+      "const isOriginal = isTeacherEmailMatch(gc.teacherEmail, user?.email) ||\n          isStaffIn(user, gc.teacherIds);"
     );
   });
 

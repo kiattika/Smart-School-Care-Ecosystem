@@ -85,6 +85,7 @@ export interface ElectiveActivityConfig {
   id: string;
   name: string;                    // ชื่อชุมนุมที่แอดมินตั้งเอง เช่น "ชุมนุมคอมพิวเตอร์"
   capacity: number;                // จำนวนรับทั้งชุมนุม
+  // ⚠️ ชื่อมีคำว่า Uid แต่เก็บ staff doc id (teacherId จากไฟล์ import) ไม่ใช่ Firebase Auth UID — เทียบกับผู้ใช้ผ่าน src/lib/staffIdentity.ts (user.staffId) เท่านั้น
   responsibleTeacherUids: string[]; // ครูรับผิดชอบร่วมกันได้หลายคน (แอดมินกำหนด)
   responsibleTeacherNames: string[]; // ชื่อคู่ลำดับเดียวกับ responsibleTeacherUids (denormalize ไว้แสดงผล)
   // วัน/คาบชุมนุม — ยืนยันจากโรงเรียนว่าไม่ใช่ค่าที่แอดมินกำหนดเอง ต้องดึงจากตารางสอนจริงที่ import
@@ -199,7 +200,7 @@ export type LateAttendanceStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
  */
 export interface LateAttendanceRequestRecord {
   id: string;
-  teacherId: string;        // Firebase Auth UID จริง (ไม่ใช่อีเมล)
+  teacherId: string;        // Firebase Auth UID จริงของครูที่ยื่นเอง (ไม่ใช่อีเมล, ไม่ใช่ staff doc id) — เขียน/อ่านด้วย user.uid ถูกต้องแล้ว
   teacherName: string;
   teacherEmail?: string;
   scheduleId: string;       // อ้างอิง schedules/{id}
@@ -229,6 +230,7 @@ export interface GlobalCourse {
   level: string;
   // TASK 3 (ครูร่วมสอน): ครูรับผิดชอบร่วมกันได้หลายคนต่อคาบ (เช่น HR ม.5/8) — teacherEmail ข้างบน
   // ยังคงเป็นของครูคนแรก/หลักเท่านั้น (backward compat) ใช้ teacherIds เพื่อจับคู่ครูร่วมสอนคนอื่นด้วย
+  // ⚠️ เก็บ staff doc id (teacherId จากไฟล์ import) ไม่ใช่ Firebase Auth UID — เทียบกับผู้ใช้ผ่าน src/lib/staffIdentity.ts (user.staffId) เท่านั้น
   teacherIds?: string[];
   // ใช้แยกวิชาหลัก (คะแนนตัวเลข) กับวิชากิจกรรม (ผ่าน/ไม่ผ่าน) ในสมุดบันทึกคะแนน — ดู TeacherPortal.tsx
   subjectType?: 'MAIN' | 'ACTIVITY';
@@ -902,6 +904,7 @@ export interface DepartmentConfig {
   // ดูแลทั้งโรงเรียน ไม่รู้ว่าใครลาวันไหนในแต่ละกลุ่มสาระ — ยืนยันจากโรงเรียนแล้ว) คนนี้จะเป็นทั้งผู้จัด
   // สอนแทนและอนุมัติขั้น 1 แทนเมื่อหัวหน้ากลุ่มสาระฯ ตัวจริงลาป่วย — ถ้ายังไม่ได้กำหนดไว้ fallback ไปที่
   // ACADEMIC_HEAD พร้อมเตือนชัดเจนในหน้าจอ (ดู SubstituteTeachingModule.tsx)
+  // ⚠️ ชื่อมีคำว่า Uid แต่เก็บ staff doc id (teacherId จากไฟล์ import) ไม่ใช่ Firebase Auth UID — เทียบกับผู้ใช้ผ่าน src/lib/staffIdentity.ts (user.staffId) เท่านั้น
   backupApproverUid?: string | null;
   backupApproverName?: string | null;
 }
