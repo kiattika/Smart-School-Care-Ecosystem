@@ -12,6 +12,9 @@
   - `firebase.json` → `firestore.database` ต้องเป็น ID เดียวกัน ไม่งั้น `firebase deploy --only firestore` ส่ง rules/indexes ไปที่ `(default)` (test เดียวกันตรวจทั้งสองจุด)
   - ใน Functions ให้ import `FieldValue` จาก `firebase-admin/firestore` — `admin.firestore.FieldValue` เป็น `undefined` ใน Functions emulator
 - การเปลี่ยนบทบาท (roles) ของผู้ใช้ต้องผ่าน callable `assignUserRole` เท่านั้น (เขียน custom claims + `staff.roles` ในที่เดียว) — client ห้ามเขียน `staff.roles` เองตอนแก้สิทธิ์
+  - SUPER_ADMIN ถอน SUPER_ADMIN ของตัวเองไม่ได้ (รวมตั้ง roles ว่าง) — `failed-precondition` จาก `functions/src/roleGuards.ts` กันล็อกตัวเองออก; ให้ SUPER_ADMIN คนอื่นทำแทน
+- อีเมลที่เขียนลง `staff` / `teachers` / `students` (รวม `parentEmail`) ต้องผ่าน `normalizeEmail()` (`src/lib/normalizeEmail.ts`: ตัดอักขระล่องหน + trim + lowercase) เสมอ — blocking function ค้นด้วย email แบบตรงตัว
+- สคริปต์ maintenance (`npx tsx scripts/<name>.ts`): `normalizeEmails.ts` (แก้อีเมลใน doc เดิม + รายงานอีเมลซ้ำ), `resetAuthClaims.ts` (ล้าง claims + revoke ทุกบัญชี, `--keep <email>` ได้หลายครั้ง) — ทั้งคู่มี `--dry-run` และ**ปฏิเสธการรันถ้าไม่มี emulator env** เว้นแต่ส่ง `--confirm-production <projectId>` (Claude ห้ามรันกับ production เอง)
 - Node.js local คือ v24 แต่ Cloud Functions Gen 1 ต้องการ ≤ Node 20 — ระวังเวลา deploy Functions
 
 ---

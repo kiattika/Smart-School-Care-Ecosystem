@@ -35,6 +35,7 @@ import { useStore } from '../store';
 import { UserProfile, UserRole } from '../types';
 import { BulkDataImportModal, ImportType } from './BulkDataImportModal';
 import { useDepartments } from '../hooks/useDepartments';
+import { normalizeEmail } from '../lib/normalizeEmail';
 import { DepartmentManagerModal } from './admin/DepartmentManagerModal';
 
 // พจนานุกรมชื่อภาษาไทยของบทบาท
@@ -351,6 +352,8 @@ export function StaffRoleManagementPage() {
         assignments: updatedAssignments,
         departmentId: updatedAssignments.departmentId || '',
         homeroomClass: updatedAssignments.homeroomClass || '',
+        // เขียนอีเมลกลับเป็นรูปแบบมาตรฐานทุกครั้งที่บันทึก (ไม่มีอีเมล = ไม่แตะ field เดิม)
+        ...(normalizeEmail(editingStaff.email) ? { email: normalizeEmail(editingStaff.email) } : {}),
         updatedAt: serverTimestamp()
       };
 

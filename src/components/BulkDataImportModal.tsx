@@ -24,6 +24,7 @@ import { db } from '../lib/firebase';
 import { useStore } from '../store';
 import { Student, Course, GlobalCourse, UserRole } from '../types';
 import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
+import { normalizeEmail } from '../lib/normalizeEmail';
 import { 
   isTeacherLoadReportFormat, 
   parseTeacherLoadReport, 
@@ -414,7 +415,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         let lastName = getFieldValue(normalized, ['lastname', 'last_name', 'นามสกุล']);
         const rawFullName = getFieldValue(normalized, ['fullname', 'name', 'ชื่อนามสกุล']);
         const position = getFieldValue(normalized, ['position', 'ตำแหน่ง']);
-        const email = getFieldValue(normalized, ['email', 'e-mail', 'อีเมล', 'อีเมล์']);
+        // normalize ตั้งแต่ตอน parse — ทั้ง validation, preview และ payload ที่เขียนลง staff/teachers ใช้ค่าเดียวกัน
+        const email = normalizeEmail(getFieldValue(normalized, ['email', 'e-mail', 'อีเมล', 'อีเมล์']));
         const rolesStr = getFieldValue(normalized, ['roles', 'role', 'บทบาท', 'สิทธิ์']);
         const department = getFieldValue(normalized, ['department', 'departmentid', 'dept', 'กลุ่มสาระ', 'กลุ่มสาระฯ', 'สังกัด']);
 
@@ -887,7 +889,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               lastName: parsedData.lastName,
               fullName: parsedData.fullName,
               position: parsedData.position,
-              email: parsedData.email,
+              email: normalizeEmail(parsedData.email),
               roles: parsedData.roles,
               departmentId: parsedData.departmentId,
               createdAt: serverTimestamp(),
