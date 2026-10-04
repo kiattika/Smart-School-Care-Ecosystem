@@ -3,6 +3,7 @@ import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { SchoolCalendarSection } from './admin/SchoolCalendarSection';
 import { StudentEmailFormatSection } from './admin/StudentEmailFormatSection';
+import { GuidanceStatusSection } from './admin/GuidanceStatusSection';
 import { DatePicker } from './shared/DatePicker';
 import { TimePicker } from './shared/TimePicker';
 import { 
@@ -377,6 +378,9 @@ export function SystemSettingsAndLocksPage() {
 
           {/* 1.6 รูปแบบอีเมลนักเรียน — school_settings/studentEmailFormat (client + blocking function อ่านค่าเดียวกัน) */}
           <StudentEmailFormatSection />
+
+          {/* 1.7 สถานะครูแนะแนว — school_settings/guidance_status (อ่านสด + ปุ่ม refreshGuidanceStatus) */}
+          <GuidanceStatusSection />
 
           {/* 2. Grade Entry Time-Window Settings (ตั้งค่าเปิด-ปิดระบบกรอกเกรด) */}
           <div className="space-y-4">
