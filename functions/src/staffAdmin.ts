@@ -53,6 +53,10 @@ export const createStaffMember = functions.https.onCall(async (data, context) =>
       const snap = await db.collection('staff').where('email', '==', email).limit(5).get();
       return snap.docs.map((d) => d.id);
     },
+    async getStudentEmailFormat() {
+      const snap = await db.collection('school_settings').doc('studentEmailFormat').get();
+      return snap.exists ? snap.data() : null;
+    },
     async findStudentIdsByEmail(email) {
       const snap = await db.collection('students').where('email', '==', email).limit(5).get();
       return snap.docs.map((d) => d.id);

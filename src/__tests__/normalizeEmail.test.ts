@@ -66,7 +66,8 @@ describe('every write of email to staff / teachers / students goes through norma
 
   it('StudentManagementPage: student email + parentEmail', () => {
     const s = src('components/StudentManagementPage.tsx');
-    expect(s).toContain('email: normalizeEmail(formEmail) || `it${cleanId}@utd.ac.th`,');
+    // fallback เมื่อไม่ได้กรอกเอง = รูปแบบที่ admin ตั้งไว้ (studentEmailFormat.test.ts) — ค่าที่กรอกยังต้องผ่าน normalizeEmail เสมอ
+    expect(s).toContain('email: normalizeEmail(formEmail) || formatStudentEmail(cleanId, studentEmailFormat),');
     expect(s).toContain('parentEmail: normalizeEmail(formParentEmail),');
     expect(s).not.toMatch(/email: form(Parent)?Email\.trim\(\)/i);
   });

@@ -39,6 +39,8 @@ import { recomputeStudentAttendanceStats } from '../services/firestoreService';
 import { Student } from '../types';
 import { isSameRoom } from '../lib/utils';
 import { normalizeEmail } from '../lib/normalizeEmail';
+import { useStudentEmailFormat } from '../hooks/useStudentEmailFormat';
+import { formatStudentEmail, studentEmailPatternLabel } from '../lib/studentEmailFormat';
 
 export interface StudentRecord {
   id: string;
@@ -93,7 +95,14 @@ const COMMON_ROOMS = [
  */
 export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => void } = {}) {
   // ดึงข้อมูลนักเรียนจริงจาก Firestore 'students' collection แบบ Real-time
-  const [studentsList, setStudentsList] = useState<StudentRecord[]>([]);
+  // รูปแบบอีเมลนักเรียนจาก school_settings/studentEmailFormat (ไม่มี = it / utd.ac.th) — config ตัวเดียวกับที่ blocking function ใช้
+  const { format: studentEmailFormat } = useStudentEmailFormat();
+  const [rawStudentsList, setRawStudentsList] = useState<StudentRecord[]>([]);
+  // แถวเก่าที่ยังไม่มี field email: แสดง/ตั้งต้นฟอร์มแก้ไขด้วยรูปแบบปัจจุบัน (ยังไม่เขียนลง Firestore จนกว่าแอดมินจะกด "บันทึก")
+  const studentsList = useMemo(
+    () => rawStudentsList.map(s => (s.email ? s : { ...s, email: formatStudentEmail(s.studentId || s.id, studentEmailFormat) })),
+    [rawStudentsList, studentEmailFormat]
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -141,10 +150,9 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
             fullName: composedFullName,
             name: composedFullName,
             nickname: data.nickname || '',
-            // ยังไม่เคยมี field นี้มาก่อน — ถ้า doc เก่ายังไม่มีค่าเก็บไว้ ให้ fallback ไปตามรูปแบบ
-            // it{รหัสประจำตัว}@utd.ac.th ที่ตกลงกันไว้ เพื่อให้แถวเก่าไม่ว่างเปล่า (ค่า fallback นี้
-            // ยังไม่ถูกเขียนลง Firestore จนกว่าแอดมินจะกด "บันทึก" อีกครั้งในฟอร์มแก้ไข)
-            email: data.email || `it${sId}@utd.ac.th`,
+            // ค่าที่เก็บไว้จริงเท่านั้น — ถ้า doc เก่ายังไม่มี field email ค่า fallback ตามรูปแบบที่ตั้งไว้
+            // เติมที่ studentsList (useMemo ด้านบน) เพื่อให้เปลี่ยนรูปแบบแล้วอัปเดตทันทีโดยไม่ต้อง subscribe ใหม่
+            email: data.email || '',
             room: rawRoom,
             className: rawRoom,
             grade: data.grade || (rawRoom.includes('/') ? rawRoom.split('/')[0] : rawRoom),
@@ -181,7 +189,7 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
           return (a.fullName || '').localeCompare(b.fullName || '', 'th');
         });
 
-        setStudentsList(docs);
+        setRawStudentsList(docs);
         setIsLoading(false);
       },
       (err) => {
@@ -374,9 +382,9 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
         name: fullName,
         fullName: fullName,
         nickname: formNickname.trim(),
-        // ถ้าไม่ได้กรอกเอง ใช้รูปแบบ it{รหัสประจำตัว}@utd.ac.th เป็นค่าเริ่มต้น (ที่ตกลงกันไว้)
+        // ถ้าไม่ได้กรอกเอง ใช้รูปแบบอีเมลนักเรียนที่ admin ตั้งไว้ (school_settings/studentEmailFormat; ไม่มี = it{รหัส}@utd.ac.th)
         // normalizeEmail = ตัดอักขระล่องหน + trim + lowercase (blocking function ค้น students ด้วย email ตรงตัว)
-        email: normalizeEmail(formEmail) || `it${cleanId}@utd.ac.th`,
+        email: normalizeEmail(formEmail) || formatStudentEmail(cleanId, studentEmailFormat),
         room: formRoom.trim(),
         className: formRoom.trim(),
         grade: formRoom.includes('/') ? formRoom.split('/')[0] : formRoom,
@@ -960,10 +968,10 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
                       value={formEmail}
                       onChange={(e) => setFormEmail(e.target.value)}
                       className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-slate-200 focus:border-purple-500 outline-none"
-                      placeholder={formStudentId ? `it${formStudentId}@utd.ac.th` : 'it{รหัสประจำตัว}@utd.ac.th'}
+                      placeholder={formStudentId ? formatStudentEmail(formStudentId, studentEmailFormat) : studentEmailPatternLabel(studentEmailFormat)}
                     />
                     <p className="text-[10px] text-slate-500 mt-1">
-                      เว้นว่างได้ — ระบบจะใช้รูปแบบ it{'{'}รหัสประจำตัว{'}'}@utd.ac.th ให้อัตโนมัติ (แก้ไขได้กรณีพิมพ์ผิดตอน import)
+                      เว้นว่างได้ — ระบบจะใช้รูปแบบ {studentEmailPatternLabel(studentEmailFormat)} ให้อัตโนมัติ (ตั้งค่ารูปแบบได้ที่เมนู "ปีการศึกษา & ล็อกระบบ"; แก้ไขได้กรณีพิมพ์ผิดตอน import)
                     </p>
                   </div>
                   <div className="sm:col-span-2">

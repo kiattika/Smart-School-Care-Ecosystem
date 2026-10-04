@@ -2,23 +2,35 @@
  * กติกาสิทธิ์เข้าระบบ (ยืนยันกับเจ้าของโปรเจกต์แล้ว) — pure function ไม่แตะ Firebase ใดๆ
  * เพื่อให้ unit test ได้ครบทุกกิ่ง (src/__tests__/resolveAccess.test.ts)
  *
- * - ต้องมีอีเมล, emailVerified = true และโดเมนเป็น @utd.ac.th เท่านั้น
+ * - ต้องมีอีเมล, emailVerified = true และโดเมนเป็น @utd.ac.th เท่านั้น — ข้อยกเว้นเดียว: โดเมนอีเมลนักเรียนที่ admin
+ *   ตั้งไว้ใน school_settings/studentEmailFormat (ผ่านได้เฉพาะทางนักเรียน; บุคลากรยังต้อง @utd.ac.th)
  * - เจอใน staff (ด้วย email ตัวพิมพ์เล็ก) → roles จาก staff doc; roles ว่าง = ปฏิเสธ
- * - ไม่เจอใน staff → หา students ด้วย field email, ไม่เจอค่อยลองรูปแบบ STUDENT_EMAIL_TEMPLATE
- *   → roles ['STUDENT']
+ * - ไม่เจอใน staff → หา students ด้วย field email, ไม่เจอค่อยลองรูปแบบอีเมลนักเรียนจาก config
+ *   ({prefix}{studentId}@{domain}) → roles ['STUDENT']
+ * - อ่าน config ไม่ได้ / ช้า / ผิดรูปแบบ = ใช้ค่าเริ่มต้น it / utd.ac.th (path ของการ login ห้ามพัง)
  * - ไม่เจอทั้งคู่ = ปฏิเสธ (ไม่มี default role ใดๆ ทั้งสิ้น)
  *
  * ผู้เรียกใช้: beforeUserCreated / beforeUserSignedIn ใน authBlocking.ts
  */
 
+import {
+  DEFAULT_STUDENT_EMAIL_FORMAT,
+  StudentEmailFormat,
+  sanitizeStudentEmailFormat,
+  studentEmailTemplate,
+} from './studentEmailFormat';
+
 export const ALLOWED_EMAIL_DOMAIN = 'utd.ac.th';
 
 /**
- * รูปแบบอีเมลนักเรียน (Google Workspace ของโรงเรียน) — `{studentId}` คือรหัสนักเรียน (ตัวเลข)
- * ใช้เป็นทางสำรองเมื่อ students/{id} ยังไม่มี field email. เก็บเป็นค่าเดียวตรงนี้
- * เพราะจะย้ายไปตั้งค่าใน admin settings ภายหลัง
+ * template อีเมลนักเรียน "ค่าเริ่มต้น" — `{studentId}` คือรหัสนักเรียน (ตัวเลข)
+ * ค่าจริงที่ใช้ตอน login อ่านจาก school_settings/studentEmailFormat (ดู studentEmailFormat.ts)
+ * ค่านี้ใช้เมื่อไม่มี config / อ่านไม่ได้ เท่านั้น
  */
-export const STUDENT_EMAIL_TEMPLATE = 'it{studentId}@utd.ac.th';
+export const STUDENT_EMAIL_TEMPLATE = studentEmailTemplate(DEFAULT_STUDENT_EMAIL_FORMAT);
+
+/** รอ config ได้ไม่เกินนี้ (ms) — blocking function ต้องตอบภายใน 7 วินาที */
+export const STUDENT_EMAIL_FORMAT_TIMEOUT_MS = 2000;
 
 export interface StaffRecord {
   /** document id ของ staff (= teacherId จากไฟล์ import ไม่ใช่ Auth UID) */
@@ -40,6 +52,11 @@ export interface StudentRecord {
 }
 
 export interface AccessLookups {
+  /**
+   * ค่าดิบของ school_settings/studentEmailFormat (null = ไม่มี doc) — ไม่ implement = ใช้ค่าเริ่มต้น
+   * ผู้เรียกไม่ต้อง catch: resolveAccess ครอบ error/timeout และ sanitize ให้เอง
+   */
+  getStudentEmailFormat?(): Promise<unknown>;
   findStaffByEmail(email: string): Promise<StaffRecord[]>;
   findStudentsByEmail(email: string): Promise<StudentRecord[]>;
   getStudentById(studentId: string): Promise<StudentRecord | null>;
@@ -98,6 +115,24 @@ export function studentIdFromEmail(email: string, template: string = STUDENT_EMA
   return m ? m[1] : null;
 }
 
+/** อ่าน config รูปแบบอีเมลนักเรียน — ไม่ throw ไม่ค้าง: error / timeout / ผิดรูปแบบ → ค่าเริ่มต้นเดิม */
+async function loadStudentEmailFormat(lookups: AccessLookups): Promise<StudentEmailFormat> {
+  if (!lookups.getStudentEmailFormat) return DEFAULT_STUDENT_EMAIL_FORMAT;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const raw = await Promise.race([
+      lookups.getStudentEmailFormat(),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), STUDENT_EMAIL_FORMAT_TIMEOUT_MS); }),
+    ]);
+    return sanitizeStudentEmailFormat(raw);
+  } catch (err) {
+    console.warn('[access] school_settings/studentEmailFormat unavailable — using default format:', err instanceof Error ? err.message : err);
+    return DEFAULT_STUDENT_EMAIL_FORMAT;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 function normalizeRoles(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return Array.from(new Set(raw.filter((r): r is string => typeof r === 'string' && r.trim() !== '').map((r) => r.trim())));
@@ -110,10 +145,18 @@ export async function resolveAccess(
   const email = (user.email || '').trim().toLowerCase();
   if (!email) return { allowed: false, reason: 'NO_EMAIL' };
   if (user.emailVerified !== true) return { allowed: false, reason: 'EMAIL_NOT_VERIFIED' };
-  if (!email.endsWith(`@${ALLOWED_EMAIL_DOMAIN}`)) return { allowed: false, reason: 'DOMAIN_NOT_ALLOWED' };
+  // โดเมนโรงเรียน (@utd.ac.th) ผ่านเสมอ; โดเมนอื่นผ่านได้เฉพาะโดเมนอีเมลนักเรียนที่ admin ตั้งไว้ และเข้าได้ทางนักเรียนเท่านั้น
+  // (อ่าน config เมื่อจำเป็นเท่านั้น — login ของบุคลากร @utd.ac.th ไม่ต้องอ่านเพิ่ม)
+  const schoolDomain = email.endsWith(`@${ALLOWED_EMAIL_DOMAIN}`);
+  let format: StudentEmailFormat | null = null;
+  if (!schoolDomain) {
+    format = await loadStudentEmailFormat(lookups);
+    if (!email.endsWith(`@${format.domain}`)) return { allowed: false, reason: 'DOMAIN_NOT_ALLOWED' };
+  }
 
   // 1. บุคลากร — ข้าม doc alias เก่าที่ใช้อีเมลเป็น doc id (seed เดิมเขียน staff/{email} ซ้ำกับ staff/{uid})
-  const staff = (await lookups.findStaffByEmail(email)).filter((s) => s.id.toLowerCase() !== email);
+  //    (โดเมนนักเรียนที่ไม่ใช่ @utd.ac.th ข้ามขั้นนี้ — บุคลากรต้องใช้อีเมลโรงเรียนเท่านั้น)
+  const staff = schoolDomain ? (await lookups.findStaffByEmail(email)).filter((s) => s.id.toLowerCase() !== email) : [];
   if (staff.length > 1) return { allowed: false, reason: 'AMBIGUOUS_RECORD' };
   if (staff.length === 1) {
     // ปิดการใช้งาน (setStaffActive) — ตรวจก่อน roles: คนที่ถูกปิดต้องได้ข้อความนี้เสมอ ไม่ไหลไปเป็นนักเรียน
@@ -130,7 +173,8 @@ export async function resolveAccess(
   if (byEmail.length === 1) {
     student = byEmail[0];
   } else {
-    const sid = studentIdFromEmail(email);
+    format = format ?? await loadStudentEmailFormat(lookups);
+    const sid = studentIdFromEmail(email, studentEmailTemplate(format));
     if (sid) student = await lookups.getStudentById(sid);
   }
 

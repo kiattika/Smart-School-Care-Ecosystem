@@ -564,6 +564,69 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         asRole('SUBJECT_TEACHER').firestore().doc('school_settings/periods_config').set({ name: 'Hacked' })
       );
     });
+
+    // school_settings/studentEmailFormat — รูปแบบอีเมลนักเรียน {prefix}{studentId}@{domain}
+    describe('studentEmailFormat', () => {
+      const PATH = 'school_settings/studentEmailFormat';
+      const valid = { prefix: 'it', domain: 'utd.ac.th' };
+      const admin = () => asRole('SUPER_ADMIN').firestore().doc(PATH);
+
+      it('lets any signed-in user read it (client hook + staff pages), but not anonymous users', async () => {
+        await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(PATH).set(valid); });
+        for (const roles of [['SUBJECT_TEACHER'], ['STUDENT'], ['PARENT'], []]) {
+          await assertSucceeds(asUser('some-uid', roles).firestore().doc(PATH).get());
+        }
+        await assertFails(asAnonymous().firestore().doc(PATH).get());
+      });
+
+      it('lets only SUPER_ADMIN write (create / update / delete)', async () => {
+        await assertSucceeds(admin().set(valid));
+        await assertSucceeds(admin().set({ prefix: 's', domain: 'student.utd.ac.th', updatedBy: 'uid-1' }));
+        await assertSucceeds(admin().delete());
+
+        await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(PATH).set(valid); });
+        for (const role of ['HOMEROOM_TEACHER', 'SUBJECT_TEACHER', 'EXECUTIVE', 'DIRECTOR', 'ACADEMIC_HEAD', 'STUDENT', 'PARENT']) {
+          const ref = asRole(role).firestore().doc(PATH);
+          await assertFails(ref.set({ prefix: 'x', domain: 'evil.example.com' }));
+          await assertFails(ref.update({ prefix: 'x' }));
+          await assertFails(ref.delete());
+        }
+        await assertFails(asUser('no-roles', []).firestore().doc(PATH).set(valid));
+        await assertFails(asAnonymous().firestore().doc(PATH).set(valid));
+      });
+
+      it('accepts an empty prefix and a multi-label domain; rejects malformed values even from SUPER_ADMIN', async () => {
+        await assertSucceeds(admin().set({ prefix: '', domain: 'utd.ac.th' }));
+        await assertSucceeds(admin().set({ prefix: 'stu_1.a-b', domain: 'a.b.example.co.th' }));
+
+        for (const bad of [
+          { prefix: 'IT', domain: 'utd.ac.th' },              // ตัวพิมพ์ใหญ่ (client sanitize เป็นตัวเล็กก่อนเขียนเสมอ)
+          { prefix: 'it ', domain: 'utd.ac.th' },             // ช่องว่าง
+          { prefix: 'a'.repeat(33), domain: 'utd.ac.th' },    // ยาวเกิน 32
+          { prefix: 'it', domain: '@utd.ac.th' },             // มี @
+          { prefix: 'it', domain: 'utd' },                    // ไม่มีจุด
+          { prefix: 'it', domain: 'utd.ac.th/evil' },         // อักขระต้องห้าม
+          { prefix: 'it', domain: '' },
+          { prefix: 'it', domain: 'UTD.ac.th' },
+          { prefix: 42, domain: 'utd.ac.th' },                // ไม่ใช่ string
+          { prefix: 'it', domain: ['utd.ac.th'] },
+          { prefix: 'it' },                                   // ขาด domain
+          { domain: 'utd.ac.th' },                            // ขาด prefix
+          { prefix: 'it', domain: 'utd.ac.th', role: 'x' },   // field แปลกปลอม
+        ]) {
+          await assertFails(admin().set(bad as Record<string, unknown>));
+        }
+        await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(PATH).set(valid); });
+        await assertFails(admin().update({ domain: 'not a domain' }));
+      });
+
+      it('REGRESSION: the school_settings/{settingId} wildcard is not a way around the format check', async () => {
+        // SUPER_ADMIN ยังเขียน school_settings อื่นได้อิสระ (wildcard เดิม) แต่เขียน studentEmailFormat ผ่านทางนั้นไม่ได้
+        await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('school_settings/anything_else').set({ whatever: 1 }));
+        await assertFails(admin().set({ prefix: 'IT', domain: 'x' }));
+        await assertFails(admin().set({ anything: 'goes' }));
+      });
+    });
   });
 
   // 11. staff collection

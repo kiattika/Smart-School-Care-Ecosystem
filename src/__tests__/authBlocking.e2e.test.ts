@@ -291,3 +291,65 @@ describe.skipIf(!AUTH_HOST || !FS_HOST)('staff create / deactivate / reactivate 
     await deleteApp(adminApp);
   });
 });
+
+async function fsDelete(path: string) {
+  const res = await fetch(`${FS_BASE}/${path}`, { method: 'DELETE', headers: { Authorization: 'Bearer owner' } });
+  if (!res.ok && res.status !== 404) throw new Error(`fsDelete ${path}: ${res.status} ${await res.text()}`);
+}
+
+/**
+ * school_settings/studentEmailFormat บน emulator จริง — blocking function อ่าน config ตอน login ทุกครั้ง:
+ * ไม่มี doc = it / utd.ac.th, ตั้งค่าใหม่มีผลทันที (prefix และโดเมนอื่น), ค่าเสีย = กลับไปค่าเริ่มต้น (ไม่พัง)
+ */
+describe.skipIf(!AUTH_HOST || !FS_HOST)('student email format config (emulator E2E)', () => {
+  const app = initClientApp({ apiKey: 'emulator-key', projectId: PROJECT_ID, authDomain: `${PROJECT_ID}.firebaseapp.com` }, 'e2e-fmt');
+  const auth = getClientAuth(app);
+  const CFG = 'school_settings/studentEmailFormat';
+
+  beforeAll(async () => {
+    connectAuthEmulator(auth, `http://${AUTH_HOST}`, { disableWarnings: true });
+    if (!getApps().length) initAdminApp({ projectId: PROJECT_ID });
+    // นักเรียนทดสอบ (ไม่มี field email — จับคู่ด้วยรูปแบบอย่างเดียว)
+    for (const id of ['38700', '38701', '38702']) await fsPut(`students/${id}`, { studentId: id, name: `นักเรียน ${id}` });
+    for (const email of ['it38700@utd.ac.th', 's38701@student.utd.ac.th', 'it38702@utd.ac.th', 'it38700@student.utd.ac.th']) {
+      await getAdminAuth().createUser({ email, password: PASSWORD, emailVerified: true });
+    }
+    await fsDelete(CFG);
+  }, 60_000);
+
+  async function tryLogin(email: string): Promise<{ ok: true; studentId: unknown } | { ok: false; message: string }> {
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email, PASSWORD);
+      const { claims } = await cred.user.getIdTokenResult(true);
+      await signOut(auth);
+      return { ok: true, studentId: claims.studentId };
+    } catch (err) {
+      return { ok: false, message: describeAuthError(err) };
+    }
+  }
+
+  it('no config doc → the original it{id}@utd.ac.th pattern; other domains are refused', async () => {
+    expect(await tryLogin('it38700@utd.ac.th')).toEqual({ ok: true, studentId: '38700' });
+    expect(await tryLogin('it38700@student.utd.ac.th')).toEqual({ ok: false, message: DENY_MESSAGES.DOMAIN_NOT_ALLOWED });
+  });
+
+  it('after the admin saves a new format it applies at once: new prefix + domain log in, the old pattern no longer does', async () => {
+    await fsPut(CFG, { prefix: 's', domain: 'student.utd.ac.th' });
+    expect(await tryLogin('s38701@student.utd.ac.th')).toEqual({ ok: true, studentId: '38701' });
+    expect(await tryLogin('it38702@utd.ac.th')).toEqual({ ok: false, message: DENY_MESSAGES.NOT_REGISTERED });
+    expect(await tryLogin('it38700@student.utd.ac.th')).toEqual({ ok: false, message: DENY_MESSAGES.NOT_REGISTERED });
+  });
+
+  it('a malformed stored value does not break login — it falls back to the default format', async () => {
+    await fsPut(CFG, { prefix: 'Bad Prefix!', domain: '@nope' });
+    expect(await tryLogin('it38700@utd.ac.th')).toEqual({ ok: true, studentId: '38700' });
+    expect(await tryLogin('s38701@student.utd.ac.th')).toEqual({ ok: false, message: DENY_MESSAGES.DOMAIN_NOT_ALLOWED });
+  });
+
+  it('deleting the doc restores the default behaviour', async () => {
+    await fsDelete(CFG);
+    expect(await tryLogin('it38700@utd.ac.th')).toEqual({ ok: true, studentId: '38700' });
+    expect(await tryLogin('s38701@student.utd.ac.th')).toEqual({ ok: false, message: DENY_MESSAGES.DOMAIN_NOT_ALLOWED });
+    await deleteApp(app);
+  });
+});
