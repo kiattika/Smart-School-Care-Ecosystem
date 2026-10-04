@@ -357,7 +357,7 @@ export function ParentPortal() {
                   <HeartPulse className="w-5 h-5" />
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-pink-500/10">สุขภาพ</span>
                 </div>
-                <span className="text-xs text-slate-400 block">คัดกรอง 2Q & PHQ-9</span>
+                <span className="text-xs text-slate-400 block">คัดกรอง 2Q</span>
                 <span className="text-2xl font-black text-emerald-400">ปกติ</span>
                 <p className="text-[10px] text-slate-400">ไม่มีภาวะซึมเศร้า</p>
               </div>

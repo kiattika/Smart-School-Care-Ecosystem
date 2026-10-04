@@ -26,6 +26,7 @@ import { SdqAnswers } from '../../lib/sdqQuestionnaire';
 import { SdqEntryForm, EMPTY_IMPACT_FORM, ImpactFormValues } from '../shared/SdqEntryForm';
 import { buildSdqSubmissionFromAnswers } from '../../lib/sdqSubmission';
 import { SdqStatusView } from '../shared/SdqStatusView';
+import { StudentNineQSection } from './StudentNineQSection';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits, subscribeSDQAssessments, subscribeSemesterHealthLogs } from '../../services/firestoreService';
 import { BMI_CATEGORY_LABEL } from '../../lib/utils';
@@ -33,7 +34,6 @@ import { SemesterHealthSelfReportForm } from './SemesterHealthSelfReportForm';
 import {
   InfirmaryVisit,
   TwoQuestionScreening,
-  PHQ9Screening,
   SDQAssessment,
   SemesterHealthLog,
   Student
@@ -50,9 +50,7 @@ export function HealthMentalWellbeingModule({
     allergies,
     specialCareNeeds,
     twoQuestionScreenings,
-    phq9Screenings,
     save2QScreening,
-    savePHQ9Screening,
     submitSDQAssessment,
     students
   } = useStore();
@@ -132,7 +130,6 @@ export function HealthMentalWellbeingModule({
   const studentSpecialCare = specialCareNeeds[student.studentId] || [];
   const visits = infirmaryVisits.filter(v => v.studentId === student.studentId);
   const screening2Q = twoQuestionScreenings[student.studentId];
-  const screeningPHQ9 = phq9Screenings[student.studentId];
   const studentSDQs = sdqAssessments.filter(s => s.studentId === student.studentId);
 
   const [activeTab, setActiveTab] = useState<'physical' | 'infirmary' | 'screening' | 'sdq'>('physical');
@@ -141,12 +138,6 @@ export function HealthMentalWellbeingModule({
   const [q1, setQ1] = useState<boolean>(screening2Q ? screening2Q.q1Depressed : false);
   const [q2, setQ2] = useState<boolean>(screening2Q ? screening2Q.q2Hopeless : false);
   const [saved2QSuccess, setSaved2QSuccess] = useState(false);
-
-  // PHQ-9 Form State (9 items 0-3)
-  const [phqAnswers, setPhqAnswers] = useState<number[]>(
-    screeningPHQ9 ? screeningPHQ9.answers : [0, 0, 0, 0, 0, 0, 0, 0, 0]
-  );
-  const [savedPHQSuccess, setSavedPHQSuccess] = useState(false);
 
   // SDQ Interactive Form State
   const [sdqEvaluator, setSdqEvaluator] = useState<'STUDENT' | 'PARENT' | 'TEACHER'>(isParentView ? 'PARENT' : 'STUDENT');
@@ -158,27 +149,14 @@ export function HealthMentalWellbeingModule({
   const { academicYear: currentAcademicYear, isConfigured: academicYearConfigured } = useCurrentSemester();
   const [sdqSubmitSuccess, setSdqSubmitSuccess] = useState(false);
   const [saved2QError, setSaved2QError] = useState<string | null>(null);
-  const [savedPHQError, setSavedPHQError] = useState<string | null>(null);
   const [sdqSubmitError, setSdqSubmitError] = useState<string | null>(null);
 
   // ตัวเลขล่าสุดจาก Firestore จริง — ไม่มี fallback mock อีกต่อไป (null = ยังไม่เคยกรอก → แสดง empty state)
   const latestHealth: SemesterHealthLog | null = healthLogs[healthLogs.length - 1] || null;
   const canSelfReport = !isParentView && !!user?.uid && !!student.studentUid && student.studentUid === user.uid;
 
-  const phqQuestions = [
-    '1. เบื่อ ไม่สนใจ หรือไม่เพลิดเพลินในการทำสิ่งต่างๆ',
-    '2. รู้สึกไม่สบายใจ ซึมเศร้า หรือท้อแท้',
-    '3. หลับยาก หรือหลับๆ ตื่นๆ หรือหลับมากเกินไป',
-    '4. เหนื่อยง่าย หรือไม่ค่อยมีแรง',
-    '5. เบื่ออาหาร หรือกินมากเกินไป',
-    '6. รู้สึกไม่ดีกับตัวเอง คิดว่าตัวเองล้มเหลว หรือทำให้ตนเองหรือครอบครัวผิดหวัง',
-    '7. สมาธิไม่ดีเวลาทำสิ่งต่างๆ เช่น อ่านหนังสือ หรือดูโทรทัศน์',
-    '8. พูดหรือทำอะไรช้าจนคนอื่นสังเกตเห็น หรือกระสับกระส่ายผิดปกติ',
-    '9. คิดทำร้ายตัวเอง หรือคิดว่าถ้าตายไปคงจะดี'
-  ];
-
   // ทั้ง 3 handler ด้านล่างนี้ await การเขียน Firestore จริงก่อนแสดง "บันทึกสำเร็จ" เสมอ (เดิม fire-
-  // and-forget แสดงสำเร็จทันทีไม่ว่า Firestore จะรับจริงหรือไม่ — ดู savePHQ9Screening/save2QScreening/
+  // and-forget แสดงสำเร็จทันทีไม่ว่า Firestore จะรับจริงหรือไม่ — ดู save2QScreening/
   // submitSDQAssessment ใน store.ts ที่แก้ให้ throw error ต่อแทนการกลืนเงียบๆ)
   const handleSave2Q = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -190,19 +168,6 @@ export function HealthMentalWellbeingModule({
     } catch (err) {
       console.error('[HealthMentalWellbeingModule] save2QScreening failed:', err);
       setSaved2QError('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
-    }
-  };
-
-  const handleSavePHQ9 = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavedPHQError(null);
-    try {
-      await savePHQ9Screening(student.studentId, phqAnswers);
-      setSavedPHQSuccess(true);
-      setTimeout(() => setSavedPHQSuccess(false), 3000);
-    } catch (err) {
-      console.error('[HealthMentalWellbeingModule] savePHQ9Screening failed:', err);
-      setSavedPHQError('บันทึกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
     }
   };
 
@@ -289,7 +254,7 @@ export function HealthMentalWellbeingModule({
           }`}
         >
           <Brain className="w-3.5 h-3.5" />
-          <span>คัดกรอง 2Q & PHQ-9</span>
+          <span>คัดกรองอารมณ์ (2Q)</span>
         </button>
         <button
           onClick={() => setActiveTab('sdq')}
@@ -664,7 +629,7 @@ export function HealthMentalWellbeingModule({
                 <div className="p-3 bg-slate-800/60 rounded-xl text-xs space-y-1">
                   <span className="text-[10px] text-slate-400 block">ผลการคัดกรอง 2Q ล่าสุด:</span>
                   <span className={`font-bold block ${q1 || q2 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                    {q1 || q2 ? '⚠️ มีความเสี่ยง (แนะนำให้ทำแบบประเมิน PHQ-9 ต่อเนื่อง)' : '✅ สภาวะอารมณ์ปกติ'}
+                    {q1 || q2 ? '⚠️ พบความเสี่ยงเบื้องต้น — ครูแนะแนวหรือครูที่ปรึกษาอาจชวนพูดคุยเพิ่มเติม หากรู้สึกไม่ไหว บอกครูที่ไว้ใจได้ทันที' : '✅ สภาวะอารมณ์ปกติ'}
                   </span>
                 </div>
 
@@ -678,92 +643,12 @@ export function HealthMentalWellbeingModule({
             </div>
           </div>
 
-          {/* PHQ-9 Comprehensive Form */}
-          <div className="lg:col-span-7 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <div>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <Smile className="w-4 h-4 text-indigo-400" />
-                    แบบประเมินภาวะซึมเศร้า 9 คำถาม (PHQ-9)
-                  </h3>
-                  <p className="text-[11px] text-slate-400">
-                    เกณฑ์คะแนน: 0=ไม่มีเลย, 1=มีบางวัน, 2=มีบ่อย, 3=มีทุกวัน (คะแนนรวม 0 - 27)
-                  </p>
-                </div>
-              </div>
-
-              {savedPHQSuccess && (
-                <div className="p-3 mb-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>บันทึกผลการประเมิน PHQ-9 และสรุปคำแนะนำสำเร็จ</span>
-                </div>
-              )}
-              {savedPHQError && (
-                <div className="p-3 mb-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span>{savedPHQError}</span>
-                </div>
-              )}
-
-              <form onSubmit={handleSavePHQ9} className="space-y-3">
-                <div className="max-h-[340px] overflow-y-auto space-y-2.5 pr-1">
-                  {phqQuestions.map((q, idx) => (
-                    <div key={idx} className="p-3 bg-slate-800/40 border border-slate-800 rounded-xl text-xs space-y-1.5">
-                      <p className="text-slate-200 font-medium">{q}</p>
-                      <div className="grid grid-cols-4 gap-1.5 text-center text-[10px]">
-                        {[
-                          { val: 0, label: 'ไม่มีเลย (0)' },
-                          { val: 1, label: 'บางวัน (1)' },
-                          { val: 2, label: 'บ่อย (2)' },
-                          { val: 3, label: 'ทุกวัน (3)' }
-                        ].map((choice) => (
-                          <button
-                            key={choice.val}
-                            type="button"
-                            onClick={() => {
-                              const newAns = [...phqAnswers];
-                              newAns[idx] = choice.val;
-                              setPhqAnswers(newAns);
-                            }}
-                            className={`py-1.5 px-1 rounded-lg border transition-all ${
-                              phqAnswers[idx] === choice.val
-                                ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300 font-bold'
-                                : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
-                            }`}
-                          >
-                            {choice.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Score Summary */}
-                <div className="p-3.5 bg-gradient-to-br from-indigo-500/10 to-blue-500/10 border border-indigo-500/20 rounded-2xl flex items-center justify-between">
-                  <div>
-                    <span className="text-[10px] text-slate-400">คะแนนประเมิน PHQ-9 รวม:</span>
-                    <p className="text-lg font-black text-indigo-400">
-                      {phqAnswers.reduce((a, b) => a + b, 0)} / 27 คะแนน
-                    </p>
-                  </div>
-                  <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold">
-                    {phqAnswers.reduce((a, b) => a + b, 0) < 5 ? 'ระดับปกติ' :
-                     phqAnswers.reduce((a, b) => a + b, 0) < 10 ? 'ระดับเล็กน้อย' :
-                     phqAnswers.reduce((a, b) => a + b, 0) < 15 ? 'ระดับปานกลาง' : 'ระดับรุนแรง'}
-                  </span>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full py-3 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl shadow transition-all cursor-pointer"
-                >
-                  บันทึกผลการประเมิน PHQ-9
-                </button>
-              </form>
+          {/* 9Q (ไทย) — แสดงเฉพาะเมื่อ 2Q ล่าสุดเป็นบวก หรือครูเปิดให้; ปิด = ไม่แสดงอะไร (ไม่มีปุ่มให้นักเรียนกดทำเองอิสระ) */}
+          {canSelfReport && student.studentUid && (
+            <div className="lg:col-span-7">
+              <StudentNineQSection studentId={student.studentId} />
             </div>
-          </div>
+          )}
         </div>
       )}
 

@@ -4,6 +4,7 @@ import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 // FieldValue ต้อง import จาก subpath นี้ — `admin.firestore.FieldValue` เป็น undefined ใน Functions emulator
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { refreshGuidanceStatusSafely } from './guidanceStatus';
 import { FIRESTORE_DATABASE_ID } from './config';
 import { selfDemotionError } from './roleGuards';
 import { isStaffInactive } from './access';
@@ -108,6 +109,7 @@ export const assignUserRole = functions.https.onCall(async (data, context) => {
       await auth.revokeRefreshTokens(targetUser.uid);
     }
 
+    await refreshGuidanceStatusSafely(); // เพิ่ม/ถอน GUIDANCE_COUNSELOR เปลี่ยนสิทธิ์ของครูที่ปรึกษา (ดู guidanceStatus.ts)
     return { success: true, staffId, roles, targetUid: targetUser?.uid ?? null };
   } catch (error: any) {
     throw new functions.https.HttpsError('internal', error.message);

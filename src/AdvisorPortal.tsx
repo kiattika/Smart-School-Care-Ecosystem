@@ -21,6 +21,8 @@ import { ResponsiveContainer, LineChart, Line, XAxis, Tooltip as RechartsTooltip
 import { StudentAnalyticsDashboard } from './components/StudentAnalyticsDashboard';
 import { AdvisorPortfolioReview } from './components/portfolio/AdvisorPortfolioReview';
 import { AdvisorSdqPanel } from './components/advisor/AdvisorSdqPanel';
+import { DepressionScreeningPanel } from './components/shared/DepressionScreeningPanel';
+import { useGuidanceStatus, useRoomScreeningRecords } from './hooks/useDepressionScreening';
 import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
 import { AdvisorGpsCheckInPanel } from './components/homevisit/AdvisorGpsCheckInPanel';
 import { AdvisorGateCheckInPanel } from './components/student-parent/AdvisorGateCheckInPanel';
@@ -45,7 +47,7 @@ export function AdvisorPortal() {
   // store จะมีข้อมูลก็ต่อเมื่อมีคน import ในเซสชันเดียวกันเท่านั้น — เปิดใหม่/ล็อกอินใหม่แล้วว่าง
   const { students, loading: studentsLoading } = useRealStudents();
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq' | 'screening'>('dashboard');
   const [assessmentModalStudent, setAssessmentModalStudent] = useState<Student | null>(null);
   const [assessmentSearch, setAssessmentSearch] = useState('');
   const [assessmentFilter, setAssessmentFilter] = useState<'ALL' | 'COMPLETED' | 'PENDING'>('ALL');
@@ -85,6 +87,11 @@ export function AdvisorPortal() {
   // (HOMEROOM_TEACHER) จึงไม่ต้องผ่าน derived cache แบบผู้ปกครอง/นักเรียน
   const attendanceRange = useMemo(() => defaultAttendanceDateRange(30), []);
   const { records: roomAttendanceRecords } = useRoomAttendanceRecords(myRoom ? [myRoom] : [], attendanceRange);
+
+  // คัดกรองซึมเศร้า 2Q/9Q/8Q (แท็บ "คัดกรองซึมเศร้า") — อ่านรายคนเฉพาะนักเรียนในห้อง (rules ผูกห้องต่อเอกสาร) และโหลดเมื่อเปิดแท็บเท่านั้น
+  // สิทธิ์ของครูที่ปรึกษาขึ้นกับ "มีครูแนะแนวที่ใช้งานอยู่ไหม" (school_settings/guidance_status) — ไม่ทราบสถานะ = จำกัดสิทธิ์ไว้ก่อน
+  const guidanceStatus = useGuidanceStatus();
+  const roomScreening = useRoomScreeningRecords(myStudents.map(s => s.studentId), activeTab === 'screening');
 
   const handleSaveAll = async () => {
     try {
@@ -198,6 +205,7 @@ export function AdvisorPortal() {
             { id: 'dashboard', label: 'แดชบอร์ดห้อง', icon: Activity },
             { id: 'self-assessment', label: 'วิเคราะห์ 30 ข้อ', icon: Brain },
             { id: 'sdq', label: 'SDQ นักเรียน', icon: Heart },
+            { id: 'screening', label: 'คัดกรองซึมเศร้า', icon: ShieldAlert },
             { id: 'visit-planner', label: 'เยี่ยมบ้าน', icon: MapPin },
             { id: 'school-checkin', label: 'เช็คชื่อโฮมรูม', icon: ClipboardList },
             { id: 'analytics', label: 'สถิติวิชาการ', icon: Sparkles },
@@ -911,6 +919,20 @@ export function AdvisorPortal() {
                 <AdvisorPortfolioReview homeroomClass={myRoom} />
               </div>
             </div>
+          )}
+
+          {activeTab === 'screening' && (
+            <DepressionScreeningPanel
+              viewer="HOMEROOM_TEACHER"
+              hasActiveCounselor={guidanceStatus.hasActiveCounselor}
+              statusKnown={guidanceStatus.known}
+              students={myStudents}
+              records={roomScreening.records}
+              loading={studentsLoading || roomScreening.loading}
+              error={roomScreening.error}
+              onChanged={roomScreening.reload}
+              allowPickAnyStudent={false}
+            />
           )}
 
           {activeTab === 'sdq' && (

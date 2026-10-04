@@ -528,8 +528,16 @@ export async function seedEmulatorAuth() {
       updatedAt: FieldValue.serverTimestamp()
     }, { merge: true });
 
+    // สถานะ "มีครูแนะแนวที่ใช้งานอยู่" (cache ที่ firestore.rules ใช้ตัดสินสิทธิ์อ่าน 9Q/8Q ของครูที่ปรึกษา — ปกติ Cloud Functions
+    // คำนวณให้; บน emulator seed ให้ตรงกับบัญชีทดสอบ guidance.test@utd.ac.th ที่ seed ไว้ด้านบน)
+    batch.set(ref('school_settings', 'guidance_status'), {
+      hasActiveCounselor: true,
+      count: 1,
+      updatedAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+
     await batch.commit();
-    console.log(`\n🕒 Seeded admin_periods_config and school_settings/periods_config`);
+    console.log(`\n🕒 Seeded admin_periods_config, school_settings/periods_config and school_settings/guidance_status`);
   } catch (err: any) {
     console.warn('Notice seeding periods config:', err.message);
   }

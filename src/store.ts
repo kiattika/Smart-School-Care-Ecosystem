@@ -16,7 +16,6 @@ import {
   AllergyRecord,
   SpecialCareNeed,
   TwoQuestionScreening,
-  PHQ9Screening,
   SDQAssessment,
   GuardianBackground,
   HomeVisitLogRecord,
@@ -53,7 +52,6 @@ import {
   updateSubstituteAssignmentsBatchFirestore,
   savePostTeachingRecordFirestore,
   save2QScreeningFirestore,
-  savePHQ9ScreeningFirestore,
   saveSDQAssessmentFirestore,
   payBillingInvoiceFirestore,
   sendParentTeacherMessageFirestore,
@@ -131,7 +129,6 @@ export const useStore = create<StoreState>((set, get) => ({
   allergies: {},
   specialCareNeeds: {},
   twoQuestionScreenings: {},
-  phq9Screenings: {},
   sdqAssessments: [],
   guardianProfiles: {},
   homeVisitLogs: [],
@@ -1057,48 +1054,10 @@ export const useStore = create<StoreState>((set, get) => ({
     }
   },
 
-  // FIX: ทั้ง 3 action นี้เดิม fire-and-forget การเขียน Firestore จริง (.catch แค่ console.warn)
+  // FIX: save2QScreening/submitSDQAssessment เดิม fire-and-forget การเขียน Firestore จริง (.catch แค่ console.warn)
   // แล้ว set optimistic state ทันทีไม่ว่าผลจริงจะเป็นอย่างไร — ผู้ใช้เห็น "บันทึกสำเร็จ" ปลอมทั้งที่
   // rules ปฏิเสธจริงอยู่เบื้องหลัง เปลี่ยนเป็น await ก่อน แล้วค่อย set state/return ตอนเขียนสำเร็จจริง
   // เท่านั้น — โยน error ต่อให้ผู้เรียก (component) จับแสดงผลจริงแทนการโชว์สำเร็จลอยๆ
-  savePHQ9Screening: async (studentId: string, answers: number[]) => {
-    const totalScore = answers.reduce((acc, curr) => acc + curr, 0);
-    let riskLevel: PHQ9Screening['riskLevel'] = 'NORMAL';
-    let recommendation = 'สุขภาพจิตอยู่ในเกณฑ์ปกติ มีสภาวะอารมณ์ที่มั่นคง';
-
-    if (totalScore >= 20) {
-      riskLevel = 'VERY_SEVERE';
-      recommendation = 'มีภาวะซึมเศร้าระดับรุนแรงมาก ควรได้รับการส่งต่อพบจิตแพทย์หรือแพทย์ผู้เชี่ยวชาญทันที';
-    } else if (totalScore >= 15) {
-      riskLevel = 'SEVERE';
-      recommendation = 'มีภาวะซึมเศร้าระดับรุนแรง ครูแนะแนวและผู้ปกครองควรให้การดูแลอย่างใกล้ชิดและนัดปรึกษาแพทย์';
-    } else if (totalScore >= 10) {
-      riskLevel = 'MODERATE';
-      recommendation = 'มีภาวะซึมเศร้าระดับปานกลาง แนะนำให้เข้ารับคำปรึกษาจากครูแนะแนวหรือนักจิตวิทยาโรงเรียน';
-    } else if (totalScore >= 5) {
-      riskLevel = 'MILD';
-      recommendation = 'มีภาวะซึมเศร้าระดับเล็กน้อย ควรหากิจกรรมผ่อนคลายความเครียดและพูดคุยกับเพื่อนหรือครอบครัว';
-    }
-
-    const screening: PHQ9Screening = {
-      id: `phq-${Date.now()}`,
-      studentId,
-      answers,
-      totalScore,
-      riskLevel,
-      recommendation,
-      conductedAt: format(new Date(), 'yyyy-MM-dd')
-    };
-    await savePHQ9ScreeningFirestore(studentId, screening);
-
-    set((state) => ({
-      phq9Screenings: {
-        ...state.phq9Screenings,
-        [studentId]: screening
-      }
-    }));
-  },
-
   save2QScreening: async (studentId: string, q1: boolean, q2: boolean) => {
     const isPositive = q1 || q2;
     const screening: TwoQuestionScreening = {

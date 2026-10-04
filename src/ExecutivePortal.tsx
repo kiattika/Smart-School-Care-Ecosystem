@@ -11,14 +11,13 @@ import {
   subscribeLateAttendanceRequests,
   subscribeAllStudentHomeLocations,
   subscribeAll2QScreenings,
-  subscribeAllPHQ9Screenings,
   subscribeAllSDQAssessments,
   subscribeInfirmaryVisits,
   subscribeActiveLearningLogs,
   subscribeAllSelfAssessments,
 } from './services/firestoreService';
 import { isNonStudentSession } from './utils/teacherLoadReportParser';
-import { LateAttendanceRequestRecord, StudentHomeLocation, TwoQuestionScreening, PHQ9Screening, SDQAssessment, InfirmaryVisit, ActiveLearningRecord, StudentSelfAssessment } from './types';
+import { LateAttendanceRequestRecord, StudentHomeLocation, TwoQuestionScreening, SDQAssessment, InfirmaryVisit, ActiveLearningRecord, StudentSelfAssessment } from './types';
 import {
   LayoutDashboard,
   Map as MapIcon,
@@ -120,17 +119,14 @@ export function ExecutivePortal() {
   // TASK 5 (Health tab): ข้อมูลสุขภาพจริงทั้งโรงเรียน (firestore.rules เพิ่ม EXECUTIVE อ่านได้แล้ว) —
   // ใช้แค่สรุปจำนวน/เปอร์เซ็นต์ระดับโรงเรียน ไม่โชว์ผลรายบุคคล ตามคำสั่ง TASK 5
   const [screenings2Q, setScreenings2Q] = useState<TwoQuestionScreening[]>([]);
-  const [screeningsPhq9, setScreeningsPhq9] = useState<PHQ9Screening[]>([]);
   const [sdqAssessments, setSdqAssessments] = useState<SDQAssessment[]>([]);
   const [infirmaryVisits, setInfirmaryVisits] = useState<InfirmaryVisit[]>([]);
   useEffect(() => subscribeAll2QScreenings(setScreenings2Q), []);
-  useEffect(() => subscribeAllPHQ9Screenings(setScreeningsPhq9), []);
   useEffect(() => subscribeAllSDQAssessments(setSdqAssessments), []);
   useEffect(() => subscribeInfirmaryVisits(setInfirmaryVisits), []);
 
   const healthSummary = useMemo(() => {
     const positive2Q = screenings2Q.filter(s => s.isPositive).length;
-    const phq9Elevated = screeningsPhq9.filter(s => s.riskLevel !== 'NORMAL' && s.riskLevel !== 'MILD').length;
     const sdqAtRisk = sdqAssessments.filter(s => s.triagingStatus === 'AT_RISK' || s.triagingStatus === 'VULNERABLE').length;
     const thisMonthStr = format(new Date(), 'yyyy-MM');
     const infirmaryThisMonth = infirmaryVisits.filter(v => (v.visitDate || '').startsWith(thisMonthStr));
@@ -138,9 +134,6 @@ export function ExecutivePortal() {
       total2Q: screenings2Q.length,
       positive2Q,
       positive2QPercent: screenings2Q.length > 0 ? Math.round((positive2Q / screenings2Q.length) * 100) : null,
-      totalPhq9: screeningsPhq9.length,
-      phq9Elevated,
-      phq9ElevatedPercent: screeningsPhq9.length > 0 ? Math.round((phq9Elevated / screeningsPhq9.length) * 100) : null,
       totalSdq: sdqAssessments.length,
       sdqAtRisk,
       sdqLegacyCriteria: sdqAssessments.filter(isLegacySdqCriteria).length,
@@ -148,7 +141,7 @@ export function ExecutivePortal() {
       infirmaryVisitsThisMonth: infirmaryThisMonth.length,
       infirmaryUrgentThisMonth: infirmaryThisMonth.filter(v => v.isUrgentAlert).length,
     };
-  }, [screenings2Q, screeningsPhq9, sdqAssessments, infirmaryVisits]);
+  }, [screenings2Q, sdqAssessments, infirmaryVisits]);
 
   // คำขอเช็คชื่อย้อนหลัง — อ่านจาก Firestore สด (อนุมัติจริงทำที่หน้ารองผู้อำนวยการฝ่ายวิชาการ)
   const [lateAttendanceRequests, setLateAttendanceRequests] = useState<LateAttendanceRequestRecord[]>([]);
@@ -614,15 +607,9 @@ export function ExecutivePortal() {
                 </div>
 
                 <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl">
-                  <h3 className="text-sm font-medium text-slate-400 mb-2 uppercase tracking-widest">คัดกรองซึมเศร้า (PHQ-9)</h3>
-                  {healthSummary.totalPhq9 > 0 ? (
-                    <>
-                      <p className="text-4xl font-bold text-white mb-1">{healthSummary.phq9ElevatedPercent}%</p>
-                      <p className="text-xs text-slate-400">ระดับปานกลางขึ้นไป {healthSummary.phq9Elevated} จาก {healthSummary.totalPhq9} คนที่คัดกรองแล้ว</p>
-                    </>
-                  ) : (
-                    <p className="text-sm text-slate-500">ยังไม่มีข้อมูลคัดกรอง PHQ-9 ในระบบ</p>
-                  )}
+                  <h3 className="text-sm font-medium text-slate-400 mb-2 uppercase tracking-widest">คัดกรองซึมเศร้า/ความเสี่ยงฆ่าตัวตาย (9Q/8Q)</h3>
+                  {/* ผลคัดกรอง 9Q/8Q เป็นข้อมูลอ่อนไหวของเด็ก — firestore.rules ไม่ให้ EXECUTIVE อ่าน (เฉพาะครูแนะแนว/ครูที่ปรึกษาตามสิทธิ์) */}
+                  <p className="text-sm text-slate-500" data-testid="exec-9q-not-available">ข้อมูล 9Q/8Q ไม่เปิดให้ผู้บริหาร — ดูได้เฉพาะครูแนะแนวและครูที่ปรึกษา (ข้อมูลอ่อนไหวของนักเรียน)</p>
                 </div>
 
                 <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl">

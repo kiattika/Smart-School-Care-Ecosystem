@@ -254,7 +254,14 @@ service cloud.firestore {
       allow read: if isSignedIn();
       // studentEmailFormat มี block เฉพาะด้านล่าง (ตรวจรูปแบบข้อมูลด้วย) — ต้องกันออกจาก wildcard นี้
       // เพราะ rules หลาย match block ใช้ OR กัน: ถ้าไม่กัน SUPER_ADMIN เขียนค่าอะไรก็ได้ผ่านทางนี้ ข้ามการตรวจรูปแบบ
-      allow write: if hasRole('SUPER_ADMIN') && settingId != 'studentEmailFormat';
+      allow write: if hasRole('SUPER_ADMIN') && settingId != 'studentEmailFormat' && settingId != 'guidance_status';
+    }
+
+    // 10.2 สถานะ "มีครูแนะแนวที่ใช้งานอยู่" — cache ที่ Cloud Functions คำนวณ (functions/src/guidanceStatus.ts) ใช้ตัดสินสิทธิ์อ่าน 9Q/8Q
+    // ของครูที่ปรึกษา: client เขียนไม่ได้เด็ดขาด (แม้ SUPER_ADMIN) — Admin SDK ข้าม rules อยู่แล้ว ห้ามลบ settingId != 'guidance_status' ด้านบน
+    match /school_settings/guidance_status {
+      allow read: if isSignedIn();
+      allow write: if false;
     }
 
     // 10.1 รูปแบบอีเมลนักเรียน {prefix}{studentId}@{domain} — client สร้างอีเมลตอนเพิ่มนักเรียน และ blocking function
@@ -386,14 +393,143 @@ service cloud.firestore {
     // TASK 5 (ExecutivePortal Health, ยืนยันจากผู้ใช้): เพิ่ม EXECUTIVE อ่านได้ทั้งโรงเรียน เพื่อสรุป
     // ภาพรวมระดับโรงเรียน (นับจำนวน ไม่ระบุตัวบุคคล) — Firestore ไม่มี field-level redaction ฝั่ง UI
     // ต้องรวมเป็นตัวเลขสรุปเท่านั้น ห้ามโชว์ผลรายบุคคล
-    match /student_screenings_2q/{studentId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || hasRole('EXECUTIVE') || isSelfStudent(studentId);
-      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
+    // ═══ คัดกรองซึมเศร้า/ฆ่าตัวตาย ตามลำดับ 2Q → 9Q → 8Q (คู่มือกรมสุขภาพจิต/สพฐ.) ═══
+    // ข้อมูลอ่อนไหวที่สุดของเด็ก. Firestore ไม่มีสิทธิ์ระดับ field (ครูที่ปรึกษาต้องเห็นแค่ "ระดับความเสี่ยง"
+    // ไม่เห็นคำตอบ/คะแนนดิบ) จึงแยกเอกสารตามระดับการมองเห็น:
+    //   student_screenings_2q            2Q ล่าสุด (นักเรียนทำเองอิสระได้) — ครูแนะแนว + ครูที่ปรึกษาของห้องอ่านเต็ม
+    //   student_screenings_9q            9Q "สรุป": riskLevel + ธงแดงข้อ 9 (ไม่มีคะแนน/คำตอบ)   ← เขียนผ่าน callable submitNineQ เท่านั้น
+    //   student_screenings_9q_detail     9Q คำตอบรายข้อ + คะแนนรวม — ครูแนะแนวเสมอ; ครูที่ปรึกษาเฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่  ← เช่นกัน
+    //   student_screening_progress       ฐานที่ใช้ทำ 9Q ไปแล้ว (usedBasisIds) — ไม่มีคะแนน นักเรียนอ่านของตัวเองได้  ← เช่นกัน
+    //     └ grants/{grantId}             ใบอนุญาตที่ครูเปิดให้นักเรียนทำ 9Q (ครูเขียนจาก client ได้ — ไม่มีคะแนน)
+    //   student_screenings_8q            8Q คะแนน/คำตอบ (ครูกรอกแทนนักเรียน) — สิทธิ์เหมือน 9Q detail; rules ตรวจคะแนน/ระดับ/ส่งต่อด่วนซ้ำเอง
+    //   student_8q_case_flags            8Q "มีเคสอยู่ในการดูแล ใช่/ไม่" (ไม่มีคะแนน) — ครูที่ปรึกษาเห็นได้เสมอ
+    //   student_screening_notices/{sid}/entries  บันทึก "แจ้งผู้ปกครองแล้ว" (ใครแจ้ง/เมื่อไร/วิธีไหน) append-only
+    // นักเรียนอ่านได้เฉพาะ 2Q ของตัวเอง (+ progress/grants ของตัวเอง) — ห้ามอ่าน 9Q/8Q ทุกชนิด
+    // ครูที่ปรึกษา = HOMEROOM_TEACHER "ของห้องนั้น" (เทียบ staff.assignments.homeroomClass กับ students/{id}.room)
+
+    // ห้องของนักเรียนอยู่ในความดูแลของครูที่ปรึกษาคนนี้
+    function isHomeroomOfStudent(sid) {
+      return isHomeroomTeacherOf(studentField(sid, 'room', '__none__'));
     }
 
+    // มีครูแนะแนวที่ใช้งานอยู่ในระบบไหม — rules ค้นหา staff ตาม role ด้วย query ไม่ได้ จึงอ่านจาก cache
+    // school_settings/guidance_status ที่ Cloud Functions คำนวณให้ (functions/src/guidanceStatus.ts; client เขียนไม่ได้)
+    // ⚠️ fail-closed: doc ไม่มี/ไม่มีฟิลด์ = ถือว่า "มีครูแนะแนว" (ครูที่ปรึกษาเห็นแค่ระดับ) ไม่ใช่ "ไม่มี" (เห็นเต็ม)
+    function hasActiveGuidanceCounselor() {
+      return !exists(/databases/$(database)/documents/school_settings/guidance_status)
+        || get(/databases/$(database)/documents/school_settings/guidance_status).data.get('hasActiveCounselor', true) == true;
+    }
+
+    // ครูที่ปรึกษาของห้องนี้ที่ "ทำแทนครูแนะแนว" ได้ — เฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่เลย
+    function isHomeroomActingAsCounselor(sid) {
+      return isHomeroomOfStudent(sid) && !hasActiveGuidanceCounselor();
+    }
+
+    // ผู้เขียน 8Q (ครูกรอกแทนนักเรียน ไม่ใช่นักเรียน): ครูแนะแนวเสมอ; ครูที่ปรึกษาเฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่
+    // ⚠️ ทางฉุกเฉิน: บันทึกได้ "เสมอ" ไม่ต้องมี 9Q ≥7/ธงแดงมาก่อน (เงื่อนไขนั้นเป็นแค่เหตุผลที่ระบบแนะนำให้ทำ 8Q — ไม่ใช่ตัวบล็อก)
+    // เพราะครูที่เจอเด็กวิกฤตต้องบันทึกได้ทันที
+    function canWriteEightQ(sid) {
+      return hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomActingAsCounselor(sid);
+    }
+
+    // 8Q: rules คำนวณคะแนน/ระดับ/ส่งต่อด่วนซ้ำจากคำตอบดิบเอง (ไม่เชื่อค่าที่ client ส่งมา) — ผู้กรอกเป็นครู (ผู้มีสิทธิ์อ่านผลอยู่แล้ว)
+    // จึงไม่ต้องใช้ Cloud Function เหมือน 9Q ที่นักเรียนส่งเอง. คะแนนต่อข้อ: 1,2,6,8,9,4,10,4; ข้อ 3 ตอบ "มี" + ควบคุมความคิดไม่ได้ = +8
+    // ระดับ: 0 NONE, 1-8 LOW, 9-16 MODERATE, ≥17 SEVERE (= ส่งต่อโรงพยาบาลด่วน)
+    function eightQIntegrityOk(d) {
+      let a = d.answers;
+      let base = (a[0] ? 1 : 0) + (a[1] ? 2 : 0) + (a[2] ? 6 : 0) + (a[3] ? 8 : 0) + (a[4] ? 9 : 0) + (a[5] ? 4 : 0) + (a[6] ? 10 : 0) + (a[7] ? 4 : 0);
+      let follow = (a[2] == true && d.q3CanControl == false) ? 8 : 0;
+      return a.size() == 8
+        && a[0] is bool && a[1] is bool && a[2] is bool && a[3] is bool && a[4] is bool && a[5] is bool && a[6] is bool && a[7] is bool
+        && ((a[2] == true && d.q3CanControl is bool) || (a[2] == false && d.q3CanControl == null))
+        && d.totalScore is int && d.totalScore == base + follow
+        && d.riskLevel == (d.totalScore == 0 ? 'NONE' : (d.totalScore <= 8 ? 'LOW' : (d.totalScore <= 16 ? 'MODERATE' : 'SEVERE')))
+        && d.urgentReferral == (d.totalScore >= 17);
+    }
+
+    // 2Q: นักเรียนทำเองอิสระได้ (ไม่จำกัดรอบ); ครูแนะแนวและครูที่ปรึกษาของห้องอ่านเต็มเสมอ
+    // EXECUTIVE อ่านได้เพื่อสรุปภาพรวมโรงเรียน (นับจำนวน ไม่ระบุตัวบุคคล — ฝั่ง UI ต้องรวมเป็นตัวเลขเท่านั้น)
+    match /student_screenings_2q/{studentId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('EXECUTIVE') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId);
+      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId);
+    }
+
+    // PHQ-9 สากลเดิม (เลิกใช้แล้ว — แทนด้วย 9Q ไทย): เก็บข้อมูลเก่าไว้อ่านได้เฉพาะครูแนะแนว/แอดมิน
+    // ห้ามเขียนเพิ่ม ห้ามนักเรียน/ครูที่ปรึกษา/ผู้บริหารอ่าน
     match /student_screenings_phq9/{studentId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || hasRole('EXECUTIVE') || isSelfStudent(studentId);
-      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('HOMEROOM_TEACHER') || isSelfStudent(studentId);
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
+      allow write: if false;
+    }
+
+    // 9Q — สรุป (ระดับความเสี่ยง + ธงแดงข้อ 9 เท่านั้น ไม่มีคะแนนรวม/คำตอบ): ครูที่ปรึกษาของห้องอ่านได้เสมอ
+    // ⚠️ client เขียนไม่ได้เด็ดขาด (แม้ครูแนะแนว/SUPER_ADMIN) — ต้องผ่าน callable submitNineQ (Admin SDK ข้าม rules) ซึ่งคำนวณ
+    // riskLevel/ธงแดงเองจากคำตอบดิบ + ตรวจสิทธิ์/ฐานการทำเอง (functions/src/nineQSubmit.ts) ไม่เชื่อค่าที่ client ส่ง
+    match /student_screenings_9q/{studentId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId);
+      allow write: if false;
+    }
+
+    // 9Q — รายละเอียด (คำตอบรายข้อ + คะแนนรวม): ครูแนะแนวเสมอ; ครูที่ปรึกษาเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่เท่านั้น — เขียนผ่าน submitNineQ เท่านั้น
+    match /student_screenings_9q_detail/{studentId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomActingAsCounselor(studentId);
+      allow write: if false;
+    }
+
+    // ฐานที่ใช้ทำ 9Q ไปแล้ว — นักเรียนอ่านของตัวเองได้ (เพื่อรู้ว่าทำฐานนี้ไปแล้ว) ไม่มีคะแนน/ระดับใดๆ — เขียนผ่าน submitNineQ เท่านั้น
+    match /student_screening_progress/{studentId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId);
+      allow write: if false;
+
+      // ใบอนุญาตให้นักเรียนทำ 9Q — ครูแนะแนว/ครูที่ปรึกษาของห้องเปิดให้ (นักเรียนเปิดเองไม่ได้); นักเรียนอ่านของตัวเอง
+      match /grants/{grantId} {
+        allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId);
+        allow create: if (hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId))
+          && request.resource.data.keys().hasOnly(['openedByUid', 'openedByName', 'openedByRole', 'openedAt', 'note'])
+          && request.resource.data.openedByUid == request.auth.uid;
+        // เพิกถอนใบอนุญาตที่ยังไม่ถูกใช้ (ลบ) — ครูแนะแนว/ครูที่ปรึกษาของห้อง; แก้ไขไม่ได้
+        allow delete: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId);
+        allow update: if false;
+      }
+    }
+
+    // 8Q — คะแนน/คำตอบ (ครูกรอกแทนนักเรียนระหว่างพูดคุย ไม่มีหน้าจอให้นักเรียนทำเอง — นักเรียนอ่าน/เขียนไม่ได้เด็ดขาด)
+    // entryPath: AFTER_9Q = ทำตามลำดับปกติ (9Q ≥7/ธงแดง) | EMERGENCY = ทางฉุกเฉิน ประเมินทันทีโดยไม่ต้องรอ 9Q (เก็บไว้ตรวจย้อนหลัง)
+    match /student_screenings_8q/{studentId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomActingAsCounselor(studentId);
+      allow create, update: if canWriteEightQ(studentId)
+        && request.resource.data.keys().hasOnly(['id', 'studentId', 'answers', 'q3CanControl', 'totalScore', 'riskLevel', 'urgentReferral', 'entryPath', 'conductedAt', 'recordedByUid', 'recordedByName', 'updatedAt'])
+        && request.resource.data.studentId == studentId
+        && request.resource.data.recordedByUid == request.auth.uid
+        && request.resource.data.entryPath in ['AFTER_9Q', 'EMERGENCY']
+        && eightQIntegrityOk(request.resource.data);
+      allow delete: if hasRole('SUPER_ADMIN');
+    }
+
+    // 8Q — "มีเคสอยู่ในการดูแล ใช่/ไม่" เท่านั้น (ไม่มีคะแนน) ครูที่ปรึกษาของห้องเห็นได้เสมอแม้มีครูแนะแนว
+    // hasCase ต้องตรงกับ 8Q ที่เขียนใน batch เดียวกัน (คะแนน > 0) — กันตั้งค่าไม่ตรงกับผลจริง
+    match /student_8q_case_flags/{studentId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId);
+      allow create, update: if canWriteEightQ(studentId)
+        && request.resource.data.keys().hasOnly(['studentId', 'hasCase', 'updatedByUid', 'updatedAt'])
+        && request.resource.data.studentId == studentId
+        && request.resource.data.hasCase is bool
+        && request.resource.data.updatedByUid == request.auth.uid
+        && request.resource.data.hasCase == (getAfter(/databases/$(database)/documents/student_screenings_8q/$(studentId)).data.totalScore > 0);
+      allow delete: if hasRole('SUPER_ADMIN');
+    }
+
+    // บันทึก "แจ้งผู้ปกครองแล้ว" — ไม่ส่งแจ้งเตือนอัตโนมัติ ครูกรอกเองหลังติดต่อจริง; append-only (แก้ไม่ได้)
+    // การแจ้งเรื่อง 8Q: ครูแนะแนวเสมอ; ครูที่ปรึกษาเฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่
+    match /student_screening_notices/{studentId}/entries/{entryId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId);
+      allow create: if (hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId))
+        && request.resource.data.keys().hasOnly(['scope', 'screeningId', 'notifiedByUid', 'notifiedByName', 'notifiedAt', 'method', 'note'])
+        && request.resource.data.scope in ['NINE_Q', 'EIGHT_Q']
+        && request.resource.data.method in ['PHONE', 'IN_PERSON', 'MESSAGE', 'OTHER']
+        && request.resource.data.notifiedByUid == request.auth.uid
+        && (request.resource.data.scope == 'NINE_Q' || hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomActingAsCounselor(studentId));
+      allow update: if false;
+      allow delete: if hasRole('SUPER_ADMIN');
     }
 
     // FIX (ยืนยันจากโรงเรียน): SDQ กรอกได้ 3 กลุ่ม — นักเรียนประเมินตนเอง/ผู้ปกครอง/ครูที่ปรึกษา
