@@ -152,7 +152,7 @@ describe('question texts (numbered, per form)', () => {
   });
 
   it('spot checks against the official wording (student and parent forms)', () => {
-    expect(sdqItemText('STUDENT', 1)).toBe('ฉันพยายามทำตัวดีกับคนอื่น ฉันใส่ใจความรู้สึกของคนอื่น');
+    expect(sdqItemText('STUDENT', 1)).toBe('ฉันพยายามจะทำตัวดีกับคนอื่น ฉันใส่ใจความรู้สึกของคนอื่น');
     expect(sdqItemText('STUDENT', 7)).toBe('ฉันมักทำตามที่คนอื่นบอก');
     expect(sdqItemText('STUDENT', 25)).toBe('ฉันทำงานได้จนเสร็จ ความตั้งใจในการทำงานของฉันดี');
     expect(sdqItemText('PARENT', 1)).toBe('ห่วงใยความรู้สึกคนอื่น');
@@ -166,10 +166,29 @@ describe('question texts (numbered, per form)', () => {
     expect(SDQ_ITEM_TEXT.STUDENT.filter((t) => t.startsWith('ฉัน')).length).toBeGreaterThan(15);
   });
 
-  it('TEACHER uses the parent wording for now (provisional — to be checked against the real teacher form)', () => {
+  it('TEACHER uses the same wording as PARENT — confirmed against the official manual ("ครู/ผู้ปกครอง" is one section)', () => {
     expect(SDQ_ITEM_TEXT.TEACHER).toBe(SDQ_ITEM_TEXT.PARENT);
     const lib = readSource(path.resolve(__dirname, '../lib/sdqQuestionnaire.ts'));
-    expect(lib).toContain('ตรวจซ้ำกับแบบฟอร์มฉบับครูตัวจริง');
+    expect(lib).toContain('ครู/ผู้ปกครอง');
+    // ไม่มีหมายเหตุ "ชั่วคราว/ต้องตรวจซ้ำ" เหลืออยู่ทั้งในไลบรารีและหน้าฟอร์ม
+    expect(lib).not.toContain('PROVISIONAL');
+    expect(lib).not.toContain('ไปก่อน');
+    expect(lib).not.toContain('⚠');
+    const form = readSource(path.resolve(__dirname, '../components/shared/SdqQuestionnaireForm.tsx'));
+    expect(form).not.toContain('provisional');
+    expect(form).not.toContain('ไปก่อน');
+  });
+
+  it('the 7 corrected items carry the exact manual wording', () => {
+    expect(sdqItemText('STUDENT', 1)).toBe('ฉันพยายามจะทำตัวดีกับคนอื่น ฉันใส่ใจความรู้สึกของคนอื่น');
+    expect(sdqItemText('STUDENT', 2)).toBe('ฉันอยู่ไม่นิ่ง ฉันนั่งนาน ๆ ไม่ได้');
+    expect(sdqItemText('STUDENT', 4)).toBe('ฉันเต็มใจแบ่งปันสิ่งของให้คนอื่น (ขนม, ของกิน, ของเล่น, เกม เป็นต้น)');
+    for (const ev of ['PARENT', 'TEACHER'] as const) {
+      expect(sdqItemText(ev, 3)).toBe('มักจะบ่นว่าปวดศีรษะ ปวดท้อง หรือไม่สบาย');
+      expect(sdqItemText(ev, 8)).toBe('กังวลใจหลายเรื่อง ดูวิตกกังวลเสมอ');
+      expect(sdqItemText(ev, 12)).toBe('มักมีเรื่องทะเลาะวิวาทกับเด็กอื่น หรือรังแกเด็กอื่น');
+      expect(sdqItemText(ev, 13)).toBe('ดูไม่มีความสุข ท้อแท้ ร้องไห้บ่อย');
+    }
   });
 });
 

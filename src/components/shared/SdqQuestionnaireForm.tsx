@@ -4,7 +4,6 @@ import {
   SDQ_ANSWER_OPTIONS,
   SDQ_ITEM_COUNT,
   SDQ_ITEM_NUMBERS,
-  SDQ_PROVISIONAL_TEXT_EVALUATORS,
   SdqAnswerValue,
   SdqAnswers,
   answeredSdqCount,
@@ -60,11 +59,6 @@ export function SdqQuestionnaireForm({
         </div>
       </div>
 
-      {SDQ_PROVISIONAL_TEXT_EVALUATORS.includes(evaluatorType) && (
-        <p className="text-[10px] text-amber-400/90" data-testid="sdq-provisional-note">
-          * ข้อความฉบับครูใช้ถ้อยคำเดียวกับฉบับผู้ปกครองไปก่อน — โปรดตรวจซ้ำกับแบบฟอร์มฉบับครูตัวจริง
-        </p>
-      )}
       <p className="text-[11px] text-slate-400">เลือกคำตอบที่ตรงที่สุดในแต่ละข้อ (ทุกข้อต้องตอบ)</p>
 
       <ol className="space-y-2.5">
