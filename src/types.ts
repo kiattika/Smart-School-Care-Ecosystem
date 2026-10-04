@@ -678,16 +678,6 @@ export interface TwoQuestionScreening {
   conductedAt: string;
 }
 
-export interface PHQ9Screening {
-  id: string;
-  studentId: string;
-  answers: number[]; // 9 questions (0 - 3)
-  totalScore: number; // 0 - 27
-  riskLevel: 'NORMAL' | 'MILD' | 'MODERATE' | 'SEVERE' | 'VERY_SEVERE';
-  recommendation: string;
-  conductedAt: string;
-}
-
 export interface SDQAssessment {
   id: string;
   studentId: string;
@@ -1121,7 +1111,6 @@ export interface StoreState {
   // infirmary_visits อ่านผ่าน services/firestoreService.ts: subscribeInfirmaryVisits() โดยตรง
   // (ดู HealthMentalWellbeingModule.tsx / InfirmaryPortal.tsx)
   twoQuestionScreenings: Record<string, TwoQuestionScreening>;
-  phq9Screenings: Record<string, PHQ9Screening>;
   sdqAssessments: SDQAssessment[];
   guardianProfiles: Record<string, GuardianBackground>;
   homeVisitLogs: HomeVisitLogRecord[];
@@ -1235,7 +1224,6 @@ export interface StoreState {
   approveDetailedLeave: (id: string, teacherRemarks?: string) => void;
   // ทั้ง 3 action นี้คืน Promise ที่ resolve ก็ต่อเมื่อ Firestore เขียนสำเร็จจริง (reject ถ้า rules
   // ปฏิเสธ/offline ฯลฯ) — ผู้เรียกต้อง await แล้วค่อยแสดง "บันทึกสำเร็จ" ห้ามโชว์ optimistic ก่อนเช็คผล
-  savePHQ9Screening: (studentId: string, answers: number[]) => Promise<void>;
   save2QScreening: (studentId: string, q1: boolean, q2: boolean) => Promise<void>;
   submitSDQAssessment: (sdq: Omit<SDQAssessment, 'id' | 'assessmentDate' | 'academicYear'> & { academicYear: string }) => Promise<void>;
   addMeritDemeritRecord: (studentId: string, type: 'MERIT' | 'DEMERIT', points: number, category: string, description: string, teacherName: string) => void;

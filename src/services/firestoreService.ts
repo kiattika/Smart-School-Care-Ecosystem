@@ -32,7 +32,6 @@ import {
   DetailedLeaveRequest,
   GPSCheckInLog,
   TwoQuestionScreening,
-  PHQ9Screening,
   SDQAssessment,
   SubstituteAssignment,
   SubstituteApprovalStage,
@@ -1241,19 +1240,6 @@ export async function save2QScreeningFirestore(studentId: string, screening: Two
   }
 }
 
-export async function savePHQ9ScreeningFirestore(studentId: string, screening: PHQ9Screening): Promise<void> {
-  const collectionPath = 'student_screenings_phq9';
-  try {
-    const ref = doc(db, collectionPath, studentId);
-    await setDoc(ref, {
-      ...screening,
-      updatedAt: serverTimestamp()
-    }, { merge: true });
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${studentId}`);
-  }
-}
-
 export async function saveSDQAssessmentFirestore(sdq: SDQAssessment): Promise<void> {
   const collectionPath = 'student_assessments_sdq';
   try {
@@ -1315,22 +1301,6 @@ export function subscribeAll2QScreenings(
     });
   } catch (error) {
     console.warn('[subscribeAll2QScreenings] setup error:', error);
-    return () => {};
-  }
-}
-
-export function subscribeAllPHQ9Screenings(
-  onUpdate: (screenings: PHQ9Screening[]) => void
-): () => void {
-  try {
-    return onSnapshot(collection(db, 'student_screenings_phq9'), (snap) => {
-      onUpdate(snap.docs.map(d => ({ id: d.id, ...d.data() } as PHQ9Screening)));
-    }, (error) => {
-      console.warn('[subscribeAllPHQ9Screenings] listener error:', error.message);
-      onUpdate([]);
-    });
-  } catch (error) {
-    console.warn('[subscribeAllPHQ9Screenings] setup error:', error);
     return () => {};
   }
 }

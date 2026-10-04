@@ -219,7 +219,7 @@ export function StudentPortal() {
             }`}
           >
             <Activity className="w-4 h-4" />
-            <span>2. สุขภาพกาย & จิต (2Q/PHQ-9/SDQ)</span>
+            <span>2. สุขภาพกาย & จิต (2Q/SDQ)</span>
           </button>
 
           <button

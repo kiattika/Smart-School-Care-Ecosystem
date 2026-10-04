@@ -15,22 +15,25 @@ describe('ExecutivePortal TASK 5: Health tab ใช้ข้อมูลสุ�
   const src = readSource(path.resolve(__dirname, '../ExecutivePortal.tsx'));
   const firestoreServiceSrc = readSource(path.resolve(__dirname, '../services/firestoreService.ts'));
 
-  it('firestoreService มี subscribe school-wide สำหรับ 2Q/PHQ-9/SDQ (ต่างจากฟังก์ชันเดิมที่ต้อง scope studentUid/respondentUid)', () => {
+  it('firestoreService มี subscribe school-wide สำหรับ 2Q/SDQ (ต่างจากฟังก์ชันเดิมที่ต้อง scope studentUid/respondentUid)', () => {
     expect(firestoreServiceSrc).toContain('export function subscribeAll2QScreenings(');
-    expect(firestoreServiceSrc).toContain('export function subscribeAllPHQ9Screenings(');
+    // PHQ-9 สากลเลิกใช้แล้ว (แทนด้วย 9Q ไทยซึ่ง EXECUTIVE ไม่มีสิทธิ์อ่าน) — ต้องไม่มี subscribe PHQ-9 เหลือ
+    expect(firestoreServiceSrc).not.toContain('subscribeAllPHQ9Screenings');
     expect(firestoreServiceSrc).toContain('export function subscribeAllSDQAssessments(');
   });
 
-  it('ExecutivePortal: Health tab subscribe ข้อมูลจริงทั้ง 4 แหล่ง (2Q/PHQ-9/SDQ/ห้องพยาบาล)', () => {
+  it('ExecutivePortal: Health tab subscribe ข้อมูลจริง 3 แหล่ง (2Q/SDQ/ห้องพยาบาล) — ไม่อ่าน 9Q/8Q', () => {
     expect(src).toContain('subscribeAll2QScreenings(setScreenings2Q)');
-    expect(src).toContain('subscribeAllPHQ9Screenings(setScreeningsPhq9)');
+    expect(src).not.toContain('PHQ9');
+    expect(src).not.toMatch(/student_screenings_(9q|8q)/);
     expect(src).toContain('subscribeAllSDQAssessments(setSdqAssessments)');
     expect(src).toContain('subscribeInfirmaryVisits(setInfirmaryVisits)');
   });
 
   it('healthSummary คำนวณจากข้อมูลจริง (isPositive/riskLevel/triagingStatus/visitDate) ไม่ fabricate ตัวเลข', () => {
     expect(src).toContain('screenings2Q.filter(s => s.isPositive).length');
-    expect(src).toContain("screeningsPhq9.filter(s => s.riskLevel !== 'NORMAL' && s.riskLevel !== 'MILD').length");
+    // ไม่มีสรุป PHQ-9/9Q/8Q ในหน้าผู้บริหารอีก (ข้อมูลอ่อนไหว — rules ไม่ให้ EXECUTIVE อ่าน)
+    expect(src).not.toMatch(/phq9|Phq9/);
     expect(src).toContain("sdqAssessments.filter(s => s.triagingStatus === 'AT_RISK' || s.triagingStatus === 'VULNERABLE').length");
   });
 

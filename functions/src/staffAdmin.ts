@@ -8,6 +8,7 @@ import { FIRESTORE_DATABASE_ID } from './config';
 import { isStaffInactive } from './access';
 import { setActiveError } from './roleGuards';
 import { validateNewStaff } from './staffValidation';
+import { refreshGuidanceStatusSafely } from './guidanceStatus';
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -97,6 +98,8 @@ export const createStaffMember = functions.https.onCall(async (data, context) =>
     throw new functions.https.HttpsError('internal', err?.message || String(err));
   }
 
+  // สิทธิ์อ่าน 9Q/8Q ของครูที่ปรึกษาขึ้นกับ "มีครูแนะแนวที่ใช้งานอยู่ไหม" — คำนวณ school_settings/guidance_status ใหม่
+  await refreshGuidanceStatusSafely();
   return { success: true, staffId: s.staffId, email: s.email, roles: s.roles };
 });
 
@@ -183,5 +186,6 @@ export const setStaffActive = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('internal', err?.message || String(err));
   }
 
+  await refreshGuidanceStatusSafely(); // ปิด/เปิดครูแนะแนวเปลี่ยนสิทธิ์ของครูที่ปรึกษา (ดู guidanceStatus.ts)
   return { success: true, staffId, active, targetUid: targetUser?.uid ?? null };
 });

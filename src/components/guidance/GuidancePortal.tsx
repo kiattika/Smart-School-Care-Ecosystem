@@ -8,7 +8,10 @@ import { isLegacySdqCriteria } from '../../lib/sdq';
 import { filterSdqByYear, buildSdqTrend } from '../../lib/sdqTrend';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { PortalSidebarLayout } from '../shared/PortalSidebarLayout';
-import { PHQ9Screening, TwoQuestionScreening, GuidanceCounselingCase } from '../../types';
+import { TwoQuestionScreening, GuidanceCounselingCase } from '../../types';
+import { useGuidanceScreeningRecords, useGuidanceStatus } from '../../hooks/useDepressionScreening';
+import { DepressionScreeningPanel } from '../shared/DepressionScreeningPanel';
+import { NINE_Q_RISK_LABEL, NINE_Q_TOTAL_MAX } from '../../lib/depressionScreening';
 import {
   createGuidanceCounselingCase,
   subscribeGuidanceCounselingCases,
@@ -32,9 +35,12 @@ import {
 export function GuidancePortal() {
   const user = useStore(s => s.user);
   const { students } = useRealStudents(); // นักเรียนจาก Firestore สด
-  // ผลคัดกรอง 2Q/PHQ-9/SDQ สด real-time — แทนตัวเลขที่เคย hardcode ไว้ทั้งหมดในแท็บ "sdq"
-  const { twoQuestionScreenings, phq9Screenings, sdqAssessments, loading: screeningsLoading } = useGuidanceScreenings();
-  const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'tcas'>('cases');
+  // ผลคัดกรอง 2Q/SDQ สด real-time — แทนตัวเลขที่เคย hardcode ไว้ทั้งหมดในแท็บ "sdq"
+  const { twoQuestionScreenings, sdqAssessments, loading: screeningsLoading } = useGuidanceScreenings();
+  // 9Q/8Q (คัดกรองซึมเศร้า/ฆ่าตัวตาย — แทน PHQ-9 สากลเดิม) สด real-time + สถานะ "มีครูแนะแนวที่ใช้งานอยู่"
+  const { records: screeningRecords, loading: depressionLoading, error: depressionError } = useGuidanceScreeningRecords();
+  const guidanceStatus = useGuidanceStatus();
+  const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'depression' | 'tcas'>('cases');
   const [searchTerm, setSearchTerm] = useState('');
 
   // ดูย้อนหลังรายปี (แท็บ SDQ): 'ALL' = ทุกปี (ค่าเริ่มต้น = พฤติกรรมเดิม), 'LEGACY' = ข้อมูลเก่าที่ไม่มีปีการศึกษา, หรือปี พ.ศ.
@@ -44,8 +50,7 @@ export function GuidancePortal() {
   const sdqInYear = useMemo(() => filterSdqByYear(sdqAssessments, sdqYear), [sdqAssessments, sdqYear]);
 
   // สรุปผลคัดกรองสุขภาพจิตจากข้อมูลจริง (แทนตัวเลข hardcode เดิม 780/49/15 คน)
-  // เกณฑ์ "กลุ่มเสี่ยง": PHQ-9 riskLevel ตั้งแต่ MODERATE ขึ้นไป (คะแนน ≥10 ตามมาตรฐานกรมสุขภาพจิต
-  // ที่คำนวณไว้แล้วตอนบันทึกใน store.ts savePHQ9Screening — MILD ถือเป็น "เฝ้าระวัง" ไม่ใช่กลุ่มเสี่ยง)
+  // เกณฑ์ "กลุ่มเสี่ยง": 9Q (ไทย) ระดับปานกลางขึ้นไป (รวม ≥13) หรือมีธงแดงข้อ 9 (MILD = เฝ้าระวัง ไม่ใช่กลุ่มเสี่ยง)
   // หรือ 2Q เป็นบวก (isPositive) หรือ SDQ triagingStatus ไม่ใช่ NORMAL (เอาผลแย่สุดต่อคนถ้ามีหลายผู้ประเมิน)
   const screeningSummary = useMemo(() => {
     const sdqWorstByStudent = new Map<string, 'NORMAL' | 'AT_RISK' | 'VULNERABLE'>();
@@ -62,26 +67,28 @@ export function GuidancePortal() {
       }
     }
 
-    const phq9ByStudent = new Map<string, PHQ9Screening>(phq9Screenings.map(p => [p.studentId, p]));
+    const nineByStudent = screeningRecords;
     const twoQByStudent = new Map<string, TwoQuestionScreening>(twoQuestionScreenings.map(q => [q.studentId, q]));
 
     // รวมรายชื่อนักเรียนทุกคนที่มีผลคัดกรองอย่างน้อย 1 ชุด (ไม่ใช่แค่คนที่อยู่ใน students[] สด
     // เผื่อ listener นักเรียนยังไม่โหลด — ยังโชว์ผลคัดกรองได้ แค่ไม่มีชื่อเต็ม/ห้องประกอบ)
     const allScreenedIds = new Set<string>([
-      ...phq9ByStudent.keys(),
+      ...[...nineByStudent.entries()].filter(([, r]) => !!r.nineSummary).map(([sid]) => sid),
       ...twoQByStudent.keys(),
       ...sdqWorstByStudent.keys(),
     ]);
 
     const atRiskList = Array.from(allScreenedIds).map(studentId => {
-      const phq9 = phq9ByStudent.get(studentId);
+      const nine = nineByStudent.get(studentId);
+      const nineSummary = nine?.nineSummary ?? null;
+      const nineDetail = nine?.nineDetail ?? null;
       const twoQ = twoQByStudent.get(studentId);
       const sdqWorst = sdqWorstByStudent.get(studentId) || 'NORMAL';
-      const phq9AtRisk = !!phq9 && ['MODERATE', 'SEVERE', 'VERY_SEVERE'].includes(phq9.riskLevel);
-      const isAtRisk = phq9AtRisk || !!twoQ?.isPositive || sdqWorst === 'VULNERABLE' || sdqWorst === 'AT_RISK';
+      const nineAtRisk = !!nineSummary && (['MODERATE', 'SEVERE'].includes(nineSummary.riskLevel) || nineSummary.redFlagItem9);
+      const isAtRisk = nineAtRisk || !!twoQ?.isPositive || sdqWorst === 'VULNERABLE' || sdqWorst === 'AT_RISK';
       const student = students.find(s => s.studentId === studentId);
-      return { studentId, student, phq9, twoQ, sdqWorst, isAtRisk, phq9AtRisk };
-    }).filter(r => r.isAtRisk).sort((a, b) => (b.phq9?.totalScore || 0) - (a.phq9?.totalScore || 0));
+      return { studentId, student, nineSummary, nineDetail, twoQ, sdqWorst, isAtRisk, nineAtRisk };
+    }).filter(r => r.isAtRisk).sort((a, b) => (Number(!!b.nineSummary?.redFlagItem9) - Number(!!a.nineSummary?.redFlagItem9)) || ((b.nineDetail?.totalScore || 0) - (a.nineDetail?.totalScore || 0)));
 
     const sdqCounts = { NORMAL: 0, AT_RISK: 0, VULNERABLE: 0 };
     for (const status of sdqWorstByStudent.values()) sdqCounts[status]++;
@@ -103,7 +110,7 @@ export function GuidancePortal() {
     const sdqWithoutImpact = sdqInYear.filter(s => !s.impactTriage).length;
 
     return { atRiskList, sdqCounts, sdqScreenedTotal, sdqLegacyCriteria, sdqImpactCounts, sdqImpactScreened: impactWorst.size, sdqWithoutImpact, totalStudents: students.length };
-  }, [phq9Screenings, twoQuestionScreenings, sdqInYear, students]);
+  }, [screeningRecords, twoQuestionScreenings, sdqInYear, students]);
 
   // เคสให้คำปรึกษา — real-time จาก Firestore (guidance_counseling_cases) แทน useState mock เดิม
   // ข้อมูลอ่อนไหวที่สุดในระบบ (เนื้อหาการปรึกษาจิตวิทยาของผู้เยาว์) — rules อ่าน/เขียนได้เฉพาะ
@@ -215,6 +222,7 @@ export function GuidancePortal() {
           items={[
             { id: 'cases', label: `เคสให้คำปรึกษาและสุขภาพจิต (${cases.length})`, icon: Users },
             { id: 'sdq', label: 'ผลประเมิน SDQ และ EQ นักเรียน', icon: ShieldAlert },
+            { id: 'depression', label: 'คัดกรองซึมเศร้า 2Q/9Q/8Q', icon: HeartHandshake },
             { id: 'tcas', label: 'ระบบแนะแนวอาชีพและ TCAS พอร์ตโฟลิโอ', icon: Award },
           ]}
         >
@@ -372,15 +380,15 @@ export function GuidancePortal() {
             {/* แนวโน้มรายด้านเทียบข้ามปีการศึกษา (2-3 ปีล่าสุด) */}
             <SdqTrendSection records={sdqAssessments} loading={screeningsLoading} />
 
-            {/* รายชื่อนักเรียนกลุ่มเสี่ยงจาก PHQ-9 / 2Q / SDQ — ต้องเห็นทันทีที่มีการส่งแบบประเมินใหม่ */}
+            {/* รายชื่อนักเรียนกลุ่มเสี่ยงจาก 9Q / 2Q / SDQ — ต้องเห็นทันทีที่มีการส่งแบบประเมินใหม่ */}
             <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-rose-400" />
                 <h3 className="text-base font-bold text-white">รายชื่อนักเรียนกลุ่มเสี่ยงที่ต้องติดตาม ({screeningSummary.atRiskList.length} คน)</h3>
               </div>
               <p className="text-xs text-slate-400">
-                เกณฑ์: PHQ-9 ระดับปานกลางขึ้นไป (คะแนน ≥10) หรือผลคัดกรอง 2Q เป็นบวก หรือ SDQ อยู่ในกลุ่มเสี่ยง/มีปัญหา —
-                กรุณาให้ครูแนะแนวยืนยันความถูกต้องของเกณฑ์นี้อีกครั้งตามมาตรฐานที่โรงเรียนใช้จริง
+                เกณฑ์: 9Q ระดับปานกลางขึ้นไป (คะแนน ≥13) หรือมีธงแดงข้อ 9 หรือผลคัดกรอง 2Q เป็นบวก หรือ SDQ อยู่ในกลุ่มเสี่ยง/มีปัญหา —
+                ดูรายละเอียด 9Q/8Q และบันทึกการแจ้งผู้ปกครองที่เมนู "คัดกรองซึมเศร้า 2Q/9Q/8Q"
               </p>
 
               {screeningSummary.atRiskList.length === 0 ? (
@@ -391,7 +399,7 @@ export function GuidancePortal() {
                     <thead>
                       <tr className="border-b border-slate-800 text-slate-400">
                         <th className="pb-2 font-medium">นักเรียน</th>
-                        <th className="pb-2 font-medium">PHQ-9</th>
+                        <th className="pb-2 font-medium">9Q</th>
                         <th className="pb-2 font-medium">2Q</th>
                         <th className="pb-2 font-medium">SDQ</th>
                       </tr>
@@ -404,11 +412,11 @@ export function GuidancePortal() {
                             <p className="text-[10px] text-slate-400 font-mono">{row.student?.room || ''} · ID: {row.studentId}</p>
                           </td>
                           <td className="py-2.5">
-                            {row.phq9 ? (
+                            {row.nineSummary ? (
                               <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                row.phq9AtRisk ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-slate-800 text-slate-300'
+                                row.nineAtRisk ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-slate-800 text-slate-300'
                               }`}>
-                                {row.phq9.totalScore}/27 ({row.phq9.riskLevel})
+                                {row.nineDetail ? `${row.nineDetail.totalScore}/${NINE_Q_TOTAL_MAX} ` : ''}({NINE_Q_RISK_LABEL[row.nineSummary.riskLevel]}){row.nineSummary.redFlagItem9 ? ' 🚩ข้อ 9' : ''}
                               </span>
                             ) : <span className="text-slate-600">—</span>}
                           </td>
@@ -438,6 +446,20 @@ export function GuidancePortal() {
               )}
             </div>
           </div>
+        )}
+
+        {/* TAB: คัดกรองซึมเศร้า/ความเสี่ยงฆ่าตัวตาย 2Q → 9Q → 8Q — ธงแดง (ข้อ 9 ของ 9Q, 8Q ≥17) เด่นแยกจากรายการปกติ */}
+        {activeTab === 'depression' && (
+          <DepressionScreeningPanel
+            viewer="GUIDANCE_COUNSELOR"
+            hasActiveCounselor={guidanceStatus.hasActiveCounselor}
+            statusKnown={guidanceStatus.known}
+            students={students}
+            records={screeningRecords}
+            loading={depressionLoading}
+            error={depressionError}
+            allowPickAnyStudent
+          />
         )}
 
         {/* TAB 3: TCAS & PORTFOLIO */}

@@ -1540,64 +1540,53 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
-  // student_screenings_2q / student_screenings_phq9 — doc id คือรหัสนักเรียน 5 หลัก ไม่ใช่ Auth UID
+  // student_screenings_2q — doc id คือรหัสนักเรียน 5 หลัก ไม่ใช่ Auth UID
   // REGRESSION: isSelf(studentId) เดิมเทียบ auth.uid กับรหัส 5 หลักตรงๆ ไม่มีวันจริง แก้เป็น
   // isSelfStudent() ที่เทียบผ่าน students/{studentId}.studentUid จริงแทน
-  describe('student_screenings_2q / student_screenings_phq9 collections', () => {
+  // (9Q/8Q และสิทธิ์ตามบทบาท x มี/ไม่มีครูแนะแนว ทดสอบละเอียดที่ firestore.screening.rules.test.ts)
+  describe('student_screenings_2q + legacy student_screenings_phq9 collections', () => {
     const STU_UID = 'stu-uid-scr1';
     const STU_ID = 'scr-std-1';
     const OTHER_UID = 'stu-uid-scr2';
 
     async function seed() {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
-        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID });
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, room: 'ม.5/8' });
       });
     }
 
-    it('REGRESSION: lets the real student (matched via students/{id}.studentUid) write their own 2Q/PHQ-9, denies a different signed-in student', async () => {
+    it('REGRESSION: lets the real student (matched via students/{id}.studentUid) write their own 2Q, denies a different signed-in student', async () => {
       await seed();
       await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_screenings_2q/${STU_ID}`).set({
         id: '2q-1', studentId: STU_ID, q1Depressed: false, q2Hopeless: true, isPositive: true, conductedAt: '2026-09-01',
       }));
-      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_screenings_phq9/${STU_ID}`).set({
-        id: 'phq-1', studentId: STU_ID, answers: [2, 2, 2, 2, 2, 2, 2, 2, 2], totalScore: 18, riskLevel: 'SEVERE',
-        recommendation: 'ทดสอบ', conductedAt: '2026-09-01',
-      }));
       await assertFails(asUser(OTHER_UID, ['STUDENT']).firestore().doc(`student_screenings_2q/${STU_ID}`).set({
         id: '2q-2', studentId: STU_ID, q1Depressed: false, q2Hopeless: false, isPositive: false, conductedAt: '2026-09-01',
       }));
-      await assertFails(asUser(OTHER_UID, ['STUDENT']).firestore().doc(`student_screenings_phq9/${STU_ID}`).set({
-        id: 'phq-2', studentId: STU_ID, answers: [0, 0, 0, 0, 0, 0, 0, 0, 0], totalScore: 0, riskLevel: 'NORMAL',
-        recommendation: 'ทดสอบ', conductedAt: '2026-09-01',
-      }));
     });
 
-    it('lets GUIDANCE_COUNSELOR and HOMEROOM_TEACHER read; denies an unrelated student', async () => {
+    it('the international PHQ-9 collection is retired: nobody can write it (not even the student or an admin); only GUIDANCE_COUNSELOR/SUPER_ADMIN can still read old data', async () => {
       await seed();
-      await testEnv.withSecurityRulesDisabled(async (ctx) => {
-        await ctx.firestore().doc(`student_screenings_phq9/${STU_ID}`).set({
-          id: 'phq-3', studentId: STU_ID, answers: [3, 3, 3, 3, 3, 3, 3, 3, 3], totalScore: 27, riskLevel: 'VERY_SEVERE',
-          recommendation: 'ทดสอบ', conductedAt: '2026-09-01',
-        });
-      });
+      const doc = { id: 'phq-1', studentId: STU_ID, answers: [2, 2, 2, 2, 2, 2, 2, 2, 2], totalScore: 18, riskLevel: 'SEVERE', recommendation: 'ทดสอบ', conductedAt: '2026-09-01' };
+      await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_screenings_phq9/${STU_ID}`).set(doc));
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc(`student_screenings_phq9/${STU_ID}`).set(doc));
+      await assertFails(asRole('GUIDANCE_COUNSELOR').firestore().doc(`student_screenings_phq9/${STU_ID}`).set(doc));
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`student_screenings_phq9/${STU_ID}`).set(doc); });
       await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
-      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
-      await assertFails(asUser(OTHER_UID, ['STUDENT']).firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
+      for (const who of [asRole('HOMEROOM_TEACHER'), asRole('EXECUTIVE'), asUser(STU_UID, ['STUDENT']), asUser(OTHER_UID, ['STUDENT'])]) {
+        await assertFails(who.firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
+      }
     });
 
-    it('TASK 5 (ExecutivePortal Health): EXECUTIVE role อ่านได้เพื่อสรุปภาพรวมโรงเรียน (นับจำนวน ไม่ระบุตัวบุคคล)', async () => {
+    it('TASK 5 (ExecutivePortal Health): EXECUTIVE can still read 2Q for school-wide counts (no identities shown in the UI)', async () => {
       await seed();
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc(`student_screenings_2q/${STU_ID}`).set({
           id: '2q-3', studentId: STU_ID, q1Depressed: true, q2Hopeless: false, isPositive: true, conductedAt: '2026-09-01',
         });
-        await ctx.firestore().doc(`student_screenings_phq9/${STU_ID}`).set({
-          id: 'phq-4', studentId: STU_ID, answers: [1, 1, 1, 1, 1, 1, 1, 1, 1], totalScore: 9, riskLevel: 'MODERATE',
-          recommendation: 'ทดสอบ', conductedAt: '2026-09-01',
-        });
       });
       await assertSucceeds(asRole('EXECUTIVE').firestore().doc(`student_screenings_2q/${STU_ID}`).get());
-      await assertSucceeds(asRole('EXECUTIVE').firestore().doc(`student_screenings_phq9/${STU_ID}`).get());
     });
   });
 

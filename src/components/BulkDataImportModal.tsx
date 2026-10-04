@@ -20,7 +20,8 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { writeBatch, doc, serverTimestamp, collection, getDocs, onSnapshot } from 'firebase/firestore';
 import { computeSyncReplacePlan, scheduleDocIdFor, primaryTeacherKey } from '../lib/scheduleSyncReplace';
-import { db } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../lib/firebase';
 import { useStore } from '../store';
 import { Student, Course, GlobalCourse, UserRole } from '../types';
 import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
@@ -1083,6 +1084,16 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           await delBatch.commit();
         }
         console.log(`[BulkDataImportModal] sync/replace: ลบ schedule เก่า ${toDelete.length} รายการ (ข้าม ${skipped} รายการที่มี attendance ผูกอยู่)`);
+      }
+
+      // นำเข้าบุคลากรอาจเพิ่ม/เปลี่ยนครูแนะแนว (GUIDANCE_COUNSELOR) — สิทธิ์อ่าน 9Q/8Q ของครูที่ปรึกษาขึ้นกับ "มีครูแนะแนวที่ใช้งานอยู่ไหม"
+      // (school_settings/guidance_status — Cloud Functions เป็นผู้คำนวณ) จึงให้คำนวณใหม่ (ล้มเหลว = แค่เตือน ไม่ทำให้การนำเข้าล้ม)
+      if (importType === 'TEACHER') {
+        try {
+          await httpsCallable(functions, 'refreshGuidanceStatus')();
+        } catch (err) {
+          console.warn('[BulkDataImportModal] refreshGuidanceStatus failed — ให้ SUPER_ADMIN เรียก refreshGuidanceStatus เองภายหลัง:', err);
+        }
       }
 
       // Update local Zustand store
