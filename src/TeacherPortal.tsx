@@ -838,7 +838,7 @@ export function TeacherPortal() {
     : 0;
 
   return (
-    <div className="flex flex-col h-screen w-full bg-[#0b0d14] text-slate-100 overflow-hidden font-sans selection:bg-blue-500/30">
+    <div className="flex flex-col flex-1 min-h-0 w-full bg-[#0b0d14] text-slate-100 overflow-hidden font-sans selection:bg-blue-500/30">
       
       {/* Toast Notification */}
       {toast && (

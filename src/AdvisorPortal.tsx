@@ -148,7 +148,7 @@ export function AdvisorPortal() {
   const selectedStudent = students.find(s => s.studentId === selectedStudentId);
 
   return (
-    <div className="flex flex-col h-screen w-full bg-[#0b0d14] text-slate-100 overflow-hidden font-sans selection:bg-blue-500/30">
+    <div className="flex flex-col flex-1 min-h-0 w-full bg-[#0b0d14] text-slate-100 overflow-hidden font-sans selection:bg-blue-500/30">
        {/* Responsive Header */}
        <header className="h-16 border-b border-white/10 bg-[#0f111a] flex items-center justify-between px-3 sm:px-6 shrink-0 shadow-lg relative z-20">
           <button

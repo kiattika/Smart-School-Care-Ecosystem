@@ -102,7 +102,9 @@ export default function App() {
   const showNavbar = user.profile && user.activeRole;
 
   return (
-    <div className="relative min-h-screen bg-slate-900 font-sans flex flex-col">
+    // ความสูงเท่าจอ: แถบบนสุดอยู่กับที่ พื้นที่ portal ได้ความสูงที่เหลือ (flex-1 min-h-0) — เหลือ scroll เดียวต่อหน้า
+    // (portal บุคลากรจัด scroll เองที่กล่องเนื้อหา; portal อื่นเลื่อนที่ wrapper ด้านล่าง ไม่ใช่ window)
+    <div className="relative h-[100dvh] bg-slate-900 font-sans flex flex-col overflow-hidden">
       {showNavbar ? (
         <NavbarWithRoleSwitcher
           user={user.profile!}
@@ -122,7 +124,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-h-0 flex flex-col">
         <AnimatePresence mode="wait">
           <motion.div
             key={user.activeRole || user.role}
@@ -130,7 +132,7 @@ export default function App() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -15, scale: 0.99 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
-            className="flex-1 flex flex-col"
+            className="flex-1 min-h-0 flex flex-col overflow-y-auto"
           >
             {user.activeRole === 'FINANCE_STAFF' ? (
               <FinancePortal />
