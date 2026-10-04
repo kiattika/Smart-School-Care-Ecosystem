@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
 import { StudentPicker } from '../shared/StudentPicker';
+import { PortalSidebarLayout } from '../shared/PortalSidebarLayout';
 import {
   recordInfirmaryVisit as recordInfirmaryVisitFirestore,
   acknowledgeInfirmaryVisit,
@@ -166,50 +167,20 @@ export function InfirmaryPortal() {
         </div>
       </div>
 
-      {/* Main Navigation Tabs */}
-      <div className="max-w-7xl w-full mx-auto px-6 pt-6">
-        <div className="flex border-b border-slate-800 gap-6">
-          <button
-            onClick={() => setActiveTab('visits')}
-            className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'visits' ? 'border-rose-500 text-rose-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Activity className="w-4 h-4" />
-            <span>สถิติการมารับบริการและจ่ายยา ({infirmaryVisits.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('inventory')}
-            className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'inventory' ? 'border-rose-500 text-rose-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Pill className="w-4 h-4" />
-            <span>คลังเวชภัณฑ์และยา ({medicines.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('screening')}
-            className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'screening' ? 'border-rose-500 text-rose-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span>ผลตรวจสุขภาพและวัคซีนประจำปี</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('profiles')}
-            className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'profiles' ? 'border-rose-500 text-rose-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <User className="w-4 h-4" />
-            <span>ข้อมูลโรคประจำตัวและประวัติแพ้ยา</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Content Body */}
-      <div className="max-w-7xl w-full mx-auto px-6 py-6 flex-1 space-y-6">
+      {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกันทุก portal (PortalSidebarLayout) */}
+      <div className="max-w-7xl w-full mx-auto px-6 py-6 flex-1">
+        <PortalSidebarLayout
+          title="งานพยาบาลโรงเรียน"
+          activeId={activeTab}
+          onSelect={(id) => setActiveTab(id as typeof activeTab)}
+          items={[
+            { id: 'visits', label: `สถิติการมารับบริการและจ่ายยา (${infirmaryVisits.length})`, icon: Activity },
+            { id: 'inventory', label: `คลังเวชภัณฑ์และยา (${medicines.length})`, icon: Pill },
+            { id: 'screening', label: 'ผลตรวจสุขภาพและวัคซีนประจำปี', icon: FileSpreadsheet },
+            { id: 'profiles', label: 'ข้อมูลโรคประจำตัวและประวัติแพ้ยา', icon: User },
+          ]}
+        >
+        <div className="space-y-6">
         
         {/* TAB 1: VISITS & TREATMENTS */}
         {activeTab === 'visits' && (
@@ -461,6 +432,8 @@ export function InfirmaryPortal() {
           </div>
         )}
 
+      </div>
+        </PortalSidebarLayout>
       </div>
 
       {/* ADD VISIT MODAL */}

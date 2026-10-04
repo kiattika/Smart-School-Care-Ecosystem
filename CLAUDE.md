@@ -122,6 +122,13 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - เวลา: `src/components/shared/TimePicker` — 24 ชั่วโมง (ชั่วโมง 00-23 + นาที) ค่าเป็น `'HH:mm'` เหมือนเดิม (`<input type="time">` บางเบราว์เซอร์/locale แสดงเป็น AM/PM)
 - ข้อยกเว้นเดียว: ช่องเวลาใน Time Simulation ของ TeacherPortal (DEV-only) — guard test `dateTimeInputsGuard.test.ts` สแกน `src/`
 
+### เมนูย่อยของหน้าบุคลากรใช้ `PortalSidebarLayout` กลาง (ห้ามทำแท็บแนวนอน/แถบเมนูเอง)
+
+- `src/components/shared/PortalSidebarLayout.tsx` — แถบด้านซ้ายแบบเดียวกันทุก portal: จอ lg+ แถบไอคอนแคบ (w-16) ขยายเป็น w-64 เมื่อ hover (หน่วงเวลา) / focus แล้วลอยทับเนื้อหา, ปักหมุดเปิดค้าง (localStorage `ssc.portalSidebar.pinned` แบบ try/catch) แล้วดันเนื้อหา; จอเล็กกว่า lg เป็นลิ้นชักจากซ้าย; `aria-current` + `title` ตอนแถบแคบ
+- ใช้แล้วใน AdminPortal, TeacherPortal (เฉพาะ view `dashboard` — view `class` / `active_learning` ไม่มีแถบนี้), AdvisorPortal, ExecutivePortal, ApprovalsPortal, InfirmaryPortal, GuidancePortal, SupervisionPortal — คง state/id ของแท็บเดิม
+- เมนูที่ซ่อนตามบทบาทกรองด้วย `visibleSidebarItems()` (`hideForRoles`) และแท็บที่ถูกซ่อนกลับไปเมนูแรกด้วย `resolveActiveSidebarId()` (`src/components/shared/portalSidebarLogic.ts`) — guard test `portalSidebar.test.ts`
+- FinancePortal ไม่มีเมนูย่อย (หน้าเดียว); StudentPortal / ParentPortal ยังใช้แถบ pill แนวนอนแบบเดิม (มือถือเป็นหลัก — รอออกแบบแยก)
+
 ### React: ห้ามใส่ `key` ให้ component ที่ประกาศ props เอง
 
 โปรเจกต์ไม่มี `@types/react` → `<MyCard key={...} />` ล้ม tsc ("Property 'key' does not exist") ให้ห่อด้วย element ที่รับ key ได้ เช่น `<div key={id}><MyCard ... /></div>` — ห้ามติดตั้ง `@types/react` เพื่อแก้เฉพาะหน้า และห้ามใช้ `any` / `@ts-ignore` กลบ

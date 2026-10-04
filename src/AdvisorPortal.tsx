@@ -14,6 +14,7 @@ import {
   MapPin, Route, Navigation, MessageCircle, Home, ClipboardList, AlertTriangle, Heart, Shield, X, Map as MapIcon, ChevronRight, CheckCircle2,
   Edit3, Clock, Compass, Brain, Sparkles, Target, Search, Filter, Eye
 } from 'lucide-react';
+import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { ResponsiveContainer, LineChart, Line, XAxis, Tooltip as RechartsTooltip } from 'recharts';
@@ -167,104 +168,12 @@ export function AdvisorPortal() {
             </h1>
           </button>
 
-          {/* Desktop Tab Switcher (lg+) */}
           <div className="hidden xl:flex items-center gap-4">
-            <div className="flex bg-black/40 border border-white/10 rounded-xl p-1">
-              <button 
-                onClick={() => setActiveTab('dashboard')}
-                className={cn("px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5", activeTab === 'dashboard' ? "bg-indigo-600 text-white shadow-sm" : "text-slate-400 hover:text-slate-200")}
-              >
-                <Activity className="w-3.5 h-3.5" />
-                แดชบอร์ดห้อง
-              </button>
-              <button 
-                onClick={() => setActiveTab('self-assessment')}
-                className={cn("px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5", activeTab === 'self-assessment' ? "bg-blue-600 text-white shadow-sm" : "text-slate-400 hover:text-slate-200")}
-              >
-                <Brain className="w-3.5 h-3.5" />
-                วิเคราะห์ 30 ข้อ
-              </button>
-              <button 
-                onClick={() => setActiveTab('visit-planner')}
-                className={cn("px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5", activeTab === 'visit-planner' ? "bg-emerald-600 text-white shadow-sm" : "text-slate-400 hover:text-slate-200")}
-              >
-                <MapPin className="w-3.5 h-3.5" />
-                เยี่ยมบ้าน
-              </button>
-              <button 
-                onClick={() => setActiveTab('school-checkin')}
-                className={cn("px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5", activeTab === 'school-checkin' ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-400 hover:text-slate-200")}
-              >
-                <ClipboardList className="w-3.5 h-3.5" />
-                เช็คชื่อโฮมรูม
-              </button>
-              <button 
-                onClick={() => setActiveTab('analytics')}
-                className={cn("px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5", activeTab === 'analytics' ? "bg-purple-600 text-white shadow-sm" : "text-slate-400 hover:text-slate-200")}
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                สถิติวิชาการ
-              </button>
-            </div>
             <div className="text-xs text-slate-300 font-mono hidden 2xl:block bg-white/5 px-2.5 py-1 rounded-lg border border-white/5">
               {format(new Date(), 'd MMMM yyyy', { locale: th })}
             </div>
           </div>
        </header>
-
-       {/* Mobile & Tablet Scrollable Sub-Navigation Bar (< xl) */}
-       <div className="xl:hidden bg-[#121624] border-b border-white/10 px-3 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0 shadow-inner">
-          <button 
-            onClick={() => setActiveTab('dashboard')}
-            className={cn(
-              "px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0",
-              activeTab === 'dashboard' ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-white bg-slate-800/60"
-            )}
-          >
-            <Activity className="w-3.5 h-3.5" />
-            แดชบอร์ดห้อง
-          </button>
-          <button 
-            onClick={() => setActiveTab('self-assessment')}
-            className={cn(
-              "px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0",
-              activeTab === 'self-assessment' ? "bg-blue-600 text-white shadow-md" : "text-slate-400 hover:text-white bg-slate-800/60"
-            )}
-          >
-            <Brain className="w-3.5 h-3.5" />
-            วิเคราะห์ 30 ข้อ
-          </button>
-          <button 
-            onClick={() => setActiveTab('visit-planner')}
-            className={cn(
-              "px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0",
-              activeTab === 'visit-planner' ? "bg-emerald-600 text-white shadow-md" : "text-slate-400 hover:text-white bg-slate-800/60"
-            )}
-          >
-            <MapPin className="w-3.5 h-3.5" />
-            เยี่ยมบ้าน
-          </button>
-          <button 
-            onClick={() => setActiveTab('school-checkin')}
-            className={cn(
-              "px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0",
-              activeTab === 'school-checkin' ? "bg-amber-500 text-slate-950 shadow-md" : "text-slate-400 hover:text-white bg-slate-800/60"
-            )}
-          >
-            <ClipboardList className="w-3.5 h-3.5" />
-            เช็คชื่อโฮมรูม
-          </button>
-          <button 
-            onClick={() => setActiveTab('analytics')}
-            className={cn(
-              "px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 shrink-0",
-              activeTab === 'analytics' ? "bg-purple-600 text-white shadow-md" : "text-slate-400 hover:text-white bg-slate-800/60"
-            )}
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            สถิติวิชาการ
-          </button>
-       </div>
 
        {!myRoom ? (
          <main className="flex-1 overflow-y-auto flex items-center justify-center p-6 bg-[#0b0d14]">
@@ -278,7 +187,21 @@ export function AdvisorPortal() {
          </main>
 
        ) : (
-       <main className="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col gap-6">
+       <main className="flex-1 overflow-y-auto p-4 md:p-6">
+        {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกันทุก portal (PortalSidebarLayout) */}
+        <PortalSidebarLayout
+          title="ครูที่ปรึกษา"
+          activeId={activeTab}
+          onSelect={(id) => setActiveTab(id as typeof activeTab)}
+          items={[
+            { id: 'dashboard', label: 'แดชบอร์ดห้อง', icon: Activity },
+            { id: 'self-assessment', label: 'วิเคราะห์ 30 ข้อ', icon: Brain },
+            { id: 'visit-planner', label: 'เยี่ยมบ้าน', icon: MapPin },
+            { id: 'school-checkin', label: 'เช็คชื่อโฮมรูม', icon: ClipboardList },
+            { id: 'analytics', label: 'สถิติวิชาการ', icon: Sparkles },
+          ]}
+        >
+        <div className="flex flex-col gap-6">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -1162,6 +1085,8 @@ export function AdvisorPortal() {
           )}
           </motion.div>
         </AnimatePresence>
+               </div>
+        </PortalSidebarLayout>
        </main>
        )}
 

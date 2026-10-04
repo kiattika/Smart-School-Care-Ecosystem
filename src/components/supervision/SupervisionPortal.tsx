@@ -18,6 +18,7 @@ import {
   BarChart3, 
   Sparkles 
 } from 'lucide-react';
+import { PortalSidebarLayout } from '../shared/PortalSidebarLayout';
 
 export function SupervisionPortal() {
   const [activeTab, setActiveTab] = useState<'schedule' | 'rubric' | 'lessonPlans' | 'mentoring'>('schedule');
@@ -162,50 +163,20 @@ export function SupervisionPortal() {
         </div>
       </div>
 
-      {/* Main Navigation Tabs */}
-      <div className="max-w-7xl w-full mx-auto px-6 pt-6">
-        <div className="flex border-b border-slate-800 gap-6">
-          <button
-            onClick={() => setActiveTab('lessonPlans')}
-            className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'lessonPlans' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-            <span>ตรวจและอนุมัติแผนการจัดการเรียนรู้ ({lessonPlans.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('schedule')}
-            className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'schedule' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Calendar className="w-4 h-4" />
-            <span>ปฏิทินและบันทึกการนิเทศชั้นเรียน ({visits.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('rubric')}
-            className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'rubric' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Award className="w-4 h-4" />
-            <span>เกณฑ์การประเมินรูบริก (Rubric Scoring)</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('mentoring')}
-            className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'mentoring' ? 'border-cyan-500 text-cyan-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <BarChart3 className="w-4 h-4" />
-            <span>สถิติการเติบโตสมรรถนะครู (Growth Analytics)</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Content Body */}
-      <div className="max-w-7xl w-full mx-auto px-6 py-6 flex-1 space-y-6">
+      {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกันทุก portal (PortalSidebarLayout) */}
+      <div className="max-w-7xl w-full mx-auto px-6 py-6 flex-1">
+        <PortalSidebarLayout
+          title="งานนิเทศการสอน"
+          activeId={activeTab}
+          onSelect={(id) => setActiveTab(id as typeof activeTab)}
+          items={[
+            { id: 'lessonPlans', label: `ตรวจและอนุมัติแผนการจัดการเรียนรู้ (${lessonPlans.length})`, icon: FileText },
+            { id: 'schedule', label: `ปฏิทินและบันทึกการนิเทศชั้นเรียน (${visits.length})`, icon: Calendar },
+            { id: 'rubric', label: 'เกณฑ์การประเมินรูบริก (Rubric Scoring)', icon: Award },
+            { id: 'mentoring', label: 'สถิติการเติบโตสมรรถนะครู (Growth Analytics)', icon: BarChart3 },
+          ]}
+        >
+        <div className="space-y-6">
         
         {/* TAB 1: LESSON PLANS REVIEW ENGINE */}
         {activeTab === 'lessonPlans' && (
@@ -410,6 +381,8 @@ export function SupervisionPortal() {
           </div>
         )}
 
+      </div>
+        </PortalSidebarLayout>
       </div>
 
       {/* LESSON PLAN REVIEW MODAL */}
