@@ -1,4 +1,5 @@
 import { SdqComputed, SdqEvaluatorType, SdqScoreErrors, SdqScores, computeSdq, validateSdqScores } from './sdq';
+import { SdqAnswers, scoreSdqAnswers } from './sdqQuestionnaire';
 import { ImpactErrors, ImpactFormValues, SdqImpactResult, computeImpact } from './sdqImpact';
 
 /**
@@ -22,4 +23,23 @@ export function buildSdqSubmission(
     };
   }
   return { ok: true, fields: { subscaleScores: s.scores, ...computeSdq(s.scores, evaluatorType), ...i.impact } };
+}
+
+/**
+ * เหมือน buildSdqSubmission แต่รับ "คำตอบ 25 ข้อ" (ส่วนที่ 1) — บวกคะแนน 5 ด้านจากคำตอบก่อน (src/lib/sdqQuestionnaire.ts)
+ * แล้วส่งต่อให้ computeSdq แปลผลตามเกณฑ์ของผู้ประเมินเหมือนเดิม; ตอบไม่ครบ 25 ข้อ = ไม่สำเร็จ (ระบุข้อที่ขาด)
+ */
+export function buildSdqSubmissionFromAnswers(
+  answers: SdqAnswers,
+  impactValues: ImpactFormValues,
+  evaluatorType: SdqEvaluatorType,
+): { ok: true; fields: SdqSubmissionFields } | { ok: false; missingItems: number[]; invalidItems: number[]; impactErrors: ImpactErrors } {
+  const scored = scoreSdqAnswers(answers);
+  if ('missingItems' in scored) {
+    const i = computeImpact(impactValues);
+    return { ok: false, missingItems: scored.missingItems, invalidItems: scored.invalidItems, impactErrors: 'errors' in i ? i.errors : {} };
+  }
+  const built = buildSdqSubmission(scored.scores, impactValues, evaluatorType);
+  if ('fields' in built) return built;
+  return { ok: false, missingItems: [], invalidItems: [], impactErrors: built.impactErrors };
 }

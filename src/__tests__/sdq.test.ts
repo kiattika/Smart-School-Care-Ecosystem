@@ -185,15 +185,15 @@ describe('wiring guards', () => {
   });
 
   it('every caller passes the evaluator type (computeSdq via buildSdqSubmission / SdqEntryForm)', () => {
-    expect(src('src/components/advisor/AdvisorSdqPanel.tsx')).toContain("buildSdqSubmission(values, impact, 'TEACHER')");
+    expect(src('src/components/advisor/AdvisorSdqPanel.tsx')).toContain("buildSdqSubmissionFromAnswers(answers, impact, 'TEACHER')");
     expect(src('src/components/advisor/AdvisorSdqPanel.tsx')).toContain('evaluatorType="TEACHER"');
     const h = src('src/components/student-parent/HealthMentalWellbeingModule.tsx');
-    expect(h).toContain('buildSdqSubmission(sdqScores, sdqImpact, sdqEvaluator)');
+    expect(h).toContain('buildSdqSubmissionFromAnswers(sdqAnswers, sdqImpact, sdqEvaluator)');
     expect(h).toContain('evaluatorType={sdqEvaluator}');
-    expect(src('src/components/shared/SdqScoreForm.tsx')).toContain('computeSdq(validation.scores, evaluatorType)');
+    expect(src('src/components/shared/SdqQuestionnaireForm.tsx')).toContain('computeSdq(scoring.scores, evaluatorType)');
     expect(src('src/lib/sdqSubmission.ts')).toContain('computeSdq(s.scores, evaluatorType)');
     // ไม่มีจุดไหนเรียก computeSdq แบบพารามิเตอร์เดียวอีก
-    for (const f of ['src/components/advisor/AdvisorSdqPanel.tsx', 'src/components/student-parent/HealthMentalWellbeingModule.tsx', 'src/components/shared/SdqScoreForm.tsx', 'src/lib/sdqSubmission.ts']) {
+    for (const f of ['src/components/advisor/AdvisorSdqPanel.tsx', 'src/components/student-parent/HealthMentalWellbeingModule.tsx', 'src/components/shared/SdqQuestionnaireForm.tsx', 'src/lib/sdqSubmission.ts']) {
       expect(src(f)).not.toMatch(/computeSdq\([^,()]+\)/);
     }
   });
@@ -203,7 +203,7 @@ describe('wiring guards', () => {
     expect(s).not.toContain('ปกติ (Normal)');
     expect(s).toContain('<SdqStatusView rec={sdq} />');
     expect(s).not.toMatch(/emotional:\s*2,\s*\n?\s*conduct:\s*1/);
-    expect(s).toContain('useState<SdqFormValues>(EMPTY_SDQ_FORM)');
+    expect(s).toContain('useState<SdqAnswers>(EMPTY_SDQ_ANSWERS)');
     expect(s).toContain('academicYear: currentAcademicYear');
   });
 
