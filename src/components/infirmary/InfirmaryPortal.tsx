@@ -136,7 +136,7 @@ export function InfirmaryPortal() {
   const activeStudent = students.find(s => s.studentId === selectedStudentId) || students[0];
 
   return (
-    <div className="flex-1 bg-slate-950 text-slate-100 flex flex-col min-h-screen">
+    <div className="flex-1 min-h-0 bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-rose-900/40 via-slate-900 to-slate-900 border-b border-rose-500/20 px-6 py-6">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -168,7 +168,9 @@ export function InfirmaryPortal() {
       </div>
 
       {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกันทุก portal (PortalSidebarLayout) */}
-      <div className="max-w-7xl w-full mx-auto px-6 py-6 flex-1">
+      {/* scroll เดียวของหน้า — แถบหัวข้อ portal ด้านบนอยู่กับที่ */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="max-w-7xl w-full mx-auto px-6 py-6">
         <PortalSidebarLayout
           title="งานพยาบาลโรงเรียน"
           activeId={activeTab}
@@ -434,6 +436,7 @@ export function InfirmaryPortal() {
 
       </div>
         </PortalSidebarLayout>
+      </div>
       </div>
 
       {/* ADD VISIT MODAL */}

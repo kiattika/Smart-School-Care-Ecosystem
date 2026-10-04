@@ -243,7 +243,7 @@ export function ExecutivePortal() {
   // เอา tab ออกทั้งหมดเหมือน TASK 6
 
   return (
-    <div className="flex h-screen w-full bg-[#05070a] text-slate-100 font-sans selection:bg-emerald-500/30 overflow-hidden">
+    <div className="flex flex-1 min-h-0 w-full bg-[#05070a] text-slate-100 font-sans selection:bg-emerald-500/30 overflow-hidden">
       
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">

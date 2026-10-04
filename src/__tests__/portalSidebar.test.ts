@@ -153,3 +153,39 @@ describe('guard: staff portals use the shared PortalSidebarLayout', () => {
     expect((s.match(/<PortalSidebarLayout/g) || []).length).toBe(1);
   });
 });
+
+/**
+ * scroll เดียวต่อหน้า (fix/sidebar-double-scroll): App เป็นความสูงเท่าจอ แถบบนสุด + แถบหัวข้อ portal อยู่กับที่
+ * ราก portal ห้ามเป็น h-screen / min-h-screen (สูงเท่าจอ "ใต้" แถบบนสุด → window เลื่อนอีกชั้น = scroll ซ้อน 2 จุด)
+ */
+describe('guard: one scroll per page (no nested window + content scroll)', () => {
+  const root = path.resolve(__dirname, '../..');
+  const src = (rel: string) => readSource(path.join(root, rel));
+  const PORTALS = [
+    'src/AdminPortal.tsx', 'src/TeacherPortal.tsx', 'src/AdvisorPortal.tsx', 'src/ExecutivePortal.tsx',
+    'src/ApprovalsPortal.tsx', 'src/components/infirmary/InfirmaryPortal.tsx',
+    'src/components/guidance/GuidancePortal.tsx', 'src/components/supervision/SupervisionPortal.tsx',
+  ];
+
+  it('App shell is viewport-height and gives the portal the remaining height', () => {
+    const s = src('src/App.tsx');
+    expect(s).toContain('<div className="relative h-[100dvh] bg-slate-900 font-sans flex flex-col overflow-hidden">');
+    expect(s).toContain('<div className="flex-1 min-h-0 flex flex-col">');
+    expect(s).toContain('className="flex-1 min-h-0 flex flex-col overflow-y-auto"');
+  });
+
+  for (const p of PORTALS) {
+    it(`${p}: root fills the area below the navbar (flex-1 min-h-0), never h-screen / min-h-screen`, () => {
+      const s = src(p);
+      const ret = s.lastIndexOf('\n  return (');
+      const rootTag = s.slice(s.indexOf('<div', ret), s.indexOf('>', s.indexOf('<div', ret)) + 1);
+      expect(rootTag).toContain('flex-1 min-h-0');
+      expect(rootTag).not.toMatch(/\bh-screen\b|\bmin-h-screen\b|100vh/);
+      expect(s).toMatch(/overflow-y-auto/); // กล่องเนื้อหาเป็นจุดเลื่อนเดียว
+    });
+  }
+
+  it('Admin header is no longer sticky under the navbar (it was hidden behind it)', () => {
+    expect(src('src/AdminPortal.tsx')).not.toContain('sticky top-0 z-40');
+  });
+});

@@ -84,7 +84,7 @@ export function ApprovalsPortal() {
   );
 
   return (
-    <div className="flex-1 bg-slate-950 text-slate-100 flex flex-col min-h-screen">
+    <div className="flex-1 min-h-0 bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="bg-gradient-to-r from-indigo-950/60 via-slate-900 to-slate-900 border-b border-indigo-500/20 px-6 py-6">
         <div className="max-w-6xl mx-auto flex items-center gap-3">
@@ -106,7 +106,9 @@ export function ApprovalsPortal() {
       </div>
 
       {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกันทุก portal (PortalSidebarLayout); เมนูตามสิทธิ์จริงเหมือนเดิม */}
-      <div className="flex-1 max-w-7xl w-full mx-auto px-6 py-6">
+      {/* scroll เดียวของหน้า — แถบหัวข้อ portal ด้านบนอยู่กับที่ */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="max-w-7xl w-full mx-auto px-6 py-6">
         <PortalSidebarLayout
           title="ศูนย์อนุมัติงานวิชาการ"
           activeId={tab}
@@ -132,6 +134,7 @@ export function ApprovalsPortal() {
           </div>
         )}
         </PortalSidebarLayout>
+      </div>
       </div>
     </div>
   );

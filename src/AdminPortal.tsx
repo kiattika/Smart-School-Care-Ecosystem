@@ -72,7 +72,7 @@ export function AdminPortal() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#05070a] text-slate-200 font-sans selection:bg-emerald-500/30 flex flex-col">
+    <div className="flex-1 min-h-0 bg-[#05070a] text-slate-200 font-sans selection:bg-emerald-500/30 flex flex-col overflow-hidden">
       {/* Toast Notification */}
       {toast && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4 fade-in duration-300">
@@ -84,7 +84,7 @@ export function AdminPortal() {
       )}
 
       {/* Top Navigation */}
-      <header className="bg-[#0a0f16] border-b border-white/10 sticky top-0 z-40">
+      <header className="bg-[#0a0f16] border-b border-white/10 shrink-0 relative z-20">
         <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3 sm:gap-4 min-w-0">
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shadow-inner shrink-0 hidden sm:flex">
@@ -108,7 +108,9 @@ export function AdminPortal() {
         </div>
       </header>
 
-      <main className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex-1">
+      {/* scroll เดียวของหน้า — แถบหัวข้อ portal ด้านบนอยู่กับที่ */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+      <main className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         
         {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกันทุก portal (PortalSidebarLayout) */}
         <PortalSidebarLayout
@@ -288,6 +290,7 @@ export function AdminPortal() {
           </AnimatePresence>
         </PortalSidebarLayout>
       </main>
+      </div>
 
     </div>
   );
