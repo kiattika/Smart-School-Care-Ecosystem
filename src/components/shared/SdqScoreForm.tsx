@@ -1,0 +1,77 @@
+import React from 'react';
+import {
+  SDQ_DIFFICULTIES_MAX,
+  SDQ_SUBSCALES,
+  SDQ_SUBSCALE_MAX,
+  SDQ_TRIAGE_LABEL,
+  SdqScoreErrors,
+  SdqSubscaleKey,
+  computeSdq,
+  validateSdqScores,
+} from '../../lib/sdq';
+
+/** ค่าในช่องกรอก (string) ต่อด้าน — ว่างเปล่าตั้งต้น ไม่มีค่าเริ่มต้นแทนผู้กรอก */
+export type SdqFormValues = Record<SdqSubscaleKey, string>;
+export const EMPTY_SDQ_FORM: SdqFormValues = { emotional: '', conduct: '', hyperactivity: '', peerProblems: '', prosocial: '' };
+
+/**
+ * ช่องกรอกคะแนน SDQ รายด้าน (0-10) + สรุปผลสดตามเกณฑ์กลางใน src/lib/sdq.ts — ใช้ร่วมกันทุกที่ที่กรอก SDQ
+ * (ครูที่ปรึกษา AdvisorSdqPanel / นักเรียน-ผู้ปกครอง HealthMentalWellbeingModule)
+ * แสดง error ต่อช่องเมื่อ showErrors = true (หลังกดบันทึก)
+ */
+export function SdqScoreForm({
+  values,
+  onChange,
+  disabled = false,
+  showErrors = false,
+}: {
+  values: SdqFormValues;
+  onChange: (next: SdqFormValues) => void;
+  disabled?: boolean;
+  showErrors?: boolean;
+}) {
+  const validation = validateSdqScores(values);
+  const errors: SdqScoreErrors = 'errors' in validation ? validation.errors : {};
+  const preview = validation.ok ? computeSdq(validation.scores) : null;
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {SDQ_SUBSCALES.map(({ key, label, hint }) => (
+          <label key={key} className="block space-y-1">
+            <span className="text-[11px] font-semibold text-slate-300">
+              {label} <span className="text-slate-500 font-normal">· {hint}</span>
+            </span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={SDQ_SUBSCALE_MAX}
+              step={1}
+              value={values[key]}
+              disabled={disabled}
+              onChange={(e) => onChange({ ...values, [key]: e.target.value })}
+              placeholder={`0-${SDQ_SUBSCALE_MAX}`}
+              aria-label={`คะแนน${label}`}
+              className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-slate-100 outline-none focus:border-purple-500 disabled:opacity-60"
+            />
+            {showErrors && errors[key] && <span role="alert" className="text-[11px] text-rose-400">{errors[key]}</span>}
+          </label>
+        ))}
+      </div>
+      <div className="text-xs rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2.5" data-testid="sdq-preview">
+        {preview ? (
+          <span className="text-slate-300">
+            คะแนนปัญหารวม 4 ด้าน <b className="text-white font-mono">{preview.totalDifficultiesScore}/{SDQ_DIFFICULTIES_MAX}</b>
+            {' → '}
+            <b className={preview.triagingStatus === 'NORMAL' ? 'text-emerald-400' : preview.triagingStatus === 'AT_RISK' ? 'text-amber-400' : 'text-rose-400'}>
+              {SDQ_TRIAGE_LABEL[preview.triagingStatus]}
+            </b>
+          </span>
+        ) : (
+          <span className="text-slate-500">กรอกคะแนนครบทั้ง 5 ด้าน (จำนวนเต็ม 0-{SDQ_SUBSCALE_MAX}) เพื่อดูผลสรุป</span>
+        )}
+      </div>
+    </div>
+  );
+}

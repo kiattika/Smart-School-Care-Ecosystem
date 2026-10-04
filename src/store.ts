@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { format } from 'date-fns';
+import { isValidAcademicYear, sdqDocId } from './lib/sdq';
 import { nextClockValue } from './lib/appClock';
 import {
   StoreState, 
@@ -1119,9 +1120,13 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   submitSDQAssessment: async (sdq) => {
+    if (!isValidAcademicYear(sdq.academicYear)) {
+      throw new Error('ไม่พบปีการศึกษาปัจจุบัน (school_settings/academic_year) — บันทึก SDQ ไม่ได้');
+    }
     const newSDQ: SDQAssessment = {
       ...sdq,
-      id: `sdq-${Date.now()}`,
+      // id ตายตัวต่อ (นักเรียน, ผู้ประเมิน, ปี) — กรอกซ้ำในปีเดียวกันชนกับเอกสารเดิม (rules ห้ามผู้กรอกแก้/ทับ)
+      id: sdqDocId(sdq.studentId, sdq.evaluatorType, sdq.academicYear),
       assessmentDate: format(new Date(), 'yyyy-MM-dd')
     };
     await saveSDQAssessmentFirestore(newSDQ);

@@ -3,6 +3,9 @@ import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
 import { useGuidanceScreenings } from '../../hooks/useGuidanceScreenings';
 import { StudentPicker } from '../shared/StudentPicker';
+import { SdqTrendSection } from './SdqTrendSection';
+import { filterSdqByYear, buildSdqTrend } from '../../lib/sdqTrend';
+import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { PortalSidebarLayout } from '../shared/PortalSidebarLayout';
 import { PHQ9Screening, TwoQuestionScreening, GuidanceCounselingCase } from '../../types';
 import {
@@ -33,6 +36,12 @@ export function GuidancePortal() {
   const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'tcas'>('cases');
   const [searchTerm, setSearchTerm] = useState('');
 
+  // ดูย้อนหลังรายปี (แท็บ SDQ): 'ALL' = ทุกปี (ค่าเริ่มต้น = พฤติกรรมเดิม), 'LEGACY' = ข้อมูลเก่าที่ไม่มีปีการศึกษา, หรือปี พ.ศ.
+  const [sdqYear, setSdqYear] = useState<string>('ALL');
+  const { academicYear: currentAcademicYear, isConfigured: academicYearConfigured } = useCurrentSemester();
+  const sdqYearOptions = useMemo(() => buildSdqTrend(sdqAssessments), [sdqAssessments]);
+  const sdqInYear = useMemo(() => filterSdqByYear(sdqAssessments, sdqYear), [sdqAssessments, sdqYear]);
+
   // สรุปผลคัดกรองสุขภาพจิตจากข้อมูลจริง (แทนตัวเลข hardcode เดิม 780/49/15 คน)
   // เกณฑ์ "กลุ่มเสี่ยง": PHQ-9 riskLevel ตั้งแต่ MODERATE ขึ้นไป (คะแนน ≥10 ตามมาตรฐานกรมสุขภาพจิต
   // ที่คำนวณไว้แล้วตอนบันทึกใน store.ts savePHQ9Screening — MILD ถือเป็น "เฝ้าระวัง" ไม่ใช่กลุ่มเสี่ยง)
@@ -40,7 +49,7 @@ export function GuidancePortal() {
   const screeningSummary = useMemo(() => {
     const sdqWorstByStudent = new Map<string, 'NORMAL' | 'AT_RISK' | 'VULNERABLE'>();
     const severityRank: Record<string, number> = { NORMAL: 0, AT_RISK: 1, VULNERABLE: 2 };
-    for (const sdq of sdqAssessments) {
+    for (const sdq of sdqInYear) {
       // BUG FIX: เดิมเช็ค "ค่าใหม่ > ค่าเดิม" อย่างเดียว โดยสมมติ default เป็น NORMAL ที่ไม่เคย set
       // ลง map จริง — ทำให้นักเรียนที่ผล SDQ เป็น NORMAL ล้วน (ไม่เคยแย่กว่า NORMAL เลย) ไม่ถูกนับเข้า
       // map เลยสักคน (sdqWorstByStudent.size / sdqCounts.NORMAL ค้างที่ 0 เสมอ ทั้งที่มีคนทำแบบประเมิน
@@ -78,7 +87,7 @@ export function GuidancePortal() {
     const sdqScreenedTotal = sdqWorstByStudent.size;
 
     return { atRiskList, sdqCounts, sdqScreenedTotal, totalStudents: students.length };
-  }, [phq9Screenings, twoQuestionScreenings, sdqAssessments, students]);
+  }, [phq9Screenings, twoQuestionScreenings, sdqInYear, students]);
 
   // เคสให้คำปรึกษา — real-time จาก Firestore (guidance_counseling_cases) แทน useState mock เดิม
   // ข้อมูลอ่อนไหวที่สุดในระบบ (เนื้อหาการปรึกษาจิตวิทยาของผู้เยาว์) — rules อ่าน/เขียนได้เฉพาะ
@@ -260,7 +269,26 @@ export function GuidancePortal() {
             <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div>
-                  <h3 className="text-base font-bold text-white">สถิติการคัดกรองสุขภาพจิตนักเรียน (SDQ) ประจำปีการศึกษา 2569</h3>
+                  <h3 className="text-base font-bold text-white">
+                    สถิติการคัดกรองสุขภาพจิตนักเรียน (SDQ) {sdqYear === 'ALL' ? 'ทุกปีการศึกษา' : sdqYear === 'LEGACY' ? '(ข้อมูลเก่าที่ไม่ระบุปี)' : `ประจำปีการศึกษา ${sdqYear}`}
+                  </h3>
+                  <div className="flex items-center gap-2 mt-2">
+                    <label htmlFor="sdq-year" className="text-[11px] text-slate-400">ดูย้อนหลังรายปี</label>
+                    <select
+                      id="sdq-year"
+                      value={sdqYear}
+                      onChange={(e) => setSdqYear(e.target.value)}
+                      className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-200 outline-none focus:border-purple-500"
+                    >
+                      <option value="ALL">ทุกปี</option>
+                      {sdqYearOptions.availableYears.map((y) => (
+                        <option key={y} value={y}>
+                          ปีการศึกษา {y}{academicYearConfigured && y === currentAcademicYear ? ' (ปัจจุบัน)' : ''}
+                        </option>
+                      ))}
+                      {sdqYearOptions.legacyCount > 0 && <option value="LEGACY">ไม่ระบุปี (ข้อมูลเก่า {sdqYearOptions.legacyCount})</option>}
+                    </select>
+                  </div>
                   <p className="text-xs text-slate-400">
                     ข้อมูลจริงแบบเรียลไทม์จากนักเรียน {screeningSummary.sdqScreenedTotal} / {screeningSummary.totalStudents} คน ที่ทำแบบประเมิน SDQ แล้ว
                   </p>
@@ -300,6 +328,9 @@ export function GuidancePortal() {
                 </div>
               </div>
             </div>
+
+            {/* แนวโน้มรายด้านเทียบข้ามปีการศึกษา (2-3 ปีล่าสุด) */}
+            <SdqTrendSection records={sdqAssessments} loading={screeningsLoading} />
 
             {/* รายชื่อนักเรียนกลุ่มเสี่ยงจาก PHQ-9 / 2Q / SDQ — ต้องเห็นทันทีที่มีการส่งแบบประเมินใหม่ */}
             <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">

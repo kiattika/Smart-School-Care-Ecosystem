@@ -21,8 +21,10 @@ import {
   GraduationCap
 } from 'lucide-react';
 import { useStore } from '../../store';
-import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits, subscribeSDQAssessments, subscribeSemesterHealthLogs } from '../../services/firestoreService';
+import { SdqFormValues, EMPTY_SDQ_FORM, SdqScoreForm } from '../shared/SdqScoreForm';
+import { computeSdq, validateSdqScores } from '../../lib/sdq';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
+import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits, subscribeSDQAssessments, subscribeSemesterHealthLogs } from '../../services/firestoreService';
 import { BMI_CATEGORY_LABEL } from '../../lib/utils';
 import { SemesterHealthSelfReportForm } from './SemesterHealthSelfReportForm';
 import {
@@ -145,13 +147,11 @@ export function HealthMentalWellbeingModule({
 
   // SDQ Interactive Form State
   const [sdqEvaluator, setSdqEvaluator] = useState<'STUDENT' | 'PARENT' | 'TEACHER'>(isParentView ? 'PARENT' : 'STUDENT');
-  const [sdqScores, setSdqScores] = useState({
-    emotional: 2,
-    conduct: 1,
-    hyperactivity: 2,
-    peerProblems: 1,
-    prosocial: 9
-  });
+  // ช่องกรอกคะแนนรายด้านเริ่มว่าง (เดิมตั้งค่าคงที่ 2/1/2/1/9 แล้วบันทึกลง Firestore ทันทีที่กดปุ่ม = ข้อมูลปลอม)
+  const [sdqScores, setSdqScores] = useState<SdqFormValues>(EMPTY_SDQ_FORM);
+  const [sdqShowErrors, setSdqShowErrors] = useState(false);
+  // ปีการศึกษาปัจจุบันจาก school_settings/academic_year — ประทับลงทุกชุด SDQ (ไม่เดา: ยังไม่ตั้ง = บันทึกไม่ได้)
+  const { academicYear: currentAcademicYear, isConfigured: academicYearConfigured } = useCurrentSemester();
   const [sdqSubmitSuccess, setSdqSubmitSuccess] = useState(false);
   const [saved2QError, setSaved2QError] = useState<string | null>(null);
   const [savedPHQError, setSavedPHQError] = useState<string | null>(null);
@@ -209,10 +209,19 @@ export function HealthMentalWellbeingModule({
       setSdqSubmitError('ไม่พบบัญชีผู้ใช้ที่ล็อกอินอยู่ กรุณาเข้าสู่ระบบใหม่ก่อนบันทึก');
       return;
     }
-    const totalDifficulties = sdqScores.emotional + sdqScores.conduct + sdqScores.hyperactivity + sdqScores.peerProblems;
-    let triagingStatus: SDQAssessment['triagingStatus'] = 'NORMAL';
-    if (totalDifficulties >= 17) triagingStatus = 'VULNERABLE';
-    else if (totalDifficulties >= 14) triagingStatus = 'AT_RISK';
+    setSdqShowErrors(true);
+    const validated = validateSdqScores(sdqScores);
+    if (!validated.ok) return;
+    if (!academicYearConfigured) {
+      setSdqSubmitError('ยังไม่ได้ตั้งปีการศึกษาปัจจุบัน — ติดต่อผู้ดูแลระบบก่อนบันทึก SDQ');
+      return;
+    }
+    const computed = computeSdq(validated.scores);
+    const alreadyDone = studentSDQs.some(s => s.evaluatorType === sdqEvaluator && s.academicYear === currentAcademicYear);
+    if (alreadyDone) {
+      setSdqSubmitError(`มีผลประเมิน SDQ ของมุมมองนี้ในปีการศึกษา ${currentAcademicYear} แล้ว — กรอกซ้ำในปีเดียวกันไม่ได้ (แก้ไขได้โดยครูแนะแนว/ผู้ดูแลระบบ)`);
+      return;
+    }
 
     try {
       await submitSDQAssessment({
@@ -226,15 +235,13 @@ export function HealthMentalWellbeingModule({
         evaluatorName: sdqEvaluator === 'STUDENT' ? `${student.name} (ประเมินตนเอง)` :
                        sdqEvaluator === 'PARENT' ? (user.displayName || 'ผู้ปกครอง') :
                        (user.displayName || 'ครูที่ปรึกษา'),
-        subscaleScores: sdqScores,
-        totalDifficultiesScore: totalDifficulties,
-        triagingStatus,
-        recommendations: [
-          `คะแนนปัญหาพฤติกรรมรวม: ${totalDifficulties}/40 (${triagingStatus === 'NORMAL' ? 'เกณฑ์ปกติ' : triagingStatus === 'AT_RISK' ? 'กลุ่มเสี่ยง' : 'กลุ่มมีปัญหา'})`,
-          `พฤติกรรมสัมพันธภาพทางสังคม (จุดแข็ง): ${sdqScores.prosocial}/10 (อยู่ในเกณฑ์ดี)`
-        ]
+        academicYear: currentAcademicYear,
+        subscaleScores: validated.scores,
+        ...computed,
       });
 
+      setSdqScores(EMPTY_SDQ_FORM);
+      setSdqShowErrors(false);
       setSdqSubmitSuccess(true);
       setTimeout(() => setSdqSubmitSuccess(false), 3000);
     } catch (err) {
@@ -905,9 +912,13 @@ export function HealthMentalWellbeingModule({
                 <div className="flex items-center gap-3">
                   <Sparkles className="w-5 h-5 text-purple-400 shrink-0" />
                   <p className="text-xs text-slate-300">
-                    ต้องการปรับปรุงหรือบันทึกผลการประเมิน SDQ เพิ่มเติมในบทบาท <span className="font-bold text-purple-300">{sdqEvaluator}</span>
+                    บันทึกผลการประเมิน SDQ ในบทบาท <span className="font-bold text-purple-300">{sdqEvaluator}</span>
+                    {academicYearConfigured && <> · ปีการศึกษา {currentAcademicYear} (1 ครั้งต่อบทบาทต่อปี)</>}
                   </p>
                 </div>
+              </div>
+              <SdqScoreForm values={sdqScores} onChange={setSdqScores} showErrors={sdqShowErrors} />
+              <div className="flex justify-end">
                 <button
                   onClick={handleSaveSDQ}
                   className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all shadow cursor-pointer shrink-0"
