@@ -32,7 +32,8 @@ function Choice<T extends string>({
       {options.map((o) => (
         <label
           key={o.value}
-          className={`px-2.5 py-1.5 rounded-lg border text-[11px] cursor-pointer select-none transition-colors ${
+          // relative: กักช่อง radio ที่ซ่อนด้วย sr-only ไว้ในป้ายตัวเอง (ดูเหตุผลใน SdqQuestionnaireForm.tsx)
+          className={`relative px-2.5 py-1.5 rounded-lg border text-[11px] cursor-pointer select-none transition-colors ${
             value === o.value ? 'bg-purple-500/20 border-purple-500 text-purple-200' : 'bg-slate-950 border-white/10 text-slate-300 hover:border-white/30'
           } ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
         >
