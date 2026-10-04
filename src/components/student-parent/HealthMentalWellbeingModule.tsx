@@ -21,9 +21,10 @@ import {
   GraduationCap
 } from 'lucide-react';
 import { useStore } from '../../store';
-import { SdqFormValues, EMPTY_SDQ_FORM } from '../shared/SdqScoreForm';
+import { EMPTY_SDQ_ANSWERS } from '../shared/SdqQuestionnaireForm';
+import { SdqAnswers } from '../../lib/sdqQuestionnaire';
 import { SdqEntryForm, EMPTY_IMPACT_FORM, ImpactFormValues } from '../shared/SdqEntryForm';
-import { buildSdqSubmission } from '../../lib/sdqSubmission';
+import { buildSdqSubmissionFromAnswers } from '../../lib/sdqSubmission';
 import { SdqStatusView } from '../shared/SdqStatusView';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits, subscribeSDQAssessments, subscribeSemesterHealthLogs } from '../../services/firestoreService';
@@ -150,7 +151,7 @@ export function HealthMentalWellbeingModule({
   // SDQ Interactive Form State
   const [sdqEvaluator, setSdqEvaluator] = useState<'STUDENT' | 'PARENT' | 'TEACHER'>(isParentView ? 'PARENT' : 'STUDENT');
   // ช่องกรอกคะแนนรายด้านเริ่มว่าง (เดิมตั้งค่าคงที่ 2/1/2/1/9 แล้วบันทึกลง Firestore ทันทีที่กดปุ่ม = ข้อมูลปลอม)
-  const [sdqScores, setSdqScores] = useState<SdqFormValues>(EMPTY_SDQ_FORM);
+  const [sdqAnswers, setSdqAnswers] = useState<SdqAnswers>(EMPTY_SDQ_ANSWERS);
   const [sdqImpact, setSdqImpact] = useState<ImpactFormValues>(EMPTY_IMPACT_FORM);
   const [sdqShowErrors, setSdqShowErrors] = useState(false);
   // ปีการศึกษาปัจจุบันจาก school_settings/academic_year — ประทับลงทุกชุด SDQ (ไม่เดา: ยังไม่ตั้ง = บันทึกไม่ได้)
@@ -214,7 +215,7 @@ export function HealthMentalWellbeingModule({
     }
     setSdqShowErrors(true);
     // ตรวจทั้ง 2 หน้า (25 ข้อ→5 ด้าน + ผลกระทบ) — เกณฑ์ของผู้ประเมินที่เลือก (นักเรียน/ผู้ปกครอง/ครู)
-    const built = buildSdqSubmission(sdqScores, sdqImpact, sdqEvaluator);
+    const built = buildSdqSubmissionFromAnswers(sdqAnswers, sdqImpact, sdqEvaluator);
     if (!built.ok) return;
     if (!academicYearConfigured) {
       setSdqSubmitError('ยังไม่ได้ตั้งปีการศึกษาปัจจุบัน — ติดต่อผู้ดูแลระบบก่อนบันทึก SDQ');
@@ -242,7 +243,7 @@ export function HealthMentalWellbeingModule({
         ...built.fields,
       });
 
-      setSdqScores(EMPTY_SDQ_FORM);
+      setSdqAnswers(EMPTY_SDQ_ANSWERS);
       setSdqImpact(EMPTY_IMPACT_FORM);
       setSdqShowErrors(false);
       setSdqSubmitSuccess(true);
@@ -918,7 +919,7 @@ export function HealthMentalWellbeingModule({
                   </p>
                 </div>
               </div>
-              <SdqEntryForm scores={sdqScores} onScoresChange={setSdqScores} impact={sdqImpact} onImpactChange={setSdqImpact} evaluatorType={sdqEvaluator} showErrors={sdqShowErrors} idPrefix="hmw-sdq" />
+              <SdqEntryForm answers={sdqAnswers} onAnswersChange={setSdqAnswers} impact={sdqImpact} onImpactChange={setSdqImpact} evaluatorType={sdqEvaluator} showErrors={sdqShowErrors} idPrefix="hmw-sdq" />
               <div className="flex justify-end">
                 <button
                   onClick={handleSaveSDQ}

@@ -5,11 +5,12 @@ import { Student, SDQAssessment } from '../../types';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { subscribeAllSDQAssessments } from '../../services/firestoreService';
 import { SDQ_EVALUATOR_LABEL, SdqEvaluatorType, isValidAcademicYear } from '../../lib/sdq';
-import { buildSdqSubmission } from '../../lib/sdqSubmission';
+import { buildSdqSubmissionFromAnswers } from '../../lib/sdqSubmission';
+import { SdqAnswers } from '../../lib/sdqQuestionnaire';
 import { EMPTY_IMPACT_FORM, ImpactFormValues, SdqEntryForm } from '../shared/SdqEntryForm';
 import { SdqStatusView } from '../shared/SdqStatusView';
 import { buildSdqRoomStatus } from '../../lib/sdqTrend';
-import { EMPTY_SDQ_FORM, SdqFormValues } from '../shared/SdqScoreForm';
+import { EMPTY_SDQ_ANSWERS } from '../shared/SdqQuestionnaireForm';
 
 /**
  * ครูที่ปรึกษากรอก SDQ ของนักเรียนในห้องตัวเอง (AdvisorPortal → เมนู "SDQ")
@@ -37,7 +38,7 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
   const rowById = useMemo(() => new Map(status.rows.map(r => [r.studentId, r])), [status]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [values, setValues] = useState<SdqFormValues>(EMPTY_SDQ_FORM);
+  const [answers, setAnswers] = useState<SdqAnswers>(EMPTY_SDQ_ANSWERS);
   const [impact, setImpact] = useState<ImpactFormValues>(EMPTY_IMPACT_FORM);
   const [showErrors, setShowErrors] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -46,15 +47,15 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
   const selected = students.find(s => s.studentId === selectedId) || null;
   const selectedDone = selected ? !!rowById.get(selected.studentId)?.byEvaluator.TEACHER : false;
 
-  const open = (id: string) => { setSelectedId(id); setValues(EMPTY_SDQ_FORM); setImpact(EMPTY_IMPACT_FORM); setShowErrors(false); setResult(null); };
-  const close = () => { setSelectedId(null); setValues(EMPTY_SDQ_FORM); setImpact(EMPTY_IMPACT_FORM); setShowErrors(false); };
+  const open = (id: string) => { setSelectedId(id); setAnswers(EMPTY_SDQ_ANSWERS); setImpact(EMPTY_IMPACT_FORM); setShowErrors(false); setResult(null); };
+  const close = () => { setSelectedId(null); setAnswers(EMPTY_SDQ_ANSWERS); setImpact(EMPTY_IMPACT_FORM); setShowErrors(false); };
 
   const handleSave = async () => {
     if (!selected || !user?.uid) return;
     setShowErrors(true);
     setResult(null);
-    // ตรวจทั้ง 2 หน้า (25 ข้อ→5 ด้าน + ผลกระทบ) ก่อนบันทึก — ผิด/ไม่ครบ = แสดง error ต่อช่อง ไม่เขียน Firestore
-    const built = buildSdqSubmission(values, impact, 'TEACHER');
+    // ตรวจทั้ง 2 หน้า (ตอบครบ 25 ข้อ → ระบบบวก 5 ด้าน + ผลกระทบ) ก่อนบันทึก — ผิด/ไม่ครบ = แสดง error ต่อช่อง ไม่เขียน Firestore
+    const built = buildSdqSubmissionFromAnswers(answers, impact, 'TEACHER');
     if (!built.ok) return;
     if (!yearReady) { setResult({ kind: 'error', message: 'ยังไม่ได้ตั้งปีการศึกษาปัจจุบัน — แจ้งผู้ดูแลระบบให้ตั้งที่หน้า "ปีการศึกษา & ล็อกระบบ"' }); return; }
     setSaving(true);
@@ -129,7 +130,7 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
             <p className="text-xs text-amber-300">นักเรียนคนนี้มีผลประเมินของครูที่ปรึกษาในปี {academicYear} แล้ว — แก้ไขภายหลังไม่ได้ (ติดต่อครูแนะแนวหรือผู้ดูแลระบบหากต้องแก้)</p>
           ) : (
             <>
-              <SdqEntryForm scores={values} onScoresChange={setValues} impact={impact} onImpactChange={setImpact} evaluatorType="TEACHER" disabled={saving} showErrors={showErrors} idPrefix="advisor-sdq" />
+              <SdqEntryForm answers={answers} onAnswersChange={setAnswers} impact={impact} onImpactChange={setImpact} evaluatorType="TEACHER" disabled={saving} showErrors={showErrors} idPrefix="advisor-sdq" />
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={close} disabled={saving} className="px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5">ยกเลิก</button>
                 <button type="button" onClick={handleSave} disabled={saving || !yearReady}
