@@ -77,7 +77,9 @@ export function SdqQuestionnaireForm({
                 {SDQ_ANSWER_OPTIONS.map((o) => (
                   <label
                     key={o.value}
-                    className={`text-center px-1 py-2.5 rounded-lg border text-[11px] font-semibold select-none transition-colors ${
+                    // relative: กักช่อง radio ที่ซ่อนด้วย sr-only (position:absolute) ไว้ในป้ายตัวเอง — ถ้าไม่มี ช่องนี้จะอ้างอิงตำแหน่งกับ
+                    // root ของ App (relative + overflow-hidden) แล้ว browser เลื่อน root ที่ซ่อนอยู่ตอนโฟกัส ทำให้ทั้งหน้าถูกดันขึ้นจนหาย
+                    className={`relative text-center px-1 py-2.5 rounded-lg border text-[11px] font-semibold select-none transition-colors ${
                       value === o.value ? 'bg-purple-500/25 border-purple-500 text-purple-100' : 'bg-slate-950 border-white/10 text-slate-300 hover:border-white/30'
                     } ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                   >

@@ -248,3 +248,13 @@ describe('wiring guards', () => {
     expect(f).toContain('SDQ_ANSWER_OPTIONS');
   });
 });
+
+describe('layout guard: hidden radios must stay inside their label', () => {
+  it('every sr-only radio sits in a `relative` label (otherwise focusing it scrolls the overflow-hidden App root and the page vanishes)', () => {
+    for (const rel of ['src/components/shared/SdqQuestionnaireForm.tsx', 'src/components/shared/SdqImpactForm.tsx']) {
+      const s = readSource(path.resolve(__dirname, '../..', rel));
+      expect(s, rel).toContain('className="sr-only"');
+      expect(s, rel).toMatch(/<label\s+key=\{o\.value\}\s+(\/\/[^\n]*\s+)*className=\{`relative /);
+    }
+  });
+});
