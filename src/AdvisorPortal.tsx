@@ -20,6 +20,7 @@ import { twMerge } from 'tailwind-merge';
 import { ResponsiveContainer, LineChart, Line, XAxis, Tooltip as RechartsTooltip } from 'recharts';
 import { StudentAnalyticsDashboard } from './components/StudentAnalyticsDashboard';
 import { AdvisorPortfolioReview } from './components/portfolio/AdvisorPortfolioReview';
+import { AdvisorSdqPanel } from './components/advisor/AdvisorSdqPanel';
 import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
 import { AdvisorGpsCheckInPanel } from './components/homevisit/AdvisorGpsCheckInPanel';
 import { AdvisorGateCheckInPanel } from './components/student-parent/AdvisorGateCheckInPanel';
@@ -44,7 +45,7 @@ export function AdvisorPortal() {
   // store จะมีข้อมูลก็ต่อเมื่อมีคน import ในเซสชันเดียวกันเท่านั้น — เปิดใหม่/ล็อกอินใหม่แล้วว่าง
   const { students, loading: studentsLoading } = useRealStudents();
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq'>('dashboard');
   const [assessmentModalStudent, setAssessmentModalStudent] = useState<Student | null>(null);
   const [assessmentSearch, setAssessmentSearch] = useState('');
   const [assessmentFilter, setAssessmentFilter] = useState<'ALL' | 'COMPLETED' | 'PENDING'>('ALL');
@@ -196,6 +197,7 @@ export function AdvisorPortal() {
           items={[
             { id: 'dashboard', label: 'แดชบอร์ดห้อง', icon: Activity },
             { id: 'self-assessment', label: 'วิเคราะห์ 30 ข้อ', icon: Brain },
+            { id: 'sdq', label: 'SDQ นักเรียน', icon: Heart },
             { id: 'visit-planner', label: 'เยี่ยมบ้าน', icon: MapPin },
             { id: 'school-checkin', label: 'เช็คชื่อโฮมรูม', icon: ClipboardList },
             { id: 'analytics', label: 'สถิติวิชาการ', icon: Sparkles },
@@ -909,6 +911,10 @@ export function AdvisorPortal() {
                 <AdvisorPortfolioReview homeroomClass={myRoom} />
               </div>
             </div>
+          )}
+
+          {activeTab === 'sdq' && (
+            <AdvisorSdqPanel room={myRoom || ''} students={myStudents} studentsLoading={studentsLoading} />
           )}
 
           {activeTab === 'self-assessment' && (

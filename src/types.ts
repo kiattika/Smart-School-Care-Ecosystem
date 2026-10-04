@@ -701,6 +701,10 @@ export interface SDQAssessment {
   respondentUid: string;
   evaluatorType: 'STUDENT' | 'TEACHER' | 'PARENT';
   evaluatorName: string;
+  // ปีการศึกษา (พ.ศ. 4 หลัก เช่น "2569") ที่ประทับตอนบันทึก — ดึงจาก school_settings/academic_year (firestore.rules ตรวจว่า
+  // ตรงกับปีปัจจุบันจริง) รายการใหม่ทุกชุดต้องมี; optional เฉพาะข้อมูลเก่าก่อนมีระบบนี้ (แสดงเป็น "ไม่ระบุปี" ไม่เดาให้)
+  // doc id ของรายการใหม่ = {studentId}_{evaluatorType}_{academicYear} (sdqDocId ใน src/lib/sdq.ts) — rules ใช้กันกรอกซ้ำ
+  academicYear?: string;
   subscaleScores: {
     emotional: number; // อารมณ์ (0-10)
     conduct: number;   // ความประพฤติ (0-10)
@@ -1214,7 +1218,7 @@ export interface StoreState {
   // ปฏิเสธ/offline ฯลฯ) — ผู้เรียกต้อง await แล้วค่อยแสดง "บันทึกสำเร็จ" ห้ามโชว์ optimistic ก่อนเช็คผล
   savePHQ9Screening: (studentId: string, answers: number[]) => Promise<void>;
   save2QScreening: (studentId: string, q1: boolean, q2: boolean) => Promise<void>;
-  submitSDQAssessment: (sdq: Omit<SDQAssessment, 'id' | 'assessmentDate'>) => Promise<void>;
+  submitSDQAssessment: (sdq: Omit<SDQAssessment, 'id' | 'assessmentDate' | 'academicYear'> & { academicYear: string }) => Promise<void>;
   addMeritDemeritRecord: (studentId: string, type: 'MERIT' | 'DEMERIT', points: number, category: string, description: string, teacherName: string) => void;
   addPortfolioItem: (item: Omit<PortfolioItem, 'id' | 'isVerifiedByTeacher'>) => void;
   addDigitalCertificate: (cert: Omit<DigitalCertificate, 'id'>) => void;

@@ -1644,15 +1644,20 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       const PARENT_UID = 'sdq2-parent-uid';
       const HR_TEACHER_UID = 'sdq2-hr-teacher';
 
+      const YEAR = '2569';
+      // doc id ตายตัว {studentId}_{evaluatorType}_{academicYear} (sdqDocId) — rules บังคับสำหรับผู้กรอก 3 กลุ่ม
+      const sdqPath = (evaluatorType: string, year = YEAR) => `student_assessments_sdq/${STU_ID}_${evaluatorType}_${year}`;
+
       async function seed() {
         await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc('school_settings/academic_year').set({ academicYear: YEAR, semester: '1' });
           await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, room: ROOM, parentUid: PARENT_UID });
           await ctx.firestore().doc(`staff/${HR_TEACHER_UID}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
           await ctx.firestore().doc('staff/other-hr').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
         });
       }
       const sdqDoc = (over: Record<string, unknown> = {}) => ({
-        id: 'x', studentId: STU_ID, studentUid: STU_UID,
+        id: 'x', studentId: STU_ID, studentUid: STU_UID, academicYear: YEAR,
         evaluatorType: 'STUDENT', evaluatorName: 'ทดสอบ',
         subscaleScores: { emotional: 1, conduct: 1, hyperactivity: 1, peerProblems: 1, prosocial: 8 },
         totalDifficultiesScore: 4, triagingStatus: 'NORMAL', assessmentDate: '2026-09-01', recommendations: [],
@@ -1661,74 +1666,149 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
 
       it('PATH 1: lets the student themselves create (self-eval)', async () => {
         await seed();
-        await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-p1').set(
+        await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(sdqPath('STUDENT')).set(
           sdqDoc({ id: 'sdq-p1', respondentUid: STU_UID, evaluatorType: 'STUDENT' })
         ));
       });
 
       it('PATH 2: lets the real linked parent (parentUid match) create', async () => {
         await seed();
-        await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('student_assessments_sdq/sdq-p2').set(
+        await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc(sdqPath('PARENT')).set(
           sdqDoc({ id: 'sdq-p2', respondentUid: PARENT_UID, evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครอง' })
         ));
       });
 
       it('PATH 3: lets the real homeroom teacher of that room create', async () => {
         await seed();
-        await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc('student_assessments_sdq/sdq-p3').set(
+        await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc(sdqPath('TEACHER')).set(
           sdqDoc({ id: 'sdq-p3', respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครูที่ปรึกษา' })
         ));
       });
 
       it('REGRESSION: denies a different student, a different parent, and a homeroom teacher of a different room (self-attestation alone is not enough)', async () => {
         await seed();
-        await assertFails(asUser('other-student-uid', ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-d1').set(
+        await assertFails(asUser('other-student-uid', ['STUDENT']).firestore().doc(sdqPath('STUDENT')).set(
           sdqDoc({ id: 'sdq-d1', respondentUid: 'other-student-uid', evaluatorType: 'STUDENT' })
         ));
-        await assertFails(asUser('other-parent-uid', ['PARENT']).firestore().doc('student_assessments_sdq/sdq-d2').set(
+        await assertFails(asUser('other-parent-uid', ['PARENT']).firestore().doc(sdqPath('PARENT')).set(
           sdqDoc({ id: 'sdq-d2', respondentUid: 'other-parent-uid', evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครองคนอื่น' })
         ));
-        await assertFails(asUser('other-hr', ['HOMEROOM_TEACHER'], { staffId: 'other-hr' }).firestore().doc('student_assessments_sdq/sdq-d3').set(
+        await assertFails(asUser('other-hr', ['HOMEROOM_TEACHER'], { staffId: 'other-hr' }).firestore().doc(sdqPath('TEACHER')).set(
           sdqDoc({ id: 'sdq-d3', respondentUid: 'other-hr', evaluatorType: 'TEACHER', evaluatorName: 'ครูห้องอื่น' })
         ));
       });
 
       it('denies a SUBJECT_TEACHER (not a homeroom teacher at all) from creating', async () => {
         await seed();
-        await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('student_assessments_sdq/sdq-d4').set(
+        await assertFails(asRole('SUBJECT_TEACHER').firestore().doc(sdqPath('TEACHER')).set(
           sdqDoc({ id: 'sdq-d4', respondentUid: 'test-uid', evaluatorType: 'TEACHER', evaluatorName: 'ครูวิชาอื่น' })
         ));
       });
 
       it('denies faking studentUid to a value that does not match the real student doc', async () => {
         await seed();
-        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-d5').set(
+        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc(sdqPath('STUDENT')).set(
           sdqDoc({ id: 'sdq-d5', studentUid: 'forged-uid', respondentUid: STU_UID, evaluatorType: 'STUDENT' })
         ));
       });
 
       it('denies naming someone else as respondentUid even from a legitimate relationship (self-attestation must also be honest)', async () => {
         await seed();
-        await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('student_assessments_sdq/sdq-d6').set(
+        await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc(sdqPath('PARENT')).set(
           sdqDoc({ id: 'sdq-d6', respondentUid: 'someone-else', evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครอง' })
         ));
+      });
+
+
+      // ── ปีการศึกษา + กันกรอกซ้ำ (feat/sdq-homeroom-entry) ──
+      it('DUPLICATE: the same (student, evaluator, year) cannot be created twice by a respondent — not by re-writing it, not under another id', async () => {
+        await seed();
+        const teacher = () => asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore();
+        const doc1 = sdqDoc({ respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครูที่ปรึกษา' });
+        await assertSucceeds(teacher().doc(sdqPath('TEACHER')).set(doc1));
+        // ทับ id เดิม = update → ผู้กรอกทำไม่ได้
+        await assertFails(teacher().doc(sdqPath('TEACHER')).set({ ...doc1, totalDifficultiesScore: 30 }));
+        // สร้างซ้ำด้วย id อื่น (เลี่ยงชน id) → id ไม่ตรงรูปแบบ ถูกปฏิเสธ
+        await assertFails(teacher().doc('student_assessments_sdq/sdq-another-id').set(doc1));
+        await assertFails(teacher().doc(`student_assessments_sdq/${STU_ID}_TEACHER_2569_2`).set(doc1));
+      });
+
+      it('the same evaluator CAN assess again in a different academic year, and other evaluators can assess in the same year', async () => {
+        await seed();
+        await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc(sdqPath('TEACHER')).set(
+          sdqDoc({ respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครู' })));
+        // ผู้ประเมินคนละประเภท ปีเดียวกัน — ผ่าน
+        await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(sdqPath('STUDENT')).set(sdqDoc({ respondentUid: STU_UID })));
+        await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc(sdqPath('PARENT')).set(
+          sdqDoc({ respondentUid: PARENT_UID, evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครอง' })));
+        // ปีถัดไป: admin เปลี่ยนปีปัจจุบันแล้ว ครูกรอกชุดใหม่ได้
+        await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('school_settings/academic_year').set({ academicYear: '2570', semester: '1' }); });
+        await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc(sdqPath('TEACHER', '2570')).set(
+          sdqDoc({ academicYear: '2570', respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครู' })));
+      });
+
+      it('academicYear must be present, well-formed and equal to the CURRENT year in school_settings/academic_year', async () => {
+        await seed();
+        const teacher = () => asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore();
+        const base = { respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครู' };
+        // ไม่มี academicYear เลย
+        const { academicYear: _omit, ...noYear } = sdqDoc(base);
+        await assertFails(teacher().doc(`student_assessments_sdq/${STU_ID}_TEACHER_undefined`).set(noYear));
+        // ปีย้อนหลัง/อนาคต/รูปแบบผิด/ชนิดผิด (แม้ id จะตรงกับปีที่ใส่)
+        for (const bad of ['2568', '2570', '69', '2569 ', 2569 as unknown as string, null as unknown as string]) {
+          await assertFails(teacher().doc(sdqPath('TEACHER', String(bad))).set(sdqDoc({ ...base, academicYear: bad })));
+        }
+        // id ปีหนึ่ง แต่ field ปีอีกอัน
+        await assertFails(teacher().doc(sdqPath('TEACHER', '2568')).set(sdqDoc(base)));
+        await assertFails(teacher().doc(sdqPath('TEACHER')).set(sdqDoc({ ...base, academicYear: '2568' })));
+      });
+
+      it('no school_settings/academic_year configured → respondents are refused (the year is never guessed)', async () => {
+        await seed();
+        await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('school_settings/academic_year').delete(); });
+        await assertFails(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc(sdqPath('TEACHER')).set(
+          sdqDoc({ respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครู' })));
+      });
+
+      it('a homeroom teacher can assess a student whose account is not linked yet (no studentUid → studentUid is ""), but cannot forge a uid for a linked one', async () => {
+        await seed();
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc('students/sdq2-unlinked').set({ studentId: 'sdq2-unlinked', room: ROOM });
+        });
+        const t = () => asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore();
+        const unlinked = sdqDoc({ studentId: 'sdq2-unlinked', studentUid: '', respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครู' });
+        await assertSucceeds(t().doc('student_assessments_sdq/sdq2-unlinked_TEACHER_2569').set(unlinked));
+        await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('student_assessments_sdq/sdq2-unlinked_TEACHER_2569').delete(); });
+        await assertFails(t().doc('student_assessments_sdq/sdq2-unlinked_TEACHER_2569').set({ ...unlinked, studentUid: 'made-up-uid' }));
+        await assertFails(t().doc(sdqPath('TEACHER')).set({ ...unlinked, studentId: STU_ID, studentUid: '' })); // linked student: '' ไม่ผ่าน
+      });
+
+      it('SUPER_ADMIN / GUIDANCE_COUNSELOR are not limited by the uniqueness/year rule (can create and edit as before)', async () => {
+        await seed();
+        for (const role of ['SUPER_ADMIN', 'GUIDANCE_COUNSELOR']) {
+          const db = asRole(role).firestore();
+          await assertSucceeds(db.doc(sdqPath('TEACHER')).set(sdqDoc({ respondentUid: 'x', evaluatorType: 'TEACHER' })));   // สร้าง
+          await assertSucceeds(db.doc(sdqPath('TEACHER')).set(sdqDoc({ respondentUid: 'x', evaluatorType: 'TEACHER', totalDifficultiesScore: 12 }))); // แก้ทับ
+          await assertSucceeds(db.doc('student_assessments_sdq/legacy-no-year').set((({ academicYear: _y, ...rest }) => rest)(sdqDoc({ respondentUid: 'x' })))); // รูปแบบเดิม/ไม่มีปี
+          await assertSucceeds(db.doc(sdqPath('TEACHER')).delete());
+        }
       });
 
       it('only SUPER_ADMIN/GUIDANCE_COUNSELOR can update or delete an already-submitted assessment (not the original respondent)', async () => {
         await seed();
         await testEnv.withSecurityRulesDisabled(async (ctx) => {
-          await ctx.firestore().doc('student_assessments_sdq/sdq-u1').set(
+          await ctx.firestore().doc(sdqPath('STUDENT')).set(
             sdqDoc({ id: 'sdq-u1', respondentUid: STU_UID, evaluatorType: 'STUDENT' })
           );
         });
-        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-u1').set(
+        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc(sdqPath('STUDENT')).set(
           sdqDoc({ id: 'sdq-u1', respondentUid: STU_UID, evaluatorType: 'STUDENT', totalDifficultiesScore: 10 })
         ));
-        await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc('student_assessments_sdq/sdq-u1').set(
+        await assertSucceeds(asRole('GUIDANCE_COUNSELOR').firestore().doc(sdqPath('STUDENT')).set(
           sdqDoc({ id: 'sdq-u1', respondentUid: STU_UID, evaluatorType: 'STUDENT', totalDifficultiesScore: 10 })
         ));
-        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc('student_assessments_sdq/sdq-u1').delete());
-        await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('student_assessments_sdq/sdq-u1').delete());
+        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc(sdqPath('STUDENT')).delete());
+        await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc(sdqPath('STUDENT')).delete());
       });
     });
   });

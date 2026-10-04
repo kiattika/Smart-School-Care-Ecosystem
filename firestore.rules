@@ -27,6 +27,13 @@ service cloud.firestore {
         && d.domain.matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$');
     }
 
+    // ปีการศึกษาที่ส่งมาต้องเป็นสตริง 4 หลักและตรงกับ school_settings/academic_year (ที่ admin ตั้งไว้) — doc ไม่มี = false
+    function isCurrentAcademicYear(year) {
+      return year is string && year.matches('^[0-9]{4}$')
+        && exists(/databases/$(database)/documents/school_settings/academic_year)
+        && get(/databases/$(database)/documents/school_settings/academic_year).data.academicYear == year;
+    }
+
     // มีบทบาทอย่างน้อย 1 อย่างใน custom claims — claims ออกโดย blocking functions
     // (beforeUserCreated/beforeUserSignedIn) เท่านั้น: signed-in แต่ไม่มี roles = ไม่ใช่บุคลากร/นักเรียนในทะเบียน
     function hasAnyRole() {
@@ -404,10 +411,20 @@ service cloud.firestore {
       // studentUid ต้อง denormalize ตรงกับ students/{studentId} จริงเสมอ (ไม่ว่าใครเป็นผู้กรอก)
       // และ respondentUid ต้องเป็นผู้เขียนจริง แล้วผู้เขียนต้องเป็นหนึ่งใน 3 กลุ่มที่ยืนยันความสัมพันธ์
       // จริงได้: (1) ตัวนักเรียนเอง (2) ผู้ปกครองของนักเรียนคนนั้นจริง (3) ครูที่ปรึกษาของห้องนั้นจริง
+      //
+      // ปีการศึกษา + กันกรอกซ้ำ (ผู้กรอก 3 กลุ่ม — SUPER_ADMIN/GUIDANCE_COUNSELOR ไม่ถูกจำกัดตรงนี้ ตามเดิม):
+      //  - academicYear ต้องตรงกับ school_settings/academic_year ปัจจุบันจริง (ไม่มีตั้งค่า = ปฏิเสธ ไม่เดาปีให้)
+      //  - doc id ต้องเป็น {studentId}_{evaluatorType}_{academicYear} ตายตัว → 1 ชุดต่อ (นักเรียน, ผู้ประเมิน, ปี)
+      //    rules ค้นเอกสารซ้ำด้วย query ไม่ได้ แต่ id ตายตัวทำให้การสร้างซ้ำคือการ "ทับ doc เดิม" = update ซึ่งผู้กรอก
+      //    ทำไม่ได้ (allow update ด้านล่างเฉพาะ SUPER_ADMIN/GUIDANCE_COUNSELOR) และสร้างด้วย id อื่นก็ไม่ผ่านเงื่อนไข id
       allow create: if hasRole('SUPER_ADMIN') ||
                        hasRole('GUIDANCE_COUNSELOR') ||
                        (
-                         request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__') &&
+                         isCurrentAcademicYear(request.resource.data.academicYear) &&
+                         sdqId == request.resource.data.studentId + '_' + request.resource.data.evaluatorType + '_' + request.resource.data.academicYear &&
+                         // นักเรียนที่ยังไม่เชื่อมบัญชี (ไม่มี field studentUid) → ส่ง '' (ครูที่ปรึกษากรอกให้ได้ ไม่ต้องรอเชื่อมบัญชี);
+                         // นักเรียนที่เชื่อมแล้วต้องตรงกับค่าจริงเสมอ — เทียบกับ doc ที่ไม่มีอยู่ get() จะ error = ปฏิเสธ
+                         request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '') &&
                          request.resource.data.respondentUid == request.auth.uid &&
                          (
                            isSelfStudent(request.resource.data.studentId) ||
