@@ -21,8 +21,10 @@ import {
   GraduationCap
 } from 'lucide-react';
 import { useStore } from '../../store';
-import { SdqFormValues, EMPTY_SDQ_FORM, SdqScoreForm } from '../shared/SdqScoreForm';
-import { computeSdq, validateSdqScores } from '../../lib/sdq';
+import { SdqFormValues, EMPTY_SDQ_FORM } from '../shared/SdqScoreForm';
+import { SdqEntryForm, EMPTY_IMPACT_FORM, ImpactFormValues } from '../shared/SdqEntryForm';
+import { buildSdqSubmission } from '../../lib/sdqSubmission';
+import { SdqStatusView } from '../shared/SdqStatusView';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits, subscribeSDQAssessments, subscribeSemesterHealthLogs } from '../../services/firestoreService';
 import { BMI_CATEGORY_LABEL } from '../../lib/utils';
@@ -149,6 +151,7 @@ export function HealthMentalWellbeingModule({
   const [sdqEvaluator, setSdqEvaluator] = useState<'STUDENT' | 'PARENT' | 'TEACHER'>(isParentView ? 'PARENT' : 'STUDENT');
   // ช่องกรอกคะแนนรายด้านเริ่มว่าง (เดิมตั้งค่าคงที่ 2/1/2/1/9 แล้วบันทึกลง Firestore ทันทีที่กดปุ่ม = ข้อมูลปลอม)
   const [sdqScores, setSdqScores] = useState<SdqFormValues>(EMPTY_SDQ_FORM);
+  const [sdqImpact, setSdqImpact] = useState<ImpactFormValues>(EMPTY_IMPACT_FORM);
   const [sdqShowErrors, setSdqShowErrors] = useState(false);
   // ปีการศึกษาปัจจุบันจาก school_settings/academic_year — ประทับลงทุกชุด SDQ (ไม่เดา: ยังไม่ตั้ง = บันทึกไม่ได้)
   const { academicYear: currentAcademicYear, isConfigured: academicYearConfigured } = useCurrentSemester();
@@ -210,13 +213,13 @@ export function HealthMentalWellbeingModule({
       return;
     }
     setSdqShowErrors(true);
-    const validated = validateSdqScores(sdqScores);
-    if (!validated.ok) return;
+    // ตรวจทั้ง 2 หน้า (25 ข้อ→5 ด้าน + ผลกระทบ) — เกณฑ์ของผู้ประเมินที่เลือก (นักเรียน/ผู้ปกครอง/ครู)
+    const built = buildSdqSubmission(sdqScores, sdqImpact, sdqEvaluator);
+    if (!built.ok) return;
     if (!academicYearConfigured) {
       setSdqSubmitError('ยังไม่ได้ตั้งปีการศึกษาปัจจุบัน — ติดต่อผู้ดูแลระบบก่อนบันทึก SDQ');
       return;
     }
-    const computed = computeSdq(validated.scores);
     const alreadyDone = studentSDQs.some(s => s.evaluatorType === sdqEvaluator && s.academicYear === currentAcademicYear);
     if (alreadyDone) {
       setSdqSubmitError(`มีผลประเมิน SDQ ของมุมมองนี้ในปีการศึกษา ${currentAcademicYear} แล้ว — กรอกซ้ำในปีเดียวกันไม่ได้ (แก้ไขได้โดยครูแนะแนว/ผู้ดูแลระบบ)`);
@@ -236,11 +239,11 @@ export function HealthMentalWellbeingModule({
                        sdqEvaluator === 'PARENT' ? (user.displayName || 'ผู้ปกครอง') :
                        (user.displayName || 'ครูที่ปรึกษา'),
         academicYear: currentAcademicYear,
-        subscaleScores: validated.scores,
-        ...computed,
+        ...built.fields,
       });
 
       setSdqScores(EMPTY_SDQ_FORM);
+      setSdqImpact(EMPTY_IMPACT_FORM);
       setSdqShowErrors(false);
       setSdqSubmitSuccess(true);
       setTimeout(() => setSdqSubmitSuccess(false), 3000);
@@ -885,10 +888,8 @@ export function HealthMentalWellbeingModule({
                       <span className="text-slate-400">คะแนนปัญหารวม:</span>
                       <span className="font-extrabold text-white">{sdq.totalDifficultiesScore}/40</span>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-400">ผลการคัดกรอง:</span>
-                      <span className="text-emerald-400 font-bold">✅ ปกติ (Normal)</span>
-                    </div>
+                    {/* เดิมแสดงข้อความ "ปกติ" ตายตัวทุกใบ ไม่ว่าคะแนนเท่าไร — ตอนนี้แสดงผลแปลจริงตามเกณฑ์ของผู้ประเมินคนนั้น */}
+                    <SdqStatusView rec={sdq} />
                   </div>
                 </div>
               ))}
@@ -917,7 +918,7 @@ export function HealthMentalWellbeingModule({
                   </p>
                 </div>
               </div>
-              <SdqScoreForm values={sdqScores} onChange={setSdqScores} showErrors={sdqShowErrors} />
+              <SdqEntryForm scores={sdqScores} onScoresChange={setSdqScores} impact={sdqImpact} onImpactChange={setSdqImpact} evaluatorType={sdqEvaluator} showErrors={sdqShowErrors} idPrefix="hmw-sdq" />
               <div className="flex justify-end">
                 <button
                   onClick={handleSaveSDQ}

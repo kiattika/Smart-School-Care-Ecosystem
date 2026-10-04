@@ -3,6 +3,7 @@ import { TrendingDown, TrendingUp, Minus } from 'lucide-react';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { SDQ_EVALUATOR_LABEL, SDQ_SUBSCALES, SDQ_SUBSCALE_MAX, SdqEvaluatorType, SdqSubscaleKey } from '../../lib/sdq';
 import { SdqTrendRecord, buildSdqTrend } from '../../lib/sdqTrend';
+import { IMPACT_TOTAL_MAX } from '../../lib/sdqImpact';
 
 const LINE_COLOR: Record<SdqSubscaleKey, string> = {
   emotional: '#a855f7',
@@ -59,6 +60,21 @@ export function SdqTrendSection({ records, loading }: { records: readonly SdqTre
                 <div className="text-slate-400">ผลประเมิน {y.responses} ชุด · นักเรียน {y.students} คน</div>
                 <div className="text-slate-300">ปัญหารวมเฉลี่ย <b className="font-mono text-white">{y.totalAverage}</b>/40</div>
                 <div className="text-[10px] text-slate-500">ปกติ {y.triage.NORMAL} · เสี่ยง {y.triage.AT_RISK} · มีปัญหา {y.triage.VULNERABLE}</div>
+                {/* ผลกระทบ (หน้าหลัง) — คนละมิติกับ 5 ด้านด้านบน: ความรุนแรงของปัญหา ไม่ใช่ชนิดของปัญหา */}
+                <div className="pt-1 mt-1 border-t border-slate-800 text-[10px]" data-testid={`sdq-year-impact-${y.year}`}>
+                  <div className="font-bold text-sky-300/80">ผลกระทบ (ความรุนแรงของปัญหา)</div>
+                  {y.impact ? (
+                    <>
+                      <div className="text-slate-300">เฉลี่ย <b className="font-mono text-white">{y.impact.averageTotal}</b>/{IMPACT_TOTAL_MAX} ({y.impact.responses} ชุด)</div>
+                      <div className="text-slate-500">ปกติ {y.impact.triage.NORMAL} · เสี่ยง {y.impact.triage.AT_RISK} · มีปัญหา {y.impact.triage.VULNERABLE}</div>
+                    </>
+                  ) : (
+                    <div className="text-slate-500">ไม่มีข้อมูลผลกระทบในปีนี้</div>
+                  )}
+                </div>
+                {y.legacyCriteria > 0 && (
+                  <div className="text-[10px] text-amber-400/90" data-testid={`sdq-year-legacy-${y.year}`}>* {y.legacyCriteria} ชุดคำนวณสถานะด้วยเกณฑ์เดิม (ค่าคะแนนและค่าเฉลี่ยไม่ได้รับผลกระทบ)</div>
+                )}
               </div>
             ))}
           </div>
@@ -83,6 +99,11 @@ export function SdqTrendSection({ records, loading }: { records: readonly SdqTre
                   </LineChart>
                 </ResponsiveContainer>
               </div>
+              {trend.delta && trend.delta.impactAverageTotal !== null && (
+                <p className="text-[11px] text-slate-400" data-testid="sdq-trend-impact-delta">
+                  <span className="text-sky-300/80 font-bold">ผลกระทบ (ความรุนแรง)</span> คะแนนเฉลี่ยเทียบปีก่อน {trend.delta.impactAverageTotal > 0 ? '+' : ''}{trend.delta.impactAverageTotal} (ค่าสูง = ผลกระทบมากขึ้น) — แยกจากกราฟรายด้านด้านบนซึ่งแสดงชนิดของปัญหา
+                </p>
+              )}
               {trend.delta && (
                 <div className="flex flex-wrap gap-2 text-[11px]" data-testid="sdq-trend-delta">
                   {SDQ_SUBSCALES.map(({ key, label, difficulty }) => {

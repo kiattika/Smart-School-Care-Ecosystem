@@ -3,7 +3,9 @@ import {
   SdqEvaluatorType,
   SdqScores,
   SdqSubscaleKey,
+  SdqStrengthStatus,
   SdqTriage,
+  isLegacySdqCriteria,
   isValidAcademicYear,
 } from './sdq';
 
@@ -24,6 +26,20 @@ export interface SdqTrendRecord {
   subscaleScores: SdqScores;
   totalDifficultiesScore: number;
   triagingStatus: SdqTriage;
+  /** สถานะรายด้าน + เวอร์ชันเกณฑ์ — ไม่มี = ข้อมูลเก่าที่คำนวณด้วยเกณฑ์เดิม */
+  subscaleStatus?: Partial<Record<SdqSubscaleKey, SdqTriage | SdqStrengthStatus>>;
+  criteriaVersion?: string | null;
+  /** ส่วนที่ 2 (ผลกระทบ) — คนละมิติกับ triagingStatus/subscaleStatus; ไม่มี = ข้อมูลเก่า */
+  impactTotalScore?: number;
+  impactTriage?: SdqTriage;
+  impactDurationMonths?: string;
+}
+
+/** สรุปผลกระทบ (ส่วนที่ 2) ต่อปี — นับเฉพาะชุดที่มีข้อมูลผลกระทบ */
+export interface SdqImpactYearStat {
+  responses: number;
+  averageTotal: number;
+  triage: Record<SdqTriage, number>;
 }
 
 export interface SdqYearStat {
@@ -34,6 +50,10 @@ export interface SdqYearStat {
   averages: Record<SdqSubscaleKey, number>;
   totalAverage: number;
   triage: Record<SdqTriage, number>;
+  /** จำนวนผลประเมินในปีนี้ที่สถานะ (triage) คำนวณด้วยเกณฑ์เดิม — ค่าคะแนนรายด้านและค่าเฉลี่ยไม่เกี่ยวกับเกณฑ์ */
+  legacyCriteria: number;
+  /** ผลกระทบ (หน้าหลัง) — null = ปีนี้ไม่มีชุดที่มีข้อมูลผลกระทบ (เช่น ข้อมูลเก่า) */
+  impact: SdqImpactYearStat | null;
 }
 
 export interface SdqTrend {
@@ -46,7 +66,7 @@ export interface SdqTrend {
   /** จำนวนผลประเมินที่ไม่มีปีการศึกษา (ไม่นับในปีใด) */
   legacyCount: number;
   /** ผลต่างปีล่าสุดเทียบปีก่อนหน้า (null = ยังเทียบไม่ได้) */
-  delta: { averages: Record<SdqSubscaleKey, number>; totalAverage: number } | null;
+  delta: { averages: Record<SdqSubscaleKey, number>; totalAverage: number; impactAverageTotal: number | null } | null;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -86,7 +106,17 @@ export function buildSdqTrend(
     const sums = emptySubscales();
     let totalSum = 0;
     const triage: Record<SdqTriage, number> = { NORMAL: 0, AT_RISK: 0, VULNERABLE: 0 };
+    let legacyCriteria = 0;
+    const impactTriage: Record<SdqTriage, number> = { NORMAL: 0, AT_RISK: 0, VULNERABLE: 0 };
+    let impactSum = 0;
+    let impactCount = 0;
     for (const r of rows) {
+      if (isLegacySdqCriteria(r)) legacyCriteria++;
+      if (r.impactTotalScore !== undefined && r.impactTriage !== undefined) {
+        impactSum += r.impactTotalScore;
+        impactTriage[r.impactTriage]++;
+        impactCount++;
+      }
       for (const { key } of SDQ_SUBSCALES) sums[key] += r.subscaleScores[key];
       totalSum += r.totalDifficultiesScore;
       triage[r.triagingStatus]++;
@@ -100,6 +130,8 @@ export function buildSdqTrend(
       averages,
       totalAverage: round2(totalSum / rows.length),
       triage,
+      legacyCriteria,
+      impact: impactCount > 0 ? { responses: impactCount, averageTotal: round2(impactSum / impactCount), triage: impactTriage } : null,
     };
   });
 
@@ -109,7 +141,11 @@ export function buildSdqTrend(
     const last = stats[stats.length - 1];
     const averages = emptySubscales();
     for (const { key } of SDQ_SUBSCALES) averages[key] = round2(last.averages[key] - prev.averages[key]);
-    delta = { averages, totalAverage: round2(last.totalAverage - prev.totalAverage) };
+    delta = {
+      averages,
+      totalAverage: round2(last.totalAverage - prev.totalAverage),
+      impactAverageTotal: prev.impact && last.impact ? round2(last.impact.averageTotal - prev.impact.averageTotal) : null,
+    };
   }
 
   return {
@@ -135,13 +171,13 @@ export function filterSdqByYear<T extends { academicYear?: string | null }>(reco
 export interface SdqRoomStatusRow {
   studentId: string;
   byEvaluator: Record<SdqEvaluatorType, boolean>;
-  /** ผลของครูที่ปรึกษา (ถ้ากรอกแล้ว) */
-  teacherResult: { totalDifficultiesScore: number; triagingStatus: SdqTriage } | null;
+  /** ผลของครูที่ปรึกษา (ถ้ากรอกแล้ว) — รวมสถานะรายด้านและเวอร์ชันเกณฑ์ ใช้แสดงผ่าน SdqStatusView */
+  teacherResult: Pick<SdqTrendRecord, 'totalDifficultiesScore' | 'triagingStatus' | 'subscaleStatus' | 'criteriaVersion' | 'impactTotalScore' | 'impactTriage' | 'impactDurationMonths'> | null;
 }
 
 export function buildSdqRoomStatus(
   studentIds: readonly string[],
-  records: readonly Pick<SdqTrendRecord, 'studentId' | 'evaluatorType' | 'academicYear' | 'totalDifficultiesScore' | 'triagingStatus'>[],
+  records: readonly Pick<SdqTrendRecord, 'studentId' | 'evaluatorType' | 'academicYear' | 'totalDifficultiesScore' | 'triagingStatus' | 'subscaleStatus' | 'criteriaVersion' | 'impactTotalScore' | 'impactTriage' | 'impactDurationMonths'>[],
   academicYear: string,
 ): { rows: SdqRoomStatusRow[]; teacherDone: number; total: number } {
   const rows: SdqRoomStatusRow[] = studentIds.map((studentId) => ({
@@ -156,7 +192,15 @@ export function buildSdqRoomStatus(
     if (!row) continue;
     row.byEvaluator[rec.evaluatorType] = true;
     if (rec.evaluatorType === 'TEACHER') {
-      row.teacherResult = { totalDifficultiesScore: rec.totalDifficultiesScore, triagingStatus: rec.triagingStatus };
+      row.teacherResult = {
+        totalDifficultiesScore: rec.totalDifficultiesScore,
+        triagingStatus: rec.triagingStatus,
+        subscaleStatus: rec.subscaleStatus,
+        criteriaVersion: rec.criteriaVersion,
+        impactTotalScore: rec.impactTotalScore,
+        impactTriage: rec.impactTriage,
+        impactDurationMonths: rec.impactDurationMonths,
+      };
     }
   }
   return { rows, teacherDone: rows.filter((r) => r.byEvaluator.TEACHER).length, total: rows.length };

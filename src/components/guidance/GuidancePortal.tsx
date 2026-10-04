@@ -4,6 +4,7 @@ import { useRealStudents } from '../../hooks/useRealStudents';
 import { useGuidanceScreenings } from '../../hooks/useGuidanceScreenings';
 import { StudentPicker } from '../shared/StudentPicker';
 import { SdqTrendSection } from './SdqTrendSection';
+import { isLegacySdqCriteria } from '../../lib/sdq';
 import { filterSdqByYear, buildSdqTrend } from '../../lib/sdqTrend';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { PortalSidebarLayout } from '../shared/PortalSidebarLayout';
@@ -86,7 +87,22 @@ export function GuidancePortal() {
     for (const status of sdqWorstByStudent.values()) sdqCounts[status]++;
     const sdqScreenedTotal = sdqWorstByStudent.size;
 
-    return { atRiskList, sdqCounts, sdqScreenedTotal, totalStudents: students.length };
+    // จำนวนผลประเมินในช่วงปีที่เลือกซึ่งสถานะคำนวณด้วยเกณฑ์เดิม (ผสมอยู่ในตัวเลขกลุ่มปกติ/เสี่ยง/มีปัญหาด้านบน)
+    const sdqLegacyCriteria = sdqInYear.filter(isLegacySdqCriteria).length;
+
+    // ส่วนที่ 2 (ผลกระทบ — ความรุนแรงของปัญหา) คนละมิติกับ triagingStatus (ชนิดของปัญหา): นับต่อนักเรียนด้วยผลที่แย่สุด
+    // เฉพาะชุดที่มีข้อมูลผลกระทบ (ข้อมูลเก่าไม่มี → ไม่นับ แจ้งจำนวนแยก)
+    const impactWorst = new Map<string, 'NORMAL' | 'AT_RISK' | 'VULNERABLE'>();
+    for (const sdq of sdqInYear) {
+      if (!sdq.impactTriage) continue;
+      const cur = impactWorst.get(sdq.studentId);
+      if (cur === undefined || severityRank[sdq.impactTriage] > severityRank[cur]) impactWorst.set(sdq.studentId, sdq.impactTriage);
+    }
+    const sdqImpactCounts = { NORMAL: 0, AT_RISK: 0, VULNERABLE: 0 };
+    for (const st of impactWorst.values()) sdqImpactCounts[st]++;
+    const sdqWithoutImpact = sdqInYear.filter(s => !s.impactTriage).length;
+
+    return { atRiskList, sdqCounts, sdqScreenedTotal, sdqLegacyCriteria, sdqImpactCounts, sdqImpactScreened: impactWorst.size, sdqWithoutImpact, totalStudents: students.length };
   }, [phq9Screenings, twoQuestionScreenings, sdqInYear, students]);
 
   // เคสให้คำปรึกษา — real-time จาก Firestore (guidance_counseling_cases) แทน useState mock เดิม
@@ -292,6 +308,11 @@ export function GuidancePortal() {
                   <p className="text-xs text-slate-400">
                     ข้อมูลจริงแบบเรียลไทม์จากนักเรียน {screeningSummary.sdqScreenedTotal} / {screeningSummary.totalStudents} คน ที่ทำแบบประเมิน SDQ แล้ว
                   </p>
+                  {screeningSummary.sdqLegacyCriteria > 0 && (
+                    <p className="text-[11px] text-amber-400/90 mt-1" data-testid="sdq-legacy-count">
+                      * {screeningSummary.sdqLegacyCriteria} ชุดในช่วงที่เลือกคำนวณสถานะด้วยเกณฑ์เดิม (ไม่ได้คำนวณย้อนหลัง)
+                    </p>
+                  )}
                 </div>
                 {screeningsLoading && (
                   <span className="text-[10px] text-slate-500 font-mono">กำลังโหลดข้อมูลสด...</span>
@@ -327,6 +348,25 @@ export function GuidancePortal() {
                   <span className="text-[10px] text-rose-400">นักเรียน {screeningSummary.sdqCounts.VULNERABLE} คน (ส่งต่อจิตแพทย์เด็กและวัยรุ่น)</span>
                 </div>
               </div>
+            </div>
+
+            {/* ส่วนที่ 2: ผลกระทบ (ความรุนแรงของปัญหา) — คนละมิติกับการ์ด 'ชนิดของปัญหา' ด้านบน */}
+            <div className="bg-slate-900/80 border border-sky-500/20 p-6 rounded-2xl shadow-xl space-y-3" data-testid="sdq-impact-card">
+              <div>
+                <h3 className="text-base font-bold text-white">ผลกระทบของปัญหา (SDQ หน้าหลัง)</h3>
+                <p className="text-xs text-slate-400">
+                  บอก <b className="text-sky-300">ความรุนแรงของผลกระทบ</b> ต่อความไม่สบายใจและชีวิตประจำวัน (บ้าน/เพื่อน/ห้องเรียน/กิจกรรมยามว่าง) — แยกจากสถิติด้านบนที่บอก <b>ชนิดของปัญหา</b> (อารมณ์/ความประพฤติ/สมาธิ/เพื่อน)
+                  · คะแนน 0-10: ปกติ 0, เสี่ยง 1-2, มีปัญหา 3-10 · นับนักเรียน {screeningSummary.sdqImpactScreened} คน (ใช้ผลที่แย่สุดของแต่ละคน)
+                </p>
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-3"><div className="text-[11px] text-slate-400">ปกติ</div><div className="text-xl font-black font-mono text-emerald-400">{screeningSummary.sdqImpactCounts.NORMAL}</div></div>
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-3"><div className="text-[11px] text-slate-400">เสี่ยง</div><div className="text-xl font-black font-mono text-amber-400">{screeningSummary.sdqImpactCounts.AT_RISK}</div></div>
+                <div className="bg-slate-950 rounded-xl border border-slate-800 p-3"><div className="text-[11px] text-slate-400">มีปัญหา</div><div className="text-xl font-black font-mono text-rose-400">{screeningSummary.sdqImpactCounts.VULNERABLE}</div></div>
+              </div>
+              {screeningSummary.sdqWithoutImpact > 0 && (
+                <p className="text-[11px] text-slate-500" data-testid="sdq-without-impact">{screeningSummary.sdqWithoutImpact} ชุดในช่วงที่เลือกไม่มีข้อมูลผลกระทบ (บันทึกก่อนมีหน้าผลกระทบ) — ไม่นับในตัวเลขนี้</p>
+              )}
             </div>
 
             {/* แนวโน้มรายด้านเทียบข้ามปีการศึกษา (2-3 ปีล่าสุด) */}

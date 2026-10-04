@@ -713,7 +713,26 @@ export interface SDQAssessment {
     prosocial: number;     // สัมพันธภาพทางสังคม (0-10)
   };
   totalDifficultiesScore: number; // รวม 4 ด้านแรก (0-40)
+  // สถานะ "รวม 4 ด้าน" ตามเกณฑ์ของผู้ประเมิน (นักเรียนประเมินตนเอง ≠ ครู/ผู้ปกครอง) — src/lib/sdq.ts SDQ_CRITERIA
   triagingStatus: 'NORMAL' | 'AT_RISK' | 'VULNERABLE';
+  // สถานะรายด้านทั้ง 5 (prosocial = 'HAS_STRENGTH' | 'NO_STRENGTH') + เวอร์ชันเกณฑ์ที่ใช้คำนวณ
+  // ข้อมูลเก่าไม่มีสองฟิลด์นี้ = คำนวณด้วยเกณฑ์เดิม (แสดงพร้อมหมายเหตุ ไม่คำนวณย้อนหลัง)
+  subscaleStatus?: {
+    emotional: 'NORMAL' | 'AT_RISK' | 'VULNERABLE';
+    conduct: 'NORMAL' | 'AT_RISK' | 'VULNERABLE';
+    hyperactivity: 'NORMAL' | 'AT_RISK' | 'VULNERABLE';
+    peerProblems: 'NORMAL' | 'AT_RISK' | 'VULNERABLE';
+    prosocial: 'HAS_STRENGTH' | 'NO_STRENGTH';
+  };
+  criteriaVersion?: string;
+  // ── ส่วนที่ 2: แบบประเมินผลกระทบ (หน้าหลัง) — src/lib/sdqImpact.ts; ทั้งหมด optional (ข้อมูลเก่าไม่มี) ──
+  // คนละมิติกับ subscaleStatus: ส่วนนี้บอก "ความรุนแรงของผลกระทบ" ไม่ใช่ "ชนิดของปัญหา"
+  impactGateAnswer?: 'NO' | 'YES_MINOR' | 'YES_DEFINITE' | 'YES_SEVERE';
+  impactDurationMonths?: 'LT_1' | 'M1_5' | 'M6_12' | 'GT_12'; // รหัสช่วงระยะเวลา แสดงผลเท่านั้น
+  impactDistressScore?: number; // 0-2
+  impactDomainScores?: { home: number; friends: number; classroom: number; leisure: number }; // แต่ละด้าน 0-2
+  impactTotalScore?: number; // 0-10
+  impactTriage?: 'NORMAL' | 'AT_RISK' | 'VULNERABLE'; // 0 ปกติ, 1-2 เสี่ยง, 3-10 มีปัญหา
   assessmentDate: string;
   recommendations: string[];
 }
