@@ -1,7 +1,7 @@
 import { cn } from "./lib/utils";
 import React, { useState } from 'react';
 import { format } from 'date-fns';
-import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, PanelLeft, PanelLeftClose, PanelLeftOpen, Menu, X, ChevronLeft, ChevronRight, ArrowRight, GraduationCap } from 'lucide-react';
+import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, ArrowRight, GraduationCap } from 'lucide-react';
 import clsx, { ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useStore } from './store';
@@ -16,12 +16,11 @@ import { BulkDataImportModal, ImportType } from './components/BulkDataImportModa
 import { ElectiveActivityManagerPage } from './components/admin/ElectiveActivityManagerPage';
 import { HouseManagerPage } from './components/admin/HouseManagerPage';
 import { BarChart3, Palette } from 'lucide-react';
+import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { motion, AnimatePresence } from 'motion/react';
 
 export function AdminPortal() {
   const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods' | 'electives' | 'houses'>('teaching-load');
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [bulkImportType, setBulkImportType] = useState<ImportType>('COURSE');
   // การนำเข้าข้อมูลมีที่เดียว: BulkDataImportModal แบบ inline ในเมนู 'import' — หน้าอื่นพามาที่นี่พร้อมเลือกชนิดไว้ให้
   const goToImport = (type: ImportType) => {
@@ -84,103 +83,10 @@ export function AdminPortal() {
         </div>
       )}
 
-      {/* Mobile Drawer Backdrop */}
-      {isMobileMenuOpen && (
-        <div 
-          onClick={() => setIsMobileMenuOpen(false)}
-          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 lg:hidden transition-opacity duration-300"
-        />
-      )}
-
-      {/* Mobile Drawer Sidebar */}
-      <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 w-72 bg-[#0a0f16] border-r border-white/10 flex flex-col transform transition-transform duration-300 ease-in-out lg:hidden shadow-2xl",
-        isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-      )}>
-        <div className="h-20 flex items-center justify-between px-5 border-b border-white/10 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shadow-inner">
-              <Database className="w-5 h-5 text-blue-400" />
-            </div>
-            <div>
-              <h1 className="text-base font-bold text-white tracking-tight">Admin Console</h1>
-              <p className="text-xs text-slate-400">การจัดการระบบส่วนกลาง</p>
-            </div>
-          </div>
-          <button 
-            onClick={() => setIsMobileMenuOpen(false)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <nav className="flex-1 py-4 px-3 space-y-1.5 overflow-y-auto">
-          {adminNavItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button 
-                key={item.id}
-                onClick={() => {
-                  setActiveTab(item.id as any);
-                  setIsMobileMenuOpen(false);
-                }}
-                className={cn(
-                  "w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-sm font-medium transition-all duration-200",
-                  isActive ? item.activeStyle : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <Icon className={cn("w-4 h-4", isActive ? item.color : "text-slate-400")} />
-                  <span>{item.fullLabel}</span>
-                </div>
-                {item.badge && (
-                  <span className={cn(
-                    "text-white text-[10px] font-bold px-2 py-0.5 rounded-full",
-                    item.badgeColor || "bg-blue-500"
-                  )}>
-                    {item.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-      </aside>
-
       {/* Top Navigation */}
       <header className="bg-[#0a0f16] border-b border-white/10 sticky top-0 z-40">
         <div className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-            {/* Mobile Hamburger Button */}
-            <button 
-              onClick={() => setIsMobileMenuOpen(true)}
-              className="lg:hidden p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/80 border border-slate-700/50 transition-colors shrink-0"
-              title="เปิดเมนู (Open Menu)"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-
-            {/* Desktop Collapse / Expand Toggle Button */}
-            <button 
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              className="hidden lg:flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/80 border border-slate-700/60 transition-all shrink-0"
-              title={isSidebarCollapsed ? "ขยายเมนูด้านซ้าย (Expand Sidebar)" : "ย่อ/ซ่อนเมนูด้านซ้าย (Collapse Sidebar)"}
-            >
-              {isSidebarCollapsed ? (
-                <>
-                  <PanelLeftOpen className="w-4 h-4 text-blue-400" />
-                  <span>แสดงเมนูด้านซ้าย</span>
-                </>
-              ) : (
-                <>
-                  <PanelLeftClose className="w-4 h-4 text-blue-400" />
-                  <span>ซ่อนเมนูด้านซ้าย</span>
-                </>
-              )}
-            </button>
-
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center shadow-inner shrink-0 hidden sm:flex">
               <Database className="w-5 h-5 text-blue-400" />
             </div>
@@ -202,107 +108,15 @@ export function AdminPortal() {
         </div>
       </header>
 
-      <main className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex gap-6 sm:gap-8 flex-1">
+      <main className="w-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex-1">
         
-        {/* Desktop Sidebar (Collapsible) */}
-        <div className={cn(
-          "shrink-0 flex flex-col gap-2 relative z-10 hidden lg:flex transition-all duration-300 ease-in-out",
-          isSidebarCollapsed ? "w-16" : "w-64"
-        )}>
-          {/* Header of Sidebar */}
-          <div className={cn(
-            "flex items-center pb-2 border-b border-white/5",
-            isSidebarCollapsed ? "justify-center" : "justify-between px-2"
-          )}>
-            {!isSidebarCollapsed && (
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">เมนูจัดการระบบ</span>
-            )}
-            <button 
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-              title={isSidebarCollapsed ? "ขยายเมนู (Expand)" : "ย่อ/ซ่อนเมนู (Collapse)"}
-            >
-              {isSidebarCollapsed ? <PanelLeftOpen className="w-4 h-4 text-blue-400" /> : <PanelLeftClose className="w-4 h-4 text-slate-400" />}
-            </button>
-          </div>
-
-          {/* Navigation Items */}
-          <div className="space-y-1.5 flex-1">
-            {adminNavItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
-                <button 
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id as any)}
-                  title={isSidebarCollapsed ? item.fullLabel : undefined}
-                  className={cn(
-                    "w-full flex items-center rounded-xl text-sm font-medium transition-all duration-200 relative group",
-                    isSidebarCollapsed ? "justify-center px-0 py-3" : "justify-between px-3.5 py-3",
-                    isActive ? item.activeStyle : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-                  )}
-                >
-                  <div className="flex items-center gap-3">
-                    <Icon className={cn("w-4 h-4 shrink-0", isActive ? item.color : "text-slate-400 group-hover:text-slate-200")} />
-                    {!isSidebarCollapsed && (
-                      <span className="truncate whitespace-nowrap text-left">{item.label}</span>
-                    )}
-                  </div>
-                  
-                  {/* Badge in expanded mode */}
-                  {item.badge && !isSidebarCollapsed && (
-                    <span className={cn(
-                      "text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0",
-                      item.badgeColor || "bg-blue-500"
-                    )}>
-                      {item.badge}
-                    </span>
-                  )}
-
-                  {/* Dot Badge in collapsed mode */}
-                  {item.badge && isSidebarCollapsed && (
-                    <span className={cn(
-                      "absolute top-2 right-2 w-2.5 h-2.5 rounded-full ring-2 ring-[#05070a]",
-                      item.badgeColor || "bg-blue-500"
-                    )} />
-                  )}
-
-                  {/* Collapsed Tooltip Hover */}
-                  {isSidebarCollapsed && (
-                    <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 text-slate-100 text-xs font-semibold rounded-lg shadow-xl border border-white/10 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-50 whitespace-nowrap">
-                      {item.fullLabel}
-                      {item.badge && <span className="ml-2 text-amber-400 font-bold">({item.badge})</span>}
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Sidebar Footer Collapse Toggle */}
-          <div className="pt-2 border-t border-white/5">
-            <button 
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              className={cn(
-                "w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800/60 border border-slate-700/40 transition-all",
-                isSidebarCollapsed ? "px-0" : ""
-              )}
-              title={isSidebarCollapsed ? "ขยายเมนูด้านซ้าย" : "ย่อ/ซ่อนเมนูด้านซ้าย"}
-            >
-              {isSidebarCollapsed ? (
-                <PanelLeftOpen className="w-4 h-4 text-blue-400" />
-              ) : (
-                <>
-                  <PanelLeftClose className="w-4 h-4 text-blue-400" />
-                  <span className="truncate">ซ่อนเมนูด้านซ้าย</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Main Content Area */}
-        <div className="flex-1 min-w-0">
+        {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกันทุก portal (PortalSidebarLayout) */}
+        <PortalSidebarLayout
+          title="เมนูจัดการระบบ"
+          activeId={activeTab}
+          onSelect={(id) => setActiveTab(id as typeof activeTab)}
+          items={adminNavItems.map(item => ({ id: item.id, label: item.label, icon: item.icon, badge: item.badge }))}
+        >
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -472,7 +286,7 @@ export function AdminPortal() {
           )}
             </motion.div>
           </AnimatePresence>
-        </div>
+        </PortalSidebarLayout>
       </main>
 
     </div>

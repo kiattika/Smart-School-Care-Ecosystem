@@ -35,7 +35,6 @@ import {
   Scale,
   Inbox,
   Clock,
-  X,
   Star,
   Trophy,
   Award,
@@ -44,13 +43,10 @@ import {
   Sparkles,
   TrendingUp,
   ArrowUpRight,
-  PanelLeft,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Menu,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
+import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { ExecutiveLearnerAnalytics } from './components/ExecutiveLearnerAnalytics';
 import { ExecutiveEngagementDashboard } from './components/ExecutiveEngagementDashboard';
 import { useStore } from './store';
@@ -193,8 +189,6 @@ export function ExecutivePortal() {
     : null;
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'approvals' | 'analytics'>('dashboard');
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const pendingApprovalsCount = lateAttendanceRequests.filter(r => r.status === 'PENDING').length;
 
@@ -251,185 +245,14 @@ export function ExecutivePortal() {
   return (
     <div className="flex h-screen w-full bg-[#05070a] text-slate-100 font-sans selection:bg-emerald-500/30 overflow-hidden">
       
-      {/* Mobile Drawer Backdrop */}
-      {isMobileMenuOpen && (
-        <div 
-          onClick={() => setIsMobileMenuOpen(false)}
-          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 md:hidden transition-opacity duration-300"
-        />
-      )}
-
-      {/* Mobile Drawer Sidebar */}
-      <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 w-72 bg-[#0a0d14] border-r border-white/10 flex flex-col transform transition-transform duration-300 ease-in-out md:hidden shadow-2xl",
-        isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-      )}>
-        <div className="h-16 flex items-center justify-between px-5 border-b border-white/10 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-emerald-600 rounded flex items-center justify-center font-bold text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]">E</div>
-            <h1 className="font-bold text-lg tracking-tight text-[#deff9a]">Executive IQ</h1>
-          </div>
-          <button 
-            onClick={() => setIsMobileMenuOpen(false)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <nav className="flex-1 py-4 px-3 space-y-1.5 overflow-y-auto">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button 
-                key={item.id}
-                onClick={() => {
-                  setActiveTab(item.id as any);
-                  setIsMobileMenuOpen(false);
-                }}
-                className={cn(
-                  "w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-sm font-medium transition-all duration-200",
-                  isActive 
-                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[inset_4px_0_0_rgba(16,185,129,1)]" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <Icon className={cn("w-5 h-5", isActive ? item.color : "text-slate-400")} />
-                  <span>{item.fullLabel}</span>
-                </div>
-                {item.badge && (
-                  <span className="bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
-                    {item.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-      </aside>
-
-      {/* Desktop Sidebar (Collapsible) */}
-      <aside className={cn(
-        "hidden md:flex border-r border-white/10 bg-[#0a0d14] flex-col shrink-0 relative z-20 transition-all duration-300 ease-in-out",
-        isSidebarCollapsed ? "w-20" : "w-64"
-      )}>
-        {/* Sidebar Header */}
-        <div className={cn(
-          "h-16 flex items-center border-b border-white/10 shrink-0 px-4 transition-all duration-300",
-          isSidebarCollapsed ? "justify-center" : "justify-between"
-        )}>
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="w-8 h-8 bg-emerald-600 rounded flex items-center justify-center font-bold text-white shrink-0 shadow-[0_0_15px_rgba(16,185,129,0.4)]">E</div>
-            {!isSidebarCollapsed && (
-              <h1 className="font-bold text-lg tracking-tight text-[#deff9a] whitespace-nowrap animate-in fade-in duration-200">
-                Executive IQ
-              </h1>
-            )}
-          </div>
-          {!isSidebarCollapsed && (
-            <button 
-              onClick={() => setIsSidebarCollapsed(true)}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
-              title="ย่อ/ซ่อนเมนู (Collapse Sidebar)"
-            >
-              <PanelLeftClose className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-
-        {/* Sidebar Navigation */}
-        <nav className="flex-1 py-4 px-2 space-y-1.5 overflow-y-auto overflow-x-hidden">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button 
-                key={item.id}
-                onClick={() => setActiveTab(item.id as any)}
-                title={isSidebarCollapsed ? item.fullLabel : undefined}
-                className={cn(
-                  "w-full flex items-center rounded-xl text-sm font-medium transition-all duration-200 relative group",
-                  isSidebarCollapsed ? "justify-center px-0 py-3" : "justify-between px-3.5 py-3",
-                  isActive 
-                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shadow-[inset_4px_0_0_rgba(16,185,129,1)]" 
-                    : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <Icon className={cn("w-5 h-5 shrink-0", isActive ? item.color : "text-slate-400 group-hover:text-slate-200")} />
-                  {!isSidebarCollapsed && (
-                    <span className="truncate whitespace-nowrap text-left">{item.label}</span>
-                  )}
-                </div>
-                
-                {/* Badge */}
-                {item.badge && !isSidebarCollapsed && (
-                  <span className="bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">
-                    {item.badge}
-                  </span>
-                )}
-                {item.badge && isSidebarCollapsed && (
-                  <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-[#0a0d14]" />
-                )}
-
-                {/* Collapsed Tooltip Hover */}
-                {isSidebarCollapsed && (
-                  <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-slate-900 text-slate-100 text-xs font-semibold rounded-lg shadow-xl border border-white/10 opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-50 whitespace-nowrap">
-                    {item.fullLabel}
-                    {item.badge && <span className="ml-2 text-amber-400 font-bold">({item.badge})</span>}
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-
-        {/* Sidebar Footer Collapse / Expand Toggle Button */}
-        <div className="p-3 border-t border-white/10 shrink-0">
-          <button 
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className={cn(
-              "w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 border border-white/5 transition-all",
-              isSidebarCollapsed ? "px-0" : ""
-            )}
-            title={isSidebarCollapsed ? "ขยายเมนูด้านซ้าย (Expand Sidebar)" : "ย่อ/ซ่อนเมนูด้านซ้าย (Collapse Sidebar)"}
-          >
-            {isSidebarCollapsed ? (
-              <PanelLeftOpen className="w-4 h-4 text-emerald-400" />
-            ) : (
-              <>
-                <PanelLeftClose className="w-4 h-4 text-emerald-400" />
-                <span className="truncate">ซ่อนเมนูด้านซ้าย</span>
-              </>
-            )}
-          </button>
-        </div>
-      </aside>
-
       {/* Main Content */}
       <main className="flex-1 flex flex-col overflow-hidden relative min-w-0">
         <header className="h-16 border-b border-white/10 flex items-center justify-between px-4 sm:px-6 lg:px-8 shrink-0 bg-[#0a0d14]/80 backdrop-blur-md z-10">
           <div className="flex items-center gap-3 min-w-0">
-            {/* Mobile Hamburger Toggle */}
-            <button 
-              onClick={() => setIsMobileMenuOpen(true)}
-              className="md:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
-              title="เปิดเมนู (Open Menu)"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
-
-            {/* Desktop Sidebar Toggle in Top Bar */}
-            <button 
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              className="hidden md:flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 border border-white/10 transition-colors shrink-0"
-              title={isSidebarCollapsed ? "ขยายเมนูด้านซ้าย (Expand Sidebar)" : "ย่อ/ซ่อนเมนูด้านซ้าย (Collapse Sidebar)"}
-            >
-              {isSidebarCollapsed ? <PanelLeftOpen className="w-4 h-4 text-emerald-400" /> : <PanelLeftClose className="w-4 h-4 text-emerald-400" />}
-              <span className="hidden lg:inline">{isSidebarCollapsed ? "แสดงเมนู" : "ซ่อนเมนู"}</span>
-            </button>
+            <div className="flex items-center gap-2 shrink-0" title="Executive IQ">
+              <div className="w-8 h-8 bg-emerald-600 rounded flex items-center justify-center font-bold text-white shadow-[0_0_15px_rgba(16,185,129,0.4)]">E</div>
+              <span className="hidden sm:inline font-bold text-lg tracking-tight text-[#deff9a] whitespace-nowrap">Executive IQ</span>
+            </div>
 
             <h2 className="text-base sm:text-lg lg:text-xl font-bold text-slate-100 truncate">
               {activeTab === 'dashboard' && 'The Strategic Command Center'}
@@ -455,6 +278,14 @@ export function ExecutivePortal() {
           <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-emerald-500/5 rounded-full blur-[120px] pointer-events-none"></div>
           <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-purple-500/5 rounded-full blur-[120px] pointer-events-none"></div>
 
+          {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกันทุก portal (PortalSidebarLayout) */}
+          <PortalSidebarLayout
+            title="Executive IQ"
+            activeId={activeTab}
+            onSelect={(id) => setActiveTab(id as typeof activeTab)}
+            items={navItems.map(item => ({ id: item.id, label: item.fullLabel, icon: item.icon, badge: item.badge }))}
+            className="relative z-10"
+          >
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -903,7 +734,7 @@ export function ExecutivePortal() {
           )}
             </motion.div>
           </AnimatePresence>
-          
+          </PortalSidebarLayout>
         </div>
 
 

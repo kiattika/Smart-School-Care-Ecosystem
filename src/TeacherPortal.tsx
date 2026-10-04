@@ -3,6 +3,17 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
 import { isStaffAssigned, isStaffIn } from './lib/staffIdentity';
 import { useDepartments } from './hooks/useDepartments';
+import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
+import { visibleSidebarItems, resolveActiveSidebarId } from './components/shared/portalSidebarLogic';
+import {
+  BookOpen as NavCoursesIcon,
+  MapPin as NavGpsIcon,
+  Layers as NavLoadIcon,
+  Trophy as NavLeaderboardIcon,
+  Repeat as NavSubstituteIcon,
+  History as NavRecordsIcon,
+  ClipboardList as NavGradebookIcon,
+} from 'lucide-react';
 import { writeTimestamp } from './lib/appClock';
 import { useSchoolCalendar } from './hooks/useSchoolCalendar';
 import { DatePicker } from './components/shared/DatePicker';
@@ -361,36 +372,36 @@ export function TeacherPortal() {
     const rawTabs: Array<{
       id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence';
       label: string;
+      icon: React.ComponentType<{ className?: string }>;
       count: number;
       hideForRoles?: string[];
     }> = [
-      { id: 'courses', label: 'ตารางสอนและการเข้าเรียน', count: myCourses.length },
-      { id: 'gps-geofence', label: '📍 พิกัดดาวเทียม & เช็คอิน (GPS Geofence)', count: 0 },
-      { id: 'teaching-load', label: 'ตารางภาระงานสอน (Teaching Load)', count: 6, hideForRoles: ['SUBJECT_TEACHER'] },
-      { id: 'leaderboard', label: '🏆 กระดานคะแนน Active Learning (Leaderboard)', count: Object.values(activeLearningPoints).filter(p => p > 0).length },
+      { id: 'courses', label: 'ตารางสอนและการเข้าเรียน', icon: NavCoursesIcon, count: myCourses.length },
+      { id: 'gps-geofence', label: 'พิกัดดาวเทียม & เช็คอิน (GPS Geofence)', icon: NavGpsIcon, count: 0 },
+      { id: 'teaching-load', label: 'ตารางภาระงานสอน (Teaching Load)', icon: NavLoadIcon, count: 6, hideForRoles: ['SUBJECT_TEACHER'] },
+      { id: 'leaderboard', label: 'กระดานคะแนน Active Learning (Leaderboard)', icon: NavLeaderboardIcon, count: Object.values(activeLearningPoints).filter(p => p > 0).length },
       {
         id: 'substitutions',
         label: 'จัดการภาระลา & สอนแทน',
+        icon: NavSubstituteIcon,
         count: substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.date === todayStr).length
           // TASK 4 — คำขอลากิจ/แลกคาบที่รอครูท่านนี้กดยืนยัน (ไม่นับรายการที่ตัวเองเสนอเอง เช่น คาบจ่ายคืนของ TASK 3)
           + substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.status === 'PENDING_TEACHER_CONFIRMATION' && sa.proposedByEmail !== user?.email).length,
       },
-      { id: 'records', label: 'ประวัติบันทึกหลังสอนทั้งหมด', count: postTeachingRecords.filter(r => myCourses.some(c => c.id === r.courseId)).length },
-      { id: 'gradebook', label: 'สมุดบันทึกคะแนน (Gradebook)', count: 0 }
+      { id: 'records', label: 'ประวัติบันทึกหลังสอนทั้งหมด', icon: NavRecordsIcon, count: postTeachingRecords.filter(r => myCourses.some(c => c.id === r.courseId)).length },
+      { id: 'gradebook', label: 'สมุดบันทึกคะแนน (Gradebook)', icon: NavGradebookIcon, count: 0 }
     ];
 
-    return rawTabs.filter(tab => {
-      const currentRole = user?.activeRole || 'SUBJECT_TEACHER';
-      if (tab.hideForRoles && tab.hideForRoles.includes(currentRole)) return false;
-      return true;
-    });
+    // ซ่อนตามบทบาท (hideForRoles) — ตรรกะกลางของแถบเมนู (portalSidebarLogic.ts) ค่าเริ่มต้นบทบาทเหมือนเดิม
+    return visibleSidebarItems(rawTabs, user?.activeRole || 'SUBJECT_TEACHER');
   }, [user?.activeRole, myCourses.length, activeLearningPoints, substituteAssignments, user?.email, todayStr, postTeachingRecords]);
 
   // Seamless fallback when role changes and current tab is restricted
   useEffect(() => {
-    const isCurrentTabValid = availableDashboardTabs.some(t => t.id === dashboardTab);
-    if (!isCurrentTabValid) {
-      setDashboardTab('courses');
+    // แท็บเดิมถูกซ่อน (เช่น สลับบทบาท) → กลับไปแท็บแรกที่มองเห็น ('courses' ไม่เคยถูกซ่อน)
+    const resolved = resolveActiveSidebarId(availableDashboardTabs, dashboardTab);
+    if (resolved && resolved !== dashboardTab) {
+      setDashboardTab(resolved as typeof dashboardTab);
     }
   }, [availableDashboardTabs, dashboardTab]);
 
@@ -906,7 +917,15 @@ export function TeacherPortal() {
         >
           {view === 'dashboard' ? (
             <main className="flex-1 overflow-y-auto p-8 bg-[#0b0f19]">
-          <div className="max-w-6xl mx-auto">
+          <div className="max-w-7xl mx-auto">
+          {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกันทุก portal (PortalSidebarLayout); ไม่แสดงตอน view เป็น class / active_learning */}
+          <PortalSidebarLayout
+            title="ภาระงานสอน"
+            activeId={dashboardTab}
+            onSelect={(id) => setDashboardTab(id as typeof dashboardTab)}
+            items={availableDashboardTabs.map(tab => ({ id: tab.id, label: tab.label, icon: tab.icon, badge: tab.count > 0 ? tab.count : null }))}
+          >
+          <div>
             <div className="flex justify-between items-end mb-6">
               <div>
                 <h2 className="text-2xl font-bold text-white mb-2">หน้าจัดการภาระงานสอน (Academic Load)</h2>
@@ -914,28 +933,6 @@ export function TeacherPortal() {
               </div>
             </div>
 
-            {/* Sub Tabs Selection (RBAC Conditionally Filtered) */}
-            <div className="flex border-b border-slate-800/80 mb-8 gap-6 overflow-x-auto">
-              {availableDashboardTabs.map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setDashboardTab(tab.id as any)}
-                  className={cn(
-                    "pb-3 text-sm font-bold transition-all relative shrink-0 cursor-pointer",
-                    dashboardTab === tab.id ? "text-emerald-400 border-b-2 border-emerald-400" : "text-slate-400 hover:text-slate-200"
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    {tab.label}
-                    {tab.count > 0 && (
-                      <span className="bg-slate-800/80 text-slate-300 border border-slate-700/50 text-xs px-2 py-0.5 rounded-full font-mono">
-                        {tab.count}
-                      </span>
-                    )}
-                  </span>
-                </button>
-              ))}
-            </div>
 
             {dashboardTab === 'courses' && (() => {
               // 1. Calculate schedule target day and label
@@ -1869,6 +1866,8 @@ export function TeacherPortal() {
                 <p className="text-slate-500 mb-6">รอผู้ดูแลระบบเพิ่มรายวิชาที่คุณรับผิดชอบ</p>
               </div>
             )}
+          </div>
+          </PortalSidebarLayout>
           </div>
 
           {/* Score Setting Modal */}

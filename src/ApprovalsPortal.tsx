@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ClipboardCheck, Repeat, Clock, Users, Palette } from 'lucide-react';
 import { useStore } from './store';
-import { cn } from './lib/utils';
+import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
 import { LateAttendanceApprovalList } from './components/LateAttendanceApprovalList';
 import { ElectiveActivityManagerPage } from './components/admin/ElectiveActivityManagerPage';
@@ -105,74 +105,20 @@ export function ApprovalsPortal() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="max-w-6xl w-full mx-auto px-6 pt-5">
-        <div className="flex gap-2 border-b border-slate-800">
-          <button
-            onClick={() => setTab('substitute')}
-            className={cn(
-              'px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 -mb-px transition-colors',
-              tab === 'substitute'
-                ? 'border-indigo-500 text-white'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            )}
-          >
-            <Repeat className="w-4 h-4" /> งานจัดครูสอนแทน
-            {pendingSubCount > 0 && (
-              <span className="text-[10px] bg-amber-500 text-slate-950 font-bold px-1.5 py-0.5 rounded-full">{pendingSubCount}</span>
-            )}
-          </button>
-
-          {canSeeLateAttendance && (
-            <button
-              onClick={() => setTab('late-attendance')}
-              className={cn(
-                'px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 -mb-px transition-colors',
-                tab === 'late-attendance'
-                  ? 'border-indigo-500 text-white'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
-              )}
-            >
-              <Clock className="w-4 h-4" /> เช็คชื่อย้อนหลัง
-              {pendingLateCount > 0 && (
-                <span className="text-[10px] bg-amber-500 text-slate-950 font-bold px-1.5 py-0.5 rounded-full">{pendingLateCount}</span>
-              )}
-            </button>
-          )}
-
-          {/* แท็บเพิ่มเติมตามสิทธิ์จริงใน firestore.rules — ตอนนี้มีแค่ ACADEMIC_HEAD
-              (elective_activities_config/house_config) role อื่นไม่เห็นเลย */}
-          {extraTabs.includes('elective') && (
-            <button
-              onClick={() => setTab('elective')}
-              className={cn(
-                'px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 -mb-px transition-colors',
-                tab === 'elective'
-                  ? 'border-indigo-500 text-white'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
-              )}
-            >
-              <Users className="w-4 h-4" /> จัดการชุมนุม
-            </button>
-          )}
-          {extraTabs.includes('house') && (
-            <button
-              onClick={() => setTab('house')}
-              className={cn(
-                'px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 -mb-px transition-colors',
-                tab === 'house'
-                  ? 'border-indigo-500 text-white'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
-              )}
-            >
-              <Palette className="w-4 h-4" /> จัดการคณะสี
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 max-w-6xl w-full mx-auto px-6 py-6">
+      {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกันทุก portal (PortalSidebarLayout); เมนูตามสิทธิ์จริงเหมือนเดิม */}
+      <div className="flex-1 max-w-7xl w-full mx-auto px-6 py-6">
+        <PortalSidebarLayout
+          title="ศูนย์อนุมัติงานวิชาการ"
+          activeId={tab}
+          onSelect={(id) => setTab(id as typeof tab)}
+          items={[
+            { id: 'substitute', label: 'งานจัดครูสอนแทน', icon: Repeat, badge: pendingSubCount },
+            ...(canSeeLateAttendance ? [{ id: 'late-attendance', label: 'เช็คชื่อย้อนหลัง', icon: Clock, badge: pendingLateCount }] : []),
+            // แท็บเพิ่มเติมตามสิทธิ์จริงใน firestore.rules — ตอนนี้มีแค่ ACADEMIC_HEAD (elective_activities_config/house_config)
+            ...(extraTabs.includes('elective') ? [{ id: 'elective', label: 'จัดการชุมนุม', icon: Users }] : []),
+            ...(extraTabs.includes('house') ? [{ id: 'house', label: 'จัดการคณะสี', icon: Palette }] : []),
+          ]}
+        >
         {tab === 'substitute' && (
           <div className="-mx-6 sm:-mx-0">
             <SubstituteTeachingModule />
@@ -185,6 +131,7 @@ export function ApprovalsPortal() {
             <LateAttendanceApprovalList readOnly={lateAttendanceReadOnly} />
           </div>
         )}
+        </PortalSidebarLayout>
       </div>
     </div>
   );

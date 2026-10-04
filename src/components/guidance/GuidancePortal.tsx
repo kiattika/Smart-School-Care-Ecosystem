@@ -3,6 +3,7 @@ import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
 import { useGuidanceScreenings } from '../../hooks/useGuidanceScreenings';
 import { StudentPicker } from '../shared/StudentPicker';
+import { PortalSidebarLayout } from '../shared/PortalSidebarLayout';
 import { PHQ9Screening, TwoQuestionScreening, GuidanceCounselingCase } from '../../types';
 import {
   createGuidanceCounselingCase,
@@ -178,41 +179,19 @@ export function GuidancePortal() {
         </div>
       </div>
 
-      {/* Main Navigation Tabs */}
-      <div className="max-w-7xl w-full mx-auto px-6 pt-6">
-        <div className="flex border-b border-slate-800 gap-6">
-          <button
-            onClick={() => setActiveTab('cases')}
-            className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'cases' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            <span>เคสให้คำปรึกษาและสุขภาพจิต ({cases.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('sdq')}
-            className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'sdq' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <ShieldAlert className="w-4 h-4" />
-            <span>ผลประเมิน SDQ และ EQ นักเรียน</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('tcas')}
-            className={`pb-3 text-xs sm:text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'tcas' ? 'border-purple-500 text-purple-400' : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Award className="w-4 h-4" />
-            <span>ระบบแนะแนวอาชีพและ TCAS พอร์ตโฟลิโอ</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Content Body */}
-      <div className="max-w-7xl w-full mx-auto px-6 py-6 flex-1 space-y-6">
+      {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกันทุก portal (PortalSidebarLayout) */}
+      <div className="max-w-7xl w-full mx-auto px-6 py-6 flex-1">
+        <PortalSidebarLayout
+          title="งานแนะแนวและให้คำปรึกษา"
+          activeId={activeTab}
+          onSelect={(id) => setActiveTab(id as typeof activeTab)}
+          items={[
+            { id: 'cases', label: `เคสให้คำปรึกษาและสุขภาพจิต (${cases.length})`, icon: Users },
+            { id: 'sdq', label: 'ผลประเมิน SDQ และ EQ นักเรียน', icon: ShieldAlert },
+            { id: 'tcas', label: 'ระบบแนะแนวอาชีพและ TCAS พอร์ตโฟลิโอ', icon: Award },
+          ]}
+        >
+        <div className="space-y-6">
         
         {/* TAB 1: COUNSELING CASES */}
         {activeTab === 'cases' && (
@@ -409,6 +388,8 @@ export function GuidancePortal() {
           </div>
         )}
 
+      </div>
+        </PortalSidebarLayout>
       </div>
 
       {/* ADD CASE MODAL */}
