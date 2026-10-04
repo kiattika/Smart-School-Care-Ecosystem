@@ -397,15 +397,15 @@ service cloud.firestore {
     // ข้อมูลอ่อนไหวที่สุดของเด็ก. Firestore ไม่มีสิทธิ์ระดับ field (ครูที่ปรึกษาต้องเห็นแค่ "ระดับความเสี่ยง"
     // ไม่เห็นคำตอบ/คะแนนดิบ) จึงแยกเอกสารตามระดับการมองเห็น:
     //   student_screenings_2q            2Q ล่าสุด (นักเรียนทำเองอิสระได้) — ครูแนะแนว + ครูที่ปรึกษาของห้องอ่านเต็ม
-    //   student_screenings_9q            9Q "สรุป": riskLevel + ธงแดงข้อ 9 (ไม่มีคะแนน/คำตอบ)
-    //   student_screenings_9q_detail     9Q คำตอบรายข้อ + คะแนนรวม — ครูแนะแนวเสมอ; ครูที่ปรึกษาเฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่
-    //   student_screenings_8q            8Q คะแนน/คำตอบ (ครูกรอกแทนนักเรียน) — สิทธิ์เหมือน 9Q detail
+    //   student_screenings_9q            9Q "สรุป": riskLevel + ธงแดงข้อ 9 (ไม่มีคะแนน/คำตอบ)   ← เขียนผ่าน callable submitNineQ เท่านั้น
+    //   student_screenings_9q_detail     9Q คำตอบรายข้อ + คะแนนรวม — ครูแนะแนวเสมอ; ครูที่ปรึกษาเฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่  ← เช่นกัน
+    //   student_screening_progress       ฐานที่ใช้ทำ 9Q ไปแล้ว (usedBasisIds) — ไม่มีคะแนน นักเรียนอ่านของตัวเองได้  ← เช่นกัน
+    //     └ grants/{grantId}             ใบอนุญาตที่ครูเปิดให้นักเรียนทำ 9Q (ครูเขียนจาก client ได้ — ไม่มีคะแนน)
+    //   student_screenings_8q            8Q คะแนน/คำตอบ (ครูกรอกแทนนักเรียน) — สิทธิ์เหมือน 9Q detail; rules ตรวจคะแนน/ระดับ/ส่งต่อด่วนซ้ำเอง
     //   student_8q_case_flags            8Q "มีเคสอยู่ในการดูแล ใช่/ไม่" (ไม่มีคะแนน) — ครูที่ปรึกษาเห็นได้เสมอ
-    //   student_screening_progress       ฐานที่ใช้ทำ 9Q ไปแล้ว (usedBasisIds) — ไม่มีคะแนน นักเรียนอ่านของตัวเองได้
-    //     └ grants/{grantId}             ใบอนุญาตที่ครูเปิดให้นักเรียนทำ 9Q
     //   student_screening_notices/{sid}/entries  บันทึก "แจ้งผู้ปกครองแล้ว" (ใครแจ้ง/เมื่อไร/วิธีไหน) append-only
     // นักเรียนอ่านได้เฉพาะ 2Q ของตัวเอง (+ progress/grants ของตัวเอง) — ห้ามอ่าน 9Q/8Q ทุกชนิด
-    // ครูที่ปรึกษา = HOMEROOM_TEACHER "ของห้องนั้น" (เทียบ students/{id}.room กับ staff.assignments.homeroomClass)
+    // ครูที่ปรึกษา = HOMEROOM_TEACHER "ของห้องนั้น" (เทียบ staff.assignments.homeroomClass กับ students/{id}.room)
 
     // ห้องของนักเรียนอยู่ในความดูแลของครูที่ปรึกษาคนนี้
     function isHomeroomOfStudent(sid) {
@@ -425,53 +425,26 @@ service cloud.firestore {
       return isHomeroomOfStudent(sid) && !hasActiveGuidanceCounselor();
     }
 
-    // ฐานที่ใช้ทำ 9Q ไปแล้ว (progress.usedBasisIds)
-    function usedNineQBasisIds(sid) {
-      return exists(/databases/$(database)/documents/student_screening_progress/$(sid))
-        ? get(/databases/$(database)/documents/student_screening_progress/$(sid)).data.get('usedBasisIds', [])
-        : [];
-    }
-
-    // นักเรียนเจ้าของทำ 9Q ด้วยฐาน (kind, basisId) นี้ได้ไหม: ฐานต้องยังไม่เคยใช้ และเป็นหนึ่งใน
-    //   (ก) 2Q ล่าสุดของตัวเองเป็นบวก และ basisId = id ของ 2Q ฉบับนั้น  หรือ
-    //   (ข) ใบอนุญาต (grant) ที่ครูเปิดให้นักเรียนคนนี้
-    // ฐานหนึ่งใช้ได้ครั้งเดียว: กันนักเรียนกดทำซ้ำเอง/ทำโดยไม่มีใครอนุญาต
-    function canStudentStartNineQ(sid, kind, basisId) {
-      return isSelfStudent(sid)
-        && basisId is string && basisId != ''
-        && !(basisId in usedNineQBasisIds(sid))
-        && (
-          (kind == '2Q'
-            && exists(/databases/$(database)/documents/student_screenings_2q/$(sid))
-            && get(/databases/$(database)/documents/student_screenings_2q/$(sid)).data.get('isPositive', false) == true
-            && get(/databases/$(database)/documents/student_screenings_2q/$(sid)).data.get('id', '') == basisId)
-          || (kind == 'GRANT'
-            && exists(/databases/$(database)/documents/student_screening_progress/$(sid)/grants/$(basisId)))
-        );
-    }
-
-    // 9Q ที่นักเรียนเขียน (summary/detail) ต้องมาพร้อมการอัปเดต progress ใน batch เดียวกัน
-    // (getAfter) ที่บันทึกว่าใช้ฐานนี้แล้ว — กันเขียน 9Q ซ้ำโดยไม่ "ใช้" ฐานนั้น
-    function nineQStudentWriteOk(sid) {
-      return request.resource.data.studentId == sid
-        && request.resource.data.studentUid == request.auth.uid
-        && canStudentStartNineQ(sid, request.resource.data.get('basisKind', ''), request.resource.data.get('basisId', ''))
-        && getAfter(/databases/$(database)/documents/student_screening_progress/$(sid)).data.get('lastBasisId', '') == request.resource.data.basisId
-        && request.resource.data.basisId in getAfter(/databases/$(database)/documents/student_screening_progress/$(sid)).data.get('usedBasisIds', []);
-    }
-
-    // 8Q เปิดได้เมื่อ 9Q ล่าสุด รวม ≥7 (riskLevel ไม่ใช่ NONE) หรือมีธงแดงข้อ 9
-    function eightQUnlocked(sid) {
-      return exists(/databases/$(database)/documents/student_screenings_9q/$(sid))
-        && (get(/databases/$(database)/documents/student_screenings_9q/$(sid)).data.get('riskLevel', 'NONE') != 'NONE'
-            || get(/databases/$(database)/documents/student_screenings_9q/$(sid)).data.get('redFlagItem9', false) == true);
-    }
-
     // ผู้เขียน 8Q (ครูกรอกแทนนักเรียน ไม่ใช่นักเรียน): ครูแนะแนวเสมอ; ครูที่ปรึกษาเฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่
-    // ต้องผ่านเงื่อนไขลำดับ (9Q → 8Q) ยกเว้น SUPER_ADMIN (แก้ข้อมูล)
+    // ⚠️ ทางฉุกเฉิน: บันทึกได้ "เสมอ" ไม่ต้องมี 9Q ≥7/ธงแดงมาก่อน (เงื่อนไขนั้นเป็นแค่เหตุผลที่ระบบแนะนำให้ทำ 8Q — ไม่ใช่ตัวบล็อก)
+    // เพราะครูที่เจอเด็กวิกฤตต้องบันทึกได้ทันที
     function canWriteEightQ(sid) {
-      return hasRole('SUPER_ADMIN')
-        || ((hasRole('GUIDANCE_COUNSELOR') || isHomeroomActingAsCounselor(sid)) && eightQUnlocked(sid));
+      return hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomActingAsCounselor(sid);
+    }
+
+    // 8Q: rules คำนวณคะแนน/ระดับ/ส่งต่อด่วนซ้ำจากคำตอบดิบเอง (ไม่เชื่อค่าที่ client ส่งมา) — ผู้กรอกเป็นครู (ผู้มีสิทธิ์อ่านผลอยู่แล้ว)
+    // จึงไม่ต้องใช้ Cloud Function เหมือน 9Q ที่นักเรียนส่งเอง. คะแนนต่อข้อ: 1,2,6,8,9,4,10,4; ข้อ 3 ตอบ "มี" + ควบคุมความคิดไม่ได้ = +8
+    // ระดับ: 0 NONE, 1-8 LOW, 9-16 MODERATE, ≥17 SEVERE (= ส่งต่อโรงพยาบาลด่วน)
+    function eightQIntegrityOk(d) {
+      let a = d.answers;
+      let base = (a[0] ? 1 : 0) + (a[1] ? 2 : 0) + (a[2] ? 6 : 0) + (a[3] ? 8 : 0) + (a[4] ? 9 : 0) + (a[5] ? 4 : 0) + (a[6] ? 10 : 0) + (a[7] ? 4 : 0);
+      let follow = (a[2] == true && d.q3CanControl == false) ? 8 : 0;
+      return a.size() == 8
+        && a[0] is bool && a[1] is bool && a[2] is bool && a[3] is bool && a[4] is bool && a[5] is bool && a[6] is bool && a[7] is bool
+        && ((a[2] == true && d.q3CanControl is bool) || (a[2] == false && d.q3CanControl == null))
+        && d.totalScore is int && d.totalScore == base + follow
+        && d.riskLevel == (d.totalScore == 0 ? 'NONE' : (d.totalScore <= 8 ? 'LOW' : (d.totalScore <= 16 ? 'MODERATE' : 'SEVERE')))
+        && d.urgentReferral == (d.totalScore >= 17);
     }
 
     // 2Q: นักเรียนทำเองอิสระได้ (ไม่จำกัดรอบ); ครูแนะแนวและครูที่ปรึกษาของห้องอ่านเต็มเสมอ
@@ -489,44 +462,23 @@ service cloud.firestore {
     }
 
     // 9Q — สรุป (ระดับความเสี่ยง + ธงแดงข้อ 9 เท่านั้น ไม่มีคะแนนรวม/คำตอบ): ครูที่ปรึกษาของห้องอ่านได้เสมอ
+    // ⚠️ client เขียนไม่ได้เด็ดขาด (แม้ครูแนะแนว/SUPER_ADMIN) — ต้องผ่าน callable submitNineQ (Admin SDK ข้าม rules) ซึ่งคำนวณ
+    // riskLevel/ธงแดงเองจากคำตอบดิบ + ตรวจสิทธิ์/ฐานการทำเอง (functions/src/nineQSubmit.ts) ไม่เชื่อค่าที่ client ส่ง
     match /student_screenings_9q/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId);
-      allow create, update: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') ||
-        (
-          request.resource.data.keys().hasOnly(['id', 'studentId', 'studentUid', 'riskLevel', 'redFlagItem9', 'conductedAt', 'basisKind', 'basisId', 'respondentKind', 'recordedByUid', 'updatedAt'])
-          && request.resource.data.riskLevel in ['NONE', 'MILD', 'MODERATE', 'SEVERE']
-          && request.resource.data.redFlagItem9 is bool
-          && nineQStudentWriteOk(studentId)
-        );
-      allow delete: if hasRole('SUPER_ADMIN');
+      allow write: if false;
     }
 
-    // 9Q — รายละเอียด (คำตอบรายข้อ + คะแนนรวม): ครูแนะแนวเสมอ; ครูที่ปรึกษาเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่เท่านั้น
+    // 9Q — รายละเอียด (คำตอบรายข้อ + คะแนนรวม): ครูแนะแนวเสมอ; ครูที่ปรึกษาเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่เท่านั้น — เขียนผ่าน submitNineQ เท่านั้น
     match /student_screenings_9q_detail/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomActingAsCounselor(studentId);
-      allow create, update: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') ||
-        (
-          request.resource.data.keys().hasOnly(['id', 'studentId', 'studentUid', 'answers', 'totalScore', 'basisKind', 'basisId', 'conductedAt', 'recordedByUid', 'updatedAt'])
-          && request.resource.data.answers is list && request.resource.data.answers.size() == 9
-          && request.resource.data.totalScore is int && request.resource.data.totalScore >= 0 && request.resource.data.totalScore <= 27
-          && nineQStudentWriteOk(studentId)
-        );
-      allow delete: if hasRole('SUPER_ADMIN');
+      allow write: if false;
     }
 
-    // ฐานที่ใช้ทำ 9Q ไปแล้ว — นักเรียนอ่านของตัวเองได้ (เพื่อรู้ว่าทำฐานนี้ไปแล้ว) ไม่มีคะแนน/ระดับใดๆ
+    // ฐานที่ใช้ทำ 9Q ไปแล้ว — นักเรียนอ่านของตัวเองได้ (เพื่อรู้ว่าทำฐานนี้ไปแล้ว) ไม่มีคะแนน/ระดับใดๆ — เขียนผ่าน submitNineQ เท่านั้น
     match /student_screening_progress/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId);
-      // นักเรียนเพิ่มได้ทีละ 1 ฐานเท่านั้น (usedBasisIds = ของเดิม + lastBasisId) และต้องเป็นฐานที่ทำได้จริง
-      allow create, update: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') ||
-        (
-          request.resource.data.keys().hasOnly(['studentId', 'studentUid', 'usedBasisIds', 'lastBasisKind', 'lastBasisId', 'lastNineQAt', 'updatedAt'])
-          && request.resource.data.studentId == studentId
-          && request.resource.data.studentUid == request.auth.uid
-          && canStudentStartNineQ(studentId, request.resource.data.get('lastBasisKind', ''), request.resource.data.get('lastBasisId', ''))
-          && request.resource.data.usedBasisIds == usedNineQBasisIds(studentId).concat([request.resource.data.lastBasisId])
-        );
-      allow delete: if hasRole('SUPER_ADMIN');
+      allow write: if false;
 
       // ใบอนุญาตให้นักเรียนทำ 9Q — ครูแนะแนว/ครูที่ปรึกษาของห้องเปิดให้ (นักเรียนเปิดเองไม่ได้); นักเรียนอ่านของตัวเอง
       match /grants/{grantId} {
@@ -541,27 +493,28 @@ service cloud.firestore {
     }
 
     // 8Q — คะแนน/คำตอบ (ครูกรอกแทนนักเรียนระหว่างพูดคุย ไม่มีหน้าจอให้นักเรียนทำเอง — นักเรียนอ่าน/เขียนไม่ได้เด็ดขาด)
+    // entryPath: AFTER_9Q = ทำตามลำดับปกติ (9Q ≥7/ธงแดง) | EMERGENCY = ทางฉุกเฉิน ประเมินทันทีโดยไม่ต้องรอ 9Q (เก็บไว้ตรวจย้อนหลัง)
     match /student_screenings_8q/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomActingAsCounselor(studentId);
       allow create, update: if canWriteEightQ(studentId)
-        && request.resource.data.keys().hasOnly(['id', 'studentId', 'answers', 'q3CanControl', 'totalScore', 'riskLevel', 'urgentReferral', 'conductedAt', 'recordedByUid', 'recordedByName', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['id', 'studentId', 'answers', 'q3CanControl', 'totalScore', 'riskLevel', 'urgentReferral', 'entryPath', 'conductedAt', 'recordedByUid', 'recordedByName', 'updatedAt'])
         && request.resource.data.studentId == studentId
         && request.resource.data.recordedByUid == request.auth.uid
-        && request.resource.data.answers is list && request.resource.data.answers.size() == 8
-        && request.resource.data.totalScore is int && request.resource.data.totalScore >= 0
-        && request.resource.data.riskLevel in ['NONE', 'LOW', 'MODERATE', 'SEVERE']
-        && request.resource.data.urgentReferral is bool;
+        && request.resource.data.entryPath in ['AFTER_9Q', 'EMERGENCY']
+        && eightQIntegrityOk(request.resource.data);
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
     // 8Q — "มีเคสอยู่ในการดูแล ใช่/ไม่" เท่านั้น (ไม่มีคะแนน) ครูที่ปรึกษาของห้องเห็นได้เสมอแม้มีครูแนะแนว
+    // hasCase ต้องตรงกับ 8Q ที่เขียนใน batch เดียวกัน (คะแนน > 0) — กันตั้งค่าไม่ตรงกับผลจริง
     match /student_8q_case_flags/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId);
       allow create, update: if canWriteEightQ(studentId)
         && request.resource.data.keys().hasOnly(['studentId', 'hasCase', 'updatedByUid', 'updatedAt'])
         && request.resource.data.studentId == studentId
         && request.resource.data.hasCase is bool
-        && request.resource.data.updatedByUid == request.auth.uid;
+        && request.resource.data.updatedByUid == request.auth.uid
+        && request.resource.data.hasCase == (getAfter(/databases/$(database)/documents/student_screenings_8q/$(studentId)).data.totalScore > 0);
       allow delete: if hasRole('SUPER_ADMIN');
     }
 

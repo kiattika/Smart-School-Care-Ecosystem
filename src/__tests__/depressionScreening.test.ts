@@ -196,7 +196,7 @@ describe('8Q — levels (0 none, 1-8 low, 9-16 moderate, ≥17 severe = urgent h
 });
 
 // ═══════════════ ลำดับการทำ (gate) ═══════════════
-describe('8Q is unlocked only by 9Q total ≥7 or the item-9 red flag', () => {
+describe('8Q is RECOMMENDED by 9Q total ≥7 or the item-9 red flag (a recommendation, not a blocker — the emergency path skips it)', () => {
   it('locked: no 9Q at all, or 9Q level NONE without a red flag', () => {
     expect(eightQUnlocked(null)).toBe(false);
     expect(eightQUnlocked(undefined)).toBe(false);
@@ -237,27 +237,27 @@ describe('visibility table (spec section 4)', () => {
   it('GUIDANCE_COUNSELOR reads and writes everything, with or without the status being known', () => {
     for (const has of [true, false]) {
       expect(screeningCapabilities('GUIDANCE_COUNSELOR', has)).toEqual({
-        read2Q: true, read9QSummary: true, read9QDetail: true, read8QDetail: true, read8QCaseFlag: true, write8Q: true, openNineQ: true,
+        read2Q: true, read9QSummary: true, read9QDetail: true, read8QDetail: true, read8QCaseFlag: true, write8Q: true, openNineQ: true, recordNineQ: true,
       });
     }
   });
 
-  it('HOMEROOM_TEACHER with an active counselor: 2Q full, 9Q level only, 8Q "has case" only, cannot write 8Q, can open 9Q', () => {
+  it('HOMEROOM_TEACHER with an active counselor: 2Q full, 9Q level only, 8Q "has case" only, cannot write 8Q or fill 9Q for a student, can open 9Q for the student to answer', () => {
     expect(screeningCapabilities('HOMEROOM_TEACHER', true)).toEqual({
-      read2Q: true, read9QSummary: true, read9QDetail: false, read8QDetail: false, read8QCaseFlag: true, write8Q: false, openNineQ: true,
+      read2Q: true, read9QSummary: true, read9QDetail: false, read8QDetail: false, read8QCaseFlag: true, write8Q: false, openNineQ: true, recordNineQ: false,
     });
   });
 
-  it('HOMEROOM_TEACHER with NO active counselor: reads 9Q answers and reads/writes 8Q in full', () => {
+  it('HOMEROOM_TEACHER with NO active counselor: reads 9Q answers, reads/writes 8Q and can fill 9Q for a student in full', () => {
     expect(screeningCapabilities('HOMEROOM_TEACHER', false)).toEqual({
-      read2Q: true, read9QSummary: true, read9QDetail: true, read8QDetail: true, read8QCaseFlag: true, write8Q: true, openNineQ: true,
+      read2Q: true, read9QSummary: true, read9QDetail: true, read8QDetail: true, read8QCaseFlag: true, write8Q: true, openNineQ: true, recordNineQ: true,
     });
   });
 
   it('STUDENT reads only 2Q — never 9Q/8Q (level, answers, case flag), cannot write 8Q or open 9Q', () => {
     for (const has of [true, false]) {
       expect(screeningCapabilities('STUDENT', has)).toEqual({
-        read2Q: true, read9QSummary: false, read9QDetail: false, read8QDetail: false, read8QCaseFlag: false, write8Q: false, openNineQ: false,
+        read2Q: true, read9QSummary: false, read9QDetail: false, read8QDetail: false, read8QCaseFlag: false, write8Q: false, openNineQ: false, recordNineQ: false,
       });
     }
   });
@@ -343,6 +343,48 @@ describe('wiring guards', () => {
     const a = src('src/AdvisorPortal.tsx');
     expect(a).toContain("{ id: 'screening', label: 'คัดกรองซึมเศร้า', icon: ShieldAlert }");
     expect(a).toContain("useRoomScreeningRecords(myStudents.map(s => s.studentId), activeTab === 'screening')");
+  });
+
+  it('TODO-2: the emergency 8Q path — separate button, no 9Q prerequisite in the UI or in firestore.rules', () => {
+    const p = src('src/components/shared/DepressionScreeningPanel.tsx');
+    expect(p).toContain('ประเมิน 8Q ทันที (กรณีฉุกเฉิน)');
+    expect(p).toContain('data-testid="eightq-emergency"');
+    expect(p).toContain("setEightQPath('EMERGENCY')");
+    expect(p).toContain("setEightQPath('AFTER_9Q')");
+    expect(p).not.toContain('eightq-locked');   // ไม่มีข้อความ/สถานะ "ล็อก" ที่ขวางการบันทึก
+    const rules = src('firestore.rules');
+    expect(rules).not.toContain('eightQUnlocked');
+    const canWrite = rules.slice(rules.indexOf('function canWriteEightQ(sid)'), rules.indexOf('function eightQIntegrityOk'));
+    expect(canWrite).toContain("hasRole('GUIDANCE_COUNSELOR') || isHomeroomActingAsCounselor(sid)");
+    expect(canWrite).not.toContain('student_screenings_9q');
+  });
+
+  it('TODO-3: 9Q is written only by the server — no client code writes the 9Q collections; the service sends raw answers to the callable', () => {
+    const svc = src('src/services/screeningService.ts');
+    expect(svc).toContain("httpsCallable(functions, 'submitNineQ')");
+    expect(svc).not.toMatch(/(set|update|delete)\([^)]*student_screenings_9q/);
+    expect(svc).not.toMatch(/student_screening_progress\/\$\{studentId\}`\), \{/);   // ไม่เขียน progress ตรง
+    expect(svc).not.toMatch(/riskLevel: result\.riskLevel,\s*redFlagItem9/);          // ไม่ส่งผลที่คำนวณฝั่ง client
+    const sec = src('src/components/student-parent/StudentNineQSection.tsx');
+    expect(sec).toContain('submitNineQByStudent({ studentId, answers: scored.answers })');
+    for (const f of ['src/components/shared/DepressionScreeningPanel.tsx', 'src/components/student-parent/StudentNineQSection.tsx', 'src/hooks/useDepressionScreening.ts']) {
+      expect(src(f), f).not.toMatch(/writeBatch|setDoc\(|updateDoc\(/);
+    }
+    const rules = src('firestore.rules');
+    for (const c of ['student_screenings_9q', 'student_screenings_9q_detail']) {
+      const block = rules.slice(rules.indexOf(`match /${c}/{studentId} {`));
+      expect(block.slice(0, block.indexOf('\n    }\n')), c).toContain('allow write: if false;');
+    }
+  });
+
+  it('TODO-5: teachers can fill 9Q for a student (proxy) or open it for the student — shared panel, both portals', () => {
+    const p = src('src/components/shared/DepressionScreeningPanel.tsx');
+    expect(p).toContain('data-testid="proxy-9q"');
+    expect(p).toContain('กรอก 9Q แทนนักเรียน');
+    expect(p).toContain('recordNineQOnBehalf');
+    expect(p).toContain('capsRecordNineQ');
+    expect(src('src/components/guidance/GuidancePortal.tsx')).toContain('<DepressionScreeningPanel');
+    expect(src('src/AdvisorPortal.tsx')).toContain('<DepressionScreeningPanel');
   });
 
   it('ExecutivePortal does not read 9Q/8Q and says so', () => {

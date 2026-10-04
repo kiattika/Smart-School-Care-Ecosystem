@@ -5,8 +5,11 @@ import { readSource } from './helpers/readSource';
 import { screeningCapabilities } from '../lib/depressionScreening';
 
 /**
- * firestore.rules — คัดกรองซึมเศร้า/ฆ่าตัวตาย 2Q → 9Q → 8Q (ต้องรันบน Firestore Emulator จริง: npm run emulators:exec)
- * ครอบคลุมสิทธิ์ทุกบทบาท × (มี / ไม่มี / ไม่รู้สถานะ) ครูแนะแนวที่ใช้งานอยู่ + เงื่อนไขลำดับ 2Q → 9Q → 8Q ที่ rules บังคับจริง
+ * firestore.rules — คัดกรองซึมเศร้า 2Q → 9Q → 8Q (ต้องรันบน Firestore Emulator จริง: npm run emulators:exec)
+ * ครอบคลุมสิทธิ์ทุกบทบาท × (มี / ไม่มี / ไม่รู้สถานะ) ครูแนะแนวที่ใช้งานอยู่
+ *  - 9Q (summary/detail/progress) client เขียนไม่ได้เลย — เขียนผ่าน callable submitNineQ เท่านั้น (ทดสอบตรรกะที่ nineQServer.test.ts
+ *    และ E2E บน Functions emulator ที่ authBlocking.e2e.test.ts)
+ *  - 8Q: ทางฉุกเฉิน (ไม่ต้องรอ 9Q) + rules คำนวณคะแนน/ระดับ/ส่งต่อด่วนซ้ำเอง
  * ตารางสิทธิ์ที่ใช้เทียบอยู่ที่ screeningCapabilities() (src/lib/depressionScreening.ts) — ตัวเดียวกับที่ UI ใช้ซ่อน/แสดงปุ่ม
  */
 
@@ -71,24 +74,14 @@ const nineDetail = (over: Record<string, unknown> = {}) => ({
   id: '9q-1', studentId: SID, studentUid: STU_UID, answers: [2, 2, 2, 1, 1, 1, 1, 1, 0], totalScore: 11,
   basisKind: '2Q', basisId: '2q-1', conductedAt: '2026-10-05', recordedByUid: STU_UID, ...over,
 });
-const progress = (basisKind: string, basisId: string, used: string[]) => ({
-  studentId: SID, studentUid: STU_UID, usedBasisIds: used, lastBasisKind: basisKind, lastBasisId: basisId, lastNineQAt: '2026-10-05',
-});
+const progress = (used: string[]) => ({ studentId: SID, studentUid: STU_UID, usedBasisIds: used, lastBasisKind: '2Q', lastBasisId: used[used.length - 1], lastNineQAt: '2026-10-05' });
+
+/** เอกสาร 8Q ที่ถูกต้อง (คะแนนคำนวณมือตามสเปค: ข้อ1=1, 2=2, 3=6 (+8 ถ้าควบคุมไม่ได้), 4=8, 5=9, 6=4, 7=10, 8=4) */
 const eightQ = (uid: string, over: Record<string, unknown> = {}) => ({
   id: '8q-1', studentId: SID, answers: [true, false, false, false, false, false, false, false], q3CanControl: null,
-  totalScore: 1, riskLevel: 'LOW', urgentReferral: false, conductedAt: '2026-10-05', recordedByUid: uid, recordedByName: 'ครู', ...over,
+  totalScore: 1, riskLevel: 'LOW', urgentReferral: false, entryPath: 'AFTER_9Q', conductedAt: '2026-10-05', recordedByUid: uid, recordedByName: 'ครู', ...over,
 });
 const flag = (uid: string, over: Record<string, unknown> = {}) => ({ studentId: SID, hasCase: true, updatedByUid: uid, ...over });
-
-/** เขียน 9Q ของนักเรียนทั้ง 3 เอกสารใน batch เดียว (summary + detail + progress) */
-async function studentSubmitsNineQ(kind: '2Q' | 'GRANT', basisId: string, used: string[], overrides: { summary?: Record<string, unknown>; detail?: Record<string, unknown> } = {}, withProgress = true) {
-  const db = student();
-  const batch = db.batch();
-  batch.set(db.doc(`student_screenings_9q/${SID}`), nineSummary({ basisKind: kind, basisId, ...(overrides.summary || {}) }));
-  batch.set(db.doc(`student_screenings_9q_detail/${SID}`), nineDetail({ basisKind: kind, basisId, ...(overrides.detail || {}) }));
-  if (withProgress) batch.set(db.doc(`student_screening_progress/${SID}`), progress(kind, basisId, used));
-  return batch.commit();
-}
 
 const put = (p: string, data: Record<string, unknown>) =>
   testEnv.withSecurityRulesDisabled(async (c) => { await c.firestore().doc(p).set(data); });
@@ -109,7 +102,6 @@ describe.skipIf(!EMULATOR_HOST)('คัดกรองซึมเศร้า 2
       await put(`student_screenings_8q/${SID}`, eightQ('g-uid'));
       await put(`student_8q_case_flags/${SID}`, flag('g-uid'));
     }
-    const cells: Array<[string, (db: ReturnType<typeof student>) => Promise<unknown>]> = [];
     const paths = {
       '2Q': `student_screenings_2q/${SID}`,
       '9Q summary': `student_screenings_9q/${SID}`,
@@ -117,7 +109,6 @@ describe.skipIf(!EMULATOR_HOST)('คัดกรองซึมเศร้า 2
       '8Q detail': `student_screenings_8q/${SID}`,
       '8Q case flag': `student_8q_case_flags/${SID}`,
     };
-    void cells;
 
     const check = async (who: () => ReturnType<typeof student>, expected: Record<keyof typeof paths, boolean>) => {
       for (const [label, p] of Object.entries(paths) as Array<[keyof typeof paths, string]>) {
@@ -192,132 +183,71 @@ describe.skipIf(!EMULATOR_HOST)('คัดกรองซึมเศร้า 2
     });
   });
 
-  // ═════════ 9Q: เปิดให้นักเรียนทำได้เฉพาะ (ก) 2Q ล่าสุดเป็นบวก (ข) ครูเปิดให้ ═════════
-  describe('9Q — student access gate', () => {
-    it('(ก) 2Q positive: the student may submit 9Q (summary + answers + progress in ONE batch)', async () => {
+  // ═════════ 9Q: client เขียนตรงไม่ได้เลย (ผ่าน callable submitNineQ เท่านั้น) ═════════
+  describe('9Q — no direct client writes (server-computed via callable submitNineQ)', () => {
+    const targets: Array<[string, Record<string, unknown>]> = [
+      [`student_screenings_9q/${SID}`, nineSummary()],
+      [`student_screenings_9q_detail/${SID}`, nineDetail()],
+      [`student_screening_progress/${SID}`, progress(['2q-1'])],
+    ];
+
+    it('NOBODY can create/update/delete 9Q summary, 9Q answers or progress from a client — student, every teacher role, executive and even SUPER_ADMIN', async () => {
+      await seed('NONE');
+      await put(`student_screenings_2q/${SID}`, twoQ());
+      await guidance().doc(`student_screening_progress/${SID}/grants/g-1`).set({ openedByUid: 'guid-uid', openedByName: 'x', openedByRole: 'GUIDANCE_COUNSELOR', openedAt: '2026-10-05' });
+      for (const who of [student, otherStudent, guidance, homeroom, homeroomOtherRoom, subjectTeacher, executive, superAdmin]) {
+        for (const [p, data] of targets) {
+          await assertFails(who().doc(p).set(data));
+          await assertFails(who().doc(p).update({ riskLevel: 'NONE' }));
+          await assertFails(who().doc(p).delete());
+        }
+      }
+    });
+
+    it('the exact attack this closes: a student with a valid basis cannot write their own result (e.g. hide the red flag / lower the level) in a hand-made batch', async () => {
       await seed('ACTIVE');
       await put(`student_screenings_2q/${SID}`, twoQ());
-      await assertSucceeds(studentSubmitsNineQ('2Q', '2q-1', ['2q-1']));
-    });
-
-    it('the same basis cannot be used twice (no endless retakes while 2Q stays positive)', async () => {
-      await seed('ACTIVE');
-      await put(`student_screenings_2q/${SID}`, twoQ());
-      await assertSucceeds(studentSubmitsNineQ('2Q', '2q-1', ['2q-1']));
-      await assertFails(studentSubmitsNineQ('2Q', '2q-1', ['2q-1', '2q-1']));
-      await assertFails(studentSubmitsNineQ('2Q', '2q-1', ['2q-1']));
-    });
-
-    it('a NEW positive 2Q is a new basis → another 9Q round is allowed, and progress keeps the history of used bases', async () => {
-      await seed('ACTIVE');
-      await put(`student_screenings_2q/${SID}`, twoQ());
-      await assertSucceeds(studentSubmitsNineQ('2Q', '2q-1', ['2q-1']));
-      await put(`student_screenings_2q/${SID}`, twoQ({ id: '2q-2' }));
-      await assertSucceeds(studentSubmitsNineQ('2Q', '2q-2', ['2q-1', '2q-2']));
-      // ลบประวัติฐานที่ใช้แล้วทิ้ง (เพื่อใช้ 2q-1 ซ้ำ) ไม่ได้
-      await assertFails(studentSubmitsNineQ('2Q', '2q-2', ['2q-2']));
-    });
-
-    it('2Q negative, or no 2Q at all, and no grant → the student cannot write 9Q', async () => {
-      await seed('ACTIVE');
-      await assertFails(studentSubmitsNineQ('2Q', '2q-1', ['2q-1']));            // ไม่มี 2Q เลย
-      await put(`student_screenings_2q/${SID}`, twoQ({ isPositive: false, q1Depressed: false }));
-      await assertFails(studentSubmitsNineQ('2Q', '2q-1', ['2q-1']));            // 2Q ล่าสุดเป็นลบ
-    });
-
-    it('the basis id must be the id of the CURRENT positive 2Q (an old/made-up id is refused)', async () => {
-      await seed('ACTIVE');
-      await put(`student_screenings_2q/${SID}`, twoQ({ id: '2q-now' }));
-      await assertFails(studentSubmitsNineQ('2Q', '2q-old', ['2q-old']));
-      await assertFails(studentSubmitsNineQ('2Q', 'made-up', ['made-up']));
-    });
-
-    it('(ข) a grant opened by GUIDANCE or by the homeroom teacher lets the student answer once; the student cannot open one', async () => {
-      await seed('ACTIVE');
-      // นักเรียนเปิดให้ตัวเองไม่ได้ (แม้ใส่ openedByUid เป็นตัวเอง)
-      await assertFails(student().doc(`student_screening_progress/${SID}/grants/g-self`).set({ openedByUid: STU_UID, openedByName: 'x', openedByRole: 'STUDENT', openedAt: '2026-10-05' }));
-      await assertSucceeds(guidance().doc(`student_screening_progress/${SID}/grants/g-1`).set({ openedByUid: 'guid-uid', openedByName: 'แนะแนว', openedByRole: 'GUIDANCE_COUNSELOR', openedAt: '2026-10-05' }));
-      await assertSucceeds(homeroom().doc(`student_screening_progress/${SID}/grants/g-2`).set({ openedByUid: 'hr-uid', openedByName: 'ที่ปรึกษา', openedByRole: 'HOMEROOM_TEACHER', openedAt: '2026-10-05', note: 'มาปรึกษาเอง' }));
-      await assertSucceeds(studentSubmitsNineQ('GRANT', 'g-1', ['g-1']));
-      await assertFails(studentSubmitsNineQ('GRANT', 'g-1', ['g-1', 'g-1']));            // ใบเดิมใช้ซ้ำไม่ได้
-      await assertSucceeds(studentSubmitsNineQ('GRANT', 'g-2', ['g-1', 'g-2']));          // ใบที่สองใช้ได้
-    });
-
-    it('grants: only GUIDANCE / the homeroom teacher OF THAT ROOM / SUPER_ADMIN may open; others (other-room homeroom, subject teacher, executive, another student) cannot; openedByUid must be the caller', async () => {
-      await seed('ACTIVE');
-      const g = (uid: string) => ({ openedByUid: uid, openedByName: 'ครู', openedByRole: 'X', openedAt: '2026-10-05' });
-      await assertFails(homeroomOtherRoom().doc(`student_screening_progress/${SID}/grants/a`).set(g('hr2-uid')));
-      await assertFails(subjectTeacher().doc(`student_screening_progress/${SID}/grants/b`).set(g('sub-uid')));
-      await assertFails(executive().doc(`student_screening_progress/${SID}/grants/c`).set(g('exec-uid')));
-      await assertFails(otherStudent().doc(`student_screening_progress/${SID}/grants/d`).set(g(OTHER_UID)));
-      await assertFails(guidance().doc(`student_screening_progress/${SID}/grants/e`).set(g('someone-else')));   // ปลอมผู้เปิด
-      await assertFails(guidance().doc(`student_screening_progress/${SID}/grants/f`).set({ ...g('guid-uid'), extra: 1 }));
-      await assertSucceeds(superAdmin().doc(`student_screening_progress/${SID}/grants/ok`).set(g('adm-uid')));
-    });
-
-    it('a grant of ANOTHER student cannot be used, and a revoked (deleted) grant cannot be used', async () => {
-      await seed('ACTIVE');
-      await guidance().doc(`student_screening_progress/${OTHER_SID}/grants/g-other`).set({ openedByUid: 'guid-uid', openedByName: 'x', openedByRole: 'GUIDANCE_COUNSELOR', openedAt: '2026-10-05' });
-      await assertFails(studentSubmitsNineQ('GRANT', 'g-other', ['g-other']));
-      await guidance().doc(`student_screening_progress/${SID}/grants/g-rev`).set({ openedByUid: 'guid-uid', openedByName: 'x', openedByRole: 'GUIDANCE_COUNSELOR', openedAt: '2026-10-05' });
-      await assertSucceeds(guidance().doc(`student_screening_progress/${SID}/grants/g-rev`).delete());
-      await assertFails(studentSubmitsNineQ('GRANT', 'g-rev', ['g-rev']));
-    });
-
-    it('the student reads their own grants and progress (to know a 9Q is open) but not another student’s', async () => {
-      await seed('ACTIVE');
-      await put(`student_screening_progress/${SID}/grants/g-1`, { openedByUid: 'guid-uid', openedByName: 'x', openedByRole: 'GUIDANCE_COUNSELOR', openedAt: '2026-10-05' });
-      await put(`student_screening_progress/${SID}`, progress('GRANT', 'g-0', ['g-0']));
-      await assertSucceeds(student().doc(`student_screening_progress/${SID}/grants/g-1`).get());
-      await assertSucceeds(student().doc(`student_screening_progress/${SID}`).get());
-      await assertFails(otherStudent().doc(`student_screening_progress/${SID}/grants/g-1`).get());
-      await assertFails(otherStudent().doc(`student_screening_progress/${SID}`).get());
-    });
-
-    it('integrity of the student write: must come WITH the progress update; progress must append exactly one basis; only whitelisted fields; valid values', async () => {
-      await seed('ACTIVE');
-      await put(`student_screenings_2q/${SID}`, twoQ());
-      await assertFails(studentSubmitsNineQ('2Q', '2q-1', ['2q-1'], {}, false));                                  // ไม่มี progress ใน batch
-      await assertFails(studentSubmitsNineQ('2Q', '2q-1', ['2q-1', 'junk']));                                      // progress เพิ่มมากกว่า 1 ฐาน
-      await assertFails(studentSubmitsNineQ('2Q', '2q-1', ['2q-1'], { summary: { riskLevel: 'GREAT' } }));       // ค่าไม่อยู่ใน enum
-      await assertFails(studentSubmitsNineQ('2Q', '2q-1', ['2q-1'], { summary: { totalScore: 3 } }));            // summary ห้ามมีคะแนนรวม
-      await assertFails(studentSubmitsNineQ('2Q', '2q-1', ['2q-1'], { detail: { answers: [1, 2, 3] } }));        // ต้อง 9 ข้อ
-      await assertFails(studentSubmitsNineQ('2Q', '2q-1', ['2q-1'], { detail: { totalScore: 99 } }));            // เกิน 27
-      await assertFails(studentSubmitsNineQ('2Q', '2q-1', ['2q-1'], { summary: { studentUid: OTHER_UID } }));    // ปลอม studentUid
-      await assertFails(studentSubmitsNineQ('2Q', '2q-1', ['2q-1'], { summary: { evil: true } }));               // field แปลกปลอม
-      await assertSucceeds(studentSubmitsNineQ('2Q', '2q-1', ['2q-1']));
-    });
-
-    it('another student can never write 9Q for this student, even with a valid-looking batch', async () => {
-      await seed('ACTIVE');
-      await put(`student_screenings_2q/${SID}`, twoQ());
-      const db = otherStudent();
+      const db = student();
       const batch = db.batch();
-      batch.set(db.doc(`student_screenings_9q/${SID}`), nineSummary({ studentUid: OTHER_UID }));
-      batch.set(db.doc(`student_screenings_9q_detail/${SID}`), nineDetail({ studentUid: OTHER_UID }));
-      batch.set(db.doc(`student_screening_progress/${SID}`), { ...progress('2Q', '2q-1', ['2q-1']), studentUid: OTHER_UID });
+      batch.set(db.doc(`student_screenings_9q/${SID}`), nineSummary({ riskLevel: 'NONE', redFlagItem9: false })); // ตอบข้อ 9 แต่ส่งว่าไม่มีธงแดง
+      batch.set(db.doc(`student_screenings_9q_detail/${SID}`), nineDetail({ answers: [3, 3, 3, 3, 3, 3, 3, 3, 3], totalScore: 0 }));
+      batch.set(db.doc(`student_screening_progress/${SID}`), progress(['2q-1']));
       await assertFails(batch.commit());
     });
   });
 
-  // ═════════ 9Q: ใครเขียนแทนนักเรียนได้ ═════════
-  describe('9Q — staff writes', () => {
-    it('GUIDANCE_COUNSELOR (and SUPER_ADMIN) can record 9Q on behalf of a student; a homeroom teacher cannot write 9Q at all (they open a grant instead)', async () => {
+  // ═════════ ใบอนุญาตให้นักเรียนทำ 9Q (ครูเขียนจาก client ได้ — ไม่มีคะแนน) ═════════
+  describe('9Q grants (opened by teachers)', () => {
+    it('grants: only GUIDANCE / the homeroom teacher OF THAT ROOM / SUPER_ADMIN may open; the student, other-room homeroom, subject teacher, executive cannot; openedByUid must be the caller; no extra fields', async () => {
       await seed('ACTIVE');
-      await assertSucceeds(guidance().doc(`student_screenings_9q/${SID}`).set(nineSummary({ basisKind: 'STAFF', basisId: 'staff-1', respondentKind: 'STAFF', recordedByUid: 'guid-uid' })));
-      await assertSucceeds(guidance().doc(`student_screenings_9q_detail/${SID}`).set(nineDetail({ basisKind: 'STAFF', basisId: 'staff-1', recordedByUid: 'guid-uid' })));
-      await assertSucceeds(superAdmin().doc(`student_screenings_9q/${SID}`).set(nineSummary()));
-      await assertFails(homeroom().doc(`student_screenings_9q/${SID}`).set(nineSummary()));
-      await assertFails(homeroom().doc(`student_screenings_9q_detail/${SID}`).set(nineDetail()));
-      // แม้ไม่มีครูแนะแนวในระบบ (ครูที่ปรึกษาทำแทนได้เฉพาะ 8Q ตามสเปค) — 9Q นักเรียนตอบเอง ครูแค่เปิดให้
-      await testEnv.withSecurityRulesDisabled(async (c) => { await c.firestore().doc('school_settings/guidance_status').set({ hasActiveCounselor: false, count: 0 }); });
-      await assertFails(homeroom().doc(`student_screenings_9q/${SID}`).set(nineSummary()));
-      await assertFails(subjectTeacher().doc(`student_screenings_9q/${SID}`).set(nineSummary()));
-      await assertFails(executive().doc(`student_screenings_9q/${SID}`).set(nineSummary()));
+      const g = (uid: string) => ({ openedByUid: uid, openedByName: 'ครู', openedByRole: 'X', openedAt: '2026-10-05' });
+      await assertFails(student().doc(`student_screening_progress/${SID}/grants/self`).set(g(STU_UID)));
+      await assertFails(homeroomOtherRoom().doc(`student_screening_progress/${SID}/grants/a`).set(g('hr2-uid')));
+      await assertFails(subjectTeacher().doc(`student_screening_progress/${SID}/grants/b`).set(g('sub-uid')));
+      await assertFails(executive().doc(`student_screening_progress/${SID}/grants/c`).set(g('exec-uid')));
+      await assertFails(otherStudent().doc(`student_screening_progress/${SID}/grants/d`).set(g(OTHER_UID)));
+      await assertFails(guidance().doc(`student_screening_progress/${SID}/grants/e`).set(g('someone-else')));
+      await assertFails(guidance().doc(`student_screening_progress/${SID}/grants/f`).set({ ...g('guid-uid'), extra: 1 }));
+      await assertSucceeds(guidance().doc(`student_screening_progress/${SID}/grants/ok1`).set(g('guid-uid')));
+      await assertSucceeds(homeroom().doc(`student_screening_progress/${SID}/grants/ok2`).set({ ...g('hr-uid'), note: 'มาปรึกษาเอง' }));
+      await assertSucceeds(superAdmin().doc(`student_screening_progress/${SID}/grants/ok3`).set(g('adm-uid')));
+    });
+
+    it('a teacher can revoke a grant (delete); nobody can edit one; the student reads their own grants and progress but not another student’s', async () => {
+      await seed('ACTIVE');
+      await put(`student_screening_progress/${SID}/grants/g-1`, { openedByUid: 'guid-uid', openedByName: 'x', openedByRole: 'GUIDANCE_COUNSELOR', openedAt: '2026-10-05' });
+      await put(`student_screening_progress/${SID}`, progress(['g-0']));
+      await assertSucceeds(student().doc(`student_screening_progress/${SID}/grants/g-1`).get());
+      await assertSucceeds(student().doc(`student_screening_progress/${SID}`).get());
+      await assertFails(otherStudent().doc(`student_screening_progress/${SID}/grants/g-1`).get());
+      await assertFails(otherStudent().doc(`student_screening_progress/${SID}`).get());
+      await assertFails(student().doc(`student_screening_progress/${SID}/grants/g-1`).delete());
+      await assertFails(guidance().doc(`student_screening_progress/${SID}/grants/g-1`).update({ note: 'x' }));
+      await assertSucceeds(guidance().doc(`student_screening_progress/${SID}/grants/g-1`).delete());
     });
   });
 
-  // ═════════ 8Q: ครูกรอกแทนเท่านั้น และเปิดได้เมื่อ 9Q ล่าสุด ≥7 หรือมีธงแดงข้อ 9 ═════════
+  // ═════════ 8Q ═════════
   describe('8Q', () => {
     it('the student can never write 8Q or its case flag (no student screen exists)', async () => {
       await seed('NONE');
@@ -326,58 +256,113 @@ describe.skipIf(!EMULATOR_HOST)('คัดกรองซึมเศร้า 2
       await assertFails(student().doc(`student_8q_case_flags/${SID}`).set(flag(STU_UID)));
     });
 
-    it('sequence: no 9Q → 8Q refused; 9Q "NONE" (<7) without red flag → refused; NONE + red flag → allowed; MILD (≥7) → allowed', async () => {
+    it('EMERGENCY PATH: no 9Q at all (or 9Q below 7 with no red flag) does NOT block GUIDANCE_COUNSELOR — 8Q (and the case flag) can be recorded immediately', async () => {
       await seed('ACTIVE');
-      await assertFails(guidance().doc(`student_screenings_8q/${SID}`).set(eightQ('guid-uid')));
+      // ไม่มี 9Q เลย
+      await assertSucceeds(guidance().doc(`student_screenings_8q/${SID}`).set(eightQ('guid-uid', { entryPath: 'EMERGENCY' })));
+      const db = guidance();
+      const batch = db.batch();
+      batch.set(db.doc(`student_screenings_8q/${SID}`), eightQ('guid-uid', { entryPath: 'EMERGENCY' }));
+      batch.set(db.doc(`student_8q_case_flags/${SID}`), flag('guid-uid'));
+      await assertSucceeds(batch.commit());
+      // 9Q ต่ำกว่า 7 และไม่มีธงแดง
       await put(`student_screenings_9q/${SID}`, nineSummary({ riskLevel: 'NONE', redFlagItem9: false }));
-      await assertFails(guidance().doc(`student_screenings_8q/${SID}`).set(eightQ('guid-uid')));
-      await assertFails(guidance().doc(`student_8q_case_flags/${SID}`).set(flag('guid-uid')));
-      await put(`student_screenings_9q/${SID}`, nineSummary({ riskLevel: 'NONE', redFlagItem9: true }));
-      await assertSucceeds(guidance().doc(`student_screenings_8q/${SID}`).set(eightQ('guid-uid')));
-      await put(`student_screenings_9q/${SID}`, nineSummary({ riskLevel: 'MILD', redFlagItem9: false }));
-      await assertSucceeds(guidance().doc(`student_screenings_8q/${SID}`).set(eightQ('guid-uid')));
-      await assertSucceeds(guidance().doc(`student_8q_case_flags/${SID}`).set(flag('guid-uid')));
+      await assertSucceeds(guidance().doc(`student_screenings_8q/${SID}`).set(eightQ('guid-uid', { entryPath: 'EMERGENCY' })));
+      // และเส้นทางปกติ (9Q ≥7 / ธงแดง) ก็ยังบันทึกได้เหมือนเดิม
+      await put(`student_screenings_9q/${SID}`, nineSummary({ riskLevel: 'MILD' }));
+      await assertSucceeds(guidance().doc(`student_screenings_8q/${SID}`).set(eightQ('guid-uid', { entryPath: 'AFTER_9Q' })));
     });
 
-    it('GUIDANCE_COUNSELOR writes 8Q always (when unlocked); the homeroom teacher writes 8Q ONLY when there is no active counselor', async () => {
-      for (const counselor of ['ACTIVE', 'NONE', 'UNKNOWN'] as CounselorState[]) {
+    it('EMERGENCY PATH for the homeroom teacher: only when there is NO active counselor (with a counselor, or status unknown, they still cannot write 8Q)', async () => {
+      for (const counselor of ['NONE', 'ACTIVE', 'UNKNOWN'] as CounselorState[]) {
         await testEnv.clearFirestore();
         await seed(counselor);
-        await put(`student_screenings_9q/${SID}`, nineSummary({ riskLevel: 'MODERATE' }));
-        const hasActive = counselor !== 'NONE';
-        const caps = screeningCapabilities('HOMEROOM_TEACHER', hasActive);
-        await assertSucceeds(guidance().doc(`student_screenings_8q/${SID}`).set(eightQ('guid-uid')));
-        // (สร้าง promise ตอนจะ await ทันที — ถ้าสร้างก่อนแล้วค่อย await จะเกิด unhandled rejection ตอนถูกปฏิเสธ)
-        if (caps.write8Q) {
-          await assertSucceeds(homeroom().doc(`student_screenings_8q/${SID}`).set(eightQ('hr-uid')));
-          await assertSucceeds(homeroom().doc(`student_8q_case_flags/${SID}`).set(flag('hr-uid')));
+        const caps = screeningCapabilities('HOMEROOM_TEACHER', counselor !== 'NONE');
+        const doc = eightQ('hr-uid', { entryPath: 'EMERGENCY' });
+        if (counselor === 'NONE') {
+          expect(caps.write8Q).toBe(true);
+          const db = homeroom();
+          const batch = db.batch();
+          batch.set(db.doc(`student_screenings_8q/${SID}`), doc);
+          batch.set(db.doc(`student_8q_case_flags/${SID}`), flag('hr-uid'));
+          await assertSucceeds(batch.commit()); // ไม่มี 9Q ก็บันทึกได้
         } else {
-          await assertFails(homeroom().doc(`student_screenings_8q/${SID}`).set(eightQ('hr-uid')));
+          expect(caps.write8Q, counselor).toBe(false);
+          await assertFails(homeroom().doc(`student_screenings_8q/${SID}`).set(doc));
           await assertFails(homeroom().doc(`student_8q_case_flags/${SID}`).set(flag('hr-uid')));
         }
-        expect(caps.write8Q, `counselor=${counselor}`).toBe(counselor === 'NONE');
         await assertFails(homeroomOtherRoom().doc(`student_screenings_8q/${SID}`).set(eightQ('hr2-uid')));
         await assertFails(subjectTeacher().doc(`student_screenings_8q/${SID}`).set(eightQ('sub-uid')));
         await assertFails(executive().doc(`student_screenings_8q/${SID}`).set(eightQ('exec-uid')));
       }
     });
 
-    it('the sequence gate applies to teachers; SUPER_ADMIN may correct data regardless', async () => {
-      await seed('NONE');
-      await assertFails(homeroom().doc(`student_screenings_8q/${SID}`).set(eightQ('hr-uid')));   // ไม่มี 9Q
-      await assertSucceeds(superAdmin().doc(`student_screenings_8q/${SID}`).set(eightQ('adm-uid')));
+    it('8Q write integrity: recordedByUid = caller; whitelisted fields only; entryPath must be AFTER_9Q or EMERGENCY; studentId must match the document', async () => {
+      await seed('ACTIVE');
+      const ref = () => guidance().doc(`student_screenings_8q/${SID}`);
+      await assertFails(ref().set(eightQ('someone-else')));
+      await assertFails(ref().set(eightQ('guid-uid', { parentNotified: true })));
+      await assertFails(ref().set(eightQ('guid-uid', { entryPath: 'WHENEVER' })));
+      const { entryPath: _omit, ...noPath } = eightQ('guid-uid');
+      await assertFails(ref().set(noPath));                                  // ไม่ระบุ entryPath = ไม่ผ่าน
+      await assertFails(ref().set(eightQ('guid-uid', { studentId: OTHER_SID })));
+      await assertSucceeds(ref().set(eightQ('guid-uid')));
     });
 
-    it('8Q write integrity: recordedByUid must be the caller, 8 answers, whitelisted fields, valid risk level', async () => {
+    it('rules recompute the 8Q score from the raw answers — a wrong total, level or "urgent" flag is refused (every edge, including the item-3 follow-up)', async () => {
       await seed('ACTIVE');
-      await put(`student_screenings_9q/${SID}`, nineSummary({ riskLevel: 'SEVERE' }));
-      const db = guidance().doc(`student_screenings_8q/${SID}`);
-      await assertFails(db.set(eightQ('someone-else')));
-      await assertFails(db.set(eightQ('guid-uid', { answers: [true] })));
-      await assertFails(db.set(eightQ('guid-uid', { riskLevel: 'HUGE' })));
-      await assertFails(db.set(eightQ('guid-uid', { parentNotified: true })));
-      await assertFails(db.set(eightQ('guid-uid', { studentId: OTHER_SID })));
-      await assertSucceeds(db.set(eightQ('guid-uid', { totalScore: 52, riskLevel: 'SEVERE', urgentReferral: true, q3CanControl: false })));
+      const ref = () => guidance().doc(`student_screenings_8q/${SID}`);
+      const answers = (yes: number[]) => [1, 2, 3, 4, 5, 6, 7, 8].map((n) => yes.includes(n));
+      const doc = (yes: number[], q3: boolean | null, total: number, level: string, urgent: boolean) =>
+        eightQ('guid-uid', { answers: answers(yes), q3CanControl: q3, totalScore: total, riskLevel: level, urgentReferral: urgent });
+
+      // ถูกต้อง: ทุกขอบของระดับ
+      await assertSucceeds(ref().set(doc([], null, 0, 'NONE', false)));
+      await assertSucceeds(ref().set(doc([1], null, 1, 'LOW', false)));
+      await assertSucceeds(ref().set(doc([4], null, 8, 'LOW', false)));                  // 8 = สูงสุดของ "น้อย"
+      await assertSucceeds(ref().set(doc([5], null, 9, 'MODERATE', false)));             // 9 = ต่ำสุดของ "ปานกลาง"
+      await assertSucceeds(ref().set(doc([3, 7], true, 16, 'MODERATE', false)));         // 6 + 10 = 16
+      await assertSucceeds(ref().set(doc([1, 3, 7], true, 17, 'SEVERE', true)));         // 17 = ต่ำสุดของ "รุนแรง" + ส่งต่อด่วน
+      await assertSucceeds(ref().set(doc([4, 5], null, 17, 'SEVERE', true)));
+      await assertSucceeds(ref().set(doc([3], true, 6, 'LOW', false)));                  // ข้อ 3 ควบคุมได้ = 6
+      await assertSucceeds(ref().set(doc([3], false, 14, 'MODERATE', false)));           // ข้อ 3 ควบคุมไม่ได้ = 6 + 8
+      await assertSucceeds(ref().set(doc([1, 2, 3, 4, 5, 6, 7, 8], false, 52, 'SEVERE', true))); // สูงสุด
+
+      // ผิด: คะแนนไม่ตรงกับคำตอบ
+      await assertFails(ref().set(doc([1, 3, 7], true, 3, 'LOW', false)));               // ลดคะแนนเอง
+      await assertFails(ref().set(doc([4, 5], null, 16, 'MODERATE', false)));            // 17 จริง แต่ส่ง 16
+      await assertFails(ref().set(doc([3], false, 6, 'LOW', false)));                    // ลืมบวก +8 ของข้อย่อย
+      await assertFails(ref().set(doc([3], true, 14, 'MODERATE', false)));               // บวก +8 ทั้งที่ควบคุมได้
+      // ผิด: ระดับ/ส่งต่อด่วนไม่ตรงกับคะแนน
+      await assertFails(ref().set(doc([4, 5], null, 17, 'MODERATE', true)));
+      await assertFails(ref().set(doc([4, 5], null, 17, 'SEVERE', false)));              // ≥17 ต้องส่งต่อด่วน
+      await assertFails(ref().set(doc([4], null, 8, 'LOW', true)));                      // <17 ห้ามติดธงส่งต่อด่วน
+      await assertFails(ref().set(doc([], null, 0, 'LOW', false)));
+      await assertFails(ref().set(doc([5], null, 9, 'LOW', false)));
+      // ผิด: โครงสร้าง
+      await assertFails(ref().set(eightQ('guid-uid', { answers: [true, false] })));
+      await assertFails(ref().set(eightQ('guid-uid', { answers: [1, 0, 0, 0, 0, 0, 0, 0] })));          // ไม่ใช่ bool
+      await assertFails(ref().set(doc([3], null, 6, 'LOW', false)));                      // ข้อ 3 มี แต่ไม่ตอบข้อย่อย
+      await assertFails(ref().set(doc([], true, 0, 'NONE', false)));                      // ข้อ 3 ไม่มี แต่มีข้อย่อยค้าง
+      await assertFails(ref().set(eightQ('guid-uid', { totalScore: 1.5 })));
+    });
+
+    it('the case flag must agree with the 8Q written in the same batch (hasCase = score > 0)', async () => {
+      await seed('ACTIVE');
+      const db = guidance();
+      const withFlag = async (eight: Record<string, unknown>, hasCase: boolean) => {
+        const batch = db.batch();
+        batch.set(db.doc(`student_screenings_8q/${SID}`), eight);
+        batch.set(db.doc(`student_8q_case_flags/${SID}`), flag('guid-uid', { hasCase }));
+        return batch.commit();
+      };
+      const none = eightQ('guid-uid', { answers: Array(8).fill(false), totalScore: 0, riskLevel: 'NONE' });
+      await assertSucceeds(withFlag(none, false));
+      await assertFails(withFlag(none, true));                          // ไม่มีคะแนนแต่บอกว่ามีเคส
+      await assertFails(withFlag(eightQ('guid-uid'), false));           // มีคะแนนแต่บอกว่าไม่มีเคส (ซ่อนเคสจากครูที่ปรึกษา)
+      await assertSucceeds(withFlag(eightQ('guid-uid'), true));
+      await assertFails(db.doc(`student_8q_case_flags/${SID}`).set(flag('someone-else')));
+      await assertFails(db.doc(`student_8q_case_flags/${SID}`).set(flag('guid-uid', { extra: 1 })));
     });
   });
 
@@ -389,7 +374,7 @@ describe.skipIf(!EMULATOR_HOST)('คัดกรองซึมเศร้า 2
       await seed('ACTIVE');
       await assertSucceeds(guidance().doc(`student_screening_notices/${SID}/entries/n1`).set(notice('guid-uid')));
       await assertSucceeds(homeroom().doc(`student_screening_notices/${SID}/entries/n2`).set(notice('hr-uid', { method: 'IN_PERSON', note: 'พบผู้ปกครองที่โรงเรียน' })));
-      await assertFails(homeroom().doc(`student_screening_notices/${SID}/entries/n3`).set(notice('guid-uid')));          // ปลอมผู้แจ้ง
+      await assertFails(homeroom().doc(`student_screening_notices/${SID}/entries/n3`).set(notice('guid-uid')));
       await assertFails(homeroomOtherRoom().doc(`student_screening_notices/${SID}/entries/n4`).set(notice('hr2-uid')));
       await assertFails(subjectTeacher().doc(`student_screening_notices/${SID}/entries/n5`).set(notice('sub-uid')));
       await assertFails(student().doc(`student_screening_notices/${SID}/entries/n6`).set(notice(STU_UID)));
@@ -428,7 +413,6 @@ describe.skipIf(!EMULATOR_HOST)('คัดกรองซึมเศร้า 2
         await assertFails(who().doc('school_settings/guidance_status').set({ hasActiveCounselor: false, count: 0 }));
         await assertFails(who().doc('school_settings/guidance_status').update({ hasActiveCounselor: false }));
       }
-      // wildcard เดิมของ school_settings ยังใช้ได้กับเอกสารอื่น
       await assertSucceeds(superAdmin().doc('school_settings/anything_else').set({ x: 1 }));
     });
 

@@ -11,8 +11,11 @@
  *   ข้อ 1=1, 2=2, 3=6 (ถ้าตอบ "มี" ถามต่อ: ควบคุมความคิดได้ไหม ได้=0 ไม่ได้=+8), 4=8, 5=9, 6=4, 7=10, 8=4
  *   รวม 0 ไม่มีแนวโน้ม, 1-8 น้อย, 9-16 ปานกลาง, ≥17 รุนแรง = ส่งต่อโรงพยาบาลด่วน (ธงแดงสูงสุด)
  *
- * 9Q ถูกเปิดให้ทำได้เฉพาะเมื่อ (ก) 2Q ล่าสุดเป็นบวก หรือ (ข) ครูแนะแนว/ครูที่ปรึกษาเปิดให้ (grant);
- * 8Q กรอกโดยครูเท่านั้น และเปิดได้เมื่อ 9Q ล่าสุด รวม ≥7 หรือมีธงแดงข้อ 9 — เงื่อนไขเดียวกันนี้ firestore.rules บังคับจริงอีกชั้น
+ * 9Q ถูกเปิดให้ทำได้เฉพาะเมื่อ (ก) 2Q ล่าสุดเป็นบวก หรือ (ข) ครูแนะแนว/ครูที่ปรึกษาเปิดให้ (grant) — หรือครูกรอกแทนนักเรียน
+ * การคำนวณผลและตรวจสิทธิ์ของ 9Q ทำที่เซิร์ฟเวอร์ (callable submitNineQ — functions/src/nineQ.ts เป็นสำเนาตรรกะชุดนี้)
+ * client ส่งแค่คำตอบดิบ; ฟังก์ชันคำนวณในไฟล์นี้ใช้ตรวจความครบถ้วนก่อนส่ง/แสดงผลให้ครูเท่านั้น ไม่ใช่แหล่งความจริงของผลที่เก็บ
+ * 8Q กรอกโดยครูเท่านั้น: 9Q ล่าสุดรวม ≥7 หรือธงแดงข้อ 9 = "เหตุผลที่ระบบแนะนำ" ให้ทำ 8Q (eightQUnlocked) แต่ **ไม่ใช่ตัวบล็อก** —
+ * ครูแนะแนว (และครูที่ปรึกษาเมื่อไม่มีครูแนะแนว) ประเมิน 8Q ทันทีได้เสมอ (ทางฉุกเฉิน, entryPath = 'EMERGENCY')
  */
 
 // ───────────────────────── 9Q ─────────────────────────
@@ -186,7 +189,13 @@ export function scoreEightQ(input: EightQAnswers): EightQScoring {
 
 // ───────────────────────── ลำดับการทำ (gate) ─────────────────────────
 
-/** 8Q เปิดได้เมื่อ 9Q ล่าสุด รวม ≥7 (ระดับน้อยขึ้นไป) หรือมีธงแดงข้อ 9 */
+/** เส้นทางที่ครูเข้ามาทำ 8Q: ตามลำดับปกติหลัง 9Q หรือทางฉุกเฉิน (ประเมินทันที ไม่ต้องรอ 9Q) — เก็บไว้ในเอกสาร 8Q เพื่อตรวจย้อนหลัง */
+export type EightQEntryPath = 'AFTER_9Q' | 'EMERGENCY';
+
+/**
+ * 9Q ล่าสุด รวม ≥7 (ระดับน้อยขึ้นไป) หรือมีธงแดงข้อ 9 = ระบบ "แนะนำ" ให้ทำ 8Q (เส้นทางปกติ AFTER_9Q)
+ * ⚠ ไม่ใช่เงื่อนไขบังคับ: ทางฉุกเฉินทำ 8Q ได้โดยไม่ต้องเข้าเงื่อนไขนี้ (firestore.rules ไม่ตรวจเงื่อนไขนี้แล้ว)
+ */
 export function eightQUnlocked(nineQ: { riskLevel: NineQRiskLevel; redFlagItem9: boolean } | null | undefined): boolean {
   return !!nineQ && (nineQ.riskLevel !== 'NONE' || nineQ.redFlagItem9 === true);
 }
@@ -227,7 +236,10 @@ export interface ScreeningCapabilities {
   /** 8Q: แค่ "มีเคสอยู่ในการดูแล ใช่/ไม่" */
   read8QCaseFlag: boolean;
   write8Q: boolean;
+  /** เปิดใบอนุญาตให้นักเรียนทำ 9Q เอง (นั่งคุยกัน/ส่งให้ทำบนอุปกรณ์ตัวเอง) */
   openNineQ: boolean;
+  /** กรอก 9Q แทนนักเรียน (นักเรียนบอกคำตอบปากเปล่า) — ผ่าน callable submitNineQ */
+  recordNineQ: boolean;
 }
 
 /**
@@ -237,13 +249,14 @@ export interface ScreeningCapabilities {
  */
 export function screeningCapabilities(viewer: ScreeningViewer, hasActiveCounselor: boolean): ScreeningCapabilities {
   if (viewer === 'GUIDANCE_COUNSELOR') {
-    return { read2Q: true, read9QSummary: true, read9QDetail: true, read8QDetail: true, read8QCaseFlag: true, write8Q: true, openNineQ: true };
+    return { read2Q: true, read9QSummary: true, read9QDetail: true, read8QDetail: true, read8QCaseFlag: true, write8Q: true, openNineQ: true, recordNineQ: true };
   }
   if (viewer === 'HOMEROOM_TEACHER') {
     const full = !hasActiveCounselor;
-    return { read2Q: true, read9QSummary: true, read9QDetail: full, read8QDetail: full, read8QCaseFlag: true, write8Q: full, openNineQ: true };
+    // ครูที่ปรึกษา: เปิดใบอนุญาตได้เสมอ; กรอก 9Q แทน/ทำ 8Q ได้เฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่
+    return { read2Q: true, read9QSummary: true, read9QDetail: full, read8QDetail: full, read8QCaseFlag: true, write8Q: full, openNineQ: true, recordNineQ: full };
   }
-  return { read2Q: true, read9QSummary: false, read9QDetail: false, read8QDetail: false, read8QCaseFlag: false, write8Q: false, openNineQ: false };
+  return { read2Q: true, read9QSummary: false, read9QDetail: false, read8QDetail: false, read8QCaseFlag: false, write8Q: false, openNineQ: false, recordNineQ: false };
 }
 
 // ───────────────────────── แจ้งผู้ปกครอง (คำเตือนเท่านั้น ไม่บังคับ ไม่ส่งอัตโนมัติ) ─────────────────────────

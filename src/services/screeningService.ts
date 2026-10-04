@@ -1,3 +1,4 @@
+import { httpsCallable } from 'firebase/functions';
 import {
   addDoc,
   collection,
@@ -10,12 +11,11 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { format } from 'date-fns';
-import { db } from '../lib/firebase';
+import { db, functions } from '../lib/firebase';
 import {
+  EightQEntryPath,
   EightQResult,
   EightQRiskLevel,
-  NineQBasis,
-  NineQResult,
   NineQRiskLevel,
   ParentNoticeMethod,
   ParentNoticeScope,
@@ -63,6 +63,7 @@ export interface EightQDoc {
   totalScore: number;
   riskLevel: EightQRiskLevel;
   urgentReferral: boolean;
+  entryPath: EightQEntryPath;
   conductedAt: string;
   recordedByUid: string;
   recordedByName: string;
@@ -102,50 +103,28 @@ export interface ParentNoticeDoc {
 const today = () => format(new Date(), 'yyyy-MM-dd');
 const ref = (path: string) => doc(db, path);
 
-// ───────── 9Q: นักเรียนตอบ (ต้องมีฐาน — 2Q บวก หรือใบอนุญาตที่ครูเปิดให้) ─────────
+// ───────── 9Q: ส่งคำตอบดิบให้เซิร์ฟเวอร์คำนวณ/ตรวจสิทธิ์/เขียน (callable submitNineQ) ─────────
+
+export interface NineQStaffResult { riskLevel: NineQRiskLevel; redFlagItem9: boolean; totalScore: number }
+
+async function callSubmitNineQ(studentId: string, answers: readonly number[]): Promise<Record<string, unknown>> {
+  // ส่งเฉพาะคำตอบดิบ — ไม่ส่ง riskLevel/คะแนน/ธงแดง (เซิร์ฟเวอร์คำนวณเอง ไม่รับค่าจาก client)
+  const res = await httpsCallable(functions, 'submitNineQ')({ studentId, answers: [...answers] });
+  return (res.data ?? {}) as Record<string, unknown>;
+}
 
 /**
- * นักเรียนส่ง 9Q — เขียน summary + detail + progress ใน batch เดียว (rules บังคับให้มาพร้อมกัน เพื่อ "ใช้" ฐานนั้น)
- * ผู้เรียกต้องส่ง usedBasisIds ปัจจุบัน (จาก progress ที่ฟังสดอยู่) — rules ตรวจว่า progress ใหม่ = เดิม + ฐานนี้พอดี
+ * นักเรียนส่ง 9Q ของตัวเอง — เซิร์ฟเวอร์เลือกฐาน (2Q ล่าสุดบวก/ใบอนุญาตที่ครูเปิดให้ ที่ยังไม่เคยใช้) และเขียน summary + detail + progress เอง
+ * ไม่คืนผลใดๆ (นักเรียนห้ามเห็นคะแนน/ระดับ/ธงแดง) — ไม่มีฐาน = เซิร์ฟเวอร์ปฏิเสธด้วยข้อความกลางๆ
  */
-export async function submitNineQByStudent(input: {
-  studentId: string;
-  studentUid: string;
-  basis: NineQBasis;
-  usedBasisIds: readonly string[];
-  result: NineQResult;
-}): Promise<void> {
-  const { studentId, studentUid, basis, usedBasisIds, result } = input;
-  const id = `9q-${Date.now()}`;
-  const conductedAt = today();
-  const batch = writeBatch(db);
-  batch.set(ref(`student_screenings_9q/${studentId}`), {
-    id, studentId, studentUid,
-    riskLevel: result.riskLevel,
-    redFlagItem9: result.redFlagItem9,
-    conductedAt,
-    basisKind: basis.kind, basisId: basis.id,
-    respondentKind: 'STUDENT',
-    recordedByUid: studentUid,
-    updatedAt: serverTimestamp(),
-  });
-  batch.set(ref(`student_screenings_9q_detail/${studentId}`), {
-    id, studentId, studentUid,
-    answers: result.answers,
-    totalScore: result.totalScore,
-    basisKind: basis.kind, basisId: basis.id,
-    conductedAt,
-    recordedByUid: studentUid,
-    updatedAt: serverTimestamp(),
-  });
-  batch.set(ref(`student_screening_progress/${studentId}`), {
-    studentId, studentUid,
-    usedBasisIds: [...usedBasisIds, basis.id],
-    lastBasisKind: basis.kind, lastBasisId: basis.id,
-    lastNineQAt: conductedAt,
-    updatedAt: serverTimestamp(),
-  });
-  await batch.commit();
+export async function submitNineQByStudent(input: { studentId: string; answers: readonly number[] }): Promise<void> {
+  await callSubmitNineQ(input.studentId, input.answers);
+}
+
+/** ครูกรอก 9Q แทนนักเรียน (นักเรียนบอกคำตอบปากเปล่า) — ครูแนะแนวเสมอ; ครูที่ปรึกษาเมื่อไม่มีครูแนะแนว; คืนผลให้ครูผู้กรอกเห็น */
+export async function recordNineQOnBehalf(input: { studentId: string; answers: readonly number[] }): Promise<NineQStaffResult> {
+  const d = await callSubmitNineQ(input.studentId, input.answers);
+  return { riskLevel: d.riskLevel as NineQRiskLevel, redFlagItem9: d.redFlagItem9 === true, totalScore: Number(d.totalScore) };
 }
 
 // ───────── ใบอนุญาตให้นักเรียนทำ 9Q (ครูแนะแนว/ครูที่ปรึกษา) ─────────
@@ -172,8 +151,10 @@ export async function saveEightQ(input: {
   studentId: string;
   result: EightQResult;
   recorder: { uid: string; name: string };
+  /** AFTER_9Q = ตามลำดับปกติ | EMERGENCY = ทางฉุกเฉิน (ประเมินทันทีโดยไม่ต้องรอ 9Q) */
+  entryPath: EightQEntryPath;
 }): Promise<EightQDoc> {
-  const { studentId, result, recorder } = input;
+  const { studentId, result, recorder, entryPath } = input;
   const eightQ: EightQDoc = {
     id: `8q-${Date.now()}`,
     studentId,
@@ -182,6 +163,7 @@ export async function saveEightQ(input: {
     totalScore: result.totalScore,
     riskLevel: result.riskLevel,
     urgentReferral: result.urgentReferral,
+    entryPath,
     conductedAt: today(),
     recordedByUid: recorder.uid,
     recordedByName: recorder.name,

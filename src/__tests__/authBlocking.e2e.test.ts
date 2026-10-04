@@ -30,6 +30,8 @@ const PASSWORD = 'test1234';
 function toValue(v: unknown): unknown {
   if (Array.isArray(v)) return { arrayValue: { values: v.map(toValue) } };
   if (typeof v === 'string') return { stringValue: v };
+  if (typeof v === 'boolean') return { booleanValue: v };
+  if (typeof v === 'number' && Number.isInteger(v)) return { integerValue: String(v) };
   if (v && typeof v === 'object') {
     return { mapValue: { fields: Object.fromEntries(Object.entries(v).map(([k, x]) => [k, toValue(x)])) } };
   }
@@ -350,6 +352,165 @@ describe.skipIf(!AUTH_HOST || !FS_HOST)('student email format config (emulator E
     await fsDelete(CFG);
     expect(await tryLogin('it38700@utd.ac.th')).toEqual({ ok: true, studentId: '38700' });
     expect(await tryLogin('s38701@student.utd.ac.th')).toEqual({ ok: false, message: DENY_MESSAGES.DOMAIN_NOT_ALLOWED });
+    await deleteApp(app);
+  });
+});
+
+// อ่านเอกสารทั้งก้อนผ่าน REST แล้วแปลงเป็นค่าธรรมดา (undefined = ไม่มีเอกสาร)
+function fromValue(v: any): unknown {
+  if (v === undefined || v === null) return undefined;
+  if ('stringValue' in v) return v.stringValue;
+  if ('booleanValue' in v) return v.booleanValue;
+  if ('integerValue' in v) return Number(v.integerValue);
+  if ('nullValue' in v) return null;
+  if ('arrayValue' in v) return (v.arrayValue.values || []).map(fromValue);
+  if ('mapValue' in v) return Object.fromEntries(Object.entries(v.mapValue.fields || {}).map(([k, x]) => [k, fromValue(x)]));
+  return undefined;
+}
+async function fsGetDoc(path: string): Promise<Record<string, unknown> | undefined> {
+  const res = await fetch(`${FS_BASE}/${path}`, { headers: { Authorization: 'Bearer owner' } });
+  if (!res.ok) return undefined;
+  const json = await res.json();
+  return Object.fromEntries(Object.entries(json.fields || {}).map(([k, x]) => [k, fromValue(x)]));
+}
+
+/**
+ * callable submitNineQ บน Functions emulator จริง (TODO-3): เซิร์ฟเวอร์คำนวณระดับ/ธงแดงเอง ตรวจฐานของนักเรียนเอง และเป็นทางเดียวที่เขียน 9Q ได้
+ * ใช้นักเรียน it38800 (ห้อง ม.5/9) + ครูแนะแนว + ครูที่ปรึกษา — รัน: npm run emulators:exec:auth
+ */
+describe.skipIf(!AUTH_HOST || !FS_HOST)('submitNineQ callable (emulator E2E)', () => {
+  const app = initClientApp({ apiKey: 'emulator-key', projectId: PROJECT_ID, authDomain: `${PROJECT_ID}.firebaseapp.com` }, 'e2e-nineq');
+  const auth = getClientAuth(app);
+  const fns = getFunctions(app, 'us-central1');
+  const submit = httpsCallable(fns, 'submitNineQ');
+  const SID = '38800';
+  const OTHER = '38801';
+  const SUMMARY = `student_screenings_9q/${SID}`;
+  const DETAIL = `student_screenings_9q_detail/${SID}`;
+  const PROGRESS = `student_screening_progress/${SID}`;
+  const as = async (email: string) => { await signOut(auth).catch(() => {}); await signInWithEmailAndPassword(auth, email, PASSWORD); };
+  const call = async (data: Record<string, unknown>) => {
+    try { return { ok: true as const, data: (await submit(data)).data as Record<string, unknown> }; }
+    catch (err) { return { ok: false as const, code: (err as { code?: string }).code, message: (err as { message?: string }).message || '' }; }
+  };
+  const answers = (n: number) => Array(9).fill(n) as number[];
+  const setCounselor = (has: boolean) => fsPut('school_settings/guidance_status', { hasActiveCounselor: has, count: has ? 1 : 0 });
+
+  beforeAll(async () => {
+    connectAuthEmulator(auth, `http://${AUTH_HOST}`, { disableWarnings: true });
+    connectFunctionsEmulator(fns, '127.0.0.1', authTestConfig.emulators.functions.port);
+    if (!getApps().length) initAdminApp({ projectId: PROJECT_ID });
+    const adminAuth = getAdminAuth();
+
+    await fsPut(`students/${SID}`, { studentId: SID, name: 'นักเรียน 9Q', room: 'ม.5/9' });
+    await fsPut(`students/${OTHER}`, { studentId: OTHER, name: 'นักเรียนอื่น', room: 'ม.5/9' });
+    await fsPut('staff/g-9q', { email: 'guid9q.e2e@utd.ac.th', roles: ['GUIDANCE_COUNSELOR'] });
+    await fsPut('staff/hr-9q', { email: 'hr9q.e2e@utd.ac.th', roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.5/9' } });
+    await fsPut('staff/hr-9q-other', { email: 'hr9qother.e2e@utd.ac.th', roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+    await setCounselor(true);
+    for (const email of ['it38800@utd.ac.th', 'it38801@utd.ac.th', 'guid9q.e2e@utd.ac.th', 'hr9q.e2e@utd.ac.th', 'hr9qother.e2e@utd.ac.th']) {
+      await adminAuth.createUser({ email, password: PASSWORD, emailVerified: true });
+    }
+  }, 90_000);
+
+  it('unauthenticated → rejected', async () => {
+    await signOut(auth).catch(() => {});
+    const r = await call({ studentId: SID, answers: answers(1) });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.code).toBe('functions/unauthenticated');
+  });
+
+  it('a student with NO basis (no 2Q, no grant) is refused with a neutral message and nothing is written', async () => {
+    await as('it38800@utd.ac.th');
+    const r = await call({ studentId: SID, answers: answers(1) });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.code).toBe('functions/failed-precondition');
+    expect(!r.ok && r.message).not.toMatch(/2Q|grant|ใบอนุญาต|ธงแดง|ระดับ/);
+    expect(await fsGetDoc(SUMMARY)).toBeUndefined();
+    expect(await fsGetDoc(DETAIL)).toBeUndefined();
+    expect(await fsGetDoc(PROGRESS)).toBeUndefined();
+  });
+
+  it('bad input is refused (wrong number of answers, out-of-range value)', async () => {
+    await as('it38800@utd.ac.th');
+    for (const bad of [[1, 2, 3], [...answers(1), 1], [0, 0, 0, 0, 0, 0, 0, 0, 4]]) {
+      const r = await call({ studentId: SID, answers: bad });
+      expect(r.ok, JSON.stringify(bad)).toBe(false);
+      expect(!r.ok && r.code).toBe('functions/invalid-argument');
+    }
+  });
+
+  it('positive 2Q → the student submits: the SERVER computes the result; the student gets back only { success }', async () => {
+    await fsPut(`student_screenings_2q/${SID}`, { id: '2q-e2e-1', studentId: SID, isPositive: true, q1Depressed: true, q2Hopeless: false });
+    await as('it38800@utd.ac.th');
+    const r = await call({ studentId: SID, answers: [1, 2, 1, 0, 0, 1, 1, 0, 2] });   // รวม 8 + ข้อ 9 = 2
+    expect(r).toEqual({ ok: true, data: { success: true } });
+    expect(await fsGetDoc(SUMMARY)).toMatchObject({ riskLevel: 'MILD', redFlagItem9: true, basisKind: '2Q', basisId: '2q-e2e-1', respondentKind: 'STUDENT', studentId: SID });
+    expect(await fsGetDoc(DETAIL)).toMatchObject({ totalScore: 8, answers: [1, 2, 1, 0, 0, 1, 1, 0, 2] });
+    expect(await fsGetDoc(PROGRESS)).toMatchObject({ usedBasisIds: ['2q-e2e-1'], lastBasisKind: '2Q', lastBasisId: '2q-e2e-1' });
+  });
+
+  it('the same basis cannot be used twice (no endless retakes while 2Q stays positive)', async () => {
+    await as('it38800@utd.ac.th');
+    const r = await call({ studentId: SID, answers: answers(0) });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.code).toBe('functions/failed-precondition');
+    expect(await fsGetDoc(SUMMARY)).toMatchObject({ riskLevel: 'MILD', redFlagItem9: true });   // ผลเดิมไม่ถูกทับ
+  });
+
+  it('ATTACK: results sent by the client (riskLevel NONE, no red flag, score 0, a made-up basis) are ignored — the server stores what the answers really are', async () => {
+    await fsPut(`student_screening_progress/${SID}/grants/g-e2e-1`, { openedByUid: 'guid-uid', openedByName: 'ครู', openedByRole: 'GUIDANCE_COUNSELOR', openedAt: '2026-10-05T10:00' });
+    await as('it38800@utd.ac.th');
+    const r = await call({ studentId: SID, answers: answers(3), riskLevel: 'NONE', redFlagItem9: false, totalScore: 0, basisKind: '2Q', basisId: 'made-up', respondentKind: 'STAFF' });
+    expect(r).toEqual({ ok: true, data: { success: true } });
+    expect(await fsGetDoc(SUMMARY)).toMatchObject({ riskLevel: 'SEVERE', redFlagItem9: true, basisKind: 'GRANT', basisId: 'g-e2e-1', respondentKind: 'STUDENT' });
+    expect(await fsGetDoc(DETAIL)).toMatchObject({ totalScore: 27 });
+    expect(await fsGetDoc(PROGRESS)).toMatchObject({ usedBasisIds: ['2q-e2e-1', 'g-e2e-1'] });
+  });
+
+  it('another student cannot submit for this student', async () => {
+    await fsPut(`student_screening_progress/${SID}/grants/g-e2e-2`, { openedByUid: 'guid-uid', openedByName: 'ครู', openedByRole: 'GUIDANCE_COUNSELOR', openedAt: '2026-10-05T10:00' });
+    await as('it38801@utd.ac.th');
+    const r = await call({ studentId: SID, answers: answers(0) });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.code).toBe('functions/permission-denied');
+    expect((await fsGetDoc(SUMMARY))?.riskLevel).toBe('SEVERE');
+  });
+
+  it('GUIDANCE_COUNSELOR fills it in on behalf of the student (no basis needed) and sees the result', async () => {
+    await as('guid9q.e2e@utd.ac.th');
+    const r = await call({ studentId: SID, answers: [0, 0, 0, 0, 0, 0, 0, 0, 0] });
+    expect(r).toEqual({ ok: true, data: { success: true, riskLevel: 'NONE', redFlagItem9: false, totalScore: 0 } });
+    expect(await fsGetDoc(SUMMARY)).toMatchObject({ riskLevel: 'NONE', respondentKind: 'STAFF', basisKind: 'STAFF' });
+    // กรอกแทนไม่ใช้ฐานของนักเรียน: progress ไม่ถูกแตะ
+    expect(await fsGetDoc(PROGRESS)).toMatchObject({ usedBasisIds: ['2q-e2e-1', 'g-e2e-1'] });
+  });
+
+  it('homeroom teacher: refused while an active counselor exists; allowed (for their own room only) when there is none', async () => {
+    await setCounselor(true);
+    await as('hr9q.e2e@utd.ac.th');
+    const refused = await call({ studentId: SID, answers: answers(1) });
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.code).toBe('functions/permission-denied');
+
+    await setCounselor(false);
+    const allowed = await call({ studentId: SID, answers: [3, 3, 3, 3, 3, 3, 0, 0, 0] });
+    expect(allowed).toEqual({ ok: true, data: { success: true, riskLevel: 'MODERATE', redFlagItem9: false, totalScore: 18 } });
+    expect(await fsGetDoc(SUMMARY)).toMatchObject({ riskLevel: 'MODERATE', respondentKind: 'STAFF' });
+
+    await as('hr9qother.e2e@utd.ac.th');
+    const otherRoom = await call({ studentId: SID, answers: answers(1) });
+    expect(otherRoom.ok).toBe(false);
+    expect(!otherRoom.ok && otherRoom.code).toBe('functions/permission-denied');
+  });
+
+  it('a missing guidance_status doc is treated as "has a counselor" (fail-closed) for the homeroom teacher', async () => {
+    await fetch(`${FS_BASE}/school_settings/guidance_status`, { method: 'DELETE', headers: { Authorization: 'Bearer owner' } });
+    await as('hr9q.e2e@utd.ac.th');
+    const r = await call({ studentId: SID, answers: answers(1) });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.code).toBe('functions/permission-denied');
+    await signOut(auth);
     await deleteApp(app);
   });
 });

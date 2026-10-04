@@ -7,7 +7,9 @@ import {
   EIGHT_Q_ITEMS,
   EIGHT_Q_RISK_LABEL,
   EightQAnswers,
+  EightQEntryPath,
   NINE_Q_ITEMS,
+  NineQAnswers,
   NINE_Q_OPTIONS,
   NINE_Q_RISK_LABEL,
   NINE_Q_TOTAL_MAX,
@@ -18,6 +20,7 @@ import {
   parentNoticeReasons,
   pickNineQBasis,
   scoreEightQ,
+  scoreNineQ,
   screeningCapabilities,
 } from '../../lib/depressionScreening';
 import { StudentScreeningRecord } from '../../hooks/useDepressionScreening';
@@ -27,11 +30,13 @@ import {
   loadNineQGrants,
   loadParentNotices,
   openNineQGrant,
+  recordNineQOnBehalf,
   recordParentNotice,
   revokeNineQGrant,
   saveEightQ,
 } from '../../services/screeningService';
 import { EightQuestionForm, EMPTY_EIGHT_Q } from './EightQuestionForm';
+import { EMPTY_NINE_Q_ANSWERS, NineQuestionForm } from './NineQuestionForm';
 import { StudentPicker } from './StudentPicker';
 import { DatePicker } from './DatePicker';
 import { TimePicker } from './TimePicker';
@@ -219,6 +224,7 @@ export function DepressionScreeningPanel({
           onClose={() => setSelectedId('')}
           onChanged={onChanged}
           capsOpenNineQ={caps.openNineQ}
+          capsRecordNineQ={caps.recordNineQ}
           capsWriteEightQ={caps.write8Q}
           capsRead9QDetail={caps.read9QDetail}
           capsRead8QDetail={caps.read8QDetail}
@@ -233,21 +239,26 @@ export function DepressionScreeningPanel({
 
 function StudentScreeningDetail({
   studentId, name, room, record, viewer, hasActiveCounselor, actor, onClose, onChanged,
-  capsOpenNineQ, capsWriteEightQ, capsRead9QDetail, capsRead8QDetail,
+  capsOpenNineQ, capsRecordNineQ, capsWriteEightQ, capsRead9QDetail, capsRead8QDetail,
 }: {
   studentId: string; name: string; room: string; record: StudentScreeningRecord;
   viewer: Viewer; hasActiveCounselor: boolean;
   actor: { uid: string; name: string } | null;
   onClose: () => void; onChanged?: () => void;
-  capsOpenNineQ: boolean; capsWriteEightQ: boolean; capsRead9QDetail: boolean; capsRead8QDetail: boolean;
+  capsOpenNineQ: boolean; capsRecordNineQ: boolean; capsWriteEightQ: boolean; capsRead9QDetail: boolean; capsRead8QDetail: boolean;
 }) {
   const [grants, setGrants] = useState<Array<NineQGrantDoc & { id: string }>>([]);
   const [notices, setNotices] = useState<ParentNoticeDoc[]>([]);
   const [tick, setTick] = useState(0);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
-  const [showEightQ, setShowEightQ] = useState(false);
+  // เส้นทางที่เปิดฟอร์ม 8Q อยู่ (null = ปิด): AFTER_9Q = ตามลำดับปกติ, EMERGENCY = ประเมินทันที ไม่ต้องรอ 9Q
+  const [eightQPath, setEightQPath] = useState<EightQEntryPath | null>(null);
   const [eightQ, setEightQ] = useState<EightQAnswers>(EMPTY_EIGHT_Q);
+  // กรอก 9Q แทนนักเรียน (นักเรียนบอกคำตอบปากเปล่า)
+  const [showNineQProxy, setShowNineQProxy] = useState(false);
+  const [nineQProxy, setNineQProxy] = useState<NineQAnswers>(EMPTY_NINE_Q_ANSWERS);
+  const [proxyShowErrors, setProxyShowErrors] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
   const [grantNote, setGrantNote] = useState('');
 
@@ -269,12 +280,12 @@ function StudentScreeningDetail({
     eightQTotal: record.eightQ ? record.eightQ.totalScore : record.eightQFlag?.hasCase ? 1 : 0,
   });
 
-  const run = async (fn: () => Promise<void>, okText: string) => {
+  const run = async (fn: () => Promise<void>, okText: string | (() => string)) => {
     setBusy(true); setMsg(null);
-    try { await fn(); setMsg({ kind: 'ok', text: okText }); setTick((t) => t + 1); onChanged?.(); }
+    try { await fn(); setMsg({ kind: 'ok', text: typeof okText === 'function' ? okText() : okText }); setTick((t) => t + 1); onChanged?.(); }
     catch (err) {
       const text = err instanceof Error ? err.message : String(err);
-      setMsg({ kind: 'error', text: /permission|insufficient/i.test(text) ? 'ทำรายการไม่สำเร็จ: ระบบไม่อนุญาต (ตรวจสิทธิ์/เงื่อนไขลำดับ 9Q → 8Q)' : `ทำรายการไม่สำเร็จ: ${text}` });
+      setMsg({ kind: 'error', text: /permission|insufficient/i.test(text) ? 'ทำรายการไม่สำเร็จ: ระบบไม่อนุญาต (ตรวจสิทธิ์ของท่านและสถานะครูแนะแนวในระบบ)' : `ทำรายการไม่สำเร็จ: ${text}` });
     } finally { setBusy(false); }
   };
 
@@ -286,11 +297,25 @@ function StudentScreeningDetail({
   const handleSaveEightQ = () => {
     setShowErrors(true);
     const scored = scoreEightQ(eightQ);
-    if (!('totalScore' in scored) || !actor) return;
+    if (!('totalScore' in scored) || !actor || !eightQPath) return;
+    const entryPath = eightQPath;
     return run(async () => {
-      await saveEightQ({ studentId, result: scored, recorder: actor });
-      setShowEightQ(false); setEightQ(EMPTY_EIGHT_Q); setShowErrors(false);
-    }, 'บันทึกผล 8Q เรียบร้อย');
+      await saveEightQ({ studentId, result: scored, recorder: actor, entryPath });
+      setEightQPath(null); setEightQ(EMPTY_EIGHT_Q); setShowErrors(false);
+    }, entryPath === 'EMERGENCY' ? 'บันทึกผล 8Q (กรณีฉุกเฉิน) เรียบร้อย' : 'บันทึกผล 8Q เรียบร้อย');
+  };
+
+  // กรอก 9Q แทนนักเรียน — ส่งคำตอบดิบให้เซิร์ฟเวอร์คำนวณ/ตรวจสิทธิ์/เขียน (callable submitNineQ) แล้วแสดงผลให้ครูผู้กรอกเห็น
+  const handleProxyNineQ = () => {
+    setProxyShowErrors(true);
+    const scored = scoreNineQ(nineQProxy);
+    if (!('totalScore' in scored)) return;
+    let resultText = 'บันทึก 9Q แทนนักเรียนเรียบร้อย';
+    return run(async () => {
+      const res = await recordNineQOnBehalf({ studentId, answers: scored.answers });
+      setShowNineQProxy(false); setNineQProxy(EMPTY_NINE_Q_ANSWERS); setProxyShowErrors(false);
+      resultText = `บันทึก 9Q แทนนักเรียนเรียบร้อย — ระดับ ${NINE_Q_RISK_LABEL[res.riskLevel]} (คะแนน ${res.totalScore}/${NINE_Q_TOTAL_MAX})${res.redFlagItem9 ? ' · ธงแดงข้อ 9' : ''}`;
+    }, () => resultText);
   };
 
   return (
@@ -330,7 +355,7 @@ function StudentScreeningDetail({
         <div className="rounded-xl border border-white/10 bg-slate-950/50 p-3 space-y-1" data-testid="detail-8q">
           <div className="font-bold text-slate-200">8Q</div>
           {capsRead8QDetail && record.eightQ ? (
-            <div className="text-slate-300">คะแนน <b className="font-mono">{record.eightQ.totalScore}</b> · {EIGHT_Q_RISK_LABEL[record.eightQ.riskLevel]}{record.eightQ.urgentReferral && <b className="ml-1 text-rose-400">ส่งต่อโรงพยาบาลด่วน</b>} · {record.eightQ.conductedAt}</div>
+            <div className="text-slate-300">คะแนน <b className="font-mono">{record.eightQ.totalScore}</b> · {EIGHT_Q_RISK_LABEL[record.eightQ.riskLevel]}{record.eightQ.urgentReferral && <b className="ml-1 text-rose-400">ส่งต่อโรงพยาบาลด่วน</b>} · {record.eightQ.conductedAt}{record.eightQ.entryPath === 'EMERGENCY' && <span className="ml-1 px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[10px]">ประเมินกรณีฉุกเฉิน</span>}</div>
           ) : (
             <div className="text-slate-300">มีเคสอยู่ในการดูแล: <b className={record.eightQFlag?.hasCase ? 'text-amber-300' : 'text-slate-400'}>{record.eightQFlag?.hasCase ? 'ใช่' : 'ไม่'}</b>{!capsRead8QDetail && <span className="block text-[10px] text-slate-500">คะแนนเป็นของครูแนะแนว</span>}</div>
           )}
@@ -363,6 +388,25 @@ function StudentScreeningDetail({
         </details>
       )}
 
+      {/* กรอก 9Q แทนนักเรียน — นักเรียนบอกคำตอบปากเปล่าระหว่างนั่งคุยกัน (เซิร์ฟเวอร์คำนวณผลและตรวจสิทธิ์) */}
+      {capsRecordNineQ && (
+        <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3 space-y-2 text-xs" data-testid="proxy-9q">
+          <div className="font-bold text-slate-200">กรอก 9Q แทนนักเรียน</div>
+          <p className="text-[10px] text-slate-500">ใช้เมื่อนั่งคุยกับนักเรียนและนักเรียนบอกคำตอบปากเปล่า — หรือใช้ปุ่ม "เปิด 9Q ให้นักเรียนคนนี้" ด้านล่างเพื่อให้นักเรียนตอบเองบนอุปกรณ์ของตัวเองระหว่างที่ท่านอยู่ด้วย</p>
+          {!showNineQProxy ? (
+            <button type="button" onClick={() => setShowNineQProxy(true)} className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-purple-600 hover:bg-purple-500">กรอก 9Q แทนนักเรียน</button>
+          ) : (
+            <div className="space-y-3">
+              <NineQuestionForm answers={nineQProxy} onChange={setNineQProxy} disabled={busy} showErrors={proxyShowErrors} idPrefix={`proxy-nineq-${studentId}`} />
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => { setShowNineQProxy(false); setNineQProxy(EMPTY_NINE_Q_ANSWERS); setProxyShowErrors(false); }} disabled={busy} className="px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5">ยกเลิก</button>
+                <button type="button" onClick={handleProxyNineQ} disabled={busy || !actor} className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 disabled:opacity-50 inline-flex items-center gap-1.5">{busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} บันทึก 9Q</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* เปิด 9Q */}
       {capsOpenNineQ && (
         <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3 space-y-2 text-xs" data-testid="open-9q">
@@ -387,22 +431,36 @@ function StudentScreeningDetail({
         </div>
       )}
 
-      {/* 8Q */}
-      <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3 space-y-2 text-xs" data-testid="eightq-section">
+      {/* 8Q — เส้นทางปกติ (ตามหลัง 9Q) แยกจากทางฉุกเฉิน (ประเมินทันที ไม่ต้องรอขั้นตอนก่อน) */}
+      <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3 space-y-3 text-xs" data-testid="eightq-section">
         <div className="font-bold text-slate-200">บันทึก 8Q (ครูกรอกแทนนักเรียนระหว่างพูดคุย)</div>
         {!capsWriteEightQ ? (
           <p className="text-slate-400" data-testid="eightq-not-allowed">
-            {viewer === 'HOMEROOM_TEACHER' && hasActiveCounselor ? 'ครูแนะแนวเป็นผู้บันทึก 8Q — ท่านเห็นเฉพาะสถานะ "มีเคสอยู่ในการดูแล"' : 'ไม่มีสิทธิ์บันทึก 8Q'}
+            {viewer === 'HOMEROOM_TEACHER' && hasActiveCounselor ? 'ครูแนะแนวเป็นผู้บันทึก 8Q — ท่านเห็นเฉพาะสถานะ "มีเคสอยู่ในการดูแล" (พบเด็กวิกฤตให้แจ้งครูแนะแนวทันที)' : 'ไม่มีสิทธิ์บันทึก 8Q'}
           </p>
-        ) : !unlocked ? (
-          <p className="text-slate-400" data-testid="eightq-locked">8Q เปิดได้เมื่อ 9Q ล่าสุดรวม ≥7 (ระดับน้อยขึ้นไป) หรือมีธงแดงข้อ 9 — ยังไม่เข้าเงื่อนไข</p>
-        ) : !showEightQ ? (
-          <button type="button" onClick={() => setShowEightQ(true)} className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 inline-flex items-center gap-1.5"><ClipboardCheck className="w-3.5 h-3.5" /> {record.eightQ || record.eightQFlag ? 'บันทึก 8Q ครั้งใหม่' : 'บันทึก 8Q'}</button>
+        ) : eightQPath === null ? (
+          <div className="space-y-3">
+            {/* ทางฉุกเฉิน: ไม่ต้องรอ 9Q — เห็นชัดเจนแยกจากเส้นทางปกติ */}
+            <div className="rounded-lg border-2 border-rose-500/60 bg-rose-950/30 p-3 space-y-2" data-testid="eightq-emergency">
+              <p className="text-rose-200 font-semibold">พบนักเรียนมีสัญญาณเสี่ยงฆ่าตัวตาย? ประเมินได้ทันที ไม่ต้องรอผล 9Q</p>
+              <button type="button" onClick={() => setEightQPath('EMERGENCY')} className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 inline-flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> ประเมิน 8Q ทันที (กรณีฉุกเฉิน)</button>
+            </div>
+            {/* เส้นทางปกติ: ตามหลัง 9Q — เงื่อนไข 9Q ≥7/ธงแดงเป็นแค่เหตุผลที่ระบบแนะนำ ไม่ใช่ตัวบล็อก */}
+            <div className="space-y-1.5" data-testid="eightq-normal">
+              {unlocked ? (
+                <p className="text-amber-300">ระบบแนะนำให้ทำ 8Q: 9Q ล่าสุดรวม ≥7 หรือมีธงแดงข้อ 9</p>
+              ) : (
+                <p className="text-slate-400" data-testid="eightq-not-recommended">เส้นทางปกติ: ทำ 8Q ต่อจาก 9Q เมื่อ 9Q ล่าสุดรวม ≥7 หรือมีธงแดงข้อ 9 (ยังไม่เข้าเงื่อนไขแนะนำ)</p>
+              )}
+              <button type="button" onClick={() => setEightQPath('AFTER_9Q')} className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-slate-700 hover:bg-slate-600 inline-flex items-center gap-1.5"><ClipboardCheck className="w-3.5 h-3.5" /> {record.eightQ || record.eightQFlag ? 'บันทึก 8Q ครั้งใหม่ (ตามลำดับปกติ)' : 'บันทึก 8Q (ตามลำดับปกติหลัง 9Q)'}</button>
+            </div>
+          </div>
         ) : (
           <div className="space-y-3">
+            {eightQPath === 'EMERGENCY' && <p className="text-rose-300 font-semibold" data-testid="eightq-emergency-banner">กรณีฉุกเฉิน — ประเมิน 8Q ทันที (ระบบบันทึกว่าเป็นการประเมินกรณีฉุกเฉิน)</p>}
             <EightQuestionForm value={eightQ} onChange={setEightQ} disabled={busy} showErrors={showErrors} idPrefix={`eightq-${studentId}`} />
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => { setShowEightQ(false); setEightQ(EMPTY_EIGHT_Q); setShowErrors(false); }} disabled={busy} className="px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5">ยกเลิก</button>
+              <button type="button" onClick={() => { setEightQPath(null); setEightQ(EMPTY_EIGHT_Q); setShowErrors(false); }} disabled={busy} className="px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5">ยกเลิก</button>
               <button type="button" onClick={handleSaveEightQ} disabled={busy || !actor} className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-50 inline-flex items-center gap-1.5">{busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} บันทึก 8Q</button>
             </div>
           </div>
@@ -422,7 +480,7 @@ function ParentNoticeSection({
   studentId, reasons, notices, actor, busy, run, nineQId, eightQId, canEightQ,
 }: {
   studentId: string; reasons: string[]; notices: ParentNoticeDoc[]; actor: { uid: string; name: string } | null; busy: boolean;
-  run: (fn: () => Promise<void>, okText: string) => Promise<void> | undefined;
+  run: (fn: () => Promise<void>, okText: string | (() => string)) => Promise<void> | undefined;
   nineQId?: string; eightQId?: string; canEightQ: boolean;
 }) {
   const [scope, setScope] = useState<ParentNoticeScope>('NINE_Q');

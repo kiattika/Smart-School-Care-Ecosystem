@@ -90,6 +90,6 @@ describe('Cloud Functions runtime + SDK', () => {
   });
 
   it('deploy script names every function (never bare --only functions)', () => {
-    expect(pkg.scripts.deploy).toBe('firebase deploy --only functions:assignUserRole,functions:createStaffMember,functions:setStaffActive,functions:refreshGuidanceStatus,functions:beforeCreate,functions:beforeSignIn');
+    expect(pkg.scripts.deploy).toBe('firebase deploy --only functions:assignUserRole,functions:createStaffMember,functions:setStaffActive,functions:refreshGuidanceStatus,functions:submitNineQ,functions:beforeCreate,functions:beforeSignIn');
   });
 });

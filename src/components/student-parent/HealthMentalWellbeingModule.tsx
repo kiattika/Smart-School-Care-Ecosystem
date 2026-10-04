@@ -646,7 +646,7 @@ export function HealthMentalWellbeingModule({
           {/* 9Q (ไทย) — แสดงเฉพาะเมื่อ 2Q ล่าสุดเป็นบวก หรือครูเปิดให้; ปิด = ไม่แสดงอะไร (ไม่มีปุ่มให้นักเรียนกดทำเองอิสระ) */}
           {canSelfReport && student.studentUid && (
             <div className="lg:col-span-7">
-              <StudentNineQSection studentId={student.studentId} studentUid={student.studentUid} />
+              <StudentNineQSection studentId={student.studentId} />
             </div>
           )}
         </div>

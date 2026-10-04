@@ -12,7 +12,7 @@ import { EMPTY_NINE_Q_ANSWERS, NineQuestionForm } from '../shared/NineQuestionFo
  * ปิด = ไม่แสดงอะไรเลย (ไม่บอกว่ามีแบบประเมินนี้อยู่)
  * ⚠ นักเรียนห้ามเห็นคะแนนดิบ/ระดับ/ธงแดงของ 9Q — หลังส่งแสดงข้อความกลางๆ เท่านั้น (ผลไปที่ครู; rules ไม่ให้นักเรียนอ่าน 9Q)
  */
-export function StudentNineQSection({ studentId, studentUid }: { studentId: string; studentUid: string }) {
+export function StudentNineQSection({ studentId }: { studentId: string }) {
   const gate = useStudentNineQGate(studentId, true);
   const [answers, setAnswers] = useState<NineQAnswers>(EMPTY_NINE_Q_ANSWERS);
   const [showErrors, setShowErrors] = useState(false);
@@ -41,7 +41,6 @@ export function StudentNineQSection({ studentId, studentUid }: { studentId: stri
   }
 
   if (gate.loading || !gate.basis) return null;
-  const basis = gate.basis;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,7 +50,8 @@ export function StudentNineQSection({ studentId, studentUid }: { studentId: stri
     if (!('totalScore' in scored)) return;
     setSaving(true);
     try {
-      await submitNineQByStudent({ studentId, studentUid, basis, usedBasisIds: gate.usedBasisIds, result: scored });
+      // ส่งแค่คำตอบดิบ — เซิร์ฟเวอร์คำนวณระดับ/ธงแดง ตรวจฐาน และเขียนเอง (ไม่คืนผลให้นักเรียน)
+      await submitNineQByStudent({ studentId, answers: scored.answers });
       setSubmitted(true);
       setAnswers(EMPTY_NINE_Q_ANSWERS);
     } catch (err) {
