@@ -28,6 +28,11 @@ const db = getFirestore(admin.app(), FIRESTORE_DATABASE_ID);
 const BLOCKING_OPTS = { region: 'asia-southeast1', timeoutSeconds: 7 } as const;
 
 const lookups: AccessLookups = {
+  async getStudentEmailFormat() {
+    // ค่าดิบ — resolveAccess ครอบ error/timeout และ sanitize เอง (doc ไม่มี = null → ค่าเริ่มต้น)
+    const snap = await db.collection('school_settings').doc('studentEmailFormat').get();
+    return snap.exists ? snap.data() : null;
+  },
   async findStaffByEmail(email) {
     const snap = await db.collection('staff').where('email', '==', email).limit(5).get();
     return snap.docs.map((d) => ({ id: d.id, roles: d.get('roles'), status: d.get('status') }));

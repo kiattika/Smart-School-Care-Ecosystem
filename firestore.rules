@@ -17,6 +17,16 @@ service cloud.firestore {
       return isSignedIn() && (request.auth.uid == userId || request.auth.token.email == userId);
     }
 
+    // school_settings/studentEmailFormat: ต้องมี prefix + domain ครบ (string, ตัวพิมพ์เล็ก) ผ่าน pattern เดียวกับ
+    // functions/src/studentEmailFormat.ts และ src/lib/studentEmailFormat.ts และไม่มี field อื่นนอกจาก updatedAt/updatedBy
+    function isValidStudentEmailFormat(d) {
+      return d.keys().hasOnly(['prefix', 'domain', 'updatedAt', 'updatedBy'])
+        && d.keys().hasAll(['prefix', 'domain'])
+        && d.prefix is string && d.prefix.matches('^[a-z0-9._-]{0,32}$')
+        && d.domain is string && d.domain.size() <= 253
+        && d.domain.matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$');
+    }
+
     // มีบทบาทอย่างน้อย 1 อย่างใน custom claims — claims ออกโดย blocking functions
     // (beforeUserCreated/beforeUserSignedIn) เท่านั้น: signed-in แต่ไม่มี roles = ไม่ใช่บุคลากร/นักเรียนในทะเบียน
     function hasAnyRole() {
@@ -235,7 +245,18 @@ service cloud.firestore {
     // 10. School Settings (periods_config, etc.)
     match /school_settings/{settingId} {
       allow read: if isSignedIn();
-      allow write: if hasRole('SUPER_ADMIN');
+      // studentEmailFormat มี block เฉพาะด้านล่าง (ตรวจรูปแบบข้อมูลด้วย) — ต้องกันออกจาก wildcard นี้
+      // เพราะ rules หลาย match block ใช้ OR กัน: ถ้าไม่กัน SUPER_ADMIN เขียนค่าอะไรก็ได้ผ่านทางนี้ ข้ามการตรวจรูปแบบ
+      allow write: if hasRole('SUPER_ADMIN') && settingId != 'studentEmailFormat';
+    }
+
+    // 10.1 รูปแบบอีเมลนักเรียน {prefix}{studentId}@{domain} — client สร้างอีเมลตอนเพิ่มนักเรียน และ blocking function
+    // (beforeUserCreated/SignedIn) ใช้จับคู่ตอน login จึงตรวจรูปแบบที่นี่ด้วย (admin SDK ของ function ข้าม rules —
+    // function เองก็ sanitize + fallback เป็น it / utd.ac.th ถ้าค่าผิด) อ่านได้ทุกคนที่ signed-in เหมือน school_settings อื่น
+    match /school_settings/studentEmailFormat {
+      allow read: if isSignedIn();
+      allow create, update: if hasRole('SUPER_ADMIN') && isValidStudentEmailFormat(request.resource.data);
+      allow delete: if hasRole('SUPER_ADMIN');
     }
 
     // 11. Staff Directory

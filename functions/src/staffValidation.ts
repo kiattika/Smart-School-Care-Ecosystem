@@ -4,6 +4,7 @@
  */
 import { ALLOWED_EMAIL_DOMAIN, studentIdFromEmail } from './access';
 import { normalizeEmail } from './email';
+import { DEFAULT_STUDENT_EMAIL_FORMAT, sanitizeStudentEmailFormat, studentEmailTemplate } from './studentEmailFormat';
 
 /** staff doc id (teacherId): ตัวอักษร/ตัวเลขขึ้นต้น ตามด้วยตัวอักษร ตัวเลข - หรือ _ (ยาวไม่เกิน 64) — ห้าม / . ช่องว่าง */
 export const STAFF_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -42,6 +43,8 @@ export interface NewStaffLookups {
   /** staff ทุกคนที่ใช้อีเมลนี้ (รวมคนที่ถูกปิดการใช้งาน) */
   findStaffIdsByEmail(email: string): Promise<string[]>;
   findStudentIdsByEmail(email: string): Promise<string[]>;
+  /** ค่าดิบของ school_settings/studentEmailFormat — ไม่ implement / อ่านไม่ได้ = ใช้ค่าเริ่มต้น (it / utd.ac.th) */
+  getStudentEmailFormat?(): Promise<unknown>;
 }
 
 export type NewStaffError = { ok: false; code: 'invalid-argument' | 'already-exists'; message: string };
@@ -62,8 +65,16 @@ export async function validateNewStaff(input: NewStaffInput, lookups: NewStaffLo
   if (!email.endsWith(`@${ALLOWED_EMAIL_DOMAIN}`)) {
     return fail('invalid-argument', `อีเมลบุคลากรต้องเป็นบัญชีของโรงเรียน (@${ALLOWED_EMAIL_DOMAIN}) เท่านั้น`);
   }
-  if (studentIdFromEmail(email) !== null) {
-    return fail('invalid-argument', 'อีเมลรูปแบบ it{รหัสนักเรียน}@utd.ac.th สงวนไว้สำหรับนักเรียน ใช้เป็นอีเมลบุคลากรไม่ได้');
+  // รูปแบบอีเมลนักเรียนที่ admin ตั้งไว้ (school_settings/studentEmailFormat) สงวนไว้สำหรับนักเรียน
+  let studentFormat = DEFAULT_STUDENT_EMAIL_FORMAT;
+  try {
+    if (lookups.getStudentEmailFormat) studentFormat = sanitizeStudentEmailFormat(await lookups.getStudentEmailFormat());
+  } catch {
+    // อ่าน config ไม่ได้ = ใช้ค่าเริ่มต้น (การสร้างบุคลากรยังตรวจชนกับ field email ของนักเรียนจริงด้านล่างอยู่ดี)
+  }
+  const studentTemplate = studentEmailTemplate(studentFormat);
+  if (studentIdFromEmail(email, studentTemplate) !== null) {
+    return fail('invalid-argument', `อีเมลรูปแบบ ${studentTemplate.replace('{studentId}', '{รหัสนักเรียน}')} สงวนไว้สำหรับนักเรียน ใช้เป็นอีเมลบุคลากรไม่ได้`);
   }
 
   if (!Array.isArray(input.roles) || !input.roles.every((r) => typeof r === 'string' && ROLE_PATTERN.test(r))) {

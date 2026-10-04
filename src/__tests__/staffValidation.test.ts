@@ -68,6 +68,23 @@ describe('validateNewStaff — email', () => {
     expect(l.findStaffIdsByEmail).toHaveBeenCalledWith('new.teacher@utd.ac.th');
   });
 
+  it('reserves the CONFIGURED student pattern (school_settings/studentEmailFormat), not just the default one', async () => {
+    const cfg = { ...lookups(), getStudentEmailFormat: vi.fn(async () => ({ prefix: 's', domain: 'utd.ac.th' })) };
+    const r = await validateNewStaff({ ...good, email: 's38501@utd.ac.th' }, cfg);
+    expect(r).toMatchObject({ ok: false, code: 'invalid-argument' });
+    expect(r.ok === false && r.message).toContain('s{รหัสนักเรียน}@utd.ac.th');
+    // รูปแบบเดิม it… ไม่ถูกสงวนอีกเมื่อ config เปลี่ยนแล้ว (นักเรียนเดิมที่มี field email ยังถูกตรวจชนด้านล่าง)
+    expect(await validateNewStaff({ ...good, email: 'it38501@utd.ac.th' }, cfg)).toMatchObject({ ok: true });
+  });
+
+  it('an unreadable / missing config falls back to the default pattern and never throws', async () => {
+    const broken = { ...lookups(), getStudentEmailFormat: vi.fn(async () => { throw new Error('boom'); }) };
+    expect(await validateNewStaff({ ...good, email: 'it38501@utd.ac.th' }, broken)).toMatchObject({ ok: false, code: 'invalid-argument' });
+    const none = { ...lookups(), getStudentEmailFormat: vi.fn(async () => null) };
+    expect(await validateNewStaff({ ...good, email: 'it38501@utd.ac.th' }, none)).toMatchObject({ ok: false, code: 'invalid-argument' });
+    expect(await validateNewStaff(good, none)).toMatchObject({ ok: true });
+  });
+
   it("rejects an email that is a student's email field", async () => {
     const r = await validateNewStaff(good, lookups({ studentsByEmail: { 'new.teacher@utd.ac.th': ['38599'] } }));
     expect(r).toMatchObject({ ok: false, code: 'already-exists' });

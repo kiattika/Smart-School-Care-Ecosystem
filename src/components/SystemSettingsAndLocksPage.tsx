@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { SchoolCalendarSection } from './admin/SchoolCalendarSection';
+import { StudentEmailFormatSection } from './admin/StudentEmailFormatSection';
 import { DatePicker } from './shared/DatePicker';
 import { TimePicker } from './shared/TimePicker';
 import { 
@@ -373,6 +374,9 @@ export function SystemSettingsAndLocksPage() {
           {/* 1.5 ปฏิทินโรงเรียน — วันหยุดพิเศษ + วันเปิด-ปิดภาคเรียน (school_calendar_events —
               collection แยกจาก school_settings/system_locks ด้านบนโดยตั้งใจ ดู SchoolCalendarSection.tsx) */}
           <SchoolCalendarSection />
+
+          {/* 1.6 รูปแบบอีเมลนักเรียน — school_settings/studentEmailFormat (client + blocking function อ่านค่าเดียวกัน) */}
+          <StudentEmailFormatSection />
 
           {/* 2. Grade Entry Time-Window Settings (ตั้งค่าเปิด-ปิดระบบกรอกเกรด) */}
           <div className="space-y-4">
