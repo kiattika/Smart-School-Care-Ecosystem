@@ -4,8 +4,9 @@ import { computeSdq, SdqEvaluatorType, SdqScores } from '../lib/sdq';
 
 function rec(studentId: string, year: string | null | undefined, scores: Partial<SdqScores> = {}, over: Partial<SdqTrendRecord> = {}): SdqTrendRecord {
   const s: SdqScores = { emotional: 2, conduct: 2, hyperactivity: 2, peerProblems: 2, prosocial: 8, ...scores };
-  const c = computeSdq(s);
-  return { studentId, evaluatorType: 'TEACHER', academicYear: year, assessmentDate: '2026-06-01', subscaleScores: s, totalDifficultiesScore: c.totalDifficultiesScore, triagingStatus: c.triagingStatus, ...over };
+  const evaluatorType = over.evaluatorType ?? 'TEACHER';
+  const c = computeSdq(s, evaluatorType);
+  return { studentId, evaluatorType, academicYear: year, assessmentDate: '2026-06-01', subscaleScores: s, totalDifficultiesScore: c.totalDifficultiesScore, triagingStatus: c.triagingStatus, subscaleStatus: c.subscaleStatus, criteriaVersion: c.criteriaVersion, ...over };
 }
 
 describe('buildSdqTrend', () => {
@@ -80,8 +81,53 @@ describe('buildSdqTrend', () => {
 
   it('counts triage buckets per year and rounds averages to 2 decimals', () => {
     const t = buildSdqTrend([rec('1', '2569', { emotional: 5, conduct: 5, hyperactivity: 5, peerProblems: 2 }), rec('2', '2569'), rec('3', '2569', { emotional: 1 })]);
-    expect(t.years[0].triage).toEqual({ NORMAL: 2, AT_RISK: 0, VULNERABLE: 1 });
+    // ครู: รวม 17 = เสี่ยง (16-17), รวม 8 / 7 = ปกติ
+    expect(t.years[0].triage).toEqual({ NORMAL: 2, AT_RISK: 1, VULNERABLE: 0 });
     expect(t.years[0].averages.emotional).toBe(2.67);
+  });
+});
+
+describe('legacy criteria (records saved before the official criteria)', () => {
+  it('counts records without criteriaVersion per year; their scores/averages still count normally', () => {
+    const legacy = rec('1', '2569', { emotional: 6 }, { criteriaVersion: undefined, subscaleStatus: undefined });
+    const t = buildSdqTrend([legacy, rec('2', '2569', { emotional: 2 })]);
+    expect(t.years[0].legacyCriteria).toBe(1);
+    expect(t.years[0].averages.emotional).toBe(4);
+    expect(buildSdqTrend([rec('1', '2569')]).years[0].legacyCriteria).toBe(0);
+  });
+
+  it('the room roster carries the sub-status and criteria version of the teacher result', () => {
+    const r = buildSdqRoomStatus(['1'], [rec('1', '2569', { emotional: 5 })], '2569');
+    expect(r.rows[0].teacherResult?.criteriaVersion).toBe('dmh-obec-2');
+    expect(r.rows[0].teacherResult?.subscaleStatus?.emotional).toBe('VULNERABLE');
+  });
+});
+
+describe('impact (page 2) in the trend — a separate dimension', () => {
+  const withImpact = (total: number, triage: 'NORMAL' | 'AT_RISK' | 'VULNERABLE') => ({ impactTotalScore: total, impactTriage: triage });
+
+  it('averages impact per year over records that have it; data without impact is ignored (impact null)', () => {
+    const t = buildSdqTrend([
+      rec('1', '2569', {}, withImpact(0, 'NORMAL')),
+      rec('2', '2569', {}, withImpact(4, 'VULNERABLE')),
+      rec('3', '2569'),
+    ]);
+    expect(t.years[0].impact).toEqual({ responses: 2, averageTotal: 2, triage: { NORMAL: 1, AT_RISK: 0, VULNERABLE: 1 } });
+    expect(buildSdqTrend([rec('1', '2569')]).years[0].impact).toBeNull();
+  });
+
+  it('impact delta needs impact data in both of the two latest years; otherwise null (no error)', () => {
+    const both = buildSdqTrend([rec('1', '2569', {}, withImpact(4, 'VULNERABLE')), rec('1', '2570', {}, withImpact(1, 'AT_RISK'))]);
+    expect(both.delta?.impactAverageTotal).toBe(-3);
+    const oneSide = buildSdqTrend([rec('1', '2569'), rec('1', '2570', {}, withImpact(1, 'AT_RISK'))]);
+    expect(oneSide.hasTrend).toBe(true);
+    expect(oneSide.delta?.impactAverageTotal).toBeNull();
+  });
+
+  it('the room roster carries the impact result of the teacher', () => {
+    const r = buildSdqRoomStatus(['1'], [rec('1', '2569', {}, withImpact(2, 'AT_RISK'))], '2569');
+    expect(r.rows[0].teacherResult?.impactTotalScore).toBe(2);
+    expect(r.rows[0].teacherResult?.impactTriage).toBe('AT_RISK');
   });
 });
 

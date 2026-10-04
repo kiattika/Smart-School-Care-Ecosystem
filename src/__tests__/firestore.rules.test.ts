@@ -1794,6 +1794,24 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         }
       });
 
+      it('the impact (page 2) fields ride in the same document: create with them is allowed for all 3 respondents, with or without the gate skip', async () => {
+        await seed();
+        const impactYes = {
+          subscaleStatus: { emotional: 'NORMAL', conduct: 'NORMAL', hyperactivity: 'NORMAL', peerProblems: 'NORMAL', prosocial: 'HAS_STRENGTH' }, criteriaVersion: 'dmh-obec-2',
+          impactGateAnswer: 'YES_DEFINITE', impactDurationMonths: 'M6_12', impactDistressScore: 1,
+          impactDomainScores: { home: 2, friends: 0, classroom: 1, leisure: 0 }, impactTotalScore: 4, impactTriage: 'VULNERABLE',
+        };
+        const impactNo = { impactGateAnswer: 'NO', impactTotalScore: 0, impactTriage: 'NORMAL' };
+        await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(sdqPath('STUDENT')).set(sdqDoc({ respondentUid: STU_UID, ...impactYes })));
+        await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc(sdqPath('PARENT')).set(
+          sdqDoc({ respondentUid: PARENT_UID, evaluatorType: 'PARENT', evaluatorName: 'ผู้ปกครอง', ...impactNo })));
+        await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc(sdqPath('TEACHER')).set(
+          sdqDoc({ respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครู', ...impactYes })));
+        // กฎกันซ้ำยังบังคับเหมือนเดิมแม้มี field เพิ่ม
+        await assertFails(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc(sdqPath('TEACHER')).set(
+          sdqDoc({ respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครู', ...impactNo })));
+      });
+
       it('only SUPER_ADMIN/GUIDANCE_COUNSELOR can update or delete an already-submitted assessment (not the original respondent)', async () => {
         await seed();
         await testEnv.withSecurityRulesDisabled(async (ctx) => {

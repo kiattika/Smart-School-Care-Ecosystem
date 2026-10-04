@@ -2,6 +2,7 @@ import { cn } from "./lib/utils";
 // TASK 1-8 (audit ข้อมูลปลอม): ExecutivePortal เดิมใช้ mockExecutiveData แทบทุก tab — หลังแก้ครบทุก
 // TASK แล้วไม่มีจุดไหนอ่านจาก mockExecutiveData อีกเลย (ทุก tab ใช้ Firestore จริงหรือถูกลบออกเพราะ
 // ไม่มีข้อมูลจริงรองรับ) จึงลบ import นี้ทิ้ง
+import { isLegacySdqCriteria } from './lib/sdq';
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from './lib/firebase';
@@ -142,6 +143,7 @@ export function ExecutivePortal() {
       phq9ElevatedPercent: screeningsPhq9.length > 0 ? Math.round((phq9Elevated / screeningsPhq9.length) * 100) : null,
       totalSdq: sdqAssessments.length,
       sdqAtRisk,
+      sdqLegacyCriteria: sdqAssessments.filter(isLegacySdqCriteria).length,
       sdqAtRiskPercent: sdqAssessments.length > 0 ? Math.round((sdqAtRisk / sdqAssessments.length) * 100) : null,
       infirmaryVisitsThisMonth: infirmaryThisMonth.length,
       infirmaryUrgentThisMonth: infirmaryThisMonth.filter(v => v.isUrgentAlert).length,
@@ -628,6 +630,9 @@ export function ExecutivePortal() {
                   {healthSummary.totalSdq > 0 ? (
                     <>
                       <p className="text-4xl font-bold text-white mb-1">{healthSummary.sdqAtRiskPercent}%</p>
+                      {healthSummary.sdqLegacyCriteria > 0 && (
+                        <p className="text-[10px] text-amber-400/90 mb-1">* {healthSummary.sdqLegacyCriteria} ฉบับคำนวณด้วยเกณฑ์เดิม (ไม่ได้คำนวณย้อนหลัง)</p>
+                      )}
                       <p className="text-xs text-slate-400">กลุ่มเสี่ยง/ต้องดูแล {healthSummary.sdqAtRisk} จาก {healthSummary.totalSdq} ฉบับที่ประเมินแล้ว</p>
                     </>
                   ) : (

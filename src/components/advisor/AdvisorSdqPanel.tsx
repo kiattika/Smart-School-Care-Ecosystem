@@ -4,15 +4,12 @@ import { useStore } from '../../store';
 import { Student, SDQAssessment } from '../../types';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { subscribeAllSDQAssessments } from '../../services/firestoreService';
-import { SDQ_EVALUATOR_LABEL, SDQ_TRIAGE_LABEL, SdqEvaluatorType, computeSdq, isValidAcademicYear, validateSdqScores } from '../../lib/sdq';
+import { SDQ_EVALUATOR_LABEL, SdqEvaluatorType, isValidAcademicYear } from '../../lib/sdq';
+import { buildSdqSubmission } from '../../lib/sdqSubmission';
+import { EMPTY_IMPACT_FORM, ImpactFormValues, SdqEntryForm } from '../shared/SdqEntryForm';
+import { SdqStatusView } from '../shared/SdqStatusView';
 import { buildSdqRoomStatus } from '../../lib/sdqTrend';
-import { EMPTY_SDQ_FORM, SdqFormValues, SdqScoreForm } from '../shared/SdqScoreForm';
-
-const TRIAGE_STYLE = {
-  NORMAL: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30',
-  AT_RISK: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
-  VULNERABLE: 'bg-rose-500/10 text-rose-300 border-rose-500/30',
-} as const;
+import { EMPTY_SDQ_FORM, SdqFormValues } from '../shared/SdqScoreForm';
 
 /**
  * ครูที่ปรึกษากรอก SDQ ของนักเรียนในห้องตัวเอง (AdvisorPortal → เมนู "SDQ")
@@ -41,6 +38,7 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [values, setValues] = useState<SdqFormValues>(EMPTY_SDQ_FORM);
+  const [impact, setImpact] = useState<ImpactFormValues>(EMPTY_IMPACT_FORM);
   const [showErrors, setShowErrors] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
@@ -48,19 +46,19 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
   const selected = students.find(s => s.studentId === selectedId) || null;
   const selectedDone = selected ? !!rowById.get(selected.studentId)?.byEvaluator.TEACHER : false;
 
-  const open = (id: string) => { setSelectedId(id); setValues(EMPTY_SDQ_FORM); setShowErrors(false); setResult(null); };
-  const close = () => { setSelectedId(null); setValues(EMPTY_SDQ_FORM); setShowErrors(false); };
+  const open = (id: string) => { setSelectedId(id); setValues(EMPTY_SDQ_FORM); setImpact(EMPTY_IMPACT_FORM); setShowErrors(false); setResult(null); };
+  const close = () => { setSelectedId(null); setValues(EMPTY_SDQ_FORM); setImpact(EMPTY_IMPACT_FORM); setShowErrors(false); };
 
   const handleSave = async () => {
     if (!selected || !user?.uid) return;
     setShowErrors(true);
     setResult(null);
-    const v = validateSdqScores(values);
-    if (!v.ok) return;
+    // ตรวจทั้ง 2 หน้า (25 ข้อ→5 ด้าน + ผลกระทบ) ก่อนบันทึก — ผิด/ไม่ครบ = แสดง error ต่อช่อง ไม่เขียน Firestore
+    const built = buildSdqSubmission(values, impact, 'TEACHER');
+    if (!built.ok) return;
     if (!yearReady) { setResult({ kind: 'error', message: 'ยังไม่ได้ตั้งปีการศึกษาปัจจุบัน — แจ้งผู้ดูแลระบบให้ตั้งที่หน้า "ปีการศึกษา & ล็อกระบบ"' }); return; }
     setSaving(true);
     try {
-      const computed = computeSdq(v.scores);
       await submitSDQAssessment({
         studentId: selected.studentId,
         // studentUid ต้องตรง students/{id} จริง (rules ตรวจ) — นักเรียนที่ยังไม่เชื่อมบัญชีไม่มี field นี้ = ''
@@ -69,8 +67,7 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
         evaluatorType: 'TEACHER',
         evaluatorName: user.displayName || 'ครูที่ปรึกษา',
         academicYear,
-        subscaleScores: v.scores,
-        ...computed,
+        ...built.fields,
       });
       setResult({ kind: 'ok', message: `บันทึก SDQ ของ ${selected.fullName || selected.name} (ปีการศึกษา ${academicYear}) เรียบร้อย` });
       close();
@@ -132,7 +129,7 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
             <p className="text-xs text-amber-300">นักเรียนคนนี้มีผลประเมินของครูที่ปรึกษาในปี {academicYear} แล้ว — แก้ไขภายหลังไม่ได้ (ติดต่อครูแนะแนวหรือผู้ดูแลระบบหากต้องแก้)</p>
           ) : (
             <>
-              <SdqScoreForm values={values} onChange={setValues} disabled={saving} showErrors={showErrors} />
+              <SdqEntryForm scores={values} onScoresChange={setValues} impact={impact} onImpactChange={setImpact} evaluatorType="TEACHER" disabled={saving} showErrors={showErrors} idPrefix="advisor-sdq" />
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={close} disabled={saving} className="px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5">ยกเลิก</button>
                 <button type="button" onClick={handleSave} disabled={saving || !yearReady}
@@ -177,9 +174,10 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
                       <td className="px-4 py-2.5"><div className="font-semibold text-slate-100">{s.fullName || s.name}</div><div className="text-[10px] text-slate-500 font-mono">ID {s.studentId}</div></td>
                       <td className="px-4 py-2.5" data-testid={`sdq-status-${s.studentId}`}>
                         {done && row?.teacherResult ? (
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold ${TRIAGE_STYLE[row.teacherResult.triagingStatus]}`}>
-                            <CheckCircle2 className="w-3 h-3" /> กรอกแล้ว · {row.teacherResult.totalDifficultiesScore}/40 · {SDQ_TRIAGE_LABEL[row.teacherResult.triagingStatus]}
-                          </span>
+                          <div className="space-y-1">
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-300"><CheckCircle2 className="w-3 h-3" /> กรอกแล้ว</span>
+                            <SdqStatusView rec={row.teacherResult} />
+                          </div>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-white/10 bg-slate-800 text-slate-300 text-[10px] font-bold"><Clock className="w-3 h-3" /> ยังไม่กรอก</span>
                         )}
