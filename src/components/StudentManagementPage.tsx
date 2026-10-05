@@ -5,7 +5,8 @@ import {
   UserCheck, 
   Edit2, 
   Plus, 
-  Trash2, 
+  ArrowRightLeft,
+  History,
   X, 
   Check, 
   Save, 
@@ -31,7 +32,6 @@ import {
   onSnapshot, 
   doc, 
   setDoc, 
-  deleteDoc, 
   serverTimestamp 
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -41,6 +41,12 @@ import { isSameRoom } from '../lib/utils';
 import { normalizeEmail } from '../lib/normalizeEmail';
 import { useStudentEmailFormat } from '../hooks/useStudentEmailFormat';
 import { formatStudentEmail, studentEmailPatternLabel } from '../lib/studentEmailFormat';
+import {
+  INACTIVE_STATUS_REASONS, STUDENT_STATUS_LABELS_TH, currentStatusReason, isStudentActive, statusLabelTh, validateStatusChange,
+  type StudentStatusReason,
+} from '../lib/studentStatus';
+import type { IdConflict } from '../lib/studentIdRegistry';
+import { changeStudentStatus, checkStudentIdConflict, createStudentWithRegistry } from '../services/studentLifecycle';
 
 export interface StudentRecord {
   id: string;
@@ -66,6 +72,9 @@ export interface StudentRecord {
   photoUrl?: string;
   avatar?: string;
   status?: string;
+  statusReason?: string;
+  statusNote?: string;
+  statusChangedAt?: unknown;
   behaviorScore?: number;
   address?: string;
   homeLocation?: {
@@ -93,7 +102,7 @@ const COMMON_ROOMS = [
  * onGoToImport: พาไปเมนู "ระบบนำเข้าข้อมูลขนาดใหญ่" ของ AdminPortal (ชนิด STUDENT) — การนำเข้าข้อมูล
  * มีที่เดียว (BulkDataImportModal แบบ inline ในเมนู 'import') ไม่เปิด modal ซ้ำในหน้านี้
  */
-export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => void } = {}) {
+export function StudentManagementPage({ onGoToImport, onOpenIdRegistry }: { onGoToImport?: () => void; onOpenIdRegistry?: (studentId?: string) => void } = {}) {
   // ดึงข้อมูลนักเรียนจริงจาก Firestore 'students' collection แบบ Real-time
   // รูปแบบอีเมลนักเรียนจาก school_settings/studentEmailFormat (ไม่มี = it / utd.ac.th) — config ตัวเดียวกับที่ blocking function ใช้
   const { format: studentEmailFormat } = useStudentEmailFormat();
@@ -105,7 +114,6 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
   );
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     setIsLoading(true);
@@ -163,6 +171,9 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
             photoUrl: data.photoUrl || data.avatar || '',
             avatar: data.avatar || data.photoUrl || '',
             status: data.status || 'ACTIVE',
+            statusReason: data.statusReason || undefined,
+            statusNote: data.statusNote || '',
+            statusChangedAt: data.statusChangedAt ?? null,
             behaviorScore: data.behaviorScore ?? 100,
             address: data.homeLocation?.address || data.address || '',
             homeLocation: data.homeLocation || {
@@ -227,8 +238,20 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
   const [formParentEmail, setFormParentEmail] = useState('');
   const [formParentMobile, setFormParentMobile] = useState('');
 
-  // Delete Confirm Modal State
-  const [studentToDelete, setStudentToDelete] = useState<StudentRecord | null>(null);
+  // แท็บรายการ: ACTIVE = นักเรียนที่ยังศึกษาอยู่ (ค่าเริ่มต้น), HISTORY = ไม่ได้ศึกษาต่อแล้ว (เอกสารไม่ถูกลบ)
+  const [listTab, setListTab] = useState<'ACTIVE' | 'HISTORY'>('ACTIVE');
+
+  // เปลี่ยนสถานะนักเรียน (แทนปุ่มลบถาวร)
+  const [statusTarget, setStatusTarget] = useState<StudentRecord | null>(null);
+  const [newStatus, setNewStatus] = useState<StudentStatusReason>('WITHDRAWN');
+  const [statusNote, setStatusNote] = useState('');
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [isChangingStatus, setIsChangingStatus] = useState(false);
+  const statusTargetIsActive = statusTarget ? isStudentActive(statusTarget) : true;
+
+  // คำเตือนเลขประจำตัวซ้ำ (เพิ่มนักเรียนใหม่): แสดงครั้งแรก ต้องกดบันทึกอีกครั้งเพื่อยืนยัน
+  const [idConflict, setIdConflict] = useState<IdConflict | null>(null);
+  const [conflictAckedFor, setConflictAckedFor] = useState<string | null>(null);
 
   // Toast / SweetAlert states
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -239,29 +262,34 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
     type: 'success' | 'warning' | 'error';
   } | null>(null);
 
+  // แยกนักเรียนที่ยังศึกษาอยู่ / ประวัติ (ไม่ได้ศึกษาต่อแล้ว)
+  const activeStudents = useMemo(() => studentsList.filter(isStudentActive), [studentsList]);
+  const historyStudents = useMemo(() => studentsList.filter(s => !isStudentActive(s)), [studentsList]);
+  const scopedStudents = listTab === 'ACTIVE' ? activeStudents : historyStudents;
+
   // หาห้องเรียนทั้งหมดที่มีข้อมูลในระบบ
   const availableRooms = useMemo(() => {
     const roomsSet = new Set<string>();
     COMMON_ROOMS.forEach(r => roomsSet.add(r));
-    studentsList.forEach(s => {
+    scopedStudents.forEach(s => {
       if (s.room) roomsSet.add(s.room);
       if (s.className) roomsSet.add(s.className);
     });
     return Array.from(roomsSet).sort((a, b) => a.localeCompare(b, 'th'));
-  }, [studentsList]);
+  }, [scopedStudents]);
 
   // สถิติตัวเลขสรุป
   const stats = useMemo(() => {
-    const total = studentsList.length;
-    const linked = studentsList.filter(s => !!s.parentUid && s.parentUid.trim() !== '').length;
+    const total = scopedStudents.length;
+    const linked = scopedStudents.filter(s => !!s.parentUid && s.parentUid.trim() !== '').length;
     const unlinked = total - linked;
-    const distinctRooms = new Set(studentsList.map(s => s.room).filter(Boolean)).size;
+    const distinctRooms = new Set(scopedStudents.map(s => s.room).filter(Boolean)).size;
     return { total, linked, unlinked, distinctRooms };
-  }, [studentsList]);
+  }, [scopedStudents]);
 
   // กรองตารางรายชื่อนักเรียนตามเงื่อนไขค้นหาและห้องเรียน
   const filteredStudents = useMemo(() => {
-    return studentsList.filter(student => {
+    return scopedStudents.filter(student => {
       // 1. Search Query
       const sQuery = searchQuery.trim().toLowerCase();
       const matchesSearch = !sQuery || (
@@ -288,7 +316,7 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
 
       return matchesSearch && matchesRoom && matchesParentLink;
     });
-  }, [studentsList, searchQuery, selectedRoom, parentLinkFilter]);
+  }, [scopedStudents, searchQuery, selectedRoom, parentLinkFilter]);
 
   // ฟังก์ชันแสดงการแจ้งเตือน
   const triggerToast = (msg: string) => {
@@ -313,7 +341,9 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
     setFormNickname('');
     setFormEmail('');
     setFormRoom(selectedRoom !== 'ALL' ? selectedRoom : '');
-    setFormStudentNo(studentsList.length + 1);
+    setFormStudentNo(activeStudents.length + 1);
+    setIdConflict(null);
+    setConflictAckedFor(null);
     setFormPhotoUrl('');
     setFormAddress('');
     setFormParentUid('');
@@ -339,6 +369,8 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
     setFormParentUid(student.parentUid || student.parentId || '');
     setFormParentEmail(student.parentEmail || '');
     setFormParentMobile(student.parentMobile || '');
+    setIdConflict(null);
+    setConflictAckedFor(null);
     setIsModalOpen(true);
   };
 
@@ -364,6 +396,16 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
 
     setIsSaving(true);
     try {
+      // เพิ่มนักเรียนใหม่: ตรวจเลขประจำตัวกับทะเบียน/เอกสารเดิมก่อน — มีประวัติ = เตือนและให้กดยืนยันอีกครั้ง (ไม่บล็อก)
+      if (isNewStudent && conflictAckedFor !== cleanId) {
+        const conflict = await checkStudentIdConflict(cleanId);
+        setIdConflict(conflict);
+        if (conflict.level !== 'none') {
+          setConflictAckedFor(cleanId);
+          setIsSaving(false);
+          return;
+        }
+      }
       const studentDocRef = doc(db, 'students', cleanId);
       const fullName = `${formPrefix ? formPrefix : ''}${formFirstName.trim()} ${formLastName.trim()}`.trim();
       const parentUidValue = formParentUid.trim() ? formParentUid.trim() : null;
@@ -400,13 +442,18 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
           routeImage: ''
         },
         address: formAddress.trim(),
-        status: editingStudent?.status || 'ACTIVE',
+        // สถานะ (status/statusReason/...) ไม่เขียนจากฟอร์มแก้ไข — เปลี่ยนผ่าน "เปลี่ยนสถานะ" เท่านั้น; นักเรียนใหม่ได้ ACTIVE จาก createStudentWithRegistry
         behaviorScore: editingStudent?.behaviorScore ?? 100,
         updatedAt: serverTimestamp(),
         ...(isNewStudent ? { createdAt: serverTimestamp() } : {})
       };
 
-      await setDoc(studentDocRef, payload, { merge: true });
+      if (isNewStudent) {
+        // นักเรียนใหม่: เขียนเอกสาร + ลงทะเบียนเลขประจำตัวในธุรกรรมเดียว
+        await createStudentWithRegistry({ studentId: cleanId, payload, fullName });
+      } else {
+        await setDoc(studentDocRef, payload, { merge: true });
+      }
 
       setIsModalOpen(false);
       triggerSweetAlert(
@@ -442,23 +489,38 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
     }
   };
 
-  // ลบข้อมูลนักเรียน
-  const handleConfirmDelete = async () => {
-    if (!studentToDelete) return;
-    setIsDeleting(true);
+  // เปลี่ยนสถานะนักเรียน (ห้ามลบเอกสารนักเรียน — ดู firestore.rules students: allow delete: if false)
+  const openStatusChange = (student: StudentRecord) => {
+    setStatusTarget(student);
+    setNewStatus(isStudentActive(student) ? 'WITHDRAWN' : 'ACTIVE');
+    setStatusNote('');
+    setStatusError(null);
+  };
+
+  const handleConfirmStatusChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!statusTarget) return;
+    const check = validateStatusChange(newStatus, statusNote, statusTarget);
+    if ('error' in check) {
+      setStatusError(check.error);
+      return;
+    }
+    setIsChangingStatus(true);
+    setStatusError(null);
     try {
-      await deleteDoc(doc(db, 'students', studentToDelete.id || studentToDelete.studentId));
-      setStudentToDelete(null);
+      await changeStudentStatus({ studentDocId: statusTarget.id || statusTarget.studentId, target: newStatus, note: statusNote });
+      const name = statusTarget.fullName || statusTarget.studentId;
+      setStatusTarget(null);
       triggerSweetAlert(
-        'ลบข้อมูลสำเร็จ',
-        `ลบข้อมูลของ ${studentToDelete.fullName || studentToDelete.studentId} เรียบร้อยแล้ว`,
+        'เปลี่ยนสถานะสำเร็จ',
+        `${name}: ${STUDENT_STATUS_LABELS_TH[newStatus]}${newStatus === 'ACTIVE' ? '' : ' — ย้ายไปแท็บประวัติแล้ว และบันทึกลงทะเบียนเลขประจำตัวเรียบร้อย'}`,
         'success'
       );
     } catch (err) {
-      console.error('Error deleting student:', err);
-      triggerToast(`❌ เกิดข้อผิดพลาดในการลบข้อมูล: ${err instanceof Error ? err.message : String(err)}`);
+      console.error('Error changing student status:', err);
+      setStatusError(`เกิดข้อผิดพลาด: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      setIsDeleting(false);
+      setIsChangingStatus(false);
     }
   };
 
@@ -526,17 +588,49 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
             <span>เพิ่มนักเรียนใหม่</span>
           </button>
 
+          {onOpenIdRegistry && (
+            <button
+              onClick={() => onOpenIdRegistry()}
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-white/10 transition-all cursor-pointer"
+            >
+              <History className="w-4 h-4" />
+              <span>ทะเบียนเลขประจำตัว</span>
+            </button>
+          )}
+
           {/* Info stats pill */}
           <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl px-4 py-2.5 flex items-center gap-3 shrink-0">
             <div className="w-8 h-8 bg-purple-500/10 text-purple-400 rounded-lg flex items-center justify-center">
               <Users className="w-4 h-4" />
             </div>
             <div>
-              <div className="text-[10px] text-slate-400">นักเรียนทั้งหมด</div>
+              <div className="text-[10px] text-slate-400">{listTab === 'ACTIVE' ? 'นักเรียนที่ศึกษาอยู่' : 'ประวัติ (ไม่ได้ศึกษาต่อแล้ว)'}</div>
               <div className="text-sm font-bold text-white font-mono">{stats.total} คน ({stats.distinctRooms} ห้อง)</div>
             </div>
           </div>
         </div>
+      </div>
+
+      {/* แท็บ: รายการหลัก (ศึกษาอยู่) / ประวัติ (ไม่ได้ศึกษาต่อแล้ว) */}
+      <div className="flex items-center gap-2" role="tablist">
+        <button
+          role="tab"
+          aria-selected={listTab === 'ACTIVE'}
+          onClick={() => setListTab('ACTIVE')}
+          data-testid="tab-active"
+          className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${listTab === 'ACTIVE' ? 'bg-purple-600/20 text-purple-200 border-purple-500/40' : 'bg-slate-900/40 text-slate-400 border-white/5 hover:text-slate-200'}`}
+        >
+          ศึกษาอยู่ ({activeStudents.length})
+        </button>
+        <button
+          role="tab"
+          aria-selected={listTab === 'HISTORY'}
+          onClick={() => setListTab('HISTORY')}
+          data-testid="tab-history"
+          className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${listTab === 'HISTORY' ? 'bg-amber-600/20 text-amber-200 border-amber-500/40' : 'bg-slate-900/40 text-slate-400 border-white/5 hover:text-slate-200'}`}
+        >
+          ประวัติ (ไม่ได้ศึกษาต่อแล้ว) ({historyStudents.length})
+        </button>
       </div>
 
       {/* 1. Search & Filter Bar */}
@@ -564,9 +658,9 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
             onChange={(e) => setSelectedRoom(e.target.value)}
             className="w-full bg-slate-950 border border-white/10 rounded-xl pl-16 pr-8 py-2.5 text-xs text-slate-200 focus:border-purple-500 outline-none transition-all appearance-none cursor-pointer"
           >
-            <option value="ALL">ทุกห้องเรียน ({studentsList.length})</option>
+            <option value="ALL">ทุกห้องเรียน ({scopedStudents.length})</option>
             {availableRooms.map(room => {
-              const countInRoom = studentsList.filter(s => isSameRoom(s.room || s.className, room)).length;
+              const countInRoom = scopedStudents.filter(s => isSameRoom(s.room || s.className, room)).length;
               return (
                 <option key={room} value={room}>
                   {room} {countInRoom > 0 ? `(${countInRoom} คน)` : ''}
@@ -621,6 +715,10 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
                       <p className="text-xs font-semibold text-slate-300">กำลังโหลดรายชื่อนักเรียนจากฐานข้อมูล Firestore...</p>
                     </div>
                   </td>
+                </tr>
+              ) : scopedStudents.length === 0 && listTab === 'HISTORY' ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-12 text-center text-slate-500 text-xs">ยังไม่มีนักเรียนที่เปลี่ยนสถานะเป็นไม่ได้ศึกษาต่อแล้ว</td>
                 </tr>
               ) : studentsList.length === 0 ? (
                 <tr>
@@ -712,6 +810,11 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
                                 </span>
                               )}
                             </div>
+                            {listTab === 'HISTORY' && (
+                              <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20" title={student.statusNote || ''}>
+                                {statusLabelTh(student)}{student.statusNote ? ` — ${student.statusNote}` : ''}
+                              </span>
+                            )}
                             {student.address && (
                               <span className="text-[10px] text-slate-500 truncate max-w-[220px] block mt-0.5" title={student.address}>
                                 🏠 {student.address}
@@ -806,12 +909,23 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
                             <RefreshCw className={`w-3.5 h-3.5 ${resyncingStudentId === student.studentId ? 'animate-spin' : ''}`} />
                           </button>
                           <button
-                            onClick={() => setStudentToDelete(student)}
-                            className="p-1.5 bg-slate-800 hover:bg-rose-500/20 hover:text-rose-400 border border-slate-700/60 hover:border-rose-500/30 text-slate-400 rounded-lg transition-all active:scale-[0.97]"
-                            title="ลบข้อมูลนักเรียน"
+                            onClick={() => openStatusChange(student)}
+                            data-testid={`change-status-${student.studentId}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-amber-500/20 hover:text-amber-300 border border-slate-700/60 hover:border-amber-500/30 text-slate-300 text-xs font-semibold rounded-lg transition-all active:scale-[0.97]"
+                            title="เปลี่ยนสถานะนักเรียน (จบ/ลาออก/ย้าย ฯลฯ) — ไม่ลบข้อมูล"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                            <span>เปลี่ยนสถานะ</span>
                           </button>
+                          {onOpenIdRegistry && (
+                            <button
+                              onClick={() => onOpenIdRegistry(student.studentId)}
+                              className="p-1.5 bg-slate-800 hover:bg-indigo-500/20 hover:text-indigo-300 border border-slate-700/60 hover:border-indigo-500/30 text-slate-400 rounded-lg transition-all active:scale-[0.97]"
+                              title="ดูประวัติผู้ถือเลขประจำตัวนี้"
+                            >
+                              <History className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1054,6 +1168,32 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
               </div>
 
               {/* Modal Footer Buttons */}
+
+                {/* คำเตือนเลขประจำตัวซ้ำกับผู้ถือเดิม (ไม่บล็อก — ต้องกดยืนยันอีกครั้ง) */}
+                {isNewStudent && idConflict && idConflict.level !== 'none' && (
+                  <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-4 space-y-2 text-amber-200" data-testid="id-conflict-warning">
+                    <h4 className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                      <AlertTriangle className="w-4 h-4" />
+                      {idConflict.level === 'active-holder'
+                        ? `เลขประจำตัว ${formStudentId.trim()} มีนักเรียนที่ยังศึกษาอยู่ถือครอง (${idConflict.existingHolder}) — การบันทึกจะเขียนทับข้อมูลของเขา`
+                        : `เลขประจำตัว ${formStudentId.trim()} เคยมีผู้ถือครองมาก่อน`}
+                    </h4>
+                    {idConflict.entries.length > 0 && (
+                      <ul className="text-[11px] space-y-0.5 font-mono">
+                        {idConflict.entries.map((e, i) => (
+                          <li key={i}>• {e.heldBy} · {e.from ?? 'ไม่ทราบวันเริ่ม'} → {e.to ?? 'ปัจจุบัน'}{e.reason ? ` (${STUDENT_STATUS_LABELS_TH[e.reason]})` : ''}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {idConflict.level === 'history' && (
+                      <p className="text-[11px] leading-relaxed">
+                        หากยืนยัน ระบบจะเก็บสำเนาข้อมูลเดิมไว้ในทะเบียนเลขประจำตัว แล้วออกเลขนี้ให้นักเรียนคนใหม่ — ข้อมูลที่ผูกกับเลขนี้ (เช่น เช็คชื่อ/ผลประเมินเก่า) จะปะปนกับคนใหม่ ตรวจสอบก่อนยืนยัน
+                      </p>
+                    )}
+                    <p className="text-[11px] font-semibold">กด "บันทึกข้อมูล" อีกครั้งเพื่อยืนยันเพิ่มนักเรียนใหม่</p>
+                  </div>
+                )}
+
               <div className="pt-4 border-t border-white/5 flex items-center justify-end gap-3">
                 <button
                   type="button"
@@ -1085,45 +1225,81 @@ export function StudentManagementPage({ onGoToImport }: { onGoToImport?: () => v
         </div>
       )}
 
-      {/* 4. Delete Confirmation Modal */}
-      {studentToDelete && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-[#11151d] border border-rose-500/20 rounded-2xl max-w-md w-full p-6 text-center shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center bg-rose-500/10 text-rose-400 border border-rose-500/20">
-              <AlertTriangle className="w-7 h-7" />
+      {/* 4. Modal: เปลี่ยนสถานะนักเรียน (แทนการลบถาวร) */}
+      {statusTarget && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in" data-testid="status-change-modal">
+          <form
+            onSubmit={handleConfirmStatusChange}
+            className="bg-[#11151d] border border-amber-500/20 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-in zoom-in-95 duration-200 space-y-4"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 shrink-0 rounded-xl flex items-center justify-center bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <ArrowRightLeft className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-white">เปลี่ยนสถานะนักเรียน</h3>
+                <p className="text-xs text-slate-400 leading-relaxed mt-0.5">
+                  <span className="text-white font-bold">{statusTarget.fullName}</span> (รหัส {statusTarget.studentId}) — สถานะปัจจุบัน:{' '}
+                  <span className="text-amber-300 font-semibold">{statusLabelTh(statusTarget)}</span>
+                </p>
+              </div>
             </div>
-            <h3 className="text-base font-bold text-white mb-2">ยืนยันการลบข้อมูลนักเรียน?</h3>
-            <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-              คุณต้องการลบข้อมูลของ <span className="text-white font-bold">{studentToDelete.fullName}</span> (รหัส {studentToDelete.studentId}) ออกจากฐานข้อมูล Firestore หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้
-            </p>
-            <div className="flex items-center justify-center gap-3">
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">สถานะใหม่ *</label>
+              <select
+                value={newStatus}
+                onChange={(e) => setNewStatus(e.target.value as StudentStatusReason)}
+                className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-slate-200 focus:border-amber-500 outline-none cursor-pointer"
+                data-testid="status-select"
+              >
+                {statusTargetIsActive ? null : <option value="ACTIVE">{STUDENT_STATUS_LABELS_TH.ACTIVE} (กลับมาเรียน)</option>}
+                {INACTIVE_STATUS_REASONS.map(r => (
+                  <option key={r} value={r}>{STUDENT_STATUS_LABELS_TH[r]}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                หมายเหตุ {newStatus === 'ACTIVE' ? '(ไม่บังคับ)' : '*'}
+              </label>
+              <textarea
+                value={statusNote}
+                onChange={(e) => setStatusNote(e.target.value)}
+                rows={3}
+                placeholder={newStatus === 'ACTIVE' ? 'เช่น กลับเข้าเรียนต่อ' : 'เช่น เลขที่หนังสือ/วันที่มีผล/เหตุผล'}
+                className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-slate-200 focus:border-amber-500 outline-none resize-none"
+                data-testid="status-note"
+              />
+            </div>
+
+            {newStatus !== 'ACTIVE' && (
+              <p className="text-[11px] text-amber-200/90 bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 leading-relaxed">
+                ข้อมูลนักเรียนจะ<strong>ไม่ถูกลบ</strong> — ย้ายไปแท็บ "ประวัติ" และเลขประจำตัว {statusTarget.studentId} จะถูกบันทึกในทะเบียนเลขประจำตัวว่าถูกปล่อยแล้ว
+              </p>
+            )}
+            {statusError && <p className="text-xs text-rose-400 font-semibold" data-testid="status-error">{statusError}</p>}
+
+            <div className="flex items-center justify-end gap-3 pt-1">
               <button
                 type="button"
-                onClick={() => setStudentToDelete(null)}
-                className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl border border-white/10 transition-colors"
+                onClick={() => setStatusTarget(null)}
+                disabled={isChangingStatus}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl border border-white/10 transition-colors"
               >
                 ยกเลิก
               </button>
               <button
-                type="button"
-                onClick={handleConfirmDelete}
-                disabled={isDeleting}
-                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-rose-600/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                type="submit"
+                disabled={isChangingStatus}
+                className="inline-flex items-center gap-2 px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-xl shadow-lg transition-all disabled:opacity-50"
               >
-                {isDeleting ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>กำลังลบ...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>ยืนยันลบข้อมูล</span>
-                  </>
-                )}
+                {isChangingStatus ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                <span>{isChangingStatus ? 'กำลังบันทึก...' : 'ยืนยันเปลี่ยนสถานะ'}</span>
               </button>
             </div>
-          </div>
+          </form>
         </div>
       )}
 
