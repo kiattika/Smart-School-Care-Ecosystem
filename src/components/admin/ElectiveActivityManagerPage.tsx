@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { useCurrentSemester } from '../../hooks/useCurrentSemester';
+import { isScheduleInTerm } from '../../lib/scheduleSyncReplace';
 import { Users, Save, Trash2, Loader2, Search, Info, Pencil, X, Lock, Unlock, CalendarClock, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useElectiveActivities } from '../../hooks/useElectiveActivities';
 import { createElectiveActivity, updateElectiveActivity, removeElectiveActivityConfig } from '../../services/firestoreService';
@@ -47,6 +49,7 @@ const DAY_OPTIONS: { value: string; label: string }[] = [
  * src/lib/electiveClubDetection.ts) ไม่มีช่องให้พิมพ์วัน/คาบเองอีกต่อไป
  */
 export function ElectiveActivityManagerPage() {
+  const semester = useCurrentSemester();
   const { user } = useStore();
   const { configs, counts, loading: configsLoading } = useElectiveActivities();
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
@@ -89,11 +92,13 @@ export function ElectiveActivityManagerPage() {
   // ตารางสอนจริงที่ import มา — ใช้ตรวจจับคาบชุมนุมของครูรับผิดชอบที่เลือกไว้ (ดึงวัน/คาบอัตโนมัติ
   // แทนให้แอดมินพิมพ์เอง — ยืนยันจากโรงเรียนแล้วว่าทุกคนมีคาบชุมนุมตามตารางสอนจริงอยู่แล้ว)
   useEffect(() => {
+    if (semester.loading) return;
     const unsub = onSnapshot(collection(db, 'schedules'), (snap) => {
-      setSchedules(snap.docs.map(d => d.data() as ScheduleDocLite));
+      // เฉพาะภาคเรียนปัจจุบัน (doc เก่าที่ไม่มี academicYear/term นับเป็นภาคเรียนปัจจุบัน)
+      setSchedules(snap.docs.filter(d => isScheduleInTerm(d.data(), semester)).map(d => d.data() as ScheduleDocLite));
     }, (err) => console.warn('[ElectiveActivityManagerPage] schedules listener:', err.message));
     return unsub;
-  }, []);
+  }, [semester.loading, semester.academicYear, semester.term]);
 
   // ครูที่รับผิดชอบชุมนุมอื่นอยู่แล้ว (ไม่นับชุมนุมที่กำลังแก้ไขอยู่ตอนนี้) — ตัดออกจากรายชื่อที่
   // เลือกเพิ่มได้ เพราะ 1 คาบเวลาสอนจริง 1 คนสอนได้แค่ที่เดียว เลือกซ้ำจะกลายเป็นสอน 2 ชุมนุมพร้อมกัน

@@ -9,6 +9,36 @@
  * → กิจกรรมเดิมของครูจะโดนตีความว่า stale แล้วโดนลบทั้งหมด (bug "คาบกิจกรรมหายหมด")
  */
 
+/** ภาคเรียนที่ schedule doc สังกัด — academicYear พ.ศ. 4 หลัก (เช่น "2569"), term "1" | "2" (ค่าเดียวกับ school_settings/academic_year) */
+export interface ScheduleSemester { academicYear: string; term: string }
+
+function semesterIdSegment(sem: ScheduleSemester): string {
+  const clean = (v: unknown) => String(v ?? '').replace(/[^\p{L}\p{N}]+/gu, '');
+  const term = clean(sem?.term);
+  const year = clean(sem?.academicYear);
+  // ห้ามสร้าง id โดยไม่มีภาคเรียน — เดิมคือสาเหตุที่ import ภาคเรียนใหม่ทับภาคเรียนเก่า
+  if (!term || !year) throw new Error('scheduleDocIdFor: ต้องระบุ academicYear และ term');
+  return `${term}_${year}`;
+}
+
+/**
+ * schedule doc นี้อยู่ในภาคเรียนที่ระบุไหม — เอกสารเก่าที่ไม่มี academicYear/term (ก่อนมีการกำกับภาคเรียน)
+ * ถือเป็นของภาคเรียนปัจจุบันเสมอ (ไม่ migrate ย้อนหลัง, ไม่ซ่อนเงียบๆ); มีแค่ field เดียวก็เทียบเฉพาะ field ที่มี
+ */
+export function isScheduleInTerm(data: Record<string, any> | null | undefined, sem: ScheduleSemester): boolean {
+  if (!data) return false;
+  const y = data.academicYear, t = data.term;
+  if (y !== undefined && y !== null && y !== '' && String(y) !== String(sem.academicYear)) return false;
+  if (t !== undefined && t !== null && t !== '' && String(t) !== String(sem.term)) return false;
+  return true;
+}
+
+/** เอกสารที่ไม่มี academicYear/term ครบ (ข้อมูลก่อนงานนี้) */
+export function isLegacyUnscopedSchedule(data: Record<string, any> | null | undefined): boolean {
+  if (!data) return false;
+  return !data.academicYear || !data.term;
+}
+
 /**
  * สร้าง schedule document id ให้ตรงกับ handleImport (Teacher Load Report path)
  *
@@ -35,7 +65,7 @@
  */
 export function scheduleDocIdFor(
   subjectCode: string, room: string, level: string, dayOfWeek: string, periodNumber: number,
-  subjectType?: string, teacherKey?: string,
+  subjectType: string | undefined, teacherKey: string | undefined, semester: ScheduleSemester,
 ): string {
   const safeCode = String(subjectCode || 'X').replace(/[^\p{L}\p{N}\p{M}_-]+/gu, '_');
   const cleanRoom = (room || level || 'all').replace(/[^a-zA-Z0-9]/g, '_');
@@ -44,7 +74,7 @@ export function scheduleDocIdFor(
     : '';
   const hasRealRoom = !!(room && String(room).trim());
   const teacherSegment = subjectType === 'ACTIVITY' && !hasRealRoom && safeTeacherKey ? `_t${safeTeacherKey}` : '';
-  return `sch_${safeCode}_${cleanRoom}${teacherSegment}_${dayOfWeek}_p${periodNumber}`;
+  return `sch_${semesterIdSegment(semester)}_${safeCode}_${cleanRoom}${teacherSegment}_${dayOfWeek}_p${periodNumber}`;
 }
 
 /**
@@ -98,6 +128,7 @@ export interface SyncReplacePlan {
 export function computeSyncReplacePlan(
   loadRows: { isValid: boolean; parsedData: Record<string, any> }[],
   existingDocs: { id: string; data: Record<string, any> }[],
+  semester: ScheduleSemester,
 ): SyncReplacePlan {
   const debug: string[] = [];
   const newIds = new Set<string>();
@@ -114,7 +145,7 @@ export function computeSyncReplacePlan(
     const hasError = keys.some(k => teachersWithErrors.has(k));
     if (!hasError) keys.forEach(k => fullyCoveredTeacherKeys.add(k));
     for (const slot of (p.slots || [])) {
-      newIds.add(scheduleDocIdFor(p.subjectCode, p.room, p.level, slot.dayOfWeek, slot.periodNumber, p.subjectType, primaryTeacherKey(p)));
+      newIds.add(scheduleDocIdFor(p.subjectCode, p.room, p.level, slot.dayOfWeek, slot.periodNumber, p.subjectType, primaryTeacherKey(p), semester));
     }
   }
 
@@ -124,6 +155,8 @@ export function computeSyncReplacePlan(
 
   const stale: StaleScheduleDoc[] = [];
   for (const d of existingDocs) {
+    // เทียบเฉพาะภายในภาคเรียนเดียวกัน — ห้ามลบ schedule ของภาคเรียนอื่น (doc ไม่มี field ภาคเรียน = ภาคเรียนปัจจุบัน)
+    if (!isScheduleInTerm(d.data, semester)) continue;
     if (newIds.has(d.id)) continue;
     const docKeys = scheduleTeacherKeys(d.data);
     const belongsToFullyCovered = docKeys.some(k => fullyCoveredTeacherKeys.has(k));

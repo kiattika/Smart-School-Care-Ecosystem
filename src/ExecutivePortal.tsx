@@ -6,6 +6,8 @@ import { isLegacySdqCriteria } from './lib/sdq';
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from './lib/firebase';
+import { useCurrentSemester } from './hooks/useCurrentSemester';
+import { isScheduleInTerm } from './lib/scheduleSyncReplace';
 import { format } from 'date-fns';
 import {
   subscribeLateAttendanceRequests,
@@ -153,7 +155,9 @@ export function ExecutivePortal() {
   // แต่ตัวส่วน (คาบเรียนวันนี้ทั้งโรงเรียน) ต้อง fetch schedules เองเพราะ ExecutivePortal ไม่เคยดึงมาก่อน
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const [todayScheduledPeriodCount, setTodayScheduledPeriodCount] = useState<number | null>(null);
+  const semester = useCurrentSemester();
   useEffect(() => {
+    if (semester.loading) return;
     let cancelled = false;
     (async () => {
       try {
@@ -163,6 +167,8 @@ export function ExecutivePortal() {
         if (cancelled) return;
         const count = snap.docs.filter(d => {
           const v = d.data() as any;
+          // เฉพาะภาคเรียนปัจจุบัน (doc เก่าที่ไม่มี academicYear/term นับเป็นภาคเรียนปัจจุบัน)
+          if (!isScheduleInTerm(v, semester)) return false;
           const dow = typeof v.scheduleDay === 'number' ? dayNames[v.scheduleDay] : String(v.dayOfWeek || '').toLowerCase();
           if (dow !== todayName) return false;
           return !isNonStudentSession(v.subjectName || v.courseName || '', v.subjectCode || v.courseCode || '', v.level);
@@ -174,7 +180,7 @@ export function ExecutivePortal() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [semester.loading, semester.academicYear, semester.term]);
   const todayCompletedPostTeachingCount = useMemo(
     () => postTeachingRecords.filter(r => r.date === todayStr).length,
     [postTeachingRecords, todayStr]

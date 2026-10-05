@@ -26,6 +26,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { useCurrentSemester } from '../hooks/useCurrentSemester';
+import { isScheduleInTerm } from '../lib/scheduleSyncReplace';
 import { useStore } from '../store';
 import { cn, isSameRoom } from '../lib/utils';
 import { isSameStaff, staffIdOf } from '../lib/staffIdentity';
@@ -116,15 +118,18 @@ const APPROVAL_ROLES: UserRole[] = ['HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPU
 
 function useSchedulesCollection(staffById: Map<string, string>) {
   const [raw, setRaw] = useState<any[]>([]);
+  const semester = useCurrentSemester();
 
   useEffect(() => {
+    if (semester.loading) return;
     const unsub = onSnapshot(
       collection(db, 'schedules'),
-      (snap) => setRaw(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      // เฉพาะภาคเรียนปัจจุบัน (doc เก่าที่ไม่มี academicYear/term นับเป็นภาคเรียนปัจจุบัน)
+      (snap) => setRaw(snap.docs.filter(d => isScheduleInTerm(d.data(), semester)).map(d => ({ id: d.id, ...d.data() }))),
       (err) => console.warn('[SubstituteTeachingModule] schedules listener notice:', err.message)
     );
     return () => unsub();
-  }, []);
+  }, [semester.loading, semester.academicYear, semester.term]);
 
   return useMemo<NormalizedSchedule[]>(() => {
     return raw.map((s: any) => {

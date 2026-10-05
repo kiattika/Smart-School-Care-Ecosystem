@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, getDocs } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { useCurrentSemester } from '../../hooks/useCurrentSemester';
+import { isScheduleInTerm } from '../../lib/scheduleSyncReplace';
 import { Bell, Save, Trash2, Loader2, Plus, Info, Search, Wand2, Timer, X } from 'lucide-react';
 import { saveAdminPeriodConfig, deleteAdminPeriodConfig } from '../../services/firestoreService';
 import type { AdminPeriodConfig } from '../../hooks/useTeacherFirestoreSchedule';
@@ -36,6 +38,7 @@ const minutesToTime = (mins: number): string => {
  * (2) gen เวลาอัตโนมัติจากเวลาเริ่ม+ระยะเวลาต่อคาบ (3) ปรับเวลาทั้งวันพร้อมกัน (บวก/ลบนาทีต่อคาบ)
  */
 export function AdminPeriodsConfigPage() {
+  const semester = useCurrentSemester();
   const [periods, setPeriods] = useState<AdminPeriodConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [drafts, setDrafts] = useState<Record<string, AdminPeriodConfig>>({});
@@ -144,6 +147,8 @@ export function AdminPeriodsConfigPage() {
       const snap = await getDocs(collection(db, 'schedules'));
       const found = new Set<number>();
       snap.forEach(d => {
+        // เฉพาะตารางสอนของภาคเรียนปัจจุบัน (doc เก่าที่ไม่มี academicYear/term นับเป็นภาคเรียนปัจจุบัน)
+        if (!isScheduleInTerm(d.data() as any, semester)) return;
         const n = Number((d.data() as any).periodNumber);
         if (Number.isFinite(n) && n >= 0) found.add(n);
       });
