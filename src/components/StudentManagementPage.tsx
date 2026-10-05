@@ -42,7 +42,7 @@ import { normalizeEmail } from '../lib/normalizeEmail';
 import { useStudentEmailFormat } from '../hooks/useStudentEmailFormat';
 import { formatStudentEmail, studentEmailPatternLabel } from '../lib/studentEmailFormat';
 import {
-  INACTIVE_STATUS_REASONS, STUDENT_STATUS_LABELS_TH, currentStatusReason, isStudentActive, statusLabelTh, validateStatusChange,
+  INACTIVE_STATUS_REASONS, STUDENT_STATUS_LABELS_TH, isStudentActive, statusLabelTh, validateStatusChange,
   type StudentStatusReason,
 } from '../lib/studentStatus';
 import type { IdConflict } from '../lib/studentIdRegistry';
