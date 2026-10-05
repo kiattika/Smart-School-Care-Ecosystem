@@ -16,7 +16,8 @@ import { BulkDataImportModal, ImportType } from './components/BulkDataImportModa
 import { IMPORT_ORDER } from './lib/importOrder';
 import { ElectiveActivityManagerPage } from './components/admin/ElectiveActivityManagerPage';
 import { HouseManagerPage } from './components/admin/HouseManagerPage';
-import { BarChart3, Palette } from 'lucide-react';
+import { StudentIdRegistryPage } from './components/admin/StudentIdRegistryPage';
+import { BarChart3, Palette, History } from 'lucide-react';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -53,10 +54,16 @@ const IMPORT_CARD_META: Record<ImportType, {
 const IMPORT_CARDS = IMPORT_ORDER.map((type) => ({ type, ...IMPORT_CARD_META[type] }));
 
 export function AdminPortal() {
-  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods' | 'electives' | 'houses'>('teaching-load');
+  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'id-registry' | 'settings' | 'periods' | 'electives' | 'houses'>('teaching-load');
+  // ทะเบียนเลขประจำตัว: เลขที่ส่งมาจากหน้าจัดการนักเรียนเพื่อเปิดดูประวัติทันที
+  const [registryFocusId, setRegistryFocusId] = useState<string | undefined>(undefined);
+  const openIdRegistry = (studentId?: string) => {
+    setRegistryFocusId(studentId);
+    setActiveTab('id-registry');
+  };
   const [bulkImportType, setBulkImportType] = useState<ImportType>(IMPORT_ORDER[0]);
   const [importBusy, setImportBusy] = useState(false);
-  // การนำเข้าข้อมูลมีที่เดียว: BulkDataImportModal แบบ inline ในเมนู 'import' — หน้าอื่นพามาที่นี่พร้อมเลือกชนิดไว้ให้
+    // การนำเข้าข้อมูลมีที่เดียว: BulkDataImportModal แบบ inline ในเมนู 'import' — หน้าอื่นพามาที่นี่พร้อมเลือกชนิดไว้ให้
   const goToImport = (type: ImportType) => {
     setBulkImportType(type);
     setActiveTab('import');
@@ -82,7 +89,7 @@ export function AdminPortal() {
   };
 
   interface AdminNavItem {
-    id: 'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods' | 'electives' | 'houses';
+    id: 'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'id-registry' | 'settings' | 'periods' | 'electives' | 'houses';
     label: string;
     fullLabel: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -99,6 +106,7 @@ export function AdminPortal() {
     { id: 'sub-analytics', label: 'วิเคราะห์สอนแทน & PA', fullLabel: 'วิเคราะห์งานสอนแทน & PA', icon: BarChart3, badge: null, color: 'text-indigo-400', activeStyle: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-[inset_4px_0_0_rgba(99,102,241,1)]' },
     { id: 'users', label: 'จัดการสิทธิ์บุคลากร', fullLabel: 'จัดการสิทธิ์บุคลากร (User RBAC)', icon: Users, badge: null, color: 'text-blue-400', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
     { id: 'students', label: 'จัดการนักเรียน', fullLabel: 'จัดการข้อมูลนักเรียน (Student Roster)', icon: GraduationCap, badge: null, color: 'text-purple-400', activeStyle: 'bg-purple-500/10 text-purple-400 border-purple-500/20 shadow-[inset_4px_0_0_rgba(168,85,247,1)]' },
+    { id: 'id-registry', label: 'ทะเบียนเลขประจำตัว', fullLabel: 'ทะเบียนเลขประจำตัวนักเรียน (Student ID Registry)', icon: History, badge: null, color: 'text-indigo-400', activeStyle: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-[inset_4px_0_0_rgba(99,102,241,1)]' },
     { id: 'periods', label: 'ตารางเวลา & กระดิ่ง', fullLabel: 'จัดการตารางเวลา & กระดิ่งคาบเรียน', icon: Bell, badge: null, color: 'text-indigo-400', activeStyle: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-[inset_4px_0_0_rgba(99,102,241,1)]' },
     { id: 'electives', label: 'จัดการชุมนุม', fullLabel: 'จัดการชุมนุม (Elective Activities)', icon: Users, badge: null, color: 'text-teal-400', activeStyle: 'bg-teal-500/10 text-teal-400 border-teal-500/20 shadow-[inset_4px_0_0_rgba(20,184,166,1)]' },
     { id: 'houses', label: 'จัดการคณะสี', fullLabel: 'จัดการคณะสี (House)', icon: Palette, badge: null, color: 'text-rose-400', activeStyle: 'bg-rose-500/10 text-rose-400 border-rose-500/20 shadow-[inset_4px_0_0_rgba(244,63,94,1)]' },
@@ -256,7 +264,13 @@ export function AdminPortal() {
 
           {activeTab === 'students' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <StudentManagementPage onGoToImport={() => goToImport('STUDENT')} />
+              <StudentManagementPage onGoToImport={() => goToImport('STUDENT')} onOpenIdRegistry={openIdRegistry} />
+            </div>
+          )}
+
+          {activeTab === 'id-registry' && (
+            <div key={registryFocusId ?? 'all'} className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <StudentIdRegistryPage initialStudentId={registryFocusId} />
             </div>
           )}
 

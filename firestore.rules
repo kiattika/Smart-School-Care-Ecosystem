@@ -97,7 +97,10 @@ service cloud.firestore {
                      hasRole('INSTRUCTIONAL_SUPERVISOR') ||
                      (isSignedIn() && resource.data.parentUid == request.auth.uid) ||
                      (isSignedIn() && resource.data.studentUid == request.auth.uid);
-      allow create, delete: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
+      allow create: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
+      // นักเรียนห้ามลบถาวรทุกกรณี (บันทึกการเช็คชื่อ/ผลประเมิน/ประวัติอ้างถึง) — เปลี่ยนสถานะแทน
+      // (status/statusReason ดู src/lib/studentStatus.ts + ทะเบียนเลขประจำตัว student_id_registry)
+      allow delete: if false;
       // TASK (รูปโปรไฟล์นักเรียน): นักเรียนแก้รูปของตัวเองได้เท่านั้น — จำกัดให้แตะได้แค่ photoUrl/
       // photoUpdatedAt (ตรวจ "ตัวเอง" ผ่าน isSelfStudent() เดียวกับที่ใช้ที่อื่น: students/{id}.studentUid
       // == auth.uid) ห้ามแก้ field อื่นของทะเบียนนักเรียน
@@ -106,6 +109,28 @@ service cloud.firestore {
                          isSelfStudent(studentId) &&
                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['photoUrl', 'photoUpdatedAt'])
                        );
+    }
+
+    // ทะเบียนเลขประจำตัวนักเรียน: student_id_registry/{studentId} = { studentId, entries: [{heldBy, from, to, reason}] }
+    // ประวัติผู้ถือเลข — เขียนโดยแอดมิน/ครูประจำชั้นผ่านการเปลี่ยนสถานะ/เพิ่มนักเรียนเท่านั้น; ห้ามลบ และห้ามทำให้ประวัติสั้นลง
+    // (ข้อมูลระบุตัวบุคคล → อ่านได้เฉพาะ SUPER_ADMIN/HOMEROOM_TEACHER ไม่เปิด bare isSignedIn())
+    match /student_id_registry/{registryId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
+      allow create: if (hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER')) &&
+                       request.resource.data.studentId == registryId &&
+                       request.resource.data.entries is list;
+      allow update: if (hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER')) &&
+                       request.resource.data.studentId == resource.data.studentId &&
+                       request.resource.data.entries is list &&
+                       request.resource.data.entries.size() >= resource.data.entries.size();
+      allow delete: if false;
+
+      // สำเนาเอกสารนักเรียนเดิมก่อนที่เลขประจำตัวถูกออกให้คนใหม่ (เพิ่มได้อย่างเดียว ห้ามแก้/ลบ)
+      match /archived_records/{archiveId} {
+        allow read: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
+        allow create: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
+        allow update, delete: if false;
+      }
     }
 
     // 2. Mental Health & Counseling Self-Assessments (PHQ-9, SDQ)

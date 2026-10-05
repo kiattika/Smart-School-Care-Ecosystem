@@ -115,6 +115,31 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       );
     });
 
+    // นักเรียนห้ามลบถาวร — เปลี่ยนสถานะแทน (students: allow delete: if false)
+    it('DELETE students: ปฏิเสธทุกบทบาท แม้ SUPER_ADMIN / HOMEROOM_TEACHER และเอกสารยังอยู่', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-del').set({ studentId: 'std-del', name: 'ลบไม่ได้', parentUid: 'parent-del', studentUid: 'stu-del' });
+      });
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc('students/std-del').delete());
+      await assertFails(asRole('HOMEROOM_TEACHER').firestore().doc('students/std-del').delete());
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('students/std-del').delete());
+      await assertFails(asUser('parent-del', ['PARENT']).firestore().doc('students/std-del').delete());
+      await assertFails(asUser('stu-del', ['STUDENT']).firestore().doc('students/std-del').delete());
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const snap = await ctx.firestore().doc('students/std-del').get();
+        expect(snap.exists).toBe(true);
+      });
+    });
+
+    it('SUPER_ADMIN เปลี่ยนสถานะนักเรียนได้ (update status/statusReason/statusNote)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-st').set({ studentId: 'std-st', name: 'A', status: 'ACTIVE' });
+      });
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('students/std-st').update({
+        status: 'INACTIVE', statusReason: 'WITHDRAWN', statusNote: 'ลาออก', statusChangedBy: 'test-uid',
+      }));
+    });
+
     // TASK 1: staff roles ที่ต้องใช้ทะเบียนนักเรียนทั้งโรงเรียน (แนะแนว/พยาบาล/การเงิน/ศึกษานิเทศก์)
     it('allows GUIDANCE_COUNSELOR / INFIRMARY_STAFF / FINANCE_STAFF / INSTRUCTIONAL_SUPERVISOR to LIST students', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
@@ -189,6 +214,62 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(studentDb.doc('students/69502').update({ photoUrl: 'evil.jpg' }));
       await assertFails(studentDb.doc('students/69599').set({ studentId: '69599', studentUid: 'stu-uid-1', photoUrl: 'p.jpg' }));
       await assertFails(studentDb.doc('students/69502').delete());
+    });
+  });
+
+  // ทะเบียนเลขประจำตัวนักเรียน (student_id_registry)
+  describe('student_id_registry collection', () => {
+    const entry = (over: object = {}) => ({ heldBy: 'สมชาย', from: '2024-05-15', to: null, reason: null, ...over });
+    const seed = async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('student_id_registry/38501').set({ studentId: '38501', entries: [entry(), entry({ heldBy: 'สมศรี' })] });
+      });
+    };
+
+    it('อ่านได้เฉพาะ SUPER_ADMIN / HOMEROOM_TEACHER; ครู/ผู้ปกครอง/นักเรียน/ผู้ไม่ล็อกอินอ่านไม่ได้', async () => {
+      await seed();
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('student_id_registry/38501').get());
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('student_id_registry/38501').get());
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('student_id_registry/38501').get());
+      await assertFails(asRole('GUIDANCE_COUNSELOR').firestore().doc('student_id_registry/38501').get());
+      await assertFails(asUser('p1', ['PARENT']).firestore().doc('student_id_registry/38501').get());
+      await assertFails(asUser('s1', ['STUDENT']).firestore().doc('student_id_registry/38501').get());
+      await assertFails(asAnonymous().firestore().doc('student_id_registry/38501').get());
+    });
+
+    it('สร้างได้เมื่อ studentId ตรงกับ id เอกสารและ entries เป็น list เท่านั้น', async () => {
+      const db = asRole('SUPER_ADMIN').firestore();
+      await assertSucceeds(db.doc('student_id_registry/40001').set({ studentId: '40001', entries: [entry()] }));
+      await assertFails(db.doc('student_id_registry/40002').set({ studentId: '99999', entries: [entry()] }));
+      await assertFails(db.doc('student_id_registry/40003').set({ studentId: '40003', entries: 'x' }));
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('student_id_registry/40004').set({ studentId: '40004', entries: [] }));
+    });
+
+    it('แก้ได้เฉพาะคงจำนวน/เพิ่มประวัติ — ทำให้ประวัติสั้นลงไม่ได้ และเปลี่ยน studentId ไม่ได้', async () => {
+      await seed();
+      const ref = asRole('SUPER_ADMIN').firestore().doc('student_id_registry/38501');
+      await assertSucceeds(ref.update({ entries: [entry({ to: '2025-01-01', reason: 'WITHDRAWN' }), entry({ heldBy: 'สมศรี' })] })); // ปิดรายการ (ขนาดเท่าเดิม)
+      await assertSucceeds(ref.update({ entries: [entry(), entry(), entry({ heldBy: 'คนใหม่' })] })); // เพิ่มผู้ถือใหม่
+      await assertFails(ref.update({ entries: [entry()] }));            // ลบประวัติ
+      await assertFails(ref.update({ entries: [] }));
+      await assertFails(ref.update({ studentId: '99999' }));
+    });
+
+    it('ห้ามลบเอกสารทะเบียนทุกบทบาท', async () => {
+      await seed();
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc('student_id_registry/38501').delete());
+      await assertFails(asRole('HOMEROOM_TEACHER').firestore().doc('student_id_registry/38501').delete());
+    });
+
+    it('archived_records: เพิ่มได้อย่างเดียว ห้ามแก้/ลบ และอ่านได้เฉพาะแอดมิน/ครูประจำชั้น', async () => {
+      await seed();
+      const db = asRole('SUPER_ADMIN').firestore();
+      await assertSucceeds(db.doc('student_id_registry/38501/archived_records/1').set({ record: { name: 'เก่า' } }));
+      await assertFails(db.doc('student_id_registry/38501/archived_records/1').update({ record: {} }));
+      await assertFails(db.doc('student_id_registry/38501/archived_records/1').delete());
+      await assertSucceeds(db.doc('student_id_registry/38501/archived_records/1').get());
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('student_id_registry/38501/archived_records/1').get());
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('student_id_registry/38501/archived_records/2').set({ record: {} }));
     });
   });
 
