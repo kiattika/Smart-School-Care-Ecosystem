@@ -432,14 +432,16 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
 
     it('TASK 7: generates multi-slot Firestore schedule documents for Mr.Kiattisak ค32201 (4 slots expanded)', () => {
       const { courseRows } = parseTeacherLoadReport(rawReportRows, mockStaffList);
-      const generatedDocs = generateScheduleDocuments(courseRows);
+      const generatedDocs = generateScheduleDocuments(courseRows, { academicYear: '2569', term: '1' });
 
       // Find documents generated from the first course (ค32201)
       const math201Docs = generatedDocs.filter(d => d.subjectCode === 'ค32201');
       expect(math201Docs).toHaveLength(4);
 
       expect(math201Docs[0]).toEqual({
-        id: 'sch_ค32201_943_tuesday_p2',
+        id: 'sch_1_2569_ค32201_943_tuesday_p2',
+        academicYear: '2569',
+        term: '1',
         subjectCode: 'ค32201',
         subjectName: 'คณิตศาสตร์เพิ่มเติม',
         room: '943',
@@ -457,14 +459,14 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
         department: 'คณิตศาสตร์'
       });
 
-      expect(math201Docs[1].id).toBe('sch_ค32201_943_wednesday_p4');
-      expect(math201Docs[2].id).toBe('sch_ค32201_943_thursday_p1');
-      expect(math201Docs[3].id).toBe('sch_ค32201_943_friday_p3');
+      expect(math201Docs[1].id).toBe('sch_1_2569_ค32201_943_wednesday_p4');
+      expect(math201Docs[2].id).toBe('sch_1_2569_ค32201_943_thursday_p1');
+      expect(math201Docs[3].id).toBe('sch_1_2569_ค32201_943_friday_p3');
     });
 
     it('TASK 8: ensures unmatched teacher generates documents with teacherIds: [] and unlinkedTeacherName & unlinkedTeacherEmail populated (NO fabricated IDs)', () => {
       const { courseRows } = parseTeacherLoadReport(rawReportRows, mockStaffList);
-      const generatedDocs = generateScheduleDocuments(courseRows);
+      const generatedDocs = generateScheduleDocuments(courseRows, { academicYear: '2569', term: '1' });
 
       const foreignDocs = generatedDocs.filter(d => d.subjectCode === 'EN32101');
       expect(foreignDocs.length).toBeGreaterThan(0);
@@ -496,7 +498,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
       const { courseRows } = parseTeacherLoadReport(rows, staff);
       expect(courseRows.every(r => r.isValid)).toBe(true);
 
-      const docs = generateScheduleDocuments(courseRows);
+      const docs = generateScheduleDocuments(courseRows, { academicYear: '2569', term: '1' });
       expect(docs).toHaveLength(2);
       // เดิม (ก่อนแก้) ทั้งสอง doc จะมี id เดียวกัน → เหลือ 1 doc ใน Map/Firestore จริง
       expect(docs[0].id).not.toBe(docs[1].id);
@@ -526,7 +528,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
       const { courseRows } = parseTeacherLoadReport(rows, mockStaffList);
       expect(courseRows.every(r => r.isValid)).toBe(true);
 
-      const docs = generateScheduleDocuments(courseRows);
+      const docs = generateScheduleDocuments(courseRows, { academicYear: '2569', term: '1' });
       const hrDocs = docs.filter(d => d.subjectCode === 'HR');
       expect(hrDocs).toHaveLength(1); // ต้องรวมเป็น doc เดียว ไม่ใช่ 2 doc แยกแบบ PLC
 
@@ -545,7 +547,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
           'ลำดับวิชา': '1', 'รหัสวิชา': 'HR', 'ชื่อรายวิชา': 'HomeRoom (กิจกรรม)', 'คาบ/ห้อง': '1 / [943] HR 5/8', 'วัน-คาบที่สอน': 'จ0', 'ระดับ': 'M.5/8', 'สรุปคาบ': '1' },
       ];
       const { courseRows } = parseTeacherLoadReport(rowsReversed, mockStaffList);
-      const docs = generateScheduleDocuments(courseRows).filter(d => d.subjectCode === 'HR');
+      const docs = generateScheduleDocuments(courseRows, { academicYear: '2569', term: '1' }).filter(d => d.subjectCode === 'HR');
       expect(docs).toHaveLength(1);
       expect(docs[0].teacherIds.sort()).toEqual(['teacher-kiattisak-uid', 'teacher-somchai-uid'].sort());
     });

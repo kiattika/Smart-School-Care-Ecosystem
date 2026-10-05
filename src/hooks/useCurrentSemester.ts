@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 
 /**
@@ -28,6 +28,27 @@ function dateFallback(): { academicYear: string; term: '1' | '2' } {
   return { academicYear: String(gregYear + 543), term };
 }
 
+/** ค่าภาคเรียนที่ตั้งไว้จริงใน school_settings/academic_year — ไม่ครบ/ผิดรูปแบบ = null (ห้ามเดา) */
+export function parseConfiguredSemester(data: Record<string, any> | null | undefined): { academicYear: string; term: '1' | '2' } | null {
+  if (data?.academicYear && (data?.semester === '1' || data?.semester === '2')) {
+    return { academicYear: String(data.academicYear), term: data.semester };
+  }
+  return null;
+}
+
+/**
+ * อ่านภาคเรียนที่ตั้งไว้จริงครั้งเดียว (ใช้ตอนนำเข้า/เขียน schedules) — ยังไม่ได้ตั้งค่า = throw
+ * ไม่ใช้ fallback จากวันที่ เพราะค่านี้ถูกประทับลงเอกสารถาวรและเป็นส่วนของ doc id
+ */
+export async function requireConfiguredSemester(): Promise<{ academicYear: string; term: '1' | '2' }> {
+  const snap = await getDoc(doc(db, 'school_settings', 'academic_year'));
+  const sem = parseConfiguredSemester(snap.exists() ? snap.data() : null);
+  if (!sem) {
+    throw new Error('ยังไม่ได้ตั้งค่าปีการศึกษา/ภาคเรียน — กรุณาตั้งค่าที่หน้า "ปีการศึกษา & ล็อกระบบ" ก่อนนำเข้าข้อมูลตารางสอน');
+  }
+  return sem;
+}
+
 export function useCurrentSemester(): CurrentSemester {
   const [state, setState] = useState<Omit<CurrentSemester, 'label'>>(() => ({
     ...dateFallback(),
@@ -39,9 +60,9 @@ export function useCurrentSemester(): CurrentSemester {
     const unsub = onSnapshot(
       doc(db, 'school_settings', 'academic_year'),
       (snap) => {
-        const data = snap.exists() ? snap.data() : null;
-        if (data?.academicYear && (data?.semester === '1' || data?.semester === '2')) {
-          setState({ academicYear: String(data.academicYear), term: data.semester, loading: false, isConfigured: true });
+        const configured = parseConfiguredSemester(snap.exists() ? snap.data() : null);
+        if (configured) {
+          setState({ ...configured, loading: false, isConfigured: true });
         } else {
           setState({ ...dateFallback(), loading: false, isConfigured: false });
         }

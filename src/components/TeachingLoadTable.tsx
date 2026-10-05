@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { collection, onSnapshot, query } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { useCurrentSemester } from '../hooks/useCurrentSemester';
+import { isScheduleInTerm } from '../lib/scheduleSyncReplace';
 import { cn } from '../lib/utils';
 import { matchTeacherByName } from '../utils/teacherLoadReportParser';
 
@@ -73,6 +75,7 @@ interface TeachingLoadTableProps {
 }
 
 export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenImport, className }: TeachingLoadTableProps) {
+  const semester = useCurrentSemester();
   const [searchTerm, setSearchTerm] = useState(initialTeacherName || '');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('ALL');
   const [expandedTeacherIds, setExpandedTeacherIds] = useState<string[]>([]);
@@ -83,6 +86,7 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
 
   // Subscribe to real Firestore collections
   useEffect(() => {
+    if (semester.loading) return;
     setIsLoading(true);
 
     const unsubStaff = onSnapshot(collection(db, 'staff'), (snap) => {
@@ -96,7 +100,8 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
     });
 
     const unsubSchedules = onSnapshot(collection(db, 'schedules'), (snap) => {
-      const scheduleList = snap.docs.map(doc => ({
+      // เฉพาะภาคเรียนปัจจุบัน (doc เก่าที่ไม่มี academicYear/term นับเป็นภาคเรียนปัจจุบัน)
+      const scheduleList = snap.docs.filter(d => isScheduleInTerm(d.data(), semester)).map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
@@ -111,7 +116,7 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
       unsubStaff();
       unsubSchedules();
     };
-  }, []);
+  }, [semester.loading, semester.academicYear, semester.term]);
 
   // Compute live Teacher Teaching Loads by joining staff and schedules
   const teachingLoads: TeacherTeachingLoad[] = useMemo(() => {

@@ -1,4 +1,4 @@
-import { scheduleDocIdFor, primaryTeacherKey } from '../lib/scheduleSyncReplace';
+import { scheduleDocIdFor, primaryTeacherKey, type ScheduleSemester } from '../lib/scheduleSyncReplace';
 
 export type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 
@@ -51,7 +51,9 @@ export interface TeacherLoadCourseRow {
 }
 
 export interface GeneratedScheduleDocument {
-  id: string; // e.g. sch_ค32201_943_tuesday_p2
+  id: string; // e.g. sch_1_2569_ค32201_943_tuesday_p2
+  academicYear: string;
+  term: string;
   subjectCode: string;
   subjectName: string;
   room: string;
@@ -563,7 +565,8 @@ export function parseTeacherLoadReport(
  * ไม่ขึ้นกับลำดับแถวในไฟล์ (merge แบบ set-union ไม่ใช่ last-write-wins)
  */
 export function generateScheduleDocuments(
-  courseRows: TeacherLoadCourseRow[]
+  courseRows: TeacherLoadCourseRow[],
+  semester: ScheduleSemester,
 ): GeneratedScheduleDocument[] {
   const byId = new Map<string, GeneratedScheduleDocument>();
 
@@ -576,11 +579,13 @@ export function generateScheduleDocuments(
     const teacherKey = primaryTeacherKey(row);
 
     for (const slot of row.slots) {
-      const scheduleDocId = scheduleDocIdFor(row.subjectCode, row.room, row.level, slot.dayOfWeek, slot.periodNumber, row.subjectType, teacherKey);
+      const scheduleDocId = scheduleDocIdFor(row.subjectCode, row.room, row.level, slot.dayOfWeek, slot.periodNumber, row.subjectType, teacherKey, semester);
 
       const newTeacherId = row.matchedTeacherId || null;
       const newDoc: GeneratedScheduleDocument = {
         id: scheduleDocId,
+        academicYear: semester.academicYear,
+        term: semester.term,
         subjectCode: row.subjectCode,
         subjectName: row.subjectName,
         room: row.room || '',

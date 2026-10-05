@@ -19,7 +19,8 @@ import {
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { writeBatch, doc, serverTimestamp, collection, getDocs, onSnapshot } from 'firebase/firestore';
-import { computeSyncReplacePlan, scheduleDocIdFor, primaryTeacherKey } from '../lib/scheduleSyncReplace';
+import { computeSyncReplacePlan, scheduleDocIdFor, primaryTeacherKey, type ScheduleSemester } from '../lib/scheduleSyncReplace';
+import { requireConfiguredSemester } from '../hooks/useCurrentSemester';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../lib/firebase';
 import { useStore } from '../store';
@@ -757,6 +758,19 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
       return;
     }
 
+    // ตารางสอนต้องผูกภาคเรียน (ส่วนของ doc id + field academicYear/term) — อ่านค่าที่ตั้งไว้จริงเท่านั้น
+    // ยังไม่ได้ตั้งค่า = หยุดการนำเข้าทั้งหมด ไม่เดา/ไม่ fallback จากวันที่
+    let semesterForImport: ScheduleSemester | null = null;
+    if (importType === 'COURSE') {
+      try {
+        semesterForImport = await requireConfiguredSemester();
+      } catch (err) {
+        setImportError(`❌ ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+    }
+    const sem = semesterForImport as ScheduleSemester;
+
     setIsImporting(true);
     setImportProgress(10);
     setImportError(null);
@@ -792,7 +806,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           if (!parsedData?.isTeacherLoadReport) continue;
           const teacherKey = primaryTeacherKey(parsedData);
           for (const slot of (parsedData.slots || [])) {
-            const scheduleDocId = scheduleDocIdFor(parsedData.subjectCode, parsedData.room, parsedData.level, slot.dayOfWeek, slot.periodNumber, parsedData.subjectType, teacherKey);
+            const scheduleDocId = scheduleDocIdFor(parsedData.subjectCode, parsedData.room, parsedData.level, slot.dayOfWeek, slot.periodNumber, parsedData.subjectType, teacherKey, sem);
             const entry = mergedTeachersByScheduleId.get(scheduleDocId) || {
               teacherIds: [], primaryTeacherId: null, primaryTeacherEmail: null, primaryTeacherName: '',
               unlinkedTeacherName: null, unlinkedTeacherEmail: null,
@@ -943,7 +957,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 // และครูหลายคนมักมีกิจกรรมชื่อเดียวกัน+วัน-คาบเดียวกันพร้อมกันทั้งโรงเรียน — ต้องฝัง
                 // identity ครูเข้าไปใน doc id (ผ่าน scheduleDocIdFor) ไม่งั้น batch.set({merge:true})
                 // ของครูที่ประมวลผลทีหลังในไฟล์จะทับ teacherId ของครูคนก่อนหน้าเงียบๆ ที่ id เดียวกัน
-                const scheduleDocId = scheduleDocIdFor(parsedData.subjectCode, parsedData.room, parsedData.level, slot.dayOfWeek, slot.periodNumber, parsedData.subjectType, teacherKey);
+                const scheduleDocId = scheduleDocIdFor(parsedData.subjectCode, parsedData.room, parsedData.level, slot.dayOfWeek, slot.periodNumber, parsedData.subjectType, teacherKey, sem);
                 const scheduleRef = doc(db, 'schedules', scheduleDocId);
 
                 // TASK 3 (ครูร่วมสอน): ใช้ teacherIds ที่ union มาแล้วจาก mergedTeachersByScheduleId
@@ -959,6 +973,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
 
                 const schedulePayload = {
                   id: scheduleDocId,
+                  academicYear: sem.academicYear,
+                  term: sem.term,
                   subjectCode: parsedData.subjectCode,
                   subjectName: parsedData.subjectName,
                   room: parsedData.room || '',
@@ -990,7 +1006,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                   code: parsedData.subjectCode,
                   name: parsedData.subjectName,
                   room: parsedData.room || parsedData.level || '',
-                  term: '1/2569',
+                  term: `${sem.term}/${sem.academicYear}`,
                   periodIndex: slot.periodNumber,
                   schedule: scheduleLabel,
                   attendanceTaken: false,
@@ -1011,12 +1027,14 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               }
             } else {
               // Legacy Flat Template Course Write
-              const cleanRoom = (parsedData.room || 'all').replace(/[^a-zA-Z0-9]/g, '_');
-              const scheduleDocId = `sch_${parsedData.courseCode}_${cleanRoom}`;
+              // id ผ่านฟังก์ชันกลางเดียวกับเส้นทาง Teacher Load Report (รวมภาคเรียน) — ไฟล์รูปแบบเก่าไม่มีวัน/คาบ จึงใช้ monday/คาบ 1 ตามที่เขียนอยู่เดิม
+              const scheduleDocId = scheduleDocIdFor(parsedData.courseCode, parsedData.room, parsedData.level, 'monday', 1, 'MAIN', undefined, sem);
               const scheduleRef = doc(db, 'schedules', scheduleDocId);
 
               const schedulePayload = {
                 id: scheduleDocId,
+                academicYear: sem.academicYear,
+                term: sem.term,
                 subjectCode: parsedData.courseCode,
                 subjectName: parsedData.courseName,
                 room: parsedData.room,
@@ -1033,13 +1051,13 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
 
               batch.set(scheduleRef, schedulePayload, { merge: true });
 
-              const courseId = `course_${parsedData.courseCode}_${cleanRoom}`;
+              const courseId = `course_${scheduleDocId.slice(4)}`;
               newCoursesToStore.push({
                 id: courseId,
                 code: parsedData.courseCode,
                 name: parsedData.courseName,
                 room: parsedData.room,
-                term: '1/2569',
+                term: `${sem.term}/${sem.academicYear}`,
                 periodIndex: 1,
                 schedule: 'จันทร์ 08:30 - 09:20 น.',
                 attendanceTaken: false,
@@ -1152,12 +1170,15 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
     (async () => {
       setScanningStale(true);
       try {
+        // ยังไม่ได้ตั้งค่าภาคเรียน → ไม่สแกน (handleImport จะหยุดและแจ้ง error เอง); เทียบเฉพาะภายในภาคเรียนเดียวกัน
+        const semester = await requireConfiguredSemester();
         const snap = await getDocs(collection(db, 'schedules'));
         if (cancelled) return;
         const existingDocs = snap.docs.map(d => ({ id: d.id, data: d.data() as Record<string, any> }));
         const plan = computeSyncReplacePlan(
           loadRows.map(r => ({ isValid: r.isValid, parsedData: r.parsedData as Record<string, any> })),
           existingDocs,
+          semester,
         );
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { useCurrentSemester } from './useCurrentSemester';
+import { isScheduleInTerm } from '../lib/scheduleSyncReplace';
 import { normalizeEmail } from '../utils/teacherLoadReportParser';
 
 export interface AdminPeriodConfig {
@@ -61,12 +63,14 @@ const sanitizeForFirestore = <T extends Record<string, any>>(obj: T): Partial<T>
 };
 
 export function useTeacherFirestoreSchedule() {
+  const semester = useCurrentSemester();
   const [periods, setPeriods] = useState<AdminPeriodConfig[]>(DEFAULT_ADMIN_PERIODS);
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (semester.loading) return;
     let unsubscribePeriods = () => {};
     let unsubscribeSchedules = () => {};
 
@@ -94,6 +98,8 @@ export function useTeacherFirestoreSchedule() {
           if (!snapshot.empty) {
             const list: ScheduleItem[] = [];
             snapshot.forEach((docSnap) => {
+              // เฉพาะภาคเรียนปัจจุบัน (doc เก่าที่ไม่มี academicYear/term นับเป็นภาคเรียนปัจจุบัน)
+              if (!isScheduleInTerm(docSnap.data(), semester)) return;
               list.push({ id: docSnap.id, ...docSnap.data() } as ScheduleItem);
             });
             setSchedules(list);
@@ -118,7 +124,7 @@ export function useTeacherFirestoreSchedule() {
       unsubscribePeriods();
       unsubscribeSchedules();
     };
-  }, []);
+  }, [semester.loading, semester.academicYear, semester.term]);
 
   const updateScheduleAttendance = async (scheduleId: string, status: boolean) => {
     const target = schedules.find(s => s.id === scheduleId);
