@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where, Query, CollectionReference } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Student } from '../types';
+import { isStudentActive } from '../lib/studentStatus';
 
 /**
  * Live real-time listener สำหรับ collection `students` ใน Firestore
@@ -63,6 +64,8 @@ function mapDocToStudent(id: string, data: any): Student {
     grade: data.grade || (room.includes('/') ? room.split('/')[0] : room),
     number: studentNo,
     status: data.status || 'ACTIVE',
+    statusReason: data.statusReason || undefined,
+    statusNote: data.statusNote || undefined,
     parentUid: data.parentUid || data.parentId || undefined,
     parentId: data.parentId || data.parentUid || undefined,
     parentEmail: data.parentEmail || '',
@@ -110,10 +113,15 @@ export interface UseRealStudentsOptions {
    * list ทั้ง collection ถูกปฏิเสธสำหรับ role STUDENT
    */
   studentUid?: string | null;
+  /**
+   * true = รวมนักเรียนที่ไม่ได้ศึกษาต่อแล้ว (จบ/ลาออก/ย้าย ฯลฯ) — ค่าเริ่มต้น false: ทุกหน้า portal เห็นเฉพาะนักเรียนที่ยัง ACTIVE
+   * (เอกสารไม่ถูกลบ ดู lib/studentStatus.ts; หน้าจัดการนักเรียนมี listener ของตัวเองและแสดงแท็บประวัติ)
+   */
+  includeInactive?: boolean;
 }
 
 export function useRealStudents(options: UseRealStudentsOptions = {}) {
-  const { parentUid, studentUid } = options;
+  const { parentUid, studentUid, includeInactive = false } = options;
   // ผู้เรียกส่ง key มา = ตั้งใจ query แบบ filtered — ถ้าค่ายังว่าง (auth ยังไม่ resolve)
   // ต้อง "รอ" ไม่ใช่ fallback ไป query ทั้ง collection (ซึ่ง STUDENT/PARENT จะโดน rules ปฏิเสธ
   // แล้วหน้าจอเด้งขึ้น "ยังไม่ได้ผูกกับทะเบียนนักเรียน" ชั่วขณะ ก่อนจะแก้ตัวเองตอน auth มา)
@@ -141,7 +149,9 @@ export function useRealStudents(options: UseRealStudentsOptions = {}) {
     const unsubscribe = onSnapshot(
       ref,
       (snapshot) => {
-        const list = snapshot.docs.map(docSnap => mapDocToStudent(docSnap.id, docSnap.data()));
+        const list = snapshot.docs
+          .filter(docSnap => includeInactive || isStudentActive(docSnap.data()))
+          .map(docSnap => mapDocToStudent(docSnap.id, docSnap.data()));
         list.sort((a, b) => {
           if ((a.room || '') !== (b.room || '')) {
             return (a.room || '').localeCompare(b.room || '', 'th');
@@ -163,7 +173,7 @@ export function useRealStudents(options: UseRealStudentsOptions = {}) {
     );
 
     return () => unsubscribe();
-  }, [parentUid, studentUid, filterNotReady]);
+  }, [parentUid, studentUid, filterNotReady, includeInactive]);
 
   return { students, loading, error };
 }

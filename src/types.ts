@@ -1,3 +1,4 @@
+import type { StudentStatusReason } from "./lib/studentStatus";
 import type { Timestamp } from 'firebase/firestore';
 import { UserProfile, UserRole } from './types/auth';
 
@@ -50,7 +51,11 @@ export interface Student {
   lastName?: string;
   grade?: string;         // ระดับชั้น (ม.5)
   number?: number;        // เลขที่ (1-10)
-  status?: 'ACTIVE' | 'INACTIVE';
+  status?: 'ACTIVE' | 'INACTIVE';   // ไม่มี field = ACTIVE (ข้อมูลเดิม); INACTIVE = ไม่ได้ศึกษาต่อแล้ว (ห้ามลบเอกสารนักเรียน)
+  statusReason?: StudentStatusReason; // เหตุผลละเอียด (ACTIVE/GRADUATED/WITHDRAWN/...) — ดู lib/studentStatus.ts
+  statusChangedAt?: unknown;          // Firestore Timestamp ที่เปลี่ยนสถานะล่าสุด
+  statusChangedBy?: string;           // uid ผู้เปลี่ยน
+  statusNote?: string;                // หมายเหตุ (บังคับเมื่อเปลี่ยนเป็นสถานะที่ไม่ใช่ ACTIVE)
   parentUid?: string;     // Firebase Auth UID ของผู้ปกครอง (เชื่อมโยงตาม Security Rules)
   parentId?: string;      // Alias/Legacy ID
   parentEmail?: string;   // อีเมลผู้ปกครอง
