@@ -27,7 +27,9 @@ import { useStore } from '../store';
 import { Student, Course, GlobalCourse, UserRole } from '../types';
 import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
 import { normalizeEmail } from '../lib/normalizeEmail';
-import { 
+import { IMPORT_TEMPLATES, templateFilename } from '../lib/importTemplates';
+import { summarizeUnlinkedTeachers } from '../lib/importUnlinkedSummary';
+import {
   isTeacherLoadReportFormat, 
   parseTeacherLoadReport, 
   THAI_DAY_MAP 
@@ -73,6 +75,13 @@ export interface BulkDataImportModalProps {
   // หลักของหน้าเอง (เช่นเมนู "นำเข้าภาระงานสอน" ใน AdminPortal.tsx ที่ควรแสดงแบบ routed section
   // เหมือนเมนูอื่นๆ ไม่ใช่ popup ลอย) — เนื้อหา/ฟังก์ชันการทำงานข้างในเหมือนกันทุกประการ เปลี่ยนแค่ wrapper
   variant?: 'modal' | 'inline';
+  // true = ประเภทข้อมูลถูกล็อกจาก initialImportType (ใช้เมื่ออยู่ในการ์ดของหน้านำเข้า): ซ่อน header, ตัวเลือกประเภท
+  // และปุ่มยกเลิก — เหลือเทมเพลต + โซนลากไฟล์ + ตารางตรวจสอบ + ปุ่มยืนยัน; logic parse/เขียนเหมือนเดิมทุกประการ
+  lockImportType?: boolean;
+  // ใช้แทนการสลับประเภทเองเมื่อ lockImportType (เช่น ปุ่ม "ไปนำเข้าบุคลากร" ในคำเตือนของตารางสอน)
+  onRequestSwitchType?: (type: ImportType) => void;
+  // แจ้งผู้ใช้งาน (เจ้าของการ์ด) ว่ากำลังเขียน Firestore อยู่ — กันสลับการ์ดกลางคัน
+  onBusyChange?: (busy: boolean) => void;
 }
 
 export interface ValidatedRow {
@@ -108,7 +117,7 @@ function getFieldValue(normalized: Record<string, any>, candidates: string[]): s
   return '';
 }
 
-export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImportSuccess, variant = 'modal' }: BulkDataImportModalProps) {
+export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImportSuccess, variant = 'modal', lockImportType = false, onRequestSwitchType, onBusyChange }: BulkDataImportModalProps) {
   const [importType, setImportType] = useState<ImportType>(initialImportType || 'STUDENT');
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState<File | null>(null);
@@ -256,22 +265,9 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
     return false;
   }, [importType, userRoles]);
 
-  const templateFilename = (t: ImportType): string =>
-    t === 'STUDENT' ? 'Student_Template.csv'
-    : t === 'TEACHER' ? 'Teacher_Template.csv'
-    : t === 'PARENT' ? 'Parent_Template.csv'
-    : 'Course_Template.csv';
-
-  // Download template CSV file — header row ต้องตรงกับที่ validateRows()/parser คาดหวัง
+  // Download template CSV file — header row ต้องตรงกับที่ validateRows()/parser คาดหวัง (เนื้อหาอยู่ใน lib/importTemplates.ts)
   const handleDownloadTemplate = () => {
-    const templates: Record<ImportType, string> = {
-      STUDENT: 'Student ID,Prefix,FirstName,LastName,Room,StudentNo,ParentMobile\n38501,นาย,กฤตยชญ์,บุญช่วย,ม.5/8,1,0812345678\n38502,นาย,ณัฐพล,สุขสบาย,ม.5/8,2,0898765432\n38503,นางสาว,สมศรี,ใจดี,ม.5/8,3,0861112233',
-      // หมายเหตุ: teacher-04 เว้นคอลัมน์ Roles และ Department ว่าง → ระบบตั้งเป็น SUBJECT_TEACHER อัตโนมัติ
-      TEACHER: 'Teacher ID,Prefix,FirstName,LastName,Position,Email,Roles,Department\nteacher-01,นาย,ทวี,รักเรียน,ครู คศ.1,tawee@utd.ac.th,"SUBJECT_TEACHER,HOMEROOM_TEACHER",math-dept\nteacher-02,นางสาว,สมจิต,แข็งขัน,ครู คศ.2,somjit@utd.ac.th,SUBJECT_TEACHER,sci-dept\nteacher-03,นางสาว,พิมลวรรณ,ศรีงาม,ครูผู้ช่วย,pimonwan@utd.ac.th,GUIDANCE_COUNSELOR,thai-dept\nteacher-04,นาย,ประสงค์,ตั้งใจสอน,ครูผู้ช่วย,prasong@utd.ac.th,,',
-      COURSE: 'Course Code,Course Name,Level,Room,Credits,Instructor ID\nTH32101,ภาษาไทย 3,ม.5,ม.5/8,1.5,teacher-somchai\nMA32101,คณิตศาสตร์พื้นฐาน 3,ม.5,ม.5/8,1.5,teacher-kiattisak\nSCI32201,ฟิสิกส์เพิ่มเติม 1,ม.5,ม.5/8,2.0,teacher-somjai\nEN32101,ภาษาอังกฤษ 3,ม.5,ม.5/8,1.0,teacher-weena',
-      PARENT: 'Student ID,ParentPrefix,ParentFirstName,ParentLastName,ParentNationalId,ParentMobile,Relationship\n38501,นาย,สมชาย,บุญช่วย,1101700207269,0812345678,บิดา\n38502,นาง,มาลี,สุขสบาย,3100600258967,0898765432,มารดา\n38503,นาย,วิรัตน์,ใจดี,1409901259376,0861112233,ผู้ปกครอง',
-    };
-    const headers = templates[importType];
+    const headers = IMPORT_TEMPLATES[importType];
     const filename = templateFilename(importType);
 
     const bom = '\uFEFF';
@@ -1151,6 +1147,16 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   );
   const isValidated = rawParsedRows !== null;
 
+  // ตารางสอน: แถวที่ผ่านตรวจแต่จับคู่ครูไม่ได้ — สรุปให้เห็นก่อนยืนยัน (ไม่นำเข้าเงียบๆ)
+  const unlinkedSummary = useMemo(
+    () => (importType === 'COURSE' ? summarizeUnlinkedTeachers(previewData) : null),
+    [importType, previewData]
+  );
+
+  useEffect(() => {
+    onBusyChange?.(isImporting);
+  }, [isImporting, onBusyChange]);
+
   // ── COURSE sync/replace: หา schedule เก่าของครูที่อยู่ในไฟล์นี้ ที่ไม่มีในไฟล์ใหม่ ──
   // Bulk Import COURSE เขียนแบบ merge เท่านั้น ไม่เคยลบของเก่า → ข้อมูลผีสะสม (เช่น ห้อง 944
   // ที่ไม่มีในไฟล์จริงแต่ค้างจาก import ทดสอบรอบก่อน). สแกนไว้ให้ admin ยืนยันลบก่อน import
@@ -1207,11 +1213,13 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
       : 'fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto animate-fade-in text-slate-200'
     }>
       <div className={isInline
-        ? 'bg-[#11151d] border border-white/10 rounded-2xl w-full shadow-xl flex flex-col overflow-hidden'
+        ? (lockImportType ? 'w-full flex flex-col overflow-hidden' : 'bg-[#11151d] border border-white/10 rounded-2xl w-full shadow-xl flex flex-col overflow-hidden')
         : 'bg-[#11151d] border border-white/10 rounded-2xl max-w-4xl w-full shadow-2xl flex flex-col my-8 max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200'
       }>
 
-        {/* Header — ไม่มีปุ่มปิด (X) ในโหมด inline เพราะไม่มี overlay ให้ปิดกลับไป (ตัวมันเองคือเนื้อหาหลักของหน้าอยู่แล้ว) */}
+        {/* Header — ไม่มีปุ่มปิด (X) ในโหมด inline เพราะไม่มี overlay ให้ปิดกลับไป (ตัวมันเองคือเนื้อหาหลักของหน้าอยู่แล้ว)
+            ซ่อนทั้งหมดเมื่อ lockImportType (การ์ดของหน้านำเข้ามีหัวข้อของตัวเองแล้ว) */}
+        {!lockImportType && (
         <div className="p-6 border-b border-white/5 bg-[#0a0f16] flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex items-center justify-center">
@@ -1234,6 +1242,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           </button>
           )}
         </div>
+        )}
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -1268,7 +1277,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             </div>
           )}
 
-          {/* 1. Import Type Selector */}
+          {/* 1. Import Type Selector — ซ่อนเมื่อประเภทถูกล็อกโดยการ์ด (หน้านำเข้ามีการ์ดต่อประเภทอยู่แล้ว) */}
+          {!lockImportType && (
           <div className="space-y-2">
             <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
               ขั้นตอนที่ 1: เลือกประเภทข้อมูลที่ต้องการนำเข้า
@@ -1304,6 +1314,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               })}
             </div>
           </div>
+          )}
 
           {/* Prerequisite Alert for COURSE import if staff roster is empty in Firestore */}
           {importType === 'COURSE' && !isStaffLoading && realStaffList.length === 0 && (
@@ -1313,19 +1324,23 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 <div>
                   <h4 className="text-xs font-bold">ข้อมูลการจับคู่บัญชีครูผู้สอน</h4>
                   <p className="text-[11px] text-amber-200/90 mt-0.5 leading-relaxed">
-                    ระบบจะใช้คอลัมน์ <strong>อีเมล์</strong> ในไฟล์ตารางสอนเพื่อจับคู่กับบัญชีบุคลากรในระบบโดยอัตโนมัติ หากยังไม่ได้นำเข้ารายชื่อครู ระบบจะบันทึกข้อมูลตารางสอนและอีเมลไว้พร้อมสำหรับการผูกบัญชีในภายหลัง
+                    ระบบจะใช้คอลัมน์ <strong>อีเมล์</strong> ในไฟล์ตารางสอนเพื่อจับคู่กับบัญชีบุคลากรในระบบโดยอัตโนมัติ ตอนนี้ยังไม่มีบุคลากรในระบบ — ควรนำเข้าบุคลากรก่อน มิฉะนั้นระบบจะบันทึกตารางสอนและอีเมลไว้รอผูกบัญชีภายหลัง (ทุกแถวจะไม่ผูกครู)
                   </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => {
+                  if (onRequestSwitchType) {
+                    onRequestSwitchType('TEACHER');
+                    return;
+                  }
                   setImportType('TEACHER');
                   if (file) handleRemoveFile();
                 }}
                 className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold rounded-lg border border-amber-500/40 transition-colors cursor-pointer"
               >
-                <span>สลับไปนำเข้ารายชื่อครู</span>
+                <span>{lockImportType ? 'ไปนำเข้าบุคลากรก่อน' : 'สลับไปนำเข้ารายชื่อครู'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1353,7 +1368,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">
-                ขั้นตอนที่ 2: อัปโหลดไฟล์เอกสาร
+                {lockImportType ? 'อัปโหลดไฟล์เอกสาร' : 'ขั้นตอนที่ 2: อัปโหลดไฟล์เอกสาร'}
               </label>
               
               {/* Template Download Button */}
@@ -1435,7 +1450,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 uppercase tracking-wider">
                   <CheckCircle2 className="w-4 h-4 text-indigo-400" />
-                  <span>ขั้นตอนที่ 3: ตรวจสอบความถูกต้องของข้อมูลจริง ({previewData.length} แถวจากไฟล์)</span>
+                  <span>{lockImportType ? 'ตรวจสอบความถูกต้องของข้อมูลจริง' : 'ขั้นตอนที่ 3: ตรวจสอบความถูกต้องของข้อมูลจริง'} ({previewData.length} แถวจากไฟล์)</span>
                 </div>
                 
                 {/* Badges Summary */}
@@ -1452,6 +1467,28 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                   )}
                 </div>
               </div>
+
+              {/* ตารางสอน: สรุปแถวที่จับคู่ครูไม่ได้ก่อนยืนยัน */}
+              {unlinkedSummary && unlinkedSummary.rowCount > 0 && (
+                <div data-testid="unlinked-teacher-summary" className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-4 flex items-start gap-3 text-amber-200">
+                  <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1.5 text-[11px] leading-relaxed">
+                    <h4 className="text-xs font-bold text-amber-300">
+                      {unlinkedSummary.rowCount} จาก {validCount} แถวที่จะนำเข้า ยังจับคู่ครูไม่ได้ ({unlinkedSummary.teacherCount} คน)
+                    </h4>
+                    <p>
+                      แถวเหล่านี้จะถูกบันทึกโดย<strong>ไม่มีครูผู้สอน</strong> (เก็บชื่อ/อีเมลไว้รอผูกเอง) — วิชาจะยังไม่ขึ้นในหน้าครูจนกว่าจะผูกบัญชี
+                      แนะนำให้<strong>นำเข้าบุคลากรก่อน</strong> (การ์ดข้อ 1) หรือตรวจว่าอีเมลในไฟล์ตรงกับบุคลากรในระบบ แล้วอัปโหลดไฟล์นี้ใหม่
+                    </p>
+                    <details className="text-amber-300/90">
+                      <summary className="cursor-pointer">ดูรายชื่อครูที่ไม่ผูก</summary>
+                      <ul className="mt-1 space-y-0.5 max-h-32 overflow-y-auto font-mono text-[10px]">
+                        {unlinkedSummary.teachers.map(t => <li key={t}>• {t}</li>)}
+                      </ul>
+                    </details>
+                  </div>
+                </div>
+              )}
 
               {/* Preview Table */}
               <div className="border border-white/5 rounded-xl overflow-hidden bg-slate-950/40">
@@ -1595,9 +1632,12 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         {/* Modal Footer */}
         <div className="p-6 border-t border-white/5 bg-[#0a0f16] flex items-center justify-between">
           <div className="text-[10px] text-slate-500">
-            School Management System • Batched Firestore Import Engine
+            {unlinkedSummary && unlinkedSummary.rowCount > 0
+              ? <span className="text-amber-300 font-semibold">⚠️ {unlinkedSummary.rowCount} แถวยังไม่ผูกครู — ดูสรุปด้านบนก่อนยืนยัน</span>
+              : 'School Management System • Batched Firestore Import Engine'}
           </div>
           <div className="flex items-center gap-3">
+            {!lockImportType && (
             <button
               type="button"
               onClick={onClose}
@@ -1606,6 +1646,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             >
               ยกเลิก (Cancel)
             </button>
+            )}
             
             {/* Re-upload trigger */}
             {file && (

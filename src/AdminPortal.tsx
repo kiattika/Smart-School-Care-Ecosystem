@@ -1,7 +1,7 @@
 import { cn } from "./lib/utils";
 import React, { useState } from 'react';
 import { format } from 'date-fns';
-import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, ArrowRight, GraduationCap } from 'lucide-react';
+import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, ArrowRight, GraduationCap, ShieldCheck } from 'lucide-react';
 import clsx, { ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useStore } from './store';
@@ -13,15 +13,49 @@ import { SubstituteTeachingModule } from './components/SubstituteTeachingModule'
 import { SubstituteTeachingAnalyticsModule } from './components/SubstituteTeachingAnalyticsModule';
 import { TeachingLoadTable } from './components/TeachingLoadTable';
 import { BulkDataImportModal, ImportType } from './components/BulkDataImportModal';
+import { IMPORT_ORDER } from './lib/importOrder';
 import { ElectiveActivityManagerPage } from './components/admin/ElectiveActivityManagerPage';
 import { HouseManagerPage } from './components/admin/HouseManagerPage';
 import { BarChart3, Palette } from 'lucide-react';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { motion, AnimatePresence } from 'motion/react';
 
+/** รายละเอียดการ์ดนำเข้า — ลำดับมาจาก IMPORT_ORDER (ลำดับพึ่งพาจริง ดู lib/importOrder.ts) */
+const IMPORT_CARD_META: Record<ImportType, {
+  title: string; description: React.ReactNode; prerequisite: string;
+  icon: React.ComponentType<{ className?: string }>; iconBox: string; openBorder: string;
+}> = {
+  TEACHER: {
+    title: 'นำเข้าบุคลากร (ครู & เจ้าหน้าที่)',
+    description: <>นำเข้ารายชื่อครู, อีเมล (@utd.ac.th), ตำแหน่ง และกลุ่มสาระการเรียนรู้ลง Collection <code className="text-emerald-400 font-mono">staff</code></>,
+    prerequisite: 'ทำก่อนเสมอ — ตารางสอนใช้ข้อมูลนี้จับคู่ครูผู้สอน',
+    icon: Users, iconBox: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400', openBorder: 'border-emerald-500/40',
+  },
+  STUDENT: {
+    title: 'นำเข้านักเรียน & โฮมรูม',
+    description: <>นำเข้าทะเบียนนักเรียนรายห้อง (ม.1 - ม.6), เลขประจำตัว, เลขที่ลง Collection <code className="text-purple-400 font-mono">students</code></>,
+    prerequisite: 'ไม่ต้องรอข้อมูลอื่น — ต้องทำก่อนนำเข้าข้อมูลผู้ปกครอง',
+    icon: UserCheck, iconBox: 'bg-purple-500/10 border-purple-500/20 text-purple-400', openBorder: 'border-purple-500/40',
+  },
+  COURSE: {
+    title: 'นำเข้าตารางสอน & ภาระงานครู',
+    description: <>อ่านไฟล์รายงานภาระงานสอน Excel/CSV และสร้างเอกสารลง Collection <code className="text-blue-400 font-mono">schedules</code> พร้อมจับคู่ครูผู้สอนด้วยอีเมล</>,
+    prerequisite: 'ต้องนำเข้าบุคลากร (ข้อ 1) ก่อน และตั้งค่าปีการศึกษา/ภาคเรียนแล้ว — แถวที่จับคู่ครูไม่ได้จะแจ้งสรุปก่อนยืนยัน',
+    icon: BookOpen, iconBox: 'bg-blue-500/10 border-blue-500/20 text-blue-400', openBorder: 'border-blue-500/40',
+  },
+  PARENT: {
+    title: 'นำเข้าข้อมูลยืนยันตัวตนผู้ปกครอง',
+    description: <>Student ID, ชื่อผู้ปกครอง, เลขบัตร ปชช. (hash SHA-256), เบอร์, ความสัมพันธ์ ลง <code className="text-amber-400 font-mono">parent_verification_records</code> สำหรับเชื่อมบัญชี LINE</>,
+    prerequisite: 'ต้องนำเข้านักเรียน (ข้อ 2) ก่อน — รหัสนักเรียนที่ไม่มีในระบบจะถูกปฏิเสธ',
+    icon: ShieldCheck, iconBox: 'bg-amber-500/10 border-amber-500/20 text-amber-400', openBorder: 'border-amber-500/40',
+  },
+};
+const IMPORT_CARDS = IMPORT_ORDER.map((type) => ({ type, ...IMPORT_CARD_META[type] }));
+
 export function AdminPortal() {
   const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'settings' | 'periods' | 'electives' | 'houses'>('teaching-load');
-  const [bulkImportType, setBulkImportType] = useState<ImportType>('COURSE');
+  const [bulkImportType, setBulkImportType] = useState<ImportType>(IMPORT_ORDER[0]);
+  const [importBusy, setImportBusy] = useState(false);
   // การนำเข้าข้อมูลมีที่เดียว: BulkDataImportModal แบบ inline ในเมนู 'import' — หน้าอื่นพามาที่นี่พร้อมเลือกชนิดไว้ให้
   const goToImport = (type: ImportType) => {
     setBulkImportType(type);
@@ -143,99 +177,62 @@ export function AdminPortal() {
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                   <div className="border-b border-white/5 pb-4">
                     <h2 className="text-2xl font-bold text-white tracking-tight">ระบบนำเข้าข้อมูลขนาดใหญ่ (Bulk Data Import)</h2>
-                    <p className="text-slate-400 mt-1 text-sm">นำเข้าข้อมูลบุคลากรครู, นักเรียน, และรายงานภาระงานสอนลงฐานข้อมูล Firestore</p>
+                    <p className="text-slate-400 mt-1 text-sm">นำเข้าตามลำดับจากบนลงล่าง: บุคลากร → นักเรียน → ตารางสอน → ผู้ปกครอง (แต่ละข้อพึ่งข้อมูลของข้อก่อนหน้า)</p>
                   </div>
 
-                  {/* 3 Unified Import Flow Cards */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                    {/* Course & Schedule Import Card */}
-                    <div className="bg-[#0f1219] border border-blue-500/30 rounded-2xl p-6 shadow-xl relative overflow-hidden flex flex-col justify-between group hover:border-blue-500/60 transition-all">
-                      <div className="space-y-3">
-                        <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-                          <BookOpen className="w-6 h-6" />
+                  {/* การ์ดเดียวต่อประเภทข้อมูล เรียงตามลำดับพึ่งพาจริง:
+                      บุคลากร → นักเรียน → ตารางสอน (จับคู่ครูจาก staff) → ผู้ปกครอง (ตรวจรหัสนักเรียนจาก students)
+                      การ์ดที่เปิดอยู่แสดงเทมเพลต + โซนลากไฟล์ + ตรวจสอบ + ปุ่มยืนยัน ในตัวเอง */}
+                  <div className="space-y-4">
+                    {IMPORT_CARDS.map((card, index) => {
+                      const isOpen = bulkImportType === card.type;
+                      const Icon = card.icon;
+                      return (
+                        <div
+                          key={card.type}
+                          data-testid={`import-card-${card.type}`}
+                          className={cn(
+                            "bg-[#0f1219] border rounded-2xl shadow-xl overflow-hidden transition-all",
+                            isOpen ? card.openBorder : "border-white/10 hover:border-white/20"
+                          )}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => { if (!importBusy) setBulkImportType(card.type); }}
+                            disabled={importBusy && !isOpen}
+                            aria-expanded={isOpen}
+                            className="w-full p-5 flex items-start gap-4 text-left cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            <div className={cn("w-12 h-12 shrink-0 rounded-xl border flex items-center justify-center", card.iconBox)}>
+                              <Icon className="w-6 h-6" />
+                            </div>
+                            <div className="flex-1 min-w-0 space-y-1">
+                              <h3 className="text-base font-bold text-white">{index + 1}. {card.title}</h3>
+                              <p className="text-xs text-slate-400 leading-relaxed">{card.description}</p>
+                              <p className="text-[11px] text-amber-300/90">{card.prerequisite}</p>
+                            </div>
+                            <span className="text-[11px] font-bold text-slate-400 shrink-0 mt-1">{isOpen ? 'กำลังเปิด' : 'เปิดการ์ด'}</span>
+                          </button>
+                          {isOpen && (
+                            <div className="border-t border-white/5 bg-[#11151d] p-5">
+                              <BulkDataImportModal
+                                isOpen={true}
+                                onClose={() => {}}
+                                initialImportType={card.type}
+                                lockImportType
+                                variant="inline"
+                                onRequestSwitchType={(t) => { if (!importBusy) setBulkImportType(t); }}
+                                onBusyChange={setImportBusy}
+                                onImportSuccess={(type, count) => {
+                                  showToast(`นำเข้าข้อมูล ${type} สำเร็จ (${count} รายการ)`);
+                                }}
+                              />
+                            </div>
+                          )}
                         </div>
-                        <h3 className="text-lg font-bold text-white">1. นำเข้าตารางสอน & ภาระงานครู</h3>
-                        <p className="text-xs text-slate-400 leading-relaxed">
-                          อ่านไฟล์รายงานภาระงานสอน Excel (.xlsx) และสร้างเอกสารลงใน Collection <code className="text-blue-400 font-mono">schedules</code> พร้อมจับคู่ครูผู้สอนอัตโนมัติ
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => setBulkImportType('COURSE')}
-                        className={cn(
-                          "mt-6 w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer border",
-                          bulkImportType === 'COURSE'
-                            ? "bg-blue-600/40 text-blue-200 border-blue-400/60"
-                            : "bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border-blue-500/30"
-                        )}
-                      >
-                        <span>{bulkImportType === 'COURSE' ? 'กำลังเลือกอยู่ — ดูฟอร์มด้านล่าง' : 'นำเข้าไฟล์ตารางสอน'}</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    {/* Teacher Import Card */}
-                    <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl relative overflow-hidden flex flex-col justify-between group hover:border-white/20 transition-all">
-                      <div className="space-y-3">
-                        <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                          <Users className="w-6 h-6" />
-                        </div>
-                        <h3 className="text-lg font-bold text-white">2. นำเข้าข้อมูลครู & บุคลากร</h3>
-                        <p className="text-xs text-slate-400 leading-relaxed">
-                          นำเข้ารายชื่อครู, อีเมล (@utd.ac.th), ตำแหน่ง และกลุ่มสาระการเรียนรู้ลง Collection <code className="text-emerald-400 font-mono">staff</code>
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => setBulkImportType('TEACHER')}
-                        className={cn(
-                          "mt-6 w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer border",
-                          bulkImportType === 'TEACHER'
-                            ? "bg-emerald-600/40 text-emerald-200 border-emerald-400/60"
-                            : "bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border-emerald-500/30"
-                        )}
-                      >
-                        <span>{bulkImportType === 'TEACHER' ? 'กำลังเลือกอยู่ — ดูฟอร์มด้านล่าง' : 'นำเข้ารายชื่อครู'}</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    {/* Student Import Card */}
-                    <div className="bg-[#0f1219] border border-white/10 rounded-2xl p-6 shadow-xl relative overflow-hidden flex flex-col justify-between group hover:border-white/20 transition-all">
-                      <div className="space-y-3">
-                        <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
-                          <UserCheck className="w-6 h-6" />
-                        </div>
-                        <h3 className="text-lg font-bold text-white">3. นำเข้าข้อมูลนักเรียน & โฮมรูม</h3>
-                        <p className="text-xs text-slate-400 leading-relaxed">
-                          นำเข้าทะเบียนนักเรียนรายห้อง (ม.1 - ม.6), เลขประจำตัว, และครูที่ปรึกษาลง Collection <code className="text-purple-400 font-mono">students</code>
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => setBulkImportType('STUDENT')}
-                        className={cn(
-                          "mt-6 w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer border",
-                          bulkImportType === 'STUDENT'
-                            ? "bg-purple-600/40 text-purple-200 border-purple-400/60"
-                            : "bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border-purple-500/30"
-                        )}
-                      >
-                        <span>{bulkImportType === 'STUDENT' ? 'กำลังเลือกอยู่ — ดูฟอร์มด้านล่าง' : 'นำเข้ารายชื่อนักเรียน'}</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                      );
+                    })}
                   </div>
-
-                  {/* TASK 5: render เป็น section เต็มหน้าตรงนี้เลย (variant="inline") แทนที่จะเป็น
-                      popup overlay ลอย — เนื้อหา/ฟังก์ชันข้างในเหมือนเดิมทุกประการ เปลี่ยนแค่ wrapper
-                      เปลี่ยนประเภทไฟล์ที่จะนำเข้าได้จาก 3 การ์ดด้านบน (bulkImportType) */}
-                  <BulkDataImportModal
-                    isOpen={true}
-                    onClose={() => {}}
-                    initialImportType={bulkImportType}
-                    variant="inline"
-                    onImportSuccess={(type, count) => {
-                      showToast(`นำเข้าข้อมูล ${type} สำเร็จ (${count} รายการ)`);
-                    }}
-                  />
                 </div>
               )}
 
