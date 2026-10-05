@@ -9,6 +9,7 @@ import { isStaffInactive } from './access';
 import { setActiveError } from './roleGuards';
 import { validateNewStaff } from './staffValidation';
 import { refreshGuidanceStatusSafely } from './guidanceStatus';
+import { validateStatusRequest } from './staffStatusReasons';
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -80,6 +81,7 @@ export const createStaffMember = functions.https.onCall(async (data, context) =>
     roles: s.roles,
     departmentId: s.departmentId,
     status: 'ACTIVE',
+    statusReason: 'ACTIVE',
     createdBy: callerUid,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
@@ -105,24 +107,25 @@ export const createStaffMember = functions.https.onCall(async (data, context) =>
 
 /**
  * ปิด/เปิดการใช้งานบุคลากร — ไม่ลบ staff doc (บันทึกย้อนหลังยังอ้างถึง)
- * - ปิด: status 'INACTIVE' + deactivatedAt/By/Reason, ล้าง custom claims, revokeRefreshTokens
+ * - ปิด: status 'INACTIVE' + statusReason (มาตรา 107: RETIRED/RESIGNED/TRANSFERRED/ORDERED_TO_LEAVE/DISCIPLINARY_DISMISSAL/DECEASED —
+ *   บังคับ) + deactivatedAt/By + deactivationReason (หมายเหตุอิสระ เสริม; บังคับเฉพาะ ORDERED_TO_LEAVE),
+ *   ล้าง custom claims, revokeRefreshTokens
  *   (blocking function ปฏิเสธการ login ครั้งถัดไปด้วย STAFF_INACTIVE)
- * - เปิด: status 'ACTIVE' — claims จะถูกออกใหม่ตอน login ครั้งถัดไป
+ * - เปิด: status 'ACTIVE' + statusReason 'ACTIVE' — claims จะถูกออกใหม่ตอน login ครั้งถัดไป
  */
 export const setStaffActive = functions.https.onCall(async (data, context) => {
   const callerUid = requireSuperAdmin(context);
 
-  const { staffId, active, reason } = data || {};
+  const { staffId, active, reason, statusReason } = data || {};
   if (typeof staffId !== 'string' || !staffId || staffId.includes('/') || typeof active !== 'boolean') {
     throw new functions.https.HttpsError('invalid-argument', 'ต้องระบุ staffId และ active (true/false)');
   }
-  const reasonText = typeof reason === 'string' ? reason.trim() : '';
-  if (!active && !reasonText) {
-    throw new functions.https.HttpsError('invalid-argument', 'กรุณาระบุเหตุผลในการปิดการใช้งาน');
+  // INACTIVE ต้องมี statusReason ที่ไม่ใช่ ACTIVE เสมอ; หมายเหตุอิสระบังคับเฉพาะ ORDERED_TO_LEAVE (ดู staffStatusReasons.ts)
+  const request = validateStatusRequest({ active, statusReason, reason });
+  if (!request.ok) {
+    throw new functions.https.HttpsError('invalid-argument', request.message);
   }
-  if (reasonText.length > 500) {
-    throw new functions.https.HttpsError('invalid-argument', 'เหตุผลยาวได้ไม่เกิน 500 ตัวอักษร');
-  }
+  const reasonText = request.note;
 
   const staffRef = db.collection('staff').doc(staffId);
   const staffSnap = await staffRef.get();
@@ -155,6 +158,7 @@ export const setStaffActive = functions.https.onCall(async (data, context) => {
   const fields: Record<string, unknown> = active
     ? {
         status: 'ACTIVE',
+        statusReason: 'ACTIVE',
         reactivatedAt: FieldValue.serverTimestamp(),
         reactivatedBy: callerUid,
         deactivatedAt: FieldValue.delete(),
@@ -164,6 +168,7 @@ export const setStaffActive = functions.https.onCall(async (data, context) => {
       }
     : {
         status: 'INACTIVE',
+        statusReason: request.statusReason,
         deactivatedAt: FieldValue.serverTimestamp(),
         deactivatedBy: callerUid,
         deactivationReason: reasonText,
@@ -187,5 +192,5 @@ export const setStaffActive = functions.https.onCall(async (data, context) => {
   }
 
   await refreshGuidanceStatusSafely(); // ปิด/เปิดครูแนะแนวเปลี่ยนสิทธิ์ของครูที่ปรึกษา (ดู guidanceStatus.ts)
-  return { success: true, staffId, active, targetUid: targetUser?.uid ?? null };
+  return { success: true, staffId, active, statusReason: request.statusReason, targetUid: targetUser?.uid ?? null };
 });

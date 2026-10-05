@@ -1,3 +1,4 @@
+import type { StaffStatusReason } from "../lib/staffStatusReasons";
 // 1. นิยามบทบาทหลักทั้งหมดในโรงเรียน
 export type UserRole = 
   | 'SUPER_ADMIN'          // แอดมินดูแลระบบ
@@ -41,6 +42,8 @@ export interface UserProfile {
   roles: UserRole[];        // รองรับการเป็นหลายบทบาท เช่น ['HOMEROOM_TEACHER', 'HEAD_OF_DEPARTMENT']
   /** 'INACTIVE' = ถูกปิดการใช้งาน (callable setStaffActive) — ไม่มี = ใช้งานได้ ดู src/lib/staffStatus.ts */
   status?: 'ACTIVE' | 'INACTIVE';
+  /** เหตุผลตามมาตรา 107 (ACTIVE เมื่อใช้งานอยู่) — ข้อมูลที่ปิดไว้ก่อนมีระบบนี้ไม่มี field นี้ */
+  statusReason?: StaffStatusReason;
   deactivationReason?: string;
   
   // ข้อมูลผูกพันตามบทบาท (Contextual Assignments)

@@ -262,15 +262,31 @@ describe.skipIf(!AUTH_HOST || !FS_HOST)('staff create / deactivate / reactivate 
   });
 
   it('a SUPER_ADMIN cannot deactivate themselves', async () => {
-    const err = await callError(setStaffActive, { staffId: 'admin-77', active: false, reason: 'ทดสอบ' });
+    const err = await callError(setStaffActive, { staffId: 'admin-77', active: false, statusReason: 'RESIGNED', reason: 'ทดสอบ' });
     expect(err.code).toBe('functions/failed-precondition');
     expect(err.message).toContain(DEACTIVATE_SELF_MESSAGE);
     expect(await fsGetField('staff/admin-77', 'status')).toBeUndefined();
   });
 
-  it('deactivated: status INACTIVE + reason, claims cleared, login rejected with STAFF_INACTIVE, roles cannot be changed', async () => {
-    await setStaffActive({ staffId: 'teacher-55', active: false, reason: 'ย้ายไปโรงเรียนอื่น' });
+  it('deactivation requires a statusReason (มาตรา 107); note required only for ORDERED_TO_LEAVE — nothing is written when rejected', async () => {
+    const noReason = await callError(setStaffActive, { staffId: 'teacher-55', active: false, reason: 'ย้ายไปโรงเรียนอื่น' });
+    expect(noReason.code).toBe('functions/invalid-argument');
+    const activeAsReason = await callError(setStaffActive, { staffId: 'teacher-55', active: false, statusReason: 'ACTIVE' });
+    expect(activeAsReason.code).toBe('functions/invalid-argument');
+    const unknownReason = await callError(setStaffActive, { staffId: 'teacher-55', active: false, statusReason: 'FIRED' });
+    expect(unknownReason.code).toBe('functions/invalid-argument');
+    const orderedNoNote = await callError(setStaffActive, { staffId: 'teacher-55', active: false, statusReason: 'ORDERED_TO_LEAVE', reason: '  ' });
+    expect(orderedNoNote.code).toBe('functions/invalid-argument');
+    // ไม่มีอะไรถูกเขียน: ยัง ACTIVE ตามที่ createStaffMember ตั้งไว้
+    expect(await fsGetField('staff/teacher-55', 'status')).toBe('ACTIVE');
+    expect(await fsGetField('staff/teacher-55', 'statusReason')).toBe('ACTIVE');
+    expect(await fsGetField('staff/teacher-55', 'deactivationReason')).toBeUndefined();
+  });
+
+  it('deactivated: status INACTIVE + statusReason + reason, claims cleared, login rejected with STAFF_INACTIVE, roles cannot be changed', async () => {
+    await setStaffActive({ staffId: 'teacher-55', active: false, statusReason: 'TRANSFERRED', reason: 'ย้ายไปโรงเรียนอื่น' });
     expect(await fsGetField('staff/teacher-55', 'status')).toBe('INACTIVE');
+    expect(await fsGetField('staff/teacher-55', 'statusReason')).toBe('TRANSFERRED');
     expect(await fsGetField('staff/teacher-55', 'deactivationReason')).toBe('ย้ายไปโรงเรียนอื่น');
     const user = await getAdminAuth().getUserByEmail(TARGET_EMAIL);
     expect(user.customClaims ?? {}).toEqual({});
@@ -286,6 +302,7 @@ describe.skipIf(!AUTH_HOST || !FS_HOST)('staff create / deactivate / reactivate 
   it('reactivated: status ACTIVE and the staff member can log in again', async () => {
     await setStaffActive({ staffId: 'teacher-55', active: true, reason: '' });
     expect(await fsGetField('staff/teacher-55', 'status')).toBe('ACTIVE');
+    expect(await fsGetField('staff/teacher-55', 'statusReason')).toBe('ACTIVE');
     expect(await fsGetField('staff/teacher-55', 'deactivationReason')).toBeUndefined();
     expect(await targetSignIn()).toEqual({ ok: true, staffId: 'teacher-55' });
     await signOut(adminAuth);

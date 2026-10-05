@@ -39,6 +39,10 @@ import { UserProfile, UserRole } from '../types';
 import { useDepartments } from '../hooks/useDepartments';
 import { normalizeEmail } from '../lib/normalizeEmail';
 import { isStaffActive } from '../lib/staffStatus';
+import {
+  INACTIVE_STAFF_REASONS, REASONS_REQUIRING_NOTE, STAFF_STATUS_LABELS_TH, inactiveStaffLabelTh, isStaffStatusReason, validateStatusRequest,
+  type StaffStatusReason,
+} from '../lib/staffStatusReasons';
 import { callableErrorMessage } from '../lib/callableErrors';
 import { DepartmentManagerModal } from './admin/DepartmentManagerModal';
 
@@ -125,6 +129,7 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
             position: data.position || 'ครูผู้สอน',
             roles: roles,
             status: data.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
+            statusReason: isStaffStatusReason(data.statusReason) ? data.statusReason : undefined,
             deactivationReason: data.deactivationReason || '',
             assignments: data.assignments || {
               departmentId: data.departmentId || '',
@@ -197,6 +202,8 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
   // ปิด/เปิดการใช้งาน — callable setStaffActive (ไม่ลบ staff doc)
   const [pendingActive, setPendingActive] = useState<{ staff: UserProfile; active: boolean } | null>(null);
   const [activeReason, setActiveReason] = useState('');
+  // เหตุผลตามมาตรา 107 (เลือกตอนปิดการใช้งาน — บังคับ; ไม่ตั้งค่าเริ่มต้นแทนผู้กรอก)
+  const [activeStatusReason, setActiveStatusReason] = useState<StaffStatusReason | ''>('');
   const [activeError, setActiveError] = useState<string | null>(null);
   const [isTogglingActive, setIsTogglingActive] = useState(false);
 
@@ -262,21 +269,23 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
   const openSetActive = (staff: UserProfile, active: boolean) => {
     setPendingActive({ staff, active });
     setActiveReason('');
+    setActiveStatusReason('');
     setActiveError(null);
   };
 
   const handleConfirmSetActive = async () => {
     if (!pendingActive) return;
     const { staff, active } = pendingActive;
-    if (!active && !activeReason.trim()) {
-      setActiveError('กรุณาระบุเหตุผลในการปิดการใช้งาน');
+    const check = validateStatusRequest({ active, statusReason: active ? 'ACTIVE' : activeStatusReason || undefined, reason: activeReason });
+    if ('message' in check) {
+      setActiveError(check.message);
       return;
     }
     setActiveError(null);
     setIsTogglingActive(true);
     try {
       const setStaffActiveFn = httpsCallable(functions, 'setStaffActive');
-      await setStaffActiveFn({ staffId: staff.id, active, reason: activeReason.trim() });
+      await setStaffActiveFn({ staffId: staff.id, active, statusReason: check.statusReason, reason: activeReason.trim() });
       setPendingActive(null);
       triggerToast(`${active ? 'เปิดใช้งาน' : 'ปิดการใช้งาน'} ${staff.prefix}${staff.firstName} ${staff.lastName} แล้ว`);
     } catch (err) {
@@ -718,7 +727,7 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                             className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-700/60 border border-slate-600 text-[10px] font-bold text-slate-300"
                             title={staff.deactivationReason ? `เหตุผล: ${staff.deactivationReason}` : undefined}
                           >
-                            <Ban className="w-3 h-3" /> ปิดการใช้งาน
+                            <Ban className="w-3 h-3" /> {inactiveStaffLabelTh(staff.statusReason)}
                           </span>
                         )}
                       </td>
@@ -1220,10 +1229,32 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                   ? 'เมื่อเปิดใช้งาน บุคลากรจะเข้าสู่ระบบได้อีกครั้ง (สิทธิ์จะกลับมาเมื่อ login ครั้งถัดไป)'
                   : 'เมื่อปิดการใช้งาน บุคลากรจะเข้าสู่ระบบไม่ได้ และถูกออกจากระบบเมื่อ session หมดอายุ (ไม่เกิน 1 ชั่วโมง) — ข้อมูลและประวัติเดิมยังอยู่ครบ ไม่ถูกลบ'}
               </p>
+              {!pendingActive.active && (
+                <label className="space-y-1 block">
+                  <span className="text-slate-400">สถานะการสิ้นสุดการใช้งาน (มาตรา 107) *</span>
+                  <select
+                    value={activeStatusReason}
+                    onChange={e => setActiveStatusReason(e.target.value as StaffStatusReason | '')}
+                    data-testid="staff-status-reason"
+                    className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="">— เลือกสถานะ —</option>
+                    {INACTIVE_STAFF_REASONS.map(r => (
+                      <option key={r} value={r}>{STAFF_STATUS_LABELS_TH[r]}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label className="space-y-1 block">
-                <span className="text-slate-400">เหตุผล{pendingActive.active ? ' (ไม่บังคับ)' : ' *'}</span>
+                <span className="text-slate-400">
+                  {pendingActive.active
+                    ? 'หมายเหตุ (ไม่บังคับ)'
+                    : activeStatusReason && REASONS_REQUIRING_NOTE.includes(activeStatusReason)
+                      ? 'หมายเหตุ * (ระบุเหตุผลย่อยตามมาตรา 107)'
+                      : 'หมายเหตุ (ไม่บังคับ)'}
+                </span>
                 <textarea value={activeReason} onChange={e => setActiveReason(e.target.value)} rows={3} maxLength={500}
-                  placeholder={pendingActive.active ? '' : 'เช่น ย้ายไปโรงเรียนอื่น / ลาออก / เกษียณ'}
+                  placeholder={pendingActive.active ? '' : 'เช่น เลขที่คำสั่ง/วันที่มีผล/รายละเอียดเพิ่มเติม'}
                   className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-white outline-none focus:border-indigo-500" />
               </label>
               {activeError && (
