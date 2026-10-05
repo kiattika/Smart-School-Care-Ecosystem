@@ -20,6 +20,7 @@ import {
 import { UserRole, Permission, UserProfile, ROLE_PERMISSIONS } from '../types/auth';
 import { useStore } from '../store';
 import { HeaderRealTimeClock } from './HeaderRealTimeClock';
+import { TermIndicator } from './TermIndicator';
 import { GPSGeofenceCheckinModal } from './GPSGeofenceCheckinModal';
 
 // สีของ Badge และธีมประจำแต่ละบทบาท
@@ -344,6 +345,9 @@ export function NavbarWithRoleSwitcher({
       {/* ฝั่งขวา: โปรไฟล์ผู้ใช้, นาฬิกา Real-time และ Role Switcher */}
       <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
         
+        {/* ภาคเรียนปัจจุบัน — แสดงทุกขนาดจอ (นาฬิกาด้านล่างแสดงเฉพาะ xl) */}
+        <TermIndicator />
+
         {/* Real-time live digital clock and active class period */}
         <div className="hidden xl:flex">
           <HeaderRealTimeClock />
