@@ -19,7 +19,11 @@ import {
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { writeBatch, doc, serverTimestamp, collection, getDocs, onSnapshot } from 'firebase/firestore';
-import { computeSyncReplacePlan, scheduleDocIdFor, primaryTeacherKey, type ScheduleSemester } from '../lib/scheduleSyncReplace';
+import {
+  computeSyncReplacePlan, scheduleDocIdFor, primaryTeacherKey,
+  SCHEDULE_REFERENCING_COLLECTIONS, collectReferenceValues, partitionStaleByReferences,
+  type ScheduleSemester,
+} from '../lib/scheduleSyncReplace';
 import { requireConfiguredSemester } from '../hooks/useCurrentSemester';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../lib/firebase';
@@ -1083,21 +1087,31 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
 
       // ── sync/replace: ลบ schedule เก่าของครูในไฟล์นี้ที่ไม่มีในไฟล์ใหม่ (admin ยืนยันแล้ว) ──
       if (importType === 'COURSE' && replaceStale && staleSchedules.length > 0) {
-        // กันลบ doc ที่มี attendance_records ผูก scheduleId อยู่
-        const attSnap = await getDocs(collection(db, 'attendance_records'));
-        const referencedSchedIds = new Set<string>();
-        attSnap.forEach(a => {
-          const sid = (a.data() as any).scheduleId;
-          if (sid) referencedSchedIds.add(String(sid));
-        });
-        const toDelete = staleSchedules.filter(s => !referencedSchedIds.has(s.id));
-        const skipped = staleSchedules.length - toDelete.length;
-        for (let i = 0; i < toDelete.length; i += 450) {
-          const delBatch = writeBatch(db);
-          toDelete.slice(i, i + 450).forEach(s => delBatch.delete(doc(db, 'schedules', s.id)));
-          await delBatch.commit();
+        // กันลบ schedule ที่ยังมีข้อมูลที่ครูบันทึกไว้อ้างถึงอยู่ (เช็คชื่อ/บันทึกหลังสอน/คำขอเช็คชื่อย้อนหลัง/สอนแทน)
+        // ⚠️ fail-closed: อ่าน collection ใดไม่ได้ = ไม่ลบอะไรเลย (ดีกว่าลบโดยไม่รู้ว่ามีข้อมูลผูกอยู่)
+        let referencedValues: Set<string> | null = new Set<string>();
+        try {
+          for (const ref of SCHEDULE_REFERENCING_COLLECTIONS) {
+            const snap = await getDocs(collection(db, ref.collection));
+            collectReferenceValues(snap.docs.map(d => d.data() as Record<string, any>), ref.fields, referencedValues);
+          }
+        } catch (err) {
+          referencedValues = null;
+          console.error('[BulkDataImportModal] sync/replace: อ่านข้อมูลอ้างอิง schedule ไม่ครบ — ยกเลิกการลบทั้งหมด', err);
+          alert('⚠️ นำเข้าข้อมูลสำเร็จ แต่ตรวจสอบข้อมูลที่ผูกกับตารางสอนเก่าไม่ครบ จึงไม่ได้ลบตารางสอนเก่าออก (ไม่มีข้อมูลเสียหาย) กรุณาลองใหม่หรือแจ้งผู้ดูแลระบบ');
         }
-        console.log(`[BulkDataImportModal] sync/replace: ลบ schedule เก่า ${toDelete.length} รายการ (ข้าม ${skipped} รายการที่มี attendance ผูกอยู่)`);
+        if (referencedValues) {
+          const { deletable, protectedDocs } = partitionStaleByReferences(staleSchedules, referencedValues);
+          for (let i = 0; i < deletable.length; i += 450) {
+            const delBatch = writeBatch(db);
+            deletable.slice(i, i + 450).forEach(s => delBatch.delete(doc(db, 'schedules', s.id)));
+            await delBatch.commit();
+          }
+          console.log(`[BulkDataImportModal] sync/replace: ลบ schedule เก่า ${deletable.length} รายการ (เก็บไว้ ${protectedDocs.length} รายการที่ยังมีข้อมูลบันทึกผูกอยู่)`);
+          if (protectedDocs.length > 0) {
+            alert(`ℹ️ ตารางสอนเก่า ${protectedDocs.length} รายการไม่ถูกลบ เพราะยังมีบันทึก (เช่น บันทึกหลังสอน/เช็คชื่อย้อนหลัง/สอนแทน) ผูกอยู่ — ตรวจสอบและจัดการเองได้ภายหลัง`);
+          }
+        }
       }
 
       // นำเข้าบุคลากรอาจเพิ่ม/เปลี่ยนครูแนะแนว (GUIDANCE_COUNSELOR) — สิทธิ์อ่าน 9Q/8Q ของครูที่ปรึกษาขึ้นกับ "มีครูแนะแนวที่ใช้งานอยู่ไหม"
