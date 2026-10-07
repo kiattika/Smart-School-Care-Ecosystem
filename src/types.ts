@@ -272,6 +272,13 @@ export interface PostTeachingRecord {
   subjectCode?: string;
   level?: string;
   room?: string;
+  // ผู้บันทึก — staff doc id (user.staffId) ของครูที่ส่งบันทึก; ใช้ให้ประวัติอยู่กับครูคนเดิมแม้ภายหลังเปลี่ยนครูผู้สอนของคาบ
+  recordedByStaffId?: string;
+  recordedByName?: string;
+  // บันทึกเก่าก่อนมี recordedByStaffId: ตอน import ภาระงานสอนซ้ำแล้วพบว่าเปลี่ยนครูในคาบนี้ ระบบประทับครูคนเดิมไว้ให้
+  // (staff doc id + ชื่อ ณ ตอนนั้น) — ครูเหล่านี้ยังเห็นบันทึกนี้ต่อไป และครูคนใหม่เห็นพร้อมป้ายระบุผู้บันทึก
+  previousTeacherStaffIds?: string[];
+  previousTeacherNames?: string[];
 }
 
 export type SubstituteApprovalStage =

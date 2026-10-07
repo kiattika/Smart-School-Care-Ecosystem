@@ -2409,6 +2409,51 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // 14.5 log การนำเข้าภาระงานสอน (schedule_import_logs) — append-only, SUPER_ADMIN สร้างเอง, ไม่เปิดให้ signed-in ทั่วไป
+  describe('schedule_import_logs (log การนำเข้าภาระงานสอน)', () => {
+    const LOG = { type: 'TEACHING_LOAD_IMPORT', importedByUid: 'admin-uid', academicYear: '2569', term: '1', teacherChanges: [], cleanedSchedules: [] };
+
+    it('SUPER_ADMIN สร้าง log ของตัวเองได้ (importedByUid == auth.uid)', async () => {
+      const db = asUser('admin-uid', ['SUPER_ADMIN']).firestore();
+      await assertSucceeds(db.doc('schedule_import_logs/l1').set(LOG));
+    });
+
+    it('SUPER_ADMIN สร้าง log แทนคนอื่น หรือผิดชนิด ไม่ได้', async () => {
+      const db = asUser('admin-uid', ['SUPER_ADMIN']).firestore();
+      await assertFails(db.doc('schedule_import_logs/l2').set({ ...LOG, importedByUid: 'someone-else' }));
+      await assertFails(db.doc('schedule_import_logs/l3').set({ ...LOG, type: 'OTHER' }));
+    });
+
+    it('บทบาทอื่นสร้างไม่ได้ (ครู, หัวหน้าวิชาการ, ผู้บริหาร)', async () => {
+      for (const role of ['SUBJECT_TEACHER', 'HOMEROOM_TEACHER', 'ACADEMIC_HEAD', 'DIRECTOR', 'EXECUTIVE']) {
+        const db = asUser('admin-uid', [role]).firestore();
+        await assertFails(db.doc(`schedule_import_logs/x-${role}`).set(LOG));
+      }
+    });
+
+    it('log แก้ไข/ลบไม่ได้แม้เป็น SUPER_ADMIN (append-only)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('schedule_import_logs/seed1').set(LOG);
+      });
+      const db = asUser('admin-uid', ['SUPER_ADMIN']).firestore();
+      await assertFails(db.doc('schedule_import_logs/seed1').update({ term: '2' }));
+      await assertFails(db.doc('schedule_import_logs/seed1').delete());
+    });
+
+    it('อ่านได้เฉพาะ SUPER_ADMIN / หัวหน้าวิชาการ / รองผอ.วิชาการ / ผอ. — ครู นักเรียน และผู้ปกครองอ่านไม่ได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('schedule_import_logs/seed2').set(LOG);
+      });
+      for (const role of ['SUPER_ADMIN', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR']) {
+        await assertSucceeds(asUser('reader-uid', [role]).firestore().doc('schedule_import_logs/seed2').get());
+      }
+      for (const role of ['SUBJECT_TEACHER', 'HOMEROOM_TEACHER', 'STUDENT', 'PARENT']) {
+        await assertFails(asUser('reader-uid', [role]).firestore().doc('schedule_import_logs/seed2').get());
+      }
+      await assertFails(asAnonymous().firestore().doc('schedule_import_logs/seed2').get());
+    });
+  });
+
   // 15. Default Deny Catch-All (Regression Test 5)
   describe('Default Deny Catch-All (Undeclared paths)', () => {
     it('REGRESSION: denies authenticated user with no matching role from reading or writing undeclared collections', async () => {

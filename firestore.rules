@@ -397,6 +397,20 @@ service cloud.firestore {
                       hasRole('HOMEROOM_TEACHER');
     }
 
+    // log การนำเข้าภาระงานสอน (Bulk Import COURSE): ใครนำเข้า เปลี่ยนครู/เก็บกวาดตารางอะไร และใครเคยเป็นผู้บันทึก
+    // เพิ่มอย่างเดียว (append-only) — SUPER_ADMIN สร้างได้โดยระบุ importedByUid เป็นของตัวเองเท่านั้น; แก้/ลบไม่ได้ทุกบทบาท
+    // อ่านได้เฉพาะผู้ดูแลระบบและผู้บริหารฝ่ายวิชาการ (ไม่เปิดให้ signed-in ทั่วไป)
+    match /schedule_import_logs/{logId} {
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('ACADEMIC_HEAD') ||
+                     hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
+                     hasRole('DIRECTOR');
+      allow create: if hasRole('SUPER_ADMIN') &&
+                       request.resource.data.importedByUid == request.auth.uid &&
+                       request.resource.data.type == 'TEACHING_LOAD_IMPORT';
+      allow update, delete: if false;
+    }
+
     match /post_teaching_records/{recordId} {
       allow read: if isSignedIn();
       allow write: if hasRole('SUPER_ADMIN') || 
