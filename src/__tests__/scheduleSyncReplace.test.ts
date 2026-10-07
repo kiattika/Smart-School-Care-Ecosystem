@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { computeSyncReplacePlan, scheduleDocIdFor, primaryTeacherKey, isScheduleInTerm, type ScheduleSemester } from '../lib/scheduleSyncReplace';
+import * as path from 'path';
+import { readSource } from './helpers/readSource';
+import {
+  computeSyncReplacePlan, scheduleDocIdFor, primaryTeacherKey, isScheduleInTerm,
+  scheduleReferenceKeys, collectReferenceValues, partitionStaleByReferences, SCHEDULE_REFERENCING_COLLECTIONS,
+  type ScheduleSemester,
+} from '../lib/scheduleSyncReplace';
 
 const SEM: ScheduleSemester = { academicYear: '2569', term: '1' };
 
@@ -227,5 +233,56 @@ describe('ภาคเรียนใน schedule doc id / replace plan', () => 
     );
     // ไฟล์ใหม่เป็นของภาคเรียน 2: ลบได้เฉพาะ doc ภาคเรียน 2 — doc ภาคเรียน 1 ต้องไม่ถูกแตะ
     expect(plan.stale.map(s => s.id)).toEqual(['sch_2_2569_ค32101_943_monday_p6']);
+  });
+});
+
+describe('กันลบ schedule ที่ยังมีข้อมูลที่ครูบันทึกไว้อ้างถึง (sync/replace)', () => {
+  const T1: ScheduleSemester = { academicYear: '2569', term: '1' };
+  const schId = scheduleDocIdFor('ค32101', '943', 'M.5/8', 'monday', 6, 'MAIN', undefined, T1);
+  const courseId = `course_${schId.slice(4)}`;
+  const otherId = scheduleDocIdFor('ค32101', '943', 'M.5/8', 'tuesday', 2, 'MAIN', undefined, T1);
+  const stale = [{ id: schId, label: 'a' }, { id: otherId, label: 'b' }];
+
+  it('scheduleReferenceKeys: คืนทั้ง id และ courseId ที่ derive จาก id เดียวกัน', () => {
+    expect(scheduleReferenceKeys(schId)).toEqual([schId, courseId]);
+    expect(scheduleReferenceKeys('legacy-id')).toEqual(['legacy-id']);
+  });
+
+  it('ไม่มีข้อมูลอ้างอิง → ลบได้ทั้งหมด', () => {
+    const r = partitionStaleByReferences(stale, new Set());
+    expect(r.deletable.map(s => s.id)).toEqual([schId, otherId]);
+    expect(r.protectedDocs).toEqual([]);
+  });
+
+  it('บันทึกหลังสอนที่อ้างด้วย courseId (รูป course_...) → ต้องเก็บ schedule ไว้', () => {
+    const refs = collectReferenceValues([{ courseId, date: '2026-10-01' }], ['scheduleId', 'courseId']);
+    const r = partitionStaleByReferences(stale, refs);
+    expect(r.protectedDocs.map(s => s.id)).toEqual([schId]);
+    expect(r.deletable.map(s => s.id)).toEqual([otherId]);
+  });
+
+  it('คำขอเช็คชื่อย้อนหลังที่อ้างด้วย scheduleId (รูป sch_...) → ต้องเก็บ schedule ไว้', () => {
+    const refs = collectReferenceValues([{ scheduleId: otherId }], ['scheduleId']);
+    const r = partitionStaleByReferences(stale, refs);
+    expect(r.protectedDocs.map(s => s.id)).toEqual([otherId]);
+    expect(r.deletable.map(s => s.id)).toEqual([schId]);
+  });
+
+  it('collectReferenceValues: ข้ามค่าว่าง/undefined/null และไม่พังเมื่อ doc ไม่มี field', () => {
+    const refs = collectReferenceValues([{ scheduleId: '' }, { scheduleId: null }, {}, { courseId: courseId }], ['scheduleId', 'courseId']);
+    expect([...refs]).toEqual([courseId]);
+  });
+
+  it('รายการ collection ที่ตรวจ ครอบคลุมทุกที่ที่ผูกกับ schedule และไม่รวม gradebook_scores', () => {
+    const names = SCHEDULE_REFERENCING_COLLECTIONS.map(c => c.collection);
+    expect(names).toEqual(expect.arrayContaining(['attendance_records', 'post_teaching_records', 'late_attendance_requests', 'substitute_assignments']));
+    expect(names).not.toContain('gradebook_scores');
+  });
+
+  it('BulkDataImportModal ใช้ตัวกันนี้จริง และไม่เหลือโค้ดเช็คเฉพาะ attendance_records แบบเดิม', () => {
+    const src = readSource(path.resolve(__dirname, '../components/BulkDataImportModal.tsx'));
+    expect(src).toContain('partitionStaleByReferences(staleSchedules');
+    expect(src).toContain('SCHEDULE_REFERENCING_COLLECTIONS');
+    expect(src).not.toContain("collection(db, 'attendance_records')");
   });
 });

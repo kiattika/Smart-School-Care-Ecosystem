@@ -184,3 +184,49 @@ export function computeSyncReplacePlan(
     debug,
   };
 }
+
+/**
+ * ค่าที่ข้อมูลอื่นใช้อ้างถึง schedule doc หนึ่งใบ — ทั้ง id ตรงๆ (`sch_...`) และ courseId ที่ derive
+ * จาก id เดียวกัน (`course_...` ดู handleImport/TeacherPortal) เพราะแต่ละ collection เก็บคนละรูปแบบ
+ */
+export function scheduleReferenceKeys(scheduleId: string): string[] {
+  const keys = [scheduleId];
+  if (scheduleId.startsWith('sch_')) keys.push(`course_${scheduleId.slice(4)}`);
+  return keys;
+}
+
+/**
+ * collection ที่ "ข้อมูลที่ครูบันทึกไว้" อ้างอิง schedule ผ่าน field เหล่านี้ — ก่อนลบ schedule เก่า (sync/replace)
+ * ต้องไม่มีข้อมูลเหล่านี้ชี้มาที่ schedule นั้น ไม่งั้นข้อมูลจะกลายเป็นข้อมูลลอยที่ไม่มีคาบรองรับ
+ * (gradebook_scores ไม่อยู่ในรายการ: คีย์ด้วย courseCode+ห้อง+ภาคเรียน ไม่ได้ผูกกับ schedule id)
+ */
+export const SCHEDULE_REFERENCING_COLLECTIONS: { collection: string; fields: string[] }[] = [
+  { collection: 'attendance_records', fields: ['scheduleId'] },
+  { collection: 'post_teaching_records', fields: ['scheduleId', 'courseId'] },
+  { collection: 'late_attendance_requests', fields: ['scheduleId'] },
+  { collection: 'substitute_assignments', fields: ['courseId', 'scheduleId'] },
+];
+
+/** ดึงค่าอ้างอิง (string) จาก doc ตาม field ที่กำหนด — รวมไว้ใน set เดียว */
+export function collectReferenceValues(docs: Record<string, any>[], fields: string[], into: Set<string> = new Set()): Set<string> {
+  for (const data of docs) {
+    for (const f of fields) {
+      const v = data?.[f];
+      if (v !== undefined && v !== null && v !== '') into.add(String(v));
+    }
+  }
+  return into;
+}
+
+/** แยก stale schedule เป็นลบได้ / ต้องเก็บไว้ (มีข้อมูลอื่นอ้างถึงอยู่) */
+export function partitionStaleByReferences<T extends { id: string }>(
+  stale: T[],
+  referencedValues: Set<string>,
+): { deletable: T[]; protectedDocs: T[] } {
+  const deletable: T[] = [];
+  const protectedDocs: T[] = [];
+  for (const s of stale) {
+    (scheduleReferenceKeys(s.id).some(k => referencedValues.has(k)) ? protectedDocs : deletable).push(s);
+  }
+  return { deletable, protectedDocs };
+}
