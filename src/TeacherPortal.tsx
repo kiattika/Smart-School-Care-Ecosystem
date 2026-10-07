@@ -1,7 +1,8 @@
 import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/utils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
-import { isStaffAssigned, isStaffIn } from './lib/staffIdentity';
+import { isStaffAssigned, isStaffIn, staffIdOf } from './lib/staffIdentity';
+import { canViewPostTeachingRecord, postTeachingAuthorNote } from './lib/postTeachingVisibility';
 import { useDepartments } from './hooks/useDepartments';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { visibleSidebarItems, resolveActiveSidebarId } from './components/shared/portalSidebarLogic';
@@ -367,6 +368,14 @@ export function TeacherPortal() {
   // ขอลากิจ/ไปราชการด้วยตนเอง — reuse SubstituteTeachingModule เต็มรูปแบบ (ไม่สร้างฟอร์มซ้ำ)
   const [showSubSelfService, setShowSubSelfService] = useState(false);
 
+  // ประวัติบันทึกหลังสอนที่ครูคนนี้เห็นได้: คาบที่สอนอยู่ตอนนี้ + บันทึกที่ตัวเองเป็นผู้บันทึก/ครูคนเดิมของคาบ
+  // (ดู lib/postTeachingVisibility.ts — เดิมกรองด้วยคาบปัจจุบันอย่างเดียว ทำให้ครูคนเก่าเสียประวัติเมื่อมีการเปลี่ยนครู)
+  const myCourseIdSet = useMemo(() => new Set(myCourses.map(c => c.id)), [myCourses]);
+  const visiblePostTeachingRecords = useMemo(
+    () => postTeachingRecords.filter(r => canViewPostTeachingRecord(user, r, myCourseIdSet)),
+    [postTeachingRecords, user, myCourseIdSet],
+  );
+
   // Dynamic Role-Based Access Control (RBAC) Tab Filtering
   const availableDashboardTabs = useMemo(() => {
     const rawTabs: Array<{
@@ -388,7 +397,7 @@ export function TeacherPortal() {
           // TASK 4 — คำขอลากิจ/แลกคาบที่รอครูท่านนี้กดยืนยัน (ไม่นับรายการที่ตัวเองเสนอเอง เช่น คาบจ่ายคืนของ TASK 3)
           + substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.status === 'PENDING_TEACHER_CONFIRMATION' && sa.proposedByEmail !== user?.email).length,
       },
-      { id: 'records', label: 'ประวัติบันทึกหลังสอนทั้งหมด', icon: NavRecordsIcon, count: postTeachingRecords.filter(r => myCourses.some(c => c.id === r.courseId)).length },
+      { id: 'records', label: 'ประวัติบันทึกหลังสอนทั้งหมด', icon: NavRecordsIcon, count: visiblePostTeachingRecords.length },
       { id: 'gradebook', label: 'สมุดบันทึกคะแนน (Gradebook)', icon: NavGradebookIcon, count: 0 }
     ];
 
@@ -713,6 +722,8 @@ export function TeacherPortal() {
       subjectCode: postTeachingPeriod?.subjectCode || postTeachingCourse.code,
       level: postTeachingPeriod?.level || postTeachingPeriod?.className || (postTeachingCourse as any).level,
       room: postTeachingPeriod?.room || postTeachingCourse.room,
+      // ผู้บันทึก — ให้ประวัติอยู่กับครูคนนี้แม้ภายหลังเปลี่ยนครูผู้สอนของคาบ (ไม่มี staffId = ไม่ใส่ ห้ามเดา)
+      ...(staffIdOf(user) ? { recordedByStaffId: staffIdOf(user) as string, recordedByName: user?.displayName || user?.email || '' } : {}),
     });
 
     setToast(`บันทึกหลังสอนวิชา ${postTeachingCourse.name} เรียบร้อยแล้ว! ${isLate ? '⚠️ (ส่งช้ากว่ากำหนด)' : '✅ (ส่งตรงเวลา)'}`);
@@ -1448,18 +1459,26 @@ export function TeacherPortal() {
                 </div>
 
                 <div className="space-y-4">
-                  {postTeachingRecords.filter(r => myCourses.some(c => c.id === r.courseId)).length === 0 ? (
+                  {visiblePostTeachingRecords.length === 0 ? (
                     <div className="text-center py-12 text-slate-500">ยังไม่พบบันทึกหลังการสอนที่เคยส่ง</div>
                   ) : (
-                    postTeachingRecords
-                      .filter(r => myCourses.some(c => c.id === r.courseId))
+                    visiblePostTeachingRecords
                       .map((record, idx) => {
                         const course = globalCourses.find(c => c.courseId === record.courseId);
+                        const authorNote = postTeachingAuthorNote(user, record, myCourseIdSet);
                         return (
                           <div key={idx} className="bg-[#0b0f19] p-5 border border-slate-800/80 rounded-xl space-y-3 hover:border-slate-700 transition-colors">
                             <div className="flex flex-wrap justify-between items-start gap-2">
                               <div>
-                                <h4 className="text-sm font-bold text-white">{course?.code} {formatCourseTitle(course?.courseName, course?.level, course?.roomName)}</h4>
+                                {/* ตารางของคาบอาจถูกเก็บกวาดไปแล้ว (ครูเดิมปิดการใช้งาน) — ใช้ข้อมูลที่เก็บไว้ในบันทึกแทน */}
+                                <h4 className="text-sm font-bold text-white">
+                                  {course?.code || record.subjectCode} {course
+                                    ? formatCourseTitle(course.courseName, course.level, course.roomName)
+                                    : [record.level, record.room].filter(Boolean).join(' ')}
+                                </h4>
+                                {authorNote && (
+                                  <div className="text-[11px] text-sky-300 mt-0.5">{authorNote}</div>
+                                )}
                                 <div className="text-[11px] text-slate-400 mt-0.5">
                                   วันที่สอน: {format(new Date(record.date), 'dd MMMM yyyy', { locale: th })} • ส่งเมื่อ: {new Date(record.submittedAt).toLocaleTimeString('th-TH')} น.
                                 </div>

@@ -24,6 +24,10 @@ import {
   SCHEDULE_REFERENCING_COLLECTIONS, collectReferenceValues, partitionStaleByReferences,
   type ScheduleSemester,
 } from '../lib/scheduleSyncReplace';
+import {
+  computeImportImpact, isImpactFullyConfirmed, reviewKeysOf, type ImportImpact,
+} from '../lib/scheduleImportImpact';
+import { applyHandoverAndCleanup, writeImportLog, type AftercareResult } from '../lib/scheduleImportAftercare';
 import { requireConfiguredSemester } from '../hooks/useCurrentSemester';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../lib/firebase';
@@ -129,7 +133,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importError, setImportError] = useState<string | null>(null);
-  const [realStaffList, setRealStaffList] = useState<Array<{ id: string; fullName?: string; firstName?: string; lastName?: string; displayName?: string; email?: string; prefix?: string }>>([]);
+  const [realStaffList, setRealStaffList] = useState<Array<{ id: string; fullName?: string; firstName?: string; lastName?: string; displayName?: string; email?: string; prefix?: string; status?: string }>>([]);
   const [isStaffLoading, setIsStaffLoading] = useState(false);
   const [realStudentIds, setRealStudentIds] = useState<Set<string>>(new Set());
   const [isStudentIdsLoading, setIsStudentIdsLoading] = useState(false);
@@ -138,6 +142,11 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   const [staleSchedules, setStaleSchedules] = useState<{ id: string; label: string }[]>([]);
   const [scanningStale, setScanningStale] = useState(false);
   const [replaceStale, setReplaceStale] = useState(false);
+
+  // ผลกระทบของการนำเข้าซ้ำ (เปลี่ยนครู / เก็บกวาดครูที่ปิดการใช้งาน) — แอดมินต้องตรวจและยืนยันก่อนนำเข้า
+  // ทีละรายการ หรือยืนยันทั้งหมดในคราวเดียว (confirmedReviewKeys เก็บคีย์ `change:<id>` / `cleanup:<id>`)
+  const [importImpact, setImportImpact] = useState<ImportImpact | null>(null);
+  const [confirmedReviewKeys, setConfirmedReviewKeys] = useState<Set<string>>(new Set());
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const staffSigRef = useRef<string>('');
@@ -167,13 +176,15 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             lastName: data.lastName || '',
             fullName: data.fullName || `${data.prefix || ''}${data.firstName || ''} ${data.lastName || ''}`.trim(),
             displayName: data.displayName || '',
+            // ใช้ตัดสินว่าครูที่ถูกแทนที่ "ปิดการใช้งาน" แล้วหรือยัง (เก็บกวาดตารางได้) — ดู lib/staffStatus.ts
+            status: typeof data.status === 'string' ? data.status : '',
           };
         });
         setIsStaffLoading(false);
         // long-poll listener ยิง snapshot ซ้ำเป็นระยะแม้ข้อมูลไม่เปลี่ยน — เทียบเนื้อหาก่อน
         // ถ้าเหมือนเดิม อย่า setRealStaffList (ไม่งั้น previewData useMemo re-compute + re-render รัว ๆ
         // จนเกิดจังหวะที่กดปุ่มยืนยันไม่ติด)
-        const sig = staff.map(s => `${s.id}${s.email}${s.fullName}${s.displayName}`).join('');
+        const sig = staff.map(s => `${s.id}${s.email}${s.fullName}${s.displayName}${s.status}`).join('');
         if (sig === staffSigRef.current) return;
         staffSigRef.current = sig;
         setRealStaffList(staff);
@@ -771,6 +782,19 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
     }
     const sem = semesterForImport as ScheduleSemester;
 
+    // ผลกระทบของการนำเข้าซ้ำ (เปลี่ยนครู/เก็บกวาด): แอดมินต้องตรวจและยืนยันครบทุกรายการก่อน และต้องเป็น SUPER_ADMIN
+    // (การโอนประวัติ/เก็บกวาด/เขียน log ทำได้เฉพาะ SUPER_ADMIN ตาม rules)
+    if (importType === 'COURSE' && importImpact) {
+      if (!isImpactFullyConfirmed(importImpact, confirmedReviewKeys)) {
+        setImportError('❌ กรุณาตรวจสอบและยืนยันรายการที่ได้รับผลกระทบให้ครบก่อนนำเข้า (ยืนยันทีละรายการ หรือกด "ยืนยันทั้งหมด")');
+        return;
+      }
+      if (reviewKeysOf(importImpact).length > 0 && !userRoles.includes('SUPER_ADMIN')) {
+        setImportError('❌ ไฟล์นี้ทำให้มีการเปลี่ยนครู/เก็บกวาดตาราง ซึ่งต้องให้ผู้ดูแลระบบ (SUPER_ADMIN) เป็นผู้นำเข้า');
+        return;
+      }
+    }
+
     setIsImporting(true);
     setImportProgress(10);
     setImportError(null);
@@ -1085,6 +1109,15 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         setImportProgress(Math.min(95, Math.round((processedCount / totalValid) * 90) + 10));
       }
 
+      // ── ผลกระทบของการนำเข้าซ้ำ: โอนประวัติให้ครูคนเดิม + เก็บกวาดตารางของครูที่ปิดการใช้งานและมีคนมาแทนแล้ว ──
+      // (แอดมินตรวจและยืนยันรายการเหล่านี้ไปแล้วก่อนเริ่ม — ดูแผงสรุปผลกระทบ; ทุกอย่างถูกบันทึกลง schedule_import_logs)
+      let aftercare: AftercareResult = { stampedBySchedule: {}, cleaned: [], errors: [] };
+      const syncReport = { deleted: [] as { id: string; label: string }[], protectedDocs: [] as { id: string; label: string }[] };
+      const canRunAftercare = importType === 'COURSE' && !!importImpact && userRoles.includes('SUPER_ADMIN');
+      if (canRunAftercare && importImpact) {
+        aftercare = await applyHandoverAndCleanup(db, importImpact);
+      }
+
       // ── sync/replace: ลบ schedule เก่าของครูในไฟล์นี้ที่ไม่มีในไฟล์ใหม่ (admin ยืนยันแล้ว) ──
       if (importType === 'COURSE' && replaceStale && staleSchedules.length > 0) {
         // กันลบ schedule ที่ยังมีข้อมูลที่ครูบันทึกไว้อ้างถึงอยู่ (เช็คชื่อ/บันทึกหลังสอน/คำขอเช็คชื่อย้อนหลัง/สอนแทน)
@@ -1101,7 +1134,9 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           alert('⚠️ นำเข้าข้อมูลสำเร็จ แต่ตรวจสอบข้อมูลที่ผูกกับตารางสอนเก่าไม่ครบ จึงไม่ได้ลบตารางสอนเก่าออก (ไม่มีข้อมูลเสียหาย) กรุณาลองใหม่หรือแจ้งผู้ดูแลระบบ');
         }
         if (referencedValues) {
-          const { deletable, protectedDocs } = partitionStaleByReferences(staleSchedules, referencedValues);
+          const { deletable, protectedDocs } = partitionStaleByReferences<{ id: string; label: string }>(staleSchedules, referencedValues);
+          syncReport.deleted = deletable;
+          syncReport.protectedDocs = protectedDocs;
           for (let i = 0; i < deletable.length; i += 450) {
             const delBatch = writeBatch(db);
             deletable.slice(i, i + 450).forEach(s => delBatch.delete(doc(db, 'schedules', s.id)));
@@ -1111,6 +1146,30 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           if (protectedDocs.length > 0) {
             alert(`ℹ️ ตารางสอนเก่า ${protectedDocs.length} รายการไม่ถูกลบ เพราะยังมีบันทึก (เช่น บันทึกหลังสอน/เช็คชื่อย้อนหลัง/สอนแทน) ผูกอยู่ — ตรวจสอบและจัดการเองได้ภายหลัง`);
           }
+        }
+      }
+
+      // ── log การนำเข้า (เพิ่มอย่างเดียว): ใครนำเข้า เปลี่ยน/ลบอะไร และใครเคยเป็นผู้บันทึกของตารางที่ถูกเก็บกวาด ──
+      if (canRunAftercare && importImpact && user) {
+        try {
+          await writeImportLog(db, {
+            actor: { uid: user.uid, staffId: user.staffId, email: user.email, name: user.displayName },
+            semester: sem,
+            fileName: file?.name,
+            rowsValid: totalValid,
+            impact: importImpact,
+            aftercare,
+            confirmedItemCount: reviewKeysOf(importImpact).length,
+            syncReplace: { enabled: replaceStale, deleted: syncReport.deleted, protectedDocs: syncReport.protectedDocs },
+          });
+        } catch (err) {
+          aftercare.errors.push(`เขียน log การนำเข้าไม่สำเร็จ: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        const stampedTotal = Object.values(aftercare.stampedBySchedule).reduce((a, b) => a + b, 0);
+        if (aftercare.errors.length > 0) {
+          alert(`⚠️ นำเข้าตารางสอนแล้ว แต่มีบางขั้นตอนไม่สมบูรณ์:\n- ${aftercare.errors.join('\n- ')}\n\nตรวจสอบ log การนำเข้าและแจ้งผู้ดูแลระบบ`);
+        } else if (importImpact.teacherChanges.length > 0 || aftercare.cleaned.length > 0) {
+          alert(`✅ นำเข้าสำเร็จ\n• โอนประวัติ: เปลี่ยนครู ${importImpact.teacherChanges.length} คาบ (ประทับชื่อครูคนเดิมในบันทึกหลังสอน ${stampedTotal} รายการ)\n• เก็บกวาดตารางครูที่ปิดการใช้งาน ${aftercare.cleaned.length} รายการ\n• บันทึก log การนำเข้าแล้ว`);
         }
       }
 
@@ -1181,6 +1240,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   useEffect(() => {
     setStaleSchedules([]);
     setReplaceStale(false);
+    setImportImpact(null);
+    setConfirmedReviewKeys(new Set());
     if (importType !== 'COURSE' || previewData.length === 0) return;
     const loadRows = previewData.filter(r => r.parsedData?.isTeacherLoadReport);
     const validRows = loadRows.filter(r => r.isValid);
@@ -1204,7 +1265,17 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           // eslint-disable-next-line no-console
           plan.debug.forEach(line => console.log('[SYNC-REPLACE]', line));
         }
-        if (!cancelled) setStaleSchedules(plan.stale.map(s => ({ id: s.id, label: s.label })));
+        if (!cancelled) {
+          setStaleSchedules(plan.stale.map(s => ({ id: s.id, label: s.label })));
+          // ผลกระทบของการนำเข้าซ้ำ: เปลี่ยนครูในคาบเดิม / ตารางของครูที่ปิดการใช้งานและมีคนมาแทนแล้ว
+          setImportImpact(computeImportImpact(
+            loadRows.map(r => ({ isValid: r.isValid, parsedData: r.parsedData as Record<string, any> })),
+            existingDocs,
+            semester,
+            realStaffList.map(s => ({ id: s.id, fullName: s.fullName || s.displayName, status: s.status })),
+            plan.stale.map(s => s.id),
+          ));
+        }
       } catch (e) {
         console.warn('[BulkDataImportModal] stale schedule scan failed:', e);
       } finally {
@@ -1212,9 +1283,21 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
       }
     })();
     return () => { cancelled = true; };
-  }, [previewData, importType]);
+  }, [previewData, importType, realStaffList]);
 
   if (!isOpen) return null;
+
+  // ยืนยันรายการที่ได้รับผลกระทบ — ทีละรายการ หรือทั้งหมดในคราวเดียว
+  const toggleReviewKey = (key: string) => setConfirmedReviewKeys(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  const confirmAllReviewKeys = () => { if (importImpact) setConfirmedReviewKeys(new Set(reviewKeysOf(importImpact))); };
+  const clearReviewKeys = () => setConfirmedReviewKeys(new Set());
+  const reviewTotal = importImpact ? reviewKeysOf(importImpact).length : 0;
+  const reviewDone = importImpact ? reviewKeysOf(importImpact).filter(k => confirmedReviewKeys.has(k)).length : 0;
+  const impactBlocksImport = importType === 'COURSE' && !!importImpact && !isImpactFullyConfirmed(importImpact, confirmedReviewKeys);
 
   const validCount = previewData.filter(r => r.isValid).length;
   const invalidCount = previewData.filter(r => !r.isValid).length;
@@ -1584,6 +1667,123 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 </p>
               </div>
 
+              {/* COURSE — ผลที่จะเกิดขึ้นเมื่อนำเข้าซ้ำ: แอดมินตรวจและยืนยันรายการที่ได้รับผลกระทบก่อนนำเข้า */}
+              {importType === 'COURSE' && importImpact && (
+                <div className="bg-sky-950/30 border border-sky-500/40 rounded-xl p-4 space-y-3 text-[11px] text-sky-100">
+                  <div className="flex items-center gap-2 font-bold text-sky-200 text-xs">
+                    <Info className="w-4 h-4" /> ผลที่จะเกิดขึ้นเมื่อนำเข้าไฟล์นี้ (ตรวจสอบก่อนยืนยัน)
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-center">
+                    {[
+                      { label: 'คาบในไฟล์', value: importImpact.slotsInFile },
+                      { label: 'คาบใหม่ที่เพิ่ม', value: importImpact.created },
+                      { label: 'ไม่เปลี่ยนแปลง', value: importImpact.unchanged },
+                      { label: 'ข้อมูลวิชาเปลี่ยน', value: importImpact.detailsChanged },
+                      { label: 'เปลี่ยนครู', value: importImpact.teacherChanges.length + importImpact.teacherAdded },
+                    ].map(s => (
+                      <div key={s.label} className="bg-black/30 rounded-lg py-2">
+                        <div className="text-base font-bold text-white">{s.value}</div>
+                        <div className="text-[10px] text-sky-300/80">{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-1 text-sky-200/90 leading-relaxed">
+                    <p>• คาบที่ตรงกับของเดิม (วิชา ห้อง วัน คาบ เดียวกัน) จะถูกเขียนทับด้วยข้อมูลจากไฟล์ — คาบใหม่จะถูกเพิ่ม ไม่ซ้ำกับของเดิม</p>
+                    <p>• <strong>ไม่ถูกแตะต้อง:</strong> การเช็คชื่อรายคาบ เนื้อหาบันทึกหลังสอน คะแนนใน Gradebook คำขอเช็คชื่อย้อนหลัง และรายการสอนแทน (การนำเข้าไม่แก้ข้อมูลเหล่านี้ ยกเว้นการประทับชื่อครูคนเดิมตามด้านล่าง)</p>
+                    <p>• ตารางของครูที่ไม่มีแถวในไฟล์นี้ จะไม่ถูกลบหรือแก้ (ยกเว้นกรณีครูที่ปิดการใช้งานและมีคนมาแทนแล้ว ตามด้านล่าง)</p>
+                  </div>
+
+                  {reviewTotal > 0 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 bg-black/30 rounded-lg px-3 py-2">
+                      <span className="font-bold text-white">
+                        รายการที่ได้รับผลกระทบ — ยืนยันแล้ว {reviewDone}/{reviewTotal} รายการ
+                        {reviewDone === reviewTotal && <span className="text-emerald-400 ml-2">✓ ครบแล้ว</span>}
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <button type="button" onClick={confirmAllReviewKeys} disabled={isImporting || reviewDone === reviewTotal}
+                          className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold cursor-pointer disabled:cursor-not-allowed">
+                          ยืนยันทั้งหมด (ตรวจสอบแล้ว)
+                        </button>
+                        <button type="button" onClick={clearReviewKeys} disabled={isImporting || reviewDone === 0}
+                          className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:text-slate-600 text-slate-300 font-bold cursor-pointer disabled:cursor-not-allowed">
+                          ล้างการยืนยัน
+                        </button>
+                      </span>
+                    </div>
+                  )}
+
+                  {importImpact.teacherChanges.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="font-bold text-white">เปลี่ยนครูในคาบเดิม ({importImpact.teacherChanges.length} คาบ)</div>
+                      <p className="text-sky-200/80 leading-relaxed">
+                        ครูผู้สอนของคาบเหล่านี้จะถูกเปลี่ยนตามไฟล์ใหม่ — <strong>ประวัติบันทึกหลังสอนเดิมยังอยู่กับครูคนเดิม</strong> (ระบบประทับชื่อครูคนเดิมไว้ที่บันทึกที่ยังไม่มีผู้บันทึก
+                        ครูคนเดิมยังเห็นประวัติของตน) และครูคนใหม่จะเห็นบันทึกเดิมของคาบนี้พร้อมป้ายบอกว่าครูคนไหนเป็นผู้บันทึก เพื่อรู้ว่าสอนไปถึงไหนแล้ว
+                      </p>
+                      <ul className="space-y-1 max-h-48 overflow-y-auto">
+                        {importImpact.teacherChanges.map(c => (
+                          <li key={c.id}>
+                            <label className="flex items-start gap-2 cursor-pointer bg-black/20 rounded-lg px-2 py-1.5">
+                              <input type="checkbox" checked={confirmedReviewKeys.has(`change:${c.id}`)} onChange={() => toggleReviewKey(`change:${c.id}`)}
+                                disabled={isImporting} className="mt-0.5 rounded border-sky-500/40 bg-black text-emerald-500" />
+                              <span>
+                                <span className="font-mono text-white">{c.label}</span><br />
+                                ครูเดิมที่ออก: <strong className="text-amber-200">{c.leavingTeacherNames.join(', ')}</strong>
+                                {' → '}ครูตามไฟล์ใหม่: <strong className="text-emerald-200">{c.toTeacherNames.length > 0 ? c.toTeacherNames.join(', ') : 'ยังจับคู่ครูไม่ได้'}</strong>
+                              </span>
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {importImpact.cleanupEligible.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="font-bold text-white">ตารางของครูที่ปิดการใช้งาน และมีครูมาสอนคาบเดียวกันแล้ว — จะถูกเก็บกวาด ({importImpact.cleanupEligible.length} รายการ)</div>
+                      <p className="text-sky-200/80 leading-relaxed">
+                        จะลบเฉพาะตารางของบุคลากรที่ <strong>ถูกปิดการใช้งานแล้วทั้งหมด</strong> และมีครูอื่นรับคาบเดียวกัน (วิชา ห้อง วัน คาบ) ในไฟล์นี้แล้วเท่านั้น
+                        ก่อนลบระบบประทับชื่อครูเจ้าของตารางลงในบันทึกหลังสอนที่ยังไม่มีผู้บันทึก (ประวัติไม่หาย) และ <strong>บันทึกลง log</strong> ว่าใครเคยเป็นผู้บันทึกและมีข้อมูลผูกอยู่เท่าใด
+                      </p>
+                      <ul className="space-y-1 max-h-48 overflow-y-auto">
+                        {importImpact.cleanupEligible.map(c => (
+                          <li key={c.id}>
+                            <label className="flex items-start gap-2 cursor-pointer bg-black/20 rounded-lg px-2 py-1.5">
+                              <input type="checkbox" checked={confirmedReviewKeys.has(`cleanup:${c.id}`)} onChange={() => toggleReviewKey(`cleanup:${c.id}`)}
+                                disabled={isImporting} className="mt-0.5 rounded border-sky-500/40 bg-black text-emerald-500" />
+                              <span>
+                                <span className="font-mono text-white">{c.label}</span><br />
+                                ครูที่ปิดการใช้งาน: <strong className="text-amber-200">{c.inactiveTeacherNames.join(', ')}</strong>
+                              </span>
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {importImpact.inactiveNotReplaced.length > 0 && (
+                    <details className="text-amber-200">
+                      <summary className="cursor-pointer font-bold">⚠️ ครูที่ปิดการใช้งานแต่ยังไม่มีใครมาแทนในไฟล์นี้ ({importImpact.inactiveNotReplaced.length} รายการ) — ไม่ลบ</summary>
+                      <ul className="mt-1 space-y-0.5 max-h-32 overflow-y-auto font-mono text-[10px]">
+                        {importImpact.inactiveNotReplaced.map(s => <li key={s.id}>• {s.label}</li>)}
+                      </ul>
+                    </details>
+                  )}
+
+                  {importImpact.untouchedTotal > 0 && (
+                    <details className="text-sky-300/80">
+                      <summary className="cursor-pointer">ตารางเดิม {importImpact.untouchedTotal} รายการที่ไม่มีแถวตรงกันในไฟล์นี้ — ไม่ถูกแตะ (ครู {importImpact.untouched.length} ราย)</summary>
+                      <ul className="mt-1 space-y-0.5 max-h-32 overflow-y-auto text-[10px]">
+                        {importImpact.untouched.map(u => <li key={u.teacher}>• {u.teacher} — {u.docCount} คาบ</li>)}
+                      </ul>
+                      <p className="mt-1 text-[10px]">ถ้าครูกลุ่มนี้ย้ายออกแล้ว ให้ปิดการใช้งานบุคลากรก่อน เมื่อมีครูมาแทนในไฟล์ ระบบจะเก็บกวาดให้ในการนำเข้าครั้งถัดไป</p>
+                    </details>
+                  )}
+                </div>
+              )}
+
               {/* COURSE sync/replace — ลบข้อมูลตารางสอนเก่าที่ไม่มีในไฟล์ใหม่ */}
               {importType === 'COURSE' && (scanningStale || staleSchedules.length > 0) && (
                 <div className="bg-amber-950/30 border border-amber-500/40 rounded-xl p-3 space-y-2">
@@ -1602,7 +1802,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                         />
                         <span className="text-[11px] text-amber-200">
                           <strong>โหมด Sync/Replace:</strong> พบตารางสอนเก่าของครูในไฟล์นี้ <strong>{staleSchedules.length} รายการ</strong> ที่ไม่มีอยู่ในไฟล์ที่กำลังนำเข้า
-                          — ติ๊กเพื่อ <strong className="text-red-300">ลบถาวร</strong> (เฉพาะครูที่ปรากฏในไฟล์นี้ ไม่แตะครูคนอื่น; ข้ามรายการที่มีการเช็คชื่อผูกอยู่)
+                          — ติ๊กเพื่อ <strong className="text-red-300">ลบถาวร</strong> (เฉพาะครูที่ปรากฏในไฟล์นี้ ไม่แตะครูคนอื่น; ข้ามรายการที่ยังมีบันทึกหลังสอน/คำขอเช็คชื่อย้อนหลัง/รายการสอนแทนผูกอยู่)
                         </span>
                       </label>
                       <details className="text-[10px] text-amber-300/80">
@@ -1683,12 +1883,14 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 (importType === 'PARENT' && isStudentIdsLoading);
               const parsing = !!file && !isValidated; // เลือกไฟล์แล้ว แต่ยังอ่าน/ตรวจไม่เสร็จ
               const disabled =
-                isImporting || rosterLoading || parsing || !file || validCount === 0 || !hasPermissionForCurrentType;
+                isImporting || rosterLoading || parsing || !file || validCount === 0 || !hasPermissionForCurrentType || impactBlocksImport;
               const label = rosterLoading
                 ? (importType === 'COURSE' ? 'กำลังโหลดรายชื่อครู...' : 'กำลังโหลดรายชื่อนักเรียน...')
                 : parsing
                   ? 'กำลังอ่านและตรวจสอบไฟล์...'
-                  : `ยืนยันการนำเข้าข้อมูล (${validCount} แถว)`;
+                  : impactBlocksImport
+                    ? `ยืนยันรายการที่ได้รับผลกระทบก่อน (${reviewDone}/${reviewTotal})`
+                    : `ยืนยันการนำเข้าข้อมูล (${validCount} แถว)`;
               return (
                 <button
                   type="button"

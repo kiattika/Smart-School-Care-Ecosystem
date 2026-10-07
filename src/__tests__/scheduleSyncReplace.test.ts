@@ -281,7 +281,7 @@ describe('กันลบ schedule ที่ยังมีข้อมูลท
 
   it('BulkDataImportModal ใช้ตัวกันนี้จริง และไม่เหลือโค้ดเช็คเฉพาะ attendance_records แบบเดิม', () => {
     const src = readSource(path.resolve(__dirname, '../components/BulkDataImportModal.tsx'));
-    expect(src).toContain('partitionStaleByReferences(staleSchedules');
+    expect(src).toMatch(/partitionStaleByReferences<[^>]*>\(staleSchedules, referencedValues\)/);
     expect(src).toContain('SCHEDULE_REFERENCING_COLLECTIONS');
     expect(src).not.toContain("collection(db, 'attendance_records')");
   });
