@@ -20,6 +20,8 @@ import { useCurrentSemester } from '../hooks/useCurrentSemester';
 import { isScheduleInTerm } from '../lib/scheduleSyncReplace';
 import { cn } from '../lib/utils';
 import { matchTeacherByName } from '../utils/teacherLoadReportParser';
+import { isStaffActive } from '../lib/staffStatus';
+import { shouldShowInTeachingLoad } from '../lib/teachingLoadVisibility';
 
 export interface TeachingSubject {
   order: number;
@@ -45,6 +47,8 @@ export interface TeacherTeachingLoad {
   totalActivityPeriods: number;
   totalPeriods: number;
   isUnlinked?: boolean;
+  /** บุคลากรถูกปิดการใช้งาน (แสดงเฉพาะเมื่อยังมีคาบค้าง) */
+  isInactive?: boolean;
 }
 
 const DAY_ORDER: Record<string, number> = {
@@ -128,6 +132,7 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
       teacherEmail: string;
       department: string;
       homeroom: string;
+      isInactive: boolean;
       scheduleItems: any[];
     }>();
 
@@ -143,6 +148,7 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
         teacherEmail: st.email || '',
         department: dept,
         homeroom,
+        isInactive: !isStaffActive(st),
         scheduleItems: []
       });
     });
@@ -196,6 +202,9 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
       const totalActivityPeriods = subjects.filter(s => s.subjectType === 'ACTIVITY').reduce((sum, s) => sum + s.totalPeriods, 0);
       const totalPeriods = totalMainPeriods + totalActivityPeriods;
 
+      // ครูที่ปิดการใช้งานและไม่มีคาบค้างในภาคเรียนนี้ → ไม่แสดงในรายงาน
+      if (!shouldShowInTeachingLoad({ status: entry.isInactive ? 'INACTIVE' : undefined }, totalPeriods)) return;
+
       result.push({
         id: entry.staffDocId,
         staffDocId: entry.staffDocId,
@@ -206,7 +215,8 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
         subjects,
         totalMainPeriods,
         totalActivityPeriods,
-        totalPeriods
+        totalPeriods,
+        isInactive: entry.isInactive
       });
     });
 
@@ -636,6 +646,11 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
                         <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
                           {teacher.department}
                         </span>
+                        {teacher.isInactive && (
+                          <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-300 border border-red-500/30" title="บุคลากรถูกปิดการใช้งานแล้ว แต่ยังมีคาบสอนค้างอยู่ในภาคเรียนนี้">
+                            ปิดการใช้งาน • ยังมีคาบค้าง
+                          </span>
+                        )}
                         {teacher.homeroom && teacher.homeroom !== '-' && (
                           <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-white/5 text-slate-300 border border-white/10">
                             ครูที่ปรึกษา: {teacher.homeroom}
