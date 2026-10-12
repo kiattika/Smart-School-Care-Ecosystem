@@ -493,7 +493,7 @@ export function ParentPortal() {
 
         {/* 1. Gate Attendance Tracker */}
         {activeTab === 'gate' && (
-          <GateAttendanceTracker studentId={student.studentId} isParentView={true} />
+          <GateAttendanceTracker studentId={student.studentId} student={student} isParentView={true} />
         )}
 
         {/* 2. Health & Mental Well-being */}
