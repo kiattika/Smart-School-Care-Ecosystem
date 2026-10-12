@@ -1033,7 +1033,8 @@ export interface BillingInvoice {
   items: BillingInvoiceItem[];
   totalAmount: number;
   dueDate: string;
-  status: 'PENDING' | 'PAID' | 'OVERDUE';   // เดิมใช้ 'UNPAID' — เปลี่ยนชื่อให้ตรงกับที่ยืนยันจากโรงเรียน
+  // VERIFYING = ผู้ปกครอง/นักเรียนแนบสลิปแล้ว รอเจ้าหน้าที่การเงินตรวจยอด+สลิป (ดู src/lib/billingPayment.ts)
+  status: 'PENDING' | 'VERIFYING' | 'PAID' | 'OVERDUE';   // เดิมใช้ 'UNPAID' — เปลี่ยนชื่อให้ตรงกับที่ยืนยันจากโรงเรียน
   promptPayQr: string;
   createdBy: string;          // Firebase Auth UID ของเจ้าหน้าที่การเงินที่สร้างใบแจ้งหนี้
   createdAt: string;
@@ -1043,6 +1044,24 @@ export interface BillingInvoice {
   // ระบบนี้เป็นบิล 1 ใบต่อการจ่าย 1 ครั้งเสมอ ไม่มีจ่ายบางส่วน/แยกใบเสร็จ จึงไม่จำเป็นต้องมี counter
   // แยกชุดที่สองสำหรับใบเสร็จโดยเฉพาะ — ใช้เลขเดียวกันตลอดสายเอกสารเพื่อลด state ที่ต้อง sync)
   receiptNo?: string;
+  // ── สลิปโอนเงินที่ผู้ปกครอง/นักเรียนแนบ (ไฟล์ใน Storage: billing_slips/{uid}/...) ──
+  slipUrl?: string;
+  slipStoragePath?: string;
+  slipFileName?: string;
+  slipUploadedAt?: string;
+  slipUploadedByUid?: string;
+  slipNote?: string;
+  slipRejectedReason?: string | null;
+  slipRejectedAt?: string | null;
+  slipRejectedBy?: string;
+  // ── การตรวจสอบโดยเจ้าหน้าที่การเงิน ──
+  verifiedBy?: string;        // Auth UID ของผู้ตรวจ/ผู้บันทึกรับเงิน
+  verifiedByName?: string;
+  verifiedAt?: string;
+  // ใบเสร็จรับเงินที่เจ้าหน้าที่แนบ (รูปภาพ/PDF — ไม่บังคับ)
+  receiptFileUrl?: string;
+  receiptStoragePath?: string;
+  receiptFileName?: string;
 }
 
 export interface ParentTeacherMessage {
@@ -1243,7 +1262,6 @@ export interface StoreState {
   addDigitalCertificate: (cert: Omit<DigitalCertificate, 'id'>) => void;
   submitVolunteerHours: (record: Omit<VolunteerHourRecord, 'id' | 'status'>) => void;
   submitHomework: (assignmentId: string, fileName: string) => void;
-  payBillingInvoice: (invoiceId: string) => void;
   sendParentTeacherMessage: (studentId: string, senderRole: ParentTeacherMessage['senderRole'], senderName: string, message: string) => void;
   bookParentAppointment: (appointment: Omit<ParentAppointment, 'id' | 'status'>) => void;
 

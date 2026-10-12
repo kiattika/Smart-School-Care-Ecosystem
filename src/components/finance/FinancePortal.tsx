@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
-import { createBillingInvoice, createBillingInvoicesBulk, subscribeBillingInvoices } from '../../services/firestoreService';
+import { createBillingInvoice, createBillingInvoicesBulk, subscribeBillingInvoices, verifyInvoicePayment, rejectPaymentSlip } from '../../services/firestoreService';
+import { uploadBillingFile } from '../../services/storageService';
+import {
+  validateBillingFile, validateRejectReason, buildVerifyPatch, buildRejectPatch, canVerifySlip, canRecordPaymentDirectly,
+} from '../../lib/billingPayment';
 import { StudentPicker } from '../shared/StudentPicker';
 import {
   Wallet,
@@ -20,7 +24,6 @@ import { DatePicker } from '../shared/DatePicker';
 
 export function FinancePortal() {
   const user = useStore(s => s.user);
-  const { payBillingInvoice } = useStore();
   const { students } = useRealStudents(); // นักเรียนจาก Firestore สด (ใช้แสดงชื่อในใบแจ้งหนี้ + สร้างบิล)
 
   // TASK 0 (เฟส 2 การเงิน): ตัดแท็บ requisitions (อนุมัติเบิกงบ/จัดซื้อครู) และ reports
@@ -44,6 +47,64 @@ export function FinancePortal() {
 
   // Selected receipt modal
   const [selectedInvoice, setSelectedInvoice] = useState<BillingInvoice | null>(null);
+
+  // ตรวจสลิป / บันทึกรับเงิน — เปลี่ยนสถานะเป็น "ชำระแล้ว" ได้ผ่านขั้นตอนนี้เท่านั้น (ลงชื่อผู้ตรวจ + เลขที่ใบเสร็จ = เลขใบแจ้งหนี้)
+  const [reviewInvoice, setReviewInvoice] = useState<BillingInvoice | null>(null);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [confirmDirect, setConfirmDirect] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const openReview = (inv: BillingInvoice) => {
+    setReviewInvoice(inv); setReceiptFile(null); setRejectReason(''); setConfirmDirect(false); setReviewError('');
+  };
+  const closeReview = () => { if (!reviewBusy) setReviewInvoice(null); };
+  const pickReceipt = (file: File | null) => {
+    setReviewError('');
+    if (!file) { setReceiptFile(null); return; }
+    const err = validateBillingFile(file);
+    if (err) { setReceiptFile(null); setReviewError(err); return; }
+    setReceiptFile(file);
+  };
+  const verifierOf = () => {
+    if (!user?.uid) return null;
+    return { uid: user.uid, name: user.displayName || user.email || '' };
+  };
+  const confirmPayment = async (method: 'SLIP_VERIFIED' | 'STAFF_RECORDED') => {
+    if (!reviewInvoice) return;
+    const verifier = verifierOf();
+    if (!verifier) { setReviewError('ไม่พบข้อมูลผู้ใช้ที่ล็อกอิน — กรุณาเข้าสู่ระบบใหม่'); return; }
+    setReviewBusy(true); setReviewError('');
+    try {
+      const receipt = receiptFile ? await uploadBillingFile('receipt', verifier.uid, reviewInvoice.id, receiptFile) : null;
+      await verifyInvoicePayment(reviewInvoice.id, buildVerifyPatch({
+        invoiceNumber: reviewInvoice.invoiceNumber, verifier, receipt, method, nowIso: new Date().toISOString(),
+      }));
+      setReviewInvoice(null);
+    } catch (e) {
+      console.error('[FinancePortal] confirm payment failed:', e);
+      setReviewError('บันทึกไม่สำเร็จ (ใบแจ้งหนี้ยังไม่ถูกเปลี่ยนสถานะ) กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+  const rejectSlip = async () => {
+    if (!reviewInvoice) return;
+    const err = validateRejectReason(rejectReason);
+    if (err) { setReviewError(err); return; }
+    const verifier = verifierOf();
+    if (!verifier) { setReviewError('ไม่พบข้อมูลผู้ใช้ที่ล็อกอิน — กรุณาเข้าสู่ระบบใหม่'); return; }
+    setReviewBusy(true); setReviewError('');
+    try {
+      await rejectPaymentSlip(reviewInvoice.id, buildRejectPatch({ reason: rejectReason, rejecterUid: verifier.uid, nowIso: new Date().toISOString() }));
+      setReviewInvoice(null);
+    } catch (e) {
+      console.error('[FinancePortal] reject slip failed:', e);
+      setReviewError('ปฏิเสธสลิปไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setReviewBusy(false);
+    }
+  };
 
   // TASK 1: สร้างใบแจ้งหนี้ใหม่ — เดี่ยว หรือ bulk (ค่าใช้จ่ายเดียวกันให้หลายคนพร้อมกัน เช่น ค่าเทอม)
   // (เฟส 2 shared components — TASK 2: การค้นหา/เลือกห้องมาจาก StudentPicker กลางแล้ว ไม่ต้องมี
@@ -231,6 +292,7 @@ export function FinancePortal() {
                   <option value="ALL">สถานะทั้งหมด (All Status)</option>
                   <option value="PAID">ชำระแล้ว (Paid)</option>
                   <option value="PENDING">รอชำระ (Pending)</option>
+                  <option value="VERIFYING">รอตรวจสอบสลิป (Verifying)</option>
                   <option value="OVERDUE">เกินกำหนด (Overdue)</option>
                 </select>
               </div>
@@ -281,6 +343,10 @@ export function FinancePortal() {
                               <span className="px-2.5 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-[10px] font-bold inline-flex items-center gap-1">
                                 <CheckCircle className="w-3 h-3" /> ชำระแล้ว (Paid)
                               </span>
+                            ) : inv.status === 'VERIFYING' ? (
+                              <span className="px-2.5 py-1 bg-sky-500/10 text-sky-300 border border-sky-500/20 rounded-full text-[10px] font-bold inline-flex items-center gap-1">
+                                <Search className="w-3 h-3" /> รอตรวจสลิป
+                              </span>
                             ) : inv.status === 'PENDING' ? (
                               <span className="px-2.5 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full text-[10px] font-bold inline-flex items-center gap-1">
                                 <Clock className="w-3 h-3" /> รอชำระ (Pending)
@@ -292,9 +358,17 @@ export function FinancePortal() {
                             )}
                           </td>
                           <td className="p-3.5 text-right space-x-2">
-                            {inv.status !== 'PAID' && (
+                            {canVerifySlip(inv) && (
                               <button
-                                onClick={() => payBillingInvoice(inv.id)}
+                                onClick={() => openReview(inv)}
+                                className="px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded-lg font-bold text-[10px] transition-colors cursor-pointer"
+                              >
+                                ตรวจสลิป
+                              </button>
+                            )}
+                            {canRecordPaymentDirectly(inv) && (
+                              <button
+                                onClick={() => openReview(inv)}
                                 className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-[10px] transition-colors cursor-pointer"
                               >
                                 บันทึกรับเงิน
@@ -437,6 +511,109 @@ export function FinancePortal() {
       )}
 
       {/* RECEIPT PRINT / PREVIEW MODAL */}
+      {reviewInvoice && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white">
+                {canVerifySlip(reviewInvoice) ? 'ตรวจสอบสลิปโอนเงิน' : 'บันทึกรับเงินโดยเจ้าหน้าที่'}
+              </h3>
+              <button onClick={closeReview} className="text-slate-400 hover:text-white text-sm font-bold px-2 py-1 bg-slate-800 rounded-lg">✕</button>
+            </div>
+
+            <div className="text-xs space-y-1 bg-slate-800/40 border border-slate-800 rounded-xl p-3">
+              <p><span className="text-slate-400">เลขที่:</span> <span className="font-mono text-emerald-400">{reviewInvoice.invoiceNumber}</span></p>
+              <p><span className="text-slate-400">นักเรียน:</span> {students.find(s => s.studentId === reviewInvoice.studentId)?.fullName || reviewInvoice.studentId}</p>
+              <p><span className="text-slate-400">รายการ:</span> {reviewInvoice.title}</p>
+              <p className="font-bold text-sm text-white">ยอดที่ต้องชำระ: <span className="font-mono text-emerald-400">฿{reviewInvoice.totalAmount.toLocaleString()}</span></p>
+            </div>
+
+            {canVerifySlip(reviewInvoice) ? (
+              <div className="space-y-2 text-xs">
+                <p className="font-bold text-slate-200">สลิปที่แนบ</p>
+                {reviewInvoice.slipUrl ? (
+                  <>
+                    {!/\.pdf$/i.test(reviewInvoice.slipStoragePath || '') && (
+                      <img src={reviewInvoice.slipUrl} alt="สลิปโอนเงิน" className="max-h-72 w-auto mx-auto rounded-xl border border-slate-700 bg-white" />
+                    )}
+                    <a href={reviewInvoice.slipUrl} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline block">
+                      เปิดไฟล์สลิปในแท็บใหม่ ({reviewInvoice.slipFileName || 'สลิป'})
+                    </a>
+                    {reviewInvoice.slipUploadedAt && (
+                      <p className="text-slate-400">ส่งเมื่อ {new Date(reviewInvoice.slipUploadedAt).toLocaleString('th-TH')}</p>
+                    )}
+                    {reviewInvoice.slipNote && <p className="text-slate-300 bg-slate-800/60 rounded-lg p-2">หมายเหตุจากผู้ส่ง: {reviewInvoice.slipNote}</p>}
+                  </>
+                ) : (
+                  <p className="text-rose-300">ไม่พบไฟล์สลิป</p>
+                )}
+              </div>
+            ) : (
+              <label className="flex items-start gap-2 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 cursor-pointer">
+                <input type="checkbox" checked={confirmDirect} onChange={(e) => setConfirmDirect(e.target.checked)} className="mt-0.5" />
+                <span>ยืนยันว่าได้รับเงินจำนวน ฿{reviewInvoice.totalAmount.toLocaleString()} แล้ว (เช่น เงินสดที่ห้องการเงิน) — ระบบจะบันทึกชื่อผู้รับเงินและเวลาเป็นหลักฐาน</span>
+              </label>
+            )}
+
+            <div className="space-y-1 text-xs">
+              <label className="font-bold text-slate-200 block">แนบใบเสร็จรับเงิน (รูปภาพหรือ PDF ไม่เกิน 5 MB — ไม่บังคับ)</label>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                onChange={(e) => pickReceipt(e.target.files?.[0] || null)}
+                className="text-slate-300 text-xs"
+              />
+            </div>
+
+            {canVerifySlip(reviewInvoice) && (
+              <div className="space-y-1 text-xs">
+                <label className="font-bold text-slate-200 block">เหตุผลที่ปฏิเสธสลิป (ใช้เมื่อกด "ปฏิเสธสลิป")</label>
+                <textarea
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  rows={2}
+                  placeholder="เช่น ยอดโอนไม่ตรงกับใบแจ้งหนี้ / สลิปไม่ชัดเจน"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2.5 text-xs text-white resize-none"
+                />
+              </div>
+            )}
+
+            {reviewError && (
+              <div role="alert" className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300">{reviewError}</div>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+              {canVerifySlip(reviewInvoice) ? (
+                <>
+                  <button
+                    onClick={rejectSlip}
+                    disabled={reviewBusy}
+                    className="flex-1 py-2.5 bg-rose-600/80 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold cursor-pointer"
+                  >
+                    ปฏิเสธสลิป
+                  </button>
+                  <button
+                    onClick={() => confirmPayment('SLIP_VERIFIED')}
+                    disabled={reviewBusy}
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold cursor-pointer"
+                  >
+                    {reviewBusy ? 'กำลังบันทึก...' : 'ตรวจยอดและสลิปแล้ว — ยืนยันรับเงิน'}
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => confirmPayment('STAFF_RECORDED')}
+                  disabled={reviewBusy || !confirmDirect}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  {reviewBusy ? 'กำลังบันทึก...' : 'บันทึกรับเงิน'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedInvoice && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5">
@@ -467,7 +644,7 @@ export function FinancePortal() {
                 <p><span className="font-bold">รายการ:</span> {selectedInvoice.title}</p>
                 <p><span className="font-bold">กำหนดชำระ:</span> {selectedInvoice.dueDate}</p>
                 {selectedInvoice.status === 'PAID' && (
-                  <p><span className="font-bold">ชำระเมื่อ:</span> {selectedInvoice.paidAt}</p>
+                  <p><span className="font-bold">ชำระเมื่อ:</span> {selectedInvoice.paidAt ? new Date(selectedInvoice.paidAt).toLocaleString('th-TH') : '-'}</p>
                 )}
               </div>
 

@@ -3,7 +3,6 @@ import {
   CreditCard,
   MessageSquare,
   Calendar,
-  QrCode,
   CheckCircle2,
   Download,
   Upload,
@@ -19,7 +18,9 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { useStore } from '../../store';
-import { subscribeBillingInvoices } from '../../services/firestoreService';
+import { subscribeBillingInvoices, submitPaymentSlip } from '../../services/firestoreService';
+import { uploadBillingFile } from '../../services/storageService';
+import { validateBillingFile, buildSlipSubmissionPatch, canSubmitSlip } from '../../lib/billingPayment';
 import { BillingInvoice, ParentTeacherMessage, ParentAppointment, Student } from '../../types';
 import { DatePicker } from '../shared/DatePicker';
 
@@ -30,7 +31,6 @@ export function ParentEngagementServices({
 }: { studentId: string; student?: Student; isParentView?: boolean }) {
   const user = useStore(s => s.user);
   const {
-    payBillingInvoice,
     parentTeacherMessages,
     sendParentTeacherMessage,
     parentAppointments,
@@ -78,7 +78,7 @@ export function ParentEngagementServices({
 
   const invoices = billingInvoices.filter(i => i.studentId === student.studentId);
   // TASK 2: แยกรายการค้างชำระ (PENDING/OVERDUE) ออกจากที่จ่ายแล้วให้ชัดเจน
-  const unpaidInvoices = invoices.filter(i => i.status !== 'PAID');
+  const unpaidInvoices = invoices.filter(i => i.status !== 'PAID'); // รวม VERIFYING (รอตรวจสอบ)
   const paidInvoices = invoices.filter(i => i.status === 'PAID');
   const messages = parentTeacherMessages.filter(m => m.studentId === student.studentId);
   const appointments = parentAppointments.filter(a => a.studentId === student.studentId);
@@ -88,7 +88,10 @@ export function ParentEngagementServices({
   // PromptPay Modal / Payment state
   const [selectedInvoice, setSelectedInvoice] = useState<BillingInvoice | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-  const [slipUploaded, setSlipUploaded] = useState(false);
+  const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipNote, setSlipNote] = useState('');
+  const [slipError, setSlipError] = useState('');
+  const closePaymentModal = () => { setSelectedInvoice(null); setSlipFile(null); setSlipNote(''); setSlipError(''); };
 
   // Chat message state
   const [msgText, setMsgText] = useState('');
@@ -117,15 +120,37 @@ export function ParentEngagementServices({
     // ห้ามสร้างข้อความตอบกลับของครูเอง — ข้อความของครูต้องมาจากครูที่ตอบจริงเท่านั้น
   };
 
-  const handleConfirmPayment = () => {
+  const handlePickSlip = (file: File | null) => {
+    setSlipError('');
+    if (!file) { setSlipFile(null); return; }
+    const err = validateBillingFile(file);
+    if (err) { setSlipFile(null); setSlipError(err); return; }
+    setSlipFile(file);
+  };
+
+  // ส่งสลิปจริง: อัปโหลดไฟล์ขึ้น Storage แล้วเปลี่ยนสถานะเป็น "รอตรวจสอบ" — ห้ามตั้ง "ชำระแล้ว" เอง
+  // เจ้าหน้าที่การเงินเป็นผู้ยืนยันหลังตรวจยอดและสลิป (firestore.rules บังคับซ้ำ)
+  const handleSubmitSlip = async () => {
     if (!selectedInvoice) return;
+    if (!user?.uid) { setSlipError('ไม่พบข้อมูลผู้ใช้ที่ล็อกอิน — กรุณาเข้าสู่ระบบใหม่'); return; }
+    if (!canSubmitSlip(selectedInvoice)) { setSlipError('ใบแจ้งหนี้นี้ไม่อยู่ในสถานะที่แนบสลิปได้'); return; }
+    const err = validateBillingFile(slipFile);
+    if (err || !slipFile) { setSlipError(err || 'กรุณาแนบสลิปโอนเงิน'); return; }
     setIsProcessingPayment(true);
-    setTimeout(() => {
-      payBillingInvoice(selectedInvoice.id);
+    setSlipError('');
+    try {
+      const uploaded = await uploadBillingFile('slip', user.uid, selectedInvoice.id, slipFile);
+      await submitPaymentSlip(
+        selectedInvoice.id,
+        buildSlipSubmissionPatch({ file: uploaded, uploaderUid: user.uid, note: slipNote, nowIso: new Date().toISOString() }),
+      );
+      closePaymentModal();
+    } catch (e) {
+      console.error('[ParentEngagementServices] submit slip failed:', e);
+      setSlipError('ส่งสลิปไม่สำเร็จ กรุณาลองใหม่อีกครั้ง (ใบแจ้งหนี้ยังไม่ถูกเปลี่ยนสถานะ)');
+    } finally {
       setIsProcessingPayment(false);
-      setSelectedInvoice(null);
-      setSlipUploaded(false);
-    }, 1200);
+    }
   };
 
   const handleBookAppointment = (e: React.FormEvent) => {
@@ -205,7 +230,7 @@ export function ParentEngagementServices({
                 ใบแจ้งยอดชำระเงินค่าบำรุงการศึกษา (e-Billing & Official Receipts)
               </h3>
               <p className="text-[11px] text-slate-400">
-                ระบบออกใบเสร็จรับเงินอิเล็กทรอนิกส์ (e-Receipt) อัตโนมัติทันทีหลังยืนยันยอด
+                โอนเงินตามช่องทางที่โรงเรียนแจ้ง แล้วแนบสลิป — เจ้าหน้าที่การเงินจะตรวจสอบยอดและสลิปก่อนเปลี่ยนสถานะเป็น "ชำระแล้ว"
               </p>
             </div>
           </div>
@@ -234,9 +259,11 @@ export function ParentEngagementServices({
                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
                           inv.status === 'OVERDUE'
                             ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-                            : 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
+                            : inv.status === 'VERIFYING'
+                              ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
+                              : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
                         }`}>
-                          {inv.status === 'OVERDUE' ? '⚠️ เกินกำหนดชำระ' : '⏳ รอการชำระเงิน'}
+                          {inv.status === 'OVERDUE' ? '⚠️ เกินกำหนดชำระ' : inv.status === 'VERIFYING' ? '🔎 รอเจ้าหน้าที่ตรวจสอบสลิป' : '⏳ รอการชำระเงิน'}
                         </span>
                       </div>
 
@@ -256,15 +283,26 @@ export function ParentEngagementServices({
                       </div>
                     </div>
 
+                    {inv.slipRejectedReason && canSubmitSlip(inv) && (
+                      <div role="alert" className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-[11px] text-rose-300">
+                        เจ้าหน้าที่การเงินไม่รับสลิปครั้งก่อน: {inv.slipRejectedReason}
+                      </div>
+                    )}
                     <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                       <span className="text-[11px] text-amber-400">กำหนดชำระภายใน: {inv.dueDate}</span>
-                      <button
-                        onClick={() => setSelectedInvoice(inv)}
-                        className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-lg transition-all cursor-pointer"
-                      >
-                        <QrCode className="w-3.5 h-3.5" />
-                        <span>ชำระผ่าน PromptPay QR</span>
-                      </button>
+                      {canSubmitSlip(inv) ? (
+                        <button
+                          onClick={() => setSelectedInvoice(inv)}
+                          className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-lg transition-all cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{inv.slipRejectedReason ? 'แนบสลิปใหม่' : 'แจ้งโอนเงิน / แนบสลิป'}</span>
+                        </button>
+                      ) : (
+                        <span className="text-[11px] text-sky-300">
+                          ส่งสลิปแล้ว {inv.slipUploadedAt ? new Date(inv.slipUploadedAt).toLocaleString('th-TH') : ''} — รอการตรวจสอบ
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -315,16 +353,22 @@ export function ParentEngagementServices({
 
                     <div className="pt-2 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                       <div className="text-[11px] text-slate-400">
-                        <span>ชำระเมื่อ: {inv.paidAt}</span>
+                        <span>ชำระเมื่อ: {inv.paidAt ? new Date(inv.paidAt).toLocaleString('th-TH') : '-'}</span>
                         <p className="text-emerald-400 font-mono">เลขที่ใบเสร็จ: {inv.receiptNo}</p>
                       </div>
-                      <button
-                        onClick={() => alert(`ดาวน์โหลดใบเสร็จรับเงินอิเล็กทรอนิกส์ ${inv.receiptNo}`)}
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border border-slate-700 transition-all cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>ใบเสร็จ e-Receipt</span>
-                      </button>
+                      {inv.receiptFileUrl ? (
+                        <a
+                          href={inv.receiptFileUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border border-slate-700 transition-all"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>เปิดใบเสร็จรับเงิน</span>
+                        </a>
+                      ) : (
+                        <span className="text-[10px] text-slate-500">ไม่มีไฟล์ใบเสร็จแนบ</span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -332,55 +376,64 @@ export function ParentEngagementServices({
             )}
           </div>
 
-          {/* PromptPay QR Payment Modal */}
+          {/* แจ้งโอนเงิน / แนบสลิป */}
           {selectedInvoice && (
             <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
               <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl space-y-5 animate-fadeIn">
                 <div className="text-center space-y-1">
                   <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
-                    THAI QR PAYMENT • PROMPTPAY
+                    แจ้งโอนเงิน • แนบสลิป
                   </span>
                   <h3 className="text-base font-bold text-white">{selectedInvoice.title}</h3>
-                  <p className="text-2xl font-black text-emerald-400">฿{(selectedInvoice.totalAmount ?? (selectedInvoice as any).amount ?? 0).toLocaleString()}</p>
+                  <p className="text-2xl font-black text-emerald-400">฿{(selectedInvoice.totalAmount ?? 0).toLocaleString()}</p>
+                  <p className="text-[11px] text-slate-400 font-mono">อ้างอิง: {selectedInvoice.invoiceNumber}</p>
                 </div>
 
-                {/* PromptPay QR Code Mockup */}
-                <div className="bg-white p-6 rounded-2xl max-w-[220px] mx-auto text-center shadow-lg">
-                  <div className="flex items-center justify-center mb-2">
-                    <span className="text-blue-900 font-black text-xs">PromptPay | พร้อมเพย์</span>
-                  </div>
-                  <QrCode className="w-40 h-40 mx-auto text-slate-900" />
-                  <span className="text-[9px] text-slate-500 font-mono block mt-2">
-                    REF: {selectedInvoice.invoiceNumber}
-                  </span>
-                </div>
+                <p className="text-[11px] text-slate-400 bg-slate-800/40 border border-slate-800 rounded-2xl p-3 leading-relaxed">
+                  โอนเงินตามช่องทางที่โรงเรียนแจ้ง ระบุเลขอ้างอิงด้านบน แล้วแนบสลิปที่นี่
+                  เจ้าหน้าที่การเงินจะตรวจสอบยอดและสลิป สถานะจะเปลี่ยนเป็น "ชำระแล้ว" เมื่อตรวจสอบเสร็จ
+                </p>
 
                 <div className="space-y-3">
-                  <div 
-                    onClick={() => setSlipUploaded(true)}
-                    className={`p-3 rounded-2xl border-2 border-dashed text-center cursor-pointer transition-all ${
-                      slipUploaded ? 'bg-emerald-500/10 border-emerald-500 text-emerald-300' : 'bg-slate-800/40 border-slate-700 text-slate-400 hover:border-emerald-500/50'
-                    }`}
-                  >
+                  <label className="block p-3 rounded-2xl border-2 border-dashed text-center cursor-pointer transition-all bg-slate-800/40 border-slate-700 text-slate-400 hover:border-emerald-500/50">
                     <Upload className="w-5 h-5 mx-auto mb-1 text-emerald-400" />
                     <span className="text-xs font-bold block">
-                      {slipUploaded ? '✅ แนบสลิปโอนเงินเรียบร้อยแล้ว' : 'คลิกเพื่อจำลองการอัปโหลดสลิปโอนเงิน'}
+                      {slipFile ? `📎 ${slipFile.name}` : 'เลือกไฟล์สลิปโอนเงิน (รูปภาพหรือ PDF ไม่เกิน 5 MB)'}
                     </span>
-                  </div>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,application/pdf"
+                      className="sr-only"
+                      onChange={(e) => handlePickSlip(e.target.files?.[0] || null)}
+                    />
+                  </label>
+
+                  <textarea
+                    value={slipNote}
+                    onChange={(e) => setSlipNote(e.target.value)}
+                    rows={2}
+                    placeholder="หมายเหตุถึงเจ้าหน้าที่การเงิน (ไม่บังคับ) เช่น วัน-เวลาที่โอน"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-xs text-white resize-none"
+                  />
+
+                  {slipError && (
+                    <div role="alert" className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300">{slipError}</div>
+                  )}
 
                   <div className="flex gap-2">
                     <button
-                      onClick={() => setSelectedInvoice(null)}
+                      onClick={closePaymentModal}
+                      disabled={isProcessingPayment}
                       className="flex-1 py-2.5 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
                     >
                       ยกเลิก
                     </button>
                     <button
-                      onClick={handleConfirmPayment}
-                      disabled={isProcessingPayment}
-                      className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      onClick={handleSubmitSlip}
+                      disabled={isProcessingPayment || !slipFile}
+                      className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold shadow transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
-                      {isProcessingPayment ? 'กำลังบันทึก...' : 'ยืนยันการชำระเงิน'}
+                      {isProcessingPayment ? 'กำลังส่งสลิป...' : 'ส่งสลิปให้เจ้าหน้าที่ตรวจสอบ'}
                     </button>
                   </div>
                 </div>

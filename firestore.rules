@@ -638,10 +638,33 @@ service cloud.firestore {
                        request.resource.data.createdBy == request.auth.uid &&
                        request.resource.data.status == 'PENDING';
 
-      // เจ้าหน้าที่การเงินแก้ไขได้เต็มที่ (เช่น ปรับยอด/กำหนดชำระ ก่อนถึงกำหนด) แต่ห้ามย้ายเจ้าของ
-      allow update: if (hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF')) &&
-                       request.resource.data.studentUid == resource.data.studentUid &&
-                       request.resource.data.parentUid == resource.data.parentUid;
+      // ขั้นตอนชำระเงิน (src/lib/billingPayment.ts):
+      //  - เจ้าหน้าที่การเงินแก้ไขได้เต็มที่ (เช่น ปรับยอด/กำหนดชำระ ตรวจสลิป) แต่ห้ามย้ายเจ้าของ
+      //    และการ "เปลี่ยนเป็น" PAID ต้องลงชื่อผู้ตรวจ (verifiedBy) เป็นตัวเองเสมอ
+      //  - ผู้ปกครอง/นักเรียนเจ้าของบิล ทำได้อย่างเดียว: แนบสลิป PENDING/OVERDUE → VERIFYING
+      //    (แตะได้เฉพาะ field ของสลิป ห้ามตั้ง PAID/ห้ามแก้ยอด) และ URL ต้องเป็นไฟล์ใน Firebase Storage
+      allow update: if (
+                         (hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF')) &&
+                         request.resource.data.studentUid == resource.data.studentUid &&
+                         request.resource.data.parentUid == resource.data.parentUid &&
+                         (request.resource.data.status != 'PAID' ||
+                           resource.data.status == 'PAID' ||
+                           request.resource.data.get('verifiedBy', '') == request.auth.uid)
+                       ) || (
+                         isSignedIn() &&
+                         (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid) &&
+                         resource.data.status in ['PENDING', 'OVERDUE'] &&
+                         request.resource.data.status == 'VERIFYING' &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                           'status', 'slipUrl', 'slipStoragePath', 'slipFileName', 'slipUploadedAt',
+                           'slipUploadedByUid', 'slipNote', 'slipRejectedReason', 'slipRejectedAt', 'updatedAt'
+                         ]) &&
+                         request.resource.data.slipUploadedByUid == request.auth.uid &&
+                         request.resource.data.slipUrl is string &&
+                         request.resource.data.slipUrl.matches('https://firebasestorage\\.googleapis\\.com/.*') &&
+                         request.resource.data.get('slipRejectedReason', null) == null &&
+                         request.resource.data.get('slipRejectedAt', null) == null
+                       );
 
       allow delete: if false;
     }
