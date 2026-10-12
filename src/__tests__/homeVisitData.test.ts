@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
-  ageFromBirthDate, bodyShapeFromBmi, distanceBracketFromMeters, prefillFromSelfAssessment, validateStudentInfo, validateFamilyInfo,
+  ageFromBirthDate, bodyShapeFromBmi, distanceBracketFromMeters, validateStudentInfo, validateFamilyInfo,
   emptyStudentInfo, emptyFamilyInfo, DISTANCE_BRACKETS, COMMUTE_DURATIONS, HOUSING_STATUS,
 } from '../lib/homeVisitData';
 import { summarizeHomeVisit } from '../lib/homeVisitAnalytics';
+import { sharedFromAssessment, fillMissing, emptyShared } from '../lib/homeVisitShared';
+import { readSource } from './helpers/readSource';
 
 describe('คำนวณจากระบบ', () => {
   it('อายุ ปี/เดือน', () => {
@@ -24,22 +26,38 @@ describe('คำนวณจากระบบ', () => {
   });
 });
 
-describe('prefillFromSelfAssessment', () => {
+describe('ข้อมูลร่วมแบบประเมินตนเอง ↔ ฟอร์มเยี่ยมบ้าน (homeVisitShared)', () => {
   const a = (fb: any): any => ({ isCompleted: true, familyBackground: fb });
-  it('ไม่มี/ยังไม่เสร็จ → ไม่เติมอะไร', () => {
-    expect(prefillFromSelfAssessment(null)).toEqual({ hints: {} });
-    expect(prefillFromSelfAssessment({ isCompleted: false, familyBackground: {} } as any)).toEqual({ hints: {} });
+  it('ไม่มีแบบประเมิน → ว่าง', () => {
+    expect(sharedFromAssessment(null).shared).toEqual(emptyShared());
   });
-  it('เติมเฉพาะค่าที่แมปได้ชัดเจน ค่ากำกวมเป็น hint', () => {
-    const r = prefillFromSelfAssessment(a({ livingWith: 'บิดาและมารดา', transportation: 'รถจักรยานยนต์', travelTime: '15-30 นาที', consultPerson: 'ผู้ปกครอง' }));
-    expect(r.livesWith).toBe('บิดาและมารดา');
-    expect(r.commuteMode).toBe('จักรยานยนต์ส่วนตัว');
-    expect(r.commuteDuration).toBe(COMMUTE_DURATIONS[0]);
-    const amb = prefillFromSelfAssessment(a({ livingWith: 'บิดา หรือ มารดา (ฝ่ายใดฝ่ายหนึ่ง)', transportation: 'เดิน/ขี่จักรยาน', travelTime: '31-60 นาที' }));
-    expect(amb.livesWith).toBeUndefined();
-    expect(amb.hints.livesWith).toBe('บิดา หรือ มารดา (ฝ่ายใดฝ่ายหนึ่ง)');
-    expect(amb.commuteDuration).toBeUndefined();
-    expect(amb.hints.commuteDuration).toBe('31-60 นาที');
+  it('ตัวเลือกปัจจุบัน (ตรง สพฐ.) ใช้ได้ตรงๆ รวม consultPerson แบบหลายข้อ', () => {
+    const r = sharedFromAssessment(a({ livingWith: 'บิดาและมารดา', transportation: 'จักรยานยนต์ส่วนตัว', travelTime: '30-50 นาที', consultPerson: ['บิดา', 'เพื่อน'] }));
+    expect(r.shared).toEqual({ livesWith: 'บิดาและมารดา', commuteMode: 'จักรยานยนต์ส่วนตัว', commuteDuration: '30-50 นาที', consultWho: ['บิดา', 'เพื่อน'] });
+    expect(r.hints).toEqual({});
+  });
+  it('เอกสารรุ่นเก่า: แมปเฉพาะที่ตรงชัดเจน ที่กำกวมเป็น hint ไม่เดา', () => {
+    const r = sharedFromAssessment(a({ livingWith: 'หอพัก / อยู่คนเดียว', transportation: 'รถจักรยานยนต์', travelTime: '15-30 นาที', consultPerson: 'คุณครู' }));
+    expect(r.shared.livesWith).toBe('พักอยู่คนเดียว (เช่าหอพัก/บ้านเช่า)');
+    expect(r.shared.commuteMode).toBe('จักรยานยนต์ส่วนตัว');
+    expect(r.shared.commuteDuration).toBe(COMMUTE_DURATIONS[0]);
+    expect(r.shared.consultWho).toEqual(['ครู']);
+    const amb = sharedFromAssessment(a({ livingWith: 'บิดา หรือ มารดา (ฝ่ายใดฝ่ายหนึ่ง)', transportation: 'เดิน/ขี่จักรยาน', travelTime: '31-60 นาที', consultPerson: '' }));
+    expect(amb.shared.livesWith).toBe(''); expect(amb.hints.livesWith).toBe('บิดา หรือ มารดา (ฝ่ายใดฝ่ายหนึ่ง)');
+    expect(amb.shared.commuteMode).toBe(''); expect(amb.hints.commuteMode).toBe('เดิน/ขี่จักรยาน');
+    expect(amb.shared.commuteDuration).toBe(''); expect(amb.hints.commuteDuration).toBe('31-60 นาที');
+  });
+  it('fillMissing เติมเฉพาะช่องว่าง ไม่ทับค่าที่กรอกแล้ว', () => {
+    const t = { ...emptyShared(), livesWith: 'บิดา' };
+    const src = { livesWith: 'มารดา', commuteMode: 'เดิน', commuteDuration: '', consultWho: ['ครู'] };
+    expect(fillMissing(t, src)).toEqual({ livesWith: 'บิดา', commuteMode: 'เดิน', commuteDuration: '', consultWho: ['ครู'] });
+  });
+  it('ตัวเลือกของแบบประเมินตนเองคือชุดเดียวกับ สพฐ.', () => {
+    const f = readSource('src/components/StudentSelfAssessmentForm.tsx');
+    for (const c of ['LIVES_WITH', 'COMMUTE_MODES', 'COMMUTE_DURATIONS', 'CONSULT_OPTIONS']) expect(f).toContain(c);
+    expect(f).not.toContain("'รถประจำทาง / รถสองแถว'");
+    // ไม่ตั้งค่าเริ่มต้นแทนนักเรียน
+    expect(f).not.toMatch(/livingWith: 'บิดาและมารดา',\s*\n\s*transportation: 'รถจักรยานยนต์'/);
   });
 });
 

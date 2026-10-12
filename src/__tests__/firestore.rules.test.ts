@@ -325,14 +325,41 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(asRole('EXECUTIVE').firestore().doc('student_self_assessments/assess-01').get());
     });
 
-    it('allows GUIDANCE_COUNSELOR and student self to write self assessment', async () => {
+    it('GUIDANCE_COUNSELOR เขียนได้; นักเรียนเจ้าของ (ผ่าน students.studentUid) เขียนของตัวเองได้ถ้า homeroomClass ตรง students.room', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/10001').set({ studentId: '10001', room: 'ม.5/8', studentUid: 'stu-1', parentUid: 'par-1' });
+      });
       await assertSucceeds(
         asRole('GUIDANCE_COUNSELOR').firestore().doc('student_self_assessments/assess-g').set({ score: 10 })
       );
-      await assertSucceeds(
-        asUser('student-me').firestore().doc('student_self_assessments/student-me').set({ score: 12 })
-      );
+      const stu = asUser('stu-1', ['STUDENT'], { studentId: '10001' }).firestore();
+      const ok = { studentId: '10001', studentUid: 'stu-1', homeroomClass: 'ม.5/8', isCompleted: true };
+      await assertSucceeds(stu.doc('student_self_assessments/10001').get()); // ยังไม่มีเอกสารก็อ่านได้
+      await assertSucceeds(stu.doc('student_self_assessments/10001').set(ok));
+      await assertSucceeds(stu.doc('student_self_assessments/10001').get());
+      await assertSucceeds(stu.doc('student_self_assessments/10001').set({ ...ok, familyBackground: { livingWith: 'บิดาและมารดา' } }, { merge: true }));
+      // ปฏิเสธ: เขียนแทนคนอื่น / ห้องไม่ตรง / uid = รหัสนักเรียนเดิม (ช่องโหว่/บั๊กรุ่นเก่า) / ลบ
+      await assertFails(stu.doc('student_self_assessments/10002').set({ ...ok, studentId: '10002' }));
+      await assertFails(stu.doc('student_self_assessments/10001').set({ ...ok, homeroomClass: 'ม.6/1' }));
+      await assertFails(asUser('student-me').firestore().doc('student_self_assessments/student-me').set({ score: 12 }));
+      await assertFails(stu.doc('student_self_assessments/10001').delete());
+      await assertFails(asUser('par-1', ['PARENT']).firestore().doc('student_self_assessments/10001').get());
     });
+
+    it('ครูที่ปรึกษาอ่านแบบประเมินของห้องตัวเองได้ (query ตาม homeroomClass) ห้องอื่น/ครูวิชาอ่านไม่ได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('staff/teacher-07').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.5/8' } });
+        await ctx.firestore().doc('staff/teacher-08').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+        await ctx.firestore().doc('student_self_assessments/10001').set({ studentId: '10001', homeroomClass: 'ม.5/8', isCompleted: true });
+      });
+      const hr = asUser('hr-uid-1', ['HOMEROOM_TEACHER'], { staffId: 'teacher-07' }).firestore();
+      await assertSucceeds(hr.doc('student_self_assessments/10001').get());
+      await assertSucceeds(hr.collection('student_self_assessments').where('homeroomClass', '==', 'ม.5/8').get());
+      await assertFails(hr.doc('student_self_assessments/10001').update({ isCompleted: false }));
+      const other = asUser('hr-uid-2', ['HOMEROOM_TEACHER'], { staffId: 'teacher-08' }).firestore();
+      await assertFails(other.doc('student_self_assessments/10001').get());
+    });
+
   });
 
   // 3. discipline_logs

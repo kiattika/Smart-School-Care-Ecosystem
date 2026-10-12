@@ -883,18 +883,16 @@ export const useStore = create<StoreState>((set, get) => ({
       isCompleted: true
     };
 
+    // เขียน Firestore จริงก่อน — ล้มเหลวต้อง throw ให้ฟอร์มแจ้งผู้ใช้ (เดิมกลืน error แล้วแจ้งสำเร็จทั้งที่ไม่ได้บันทึก
+    // ทำให้ข้อมูลหายตอนกลับมาเปิด และครูที่ปรึกษาไม่เห็น)
+    await saveSelfAssessmentRecord(updated);
+
     set((state) => ({
       selfAssessments: {
         ...state.selfAssessments,
         [assessment.studentId]: updated
       }
     }));
-
-    try {
-      await saveSelfAssessmentRecord(updated);
-    } catch (err) {
-      console.warn("Notice: Firestore persistence for self-assessment handled locally/optimistically", err);
-    }
   },
 
   // Extended Student & Parent Actions Implementation

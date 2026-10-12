@@ -27,6 +27,8 @@ import {
   AttendanceRecordLite,
   AttendanceStatusValue,
 } from '../lib/studentAttendanceStats';
+import { emptyShared, fillMissing, sharedFromAssessment, sharedFromInfo, sharedEqual, type SharedFields } from '../lib/homeVisitShared';
+import { emptyStudentInfo } from '../lib/homeVisitData';
 import { diffCourseAttendance, computeCourseStatsMap } from '../lib/courseAttendanceStats';
 import type { AttendanceRecordFull } from '../lib/attendanceHistory';
 import { 
@@ -2631,3 +2633,55 @@ function subscribeAllDocs<T>(col: string, onUpdate: (rows: T[]) => void): () => 
 export const subscribeAllHomeVisitRecords = (cb: (rows: import('../types').HomeVisitRecord[]) => void) => subscribeAllDocs(HOME_VISIT_COL, cb);
 export const subscribeAllStudentHomeVisitInfo = (cb: (rows: import('../types').StudentHomeVisitInfo[]) => void) => subscribeAllDocs(HV_STUDENT_COL, cb);
 export const subscribeAllFamilyHomeVisitInfo = (cb: (rows: import('../types').FamilyHomeVisitInfo[]) => void) => subscribeAllDocs(HV_FAMILY_COL, cb);
+
+
+/** ครูที่ปรึกษา: แบบประเมินตนเองของห้อง (ต้องมี homeroomClass ในเอกสาร — นักเรียนบันทึกแล้วจึงเห็น) */
+export function subscribeSelfAssessmentsByRoom(
+  homeroomClass: string,
+  onUpdate: (assessments: Record<string, StudentSelfAssessment>) => void,
+): () => void {
+  try {
+    const q = query(collection(db, 'student_self_assessments'), where('homeroomClass', '==', homeroomClass));
+    return onSnapshot(q, (snap) => {
+      const map: Record<string, StudentSelfAssessment> = {};
+      snap.docs.forEach(d => { const data = d.data() as StudentSelfAssessment; map[data.studentId || d.id] = data; });
+      onUpdate(map);
+    }, (error) => {
+      console.warn('[subscribeSelfAssessmentsByRoom] listener error:', error.message);
+      onUpdate({});
+    });
+  } catch (error) {
+    console.warn('[subscribeSelfAssessmentsByRoom] setup error:', error);
+    return () => {};
+  }
+}
+
+/** แบบประเมินตนเอง → ฟอร์มเยี่ยมบ้านฝั่งนักเรียน: เติมเฉพาะช่องที่ยังว่าง (สร้างเอกสารบางส่วนถ้ายังไม่มี) */
+export async function syncSharedToHomeVisitInfo(base: { studentId: string; studentUid: string; homeroomClass: string }, shared: SharedFields): Promise<void> {
+  const ref = doc(db, 'home_visit_student_info', base.studentId);
+  const snap = await getDoc(ref);
+  const current = snap.exists() ? (snap.data() as import('../types').StudentHomeVisitInfo) : null;
+  const before = sharedFromInfo(current);
+  const next = fillMissing(before, shared);
+  if (current && sharedEqual(before, next)) return;
+  if (!current && sharedEqual(emptyShared(), next)) return;
+  const patch = { livesWith: next.livesWith, commuteMode: next.commuteMode, commuteDuration: next.commuteDuration, consultWho: next.consultWho };
+  const body = current ? { ...current, ...patch } : { ...emptyStudentInfo(base), ...patch };
+  await setDoc(ref, { ...body, ...base, updatedAt: new Date().toISOString() });
+}
+
+/** ฟอร์มเยี่ยมบ้านฝั่งนักเรียน → แบบประเมินตนเอง: เติมเฉพาะช่องที่ยังว่าง และเฉพาะเมื่อมีแบบประเมินอยู่แล้ว */
+export async function syncSharedToSelfAssessment(base: { studentId: string; studentUid: string; homeroomClass: string }, shared: SharedFields): Promise<void> {
+  const ref = doc(db, 'student_self_assessments', base.studentId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const cur = snap.data() as StudentSelfAssessment;
+  const before = sharedFromAssessment(cur).shared;
+  const next = fillMissing(before, shared);
+  if (sharedEqual(before, next)) return;
+  await setDoc(ref, {
+    studentId: base.studentId, studentUid: base.studentUid, homeroomClass: base.homeroomClass,
+    familyBackground: { livingWith: next.livesWith, transportation: next.commuteMode, travelTime: next.commuteDuration, consultPerson: next.consultWho },
+    updatedAt: new Date().toISOString(),
+  }, { merge: true });
+}

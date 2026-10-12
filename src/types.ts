@@ -495,6 +495,9 @@ export interface StudentSelfAssessment {
   id?: string;
   studentId: string;
   studentName?: string;
+  /** denormalize ตอนนักเรียนบันทึก (firestore.rules ตรวจกับ students.room) — ให้ครูที่ปรึกษาอ่านเฉพาะห้องตัวเองได้ */
+  studentUid?: string;
+  homeroomClass?: string;
   submittedAt?: string;
   updatedAt?: string;
   isCompleted: boolean;
@@ -511,11 +514,12 @@ export interface StudentSelfAssessment {
 
   // ส่วนที่ 2: ภูมิหลัง บริบทครอบครัว และการเดินทาง (Background & Context)
   familyBackground: {
-    livingWith: string;          // ข้อ 7: ปัจจุบันพักอาศัยอยู่กับใคร
-    transportation: string;      // ข้อ 8: การเดินทางมาโรงเรียนส่วนใหญ่ใช้พาหนะใด
-    travelTime: string;          // ข้อ 9: ระยะเวลาที่ใช้ในการเดินทางมาโรงเรียน
+    // ข้อ 7, 8, 9, 11 ใช้ตัวเลือกชุดเดียวกับแบบเก็บข้อมูลเยี่ยมบ้าน สพฐ. (src/lib/homeVisitData.ts) และใช้ข้อมูลร่วมกัน
+    livingWith: string;          // ข้อ 7: ปัจจุบันพักอาศัยอยู่กับใคร (LIVES_WITH)
+    transportation: string;      // ข้อ 8: การเดินทางมาโรงเรียนส่วนใหญ่ใช้พาหนะใด (COMMUTE_MODES)
+    travelTime: string;          // ข้อ 9: ระยะเวลาที่ใช้ในการเดินทางมาโรงเรียน (COMMUTE_DURATIONS)
     responsibilities: string[];  // ข้อ 10: ภาระงานนอกเหนือจากการเรียนที่ต้องรับผิดชอบประจำ
-    consultPerson: string;       // ข้อ 11: เมื่อมีเรื่องสบายใจ/ไม่สบายใจ ปรึกษาใครบ่อยที่สุด
+    consultPerson: string[];     // ข้อ 11: เมื่อทุกข์ใจ/มีปัญหา ปรึกษาใคร (CONSULT_OPTIONS; เอกสารรุ่นเก่าเก็บเป็น string เดียว)
   };
 
   // ส่วนที่ 3: ตัวตน นิสัย และความสนใจ (Identity & Interests)

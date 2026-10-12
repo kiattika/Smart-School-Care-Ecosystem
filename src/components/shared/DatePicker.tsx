@@ -22,6 +22,8 @@ interface DatePickerProps {
   clearable?: boolean;
   /** ข้อความสำหรับ screen reader / validation */
   ariaLabel?: string;
+  /** เปิดปฏิทินที่หน้าเลือกปี (พ.ศ.) ก่อน → เดือน → วัน — เหมาะกับวันเกิดที่ต้องย้อนไปหลายปี */
+  yearFirst?: boolean;
 }
 
 const parseYmd = (s: string): Date | null => {
@@ -48,14 +50,24 @@ const formatDisplay = (s: string): string => {
  * ปฏิทินชัดเจน) ใช้ในฟอร์มลากิจ/ไปราชการ และเช็คชื่อย้อนหลัง — ค่าที่เก็บ/ส่งออกยังเป็น string
  * รูปแบบ YYYY-MM-DD เหมือนเดิมทุกที่ที่เรียกใช้ ไม่ต้องแก้ตรรกะอื่นที่กินค่านี้ต่อ
  */
-export function DatePicker({ value, onChange, min, max, placeholder, className, disabled, required, clearable, ariaLabel }: DatePickerProps) {
+export function DatePicker({ value, onChange, min, max, placeholder, className, disabled, required, clearable, ariaLabel, yearFirst }: DatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
+  // days = ตารางวัน, months = เลือกเดือน, years = เลือกปี (พ.ศ.) — กดหัวข้อ "เดือน ปี" เพื่อย้อนไปเลือกเดือน/ปี
+  const [mode, setMode] = useState<'days' | 'months' | 'years'>('days');
+  const [yearPageStart, setYearPageStart] = useState(0);
   const selected = parseYmd(value);
   const [viewDate, setViewDate] = useState(() => selected || parseYmd(min) || new Date());
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (isOpen) setViewDate(selected || parseYmd(min) || new Date());
+    if (isOpen) {
+      const base = selected || parseYmd(min) || new Date();
+      setViewDate(base);
+      setMode(yearFirst ? 'years' : 'days');
+      // หน้าเลือกปี 20 ปี/หน้า: มีค่าแล้ว → หน้าที่มีปีนั้น; ยังไม่มี → ให้ปีล่าสุด (max/วันนี้) อยู่ท้ายหน้า
+      const anchorYear = selected ? selected.getFullYear() : (parseYmd(max) || new Date()).getFullYear();
+      setYearPageStart(selected ? anchorYear - (anchorYear % 20) + 0 : anchorYear - 19);
+    }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -132,12 +144,57 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
 
       {isOpen && (
         <div className="absolute z-50 mt-1 w-72 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-3">
+          {mode === 'years' && (
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <button type="button" aria-label="ย้อนไป 20 ปี" onClick={() => setYearPageStart(y => y - 20)} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300"><ChevronLeft className="w-4 h-4" /></button>
+                <span className="text-xs font-bold text-white">เลือกปี พ.ศ. {yearPageStart + 543}–{yearPageStart + 19 + 543}</span>
+                <button type="button" aria-label="ไปข้างหน้า 20 ปี" onClick={() => setYearPageStart(y => y + 20)} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300"><ChevronRight className="w-4 h-4" /></button>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {Array.from({ length: 20 }, (_, i) => yearPageStart + i).map(y => {
+                  const outOfRange = (minDate && y < minDate.getFullYear()) || (maxDate && y > maxDate.getFullYear());
+                  const active = viewDate.getFullYear() === y && !!selected && selected.getFullYear() === y;
+                  return (
+                    <button type="button" key={y} disabled={!!outOfRange}
+                      onClick={() => { setViewDate(new Date(y, viewDate.getMonth(), 1)); setMode('months'); }}
+                      className={`py-2 rounded-lg text-[11px] font-semibold ${active ? 'bg-emerald-600 text-white' : outOfRange ? 'text-slate-700 cursor-not-allowed' : 'text-slate-200 hover:bg-slate-800'}`}>
+                      {y + 543}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          {mode === 'months' && (
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <button type="button" aria-label="ปีก่อนหน้า" onClick={() => setViewDate(new Date(year - 1, month, 1))} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300"><ChevronLeft className="w-4 h-4" /></button>
+                <button type="button" onClick={() => { setYearPageStart(year - (year % 20)); setMode('years'); }} className="text-xs font-bold text-white hover:text-emerald-300" title="เลือกปีใหม่">ปี พ.ศ. {year + 543}</button>
+                <button type="button" aria-label="ปีถัดไป" onClick={() => setViewDate(new Date(year + 1, month, 1))} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300"><ChevronRight className="w-4 h-4" /></button>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {THAI_MONTHS.map((m, i) => {
+                  const monthStart = new Date(year, i, 1), monthEnd = new Date(year, i + 1, 0);
+                  const outOfRange = (minDate && monthEnd < minDate) || (maxDate && monthStart > maxDate);
+                  return (
+                    <button type="button" key={m} disabled={!!outOfRange}
+                      onClick={() => { setViewDate(new Date(year, i, 1)); setMode('days'); }}
+                      className={`py-2 rounded-lg text-[11px] font-semibold ${i === month ? 'bg-slate-800 text-emerald-400 border border-emerald-500/40' : outOfRange ? 'text-slate-700 cursor-not-allowed' : 'text-slate-200 hover:bg-slate-800'}`}>
+                      {m}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          {mode === 'days' && (<>
           <div className="flex items-center justify-between mb-2">
-            <button type="button" onClick={() => setViewDate(new Date(year, month - 1, 1))} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300">
+            <button type="button" aria-label="เดือนก่อนหน้า" onClick={() => setViewDate(new Date(year, month - 1, 1))} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300">
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <span className="text-xs font-bold text-white">{THAI_MONTHS[month]} {year + 543}</span>
-            <button type="button" onClick={() => setViewDate(new Date(year, month + 1, 1))} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300">
+            <button type="button" onClick={() => { setYearPageStart(year - (year % 20)); setMode('years'); }} className="text-xs font-bold text-white hover:text-emerald-300" title="กดเพื่อเลือกปี/เดือน">{THAI_MONTHS[month]} {year + 543}</button>
+            <button type="button" aria-label="เดือนถัดไป" onClick={() => setViewDate(new Date(year, month + 1, 1))} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300">
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
@@ -170,6 +227,7 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
               );
             })}
           </div>
+          </>)}
         </div>
       )}
     </div>

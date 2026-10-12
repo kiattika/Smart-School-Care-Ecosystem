@@ -161,12 +161,21 @@ service cloud.firestore {
     match /student_self_assessments/{studentId} {
       // TASK 9 (ExecutivePortal Learner Analytics): เพิ่ม EXECUTIVE อ่านได้ทั้งโรงเรียน — ฝั่ง UI
       // (ExecutiveLearnerAnalytics.tsx) รวมเป็นกราฟแจกแจง/เปอร์เซ็นต์เท่านั้น ไม่โชว์ผลรายบุคคล
+      // นักเรียนเจ้าของเทียบผ่าน students/{studentId}.studentUid (isSelfStudent) — เดิมเทียบ auth.uid กับรหัสนักเรียน
+      // ตรงๆ ซึ่งไม่มีวันจริง ทำให้นักเรียนจริงบันทึก/อ่านแบบประเมินของตัวเองไม่ได้ (ข้อมูลหายหลังส่ง)
+      // ครูที่ปรึกษาอ่านได้เฉพาะห้องตัวเอง (homeroomClass denormalize ตอนนักเรียนบันทึก — ตรวจกับ students.room)
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('GUIDANCE_COUNSELOR') ||
                      hasRole('EXECUTIVE') ||
+                     isSelfStudent(studentId) ||
+                     (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass)) ||
                      isSelf(resource.data.studentId) ||
                      isSelf(resource.data.studentUid);
-      allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isSelf(studentId);
+      allow create, update: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') ||
+                     (isSelfStudent(studentId)
+                      && request.resource.data.studentId == studentId
+                      && request.resource.data.homeroomClass == studentField(studentId, 'room', '__none__'));
+      allow delete: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
     }
 
     // 3. Discipline & Behavior Logs
