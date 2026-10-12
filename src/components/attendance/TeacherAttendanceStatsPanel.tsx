@@ -87,8 +87,11 @@ export function TeacherAttendanceStatsPanel({ options }: { options: AttendanceSt
                 {open ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
                 <span className="text-xs text-slate-500 w-14 shrink-0">{student.studentId}</span>
                 <span className="flex-1 min-w-0 truncate text-sm font-bold text-white">{student.name}</span>
-                <span className="hidden sm:flex items-center gap-3 text-[11px] text-slate-400 shrink-0">
-                  <span>มา {stats.present}</span><span>สาย {stats.late}</span><span>ขาด {stats.absent}</span><span>ลา {stats.leave}</span>
+                <span className="hidden sm:flex items-center gap-4 text-xs font-semibold shrink-0" data-testid="stats-row-counts">
+                  <span className="text-emerald-400">มา <b className="text-base font-black">{stats.present}</b></span>
+                  <span className="text-amber-400">สาย <b className="text-base font-black">{stats.late}</b></span>
+                  <span className="text-rose-400">ขาด <b className="text-base font-black">{stats.absent}</b></span>
+                  <span className="text-indigo-400">ลา <b className="text-base font-black">{stats.leave}</b></span>
                 </span>
                 <span className={cn('w-14 text-right text-sm font-black shrink-0', stats.isBelowThreshold ? 'text-rose-300' : 'text-white')}>
                   {stats.attendanceRate === null ? '—' : `${stats.attendanceRate}%`}

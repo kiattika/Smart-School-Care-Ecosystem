@@ -21,6 +21,7 @@ import { useSchoolCalendar } from './hooks/useSchoolCalendar';
 import { DatePicker } from './components/shared/DatePicker';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
+import { rosterLevels, sortRoster, filterRosterByLevel, studentLevelLabel } from './lib/gradebookRoster';
 import { TeacherAttendanceStatsPanel } from './components/attendance/TeacherAttendanceStatsPanel';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests, subscribeHiddenGradebookCourses, hideGradebookCourse, unhideGradebookCourse } from './services/firestoreService';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
@@ -446,7 +447,13 @@ export function TeacherPortal() {
   }, [availableDashboardTabs, dashboardTab]);
 
   const [selectedGradebookCourseId, setSelectedGradebookCourseId] = useState<string>('');
+  const [gradebookLevelFilter, setGradebookLevelFilter] = useState<string>('');
   const [gradebookStudents, setGradebookStudents] = useState<any[]>([]);
+  const gradebookLevels = useMemo(() => rosterLevels(gradebookStudents), [gradebookStudents]);
+  const gradebookRoster = useMemo(
+    () => sortRoster(filterRosterByLevel(gradebookStudents, gradebookLevels.includes(gradebookLevelFilter) ? gradebookLevelFilter : '')),
+    [gradebookStudents, gradebookLevels, gradebookLevelFilter],
+  );
   const [gradebookLoading, setGradebookLoading] = useState<boolean>(false);
   const [showScoreSettingModal, setShowScoreSettingModal] = useState(false);
   const [scoreSettingForm, setScoreSettingForm] = useState({ preMidterm: 25, midterm: 20, postMidterm: 25, final: 30 });
@@ -1625,7 +1632,7 @@ export function TeacherPortal() {
                     <select
                       className="bg-[#0b0f19] border border-slate-800/80 text-white text-sm rounded-lg p-2 focus:border-emerald-500 outline-none"
                       value={selectedGradebookCourseId}
-                      onChange={(e) => setSelectedGradebookCourseId(e.target.value)}
+                      onChange={(e) => { setSelectedGradebookCourseId(e.target.value); setGradebookLevelFilter(''); }}
                     >
                       <option value="">-- เลือกรายวิชา --</option>
                       {visibleGradebookCourses.map(c => (
@@ -1700,9 +1707,25 @@ export function TeacherPortal() {
                       };
 
                       return (
+                        <>
+                        {gradebookLevels.length > 1 && (
+                          <div className="flex items-center gap-2 mb-3 text-xs text-slate-300">
+                            <label htmlFor="gradebook-level-filter">กรองระดับชั้น</label>
+                            <select
+                              id="gradebook-level-filter"
+                              value={gradebookLevels.includes(gradebookLevelFilter) ? gradebookLevelFilter : ''}
+                              onChange={e => setGradebookLevelFilter(e.target.value)}
+                              className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white"
+                            >
+                              <option value="">ทุกระดับชั้น ({gradebookStudents.length} คน)</option>
+                              {gradebookLevels.map(l => <option key={l} value={l}>{l}</option>)}
+                            </select>
+                          </div>
+                        )}
                         <table className="w-full text-left text-sm text-slate-300">
                           <thead className="bg-[#0b0f19] border-b border-slate-800/80">
                             <tr>
+                              <th className="px-4 py-3 font-bold text-slate-200">ระดับชั้น</th>
                               <th className="px-4 py-3 font-bold text-slate-200">เลขที่ (No.)</th>
                               <th className="px-4 py-3 font-bold text-slate-200">รหัสนักเรียน</th>
                               <th className="px-4 py-3 font-bold text-slate-200">ชื่อ - นามสกุล</th>
@@ -1721,7 +1744,7 @@ export function TeacherPortal() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/80">
-                            {gradebookStudents.map((student, idx) => {
+                            {gradebookRoster.map((student, idx) => {
                               const studentId = student.studentId || student.id;
                               const studentNumber = student.studentNumber ?? student.studentNo ?? student.number ?? (idx + 1);
                               const studentName = student.fullName || student.name || `นักเรียน ${studentId}`;
@@ -1733,6 +1756,7 @@ export function TeacherPortal() {
                               if (isActivitySubject) {
                                 return (
                                   <tr key={student.id || studentId} className="hover:bg-slate-800/40 transition-colors">
+                                    <td className="px-4 py-2 text-xs text-sky-300 font-semibold">{studentLevelLabel(student) || '-'}</td>
                                     <td className="px-4 py-2 font-mono text-xs">{studentNumber}</td>
                                     <td className="px-4 py-2 font-mono text-xs">{studentId}</td>
                                     <td className="px-4 py-2 text-xs font-medium text-white">{studentName}</td>
@@ -1811,6 +1835,7 @@ export function TeacherPortal() {
 
                               return (
                                 <tr key={student.id || studentId} className="hover:bg-slate-800/40 transition-colors">
+                                  <td className="px-4 py-2 text-xs text-sky-300 font-semibold">{studentLevelLabel(student) || '-'}</td>
                                   <td className="px-4 py-2 font-mono text-xs">{studentNumber}</td>
                                   <td className="px-4 py-2 font-mono text-xs">{studentId}</td>
                                   <td className="px-4 py-2 text-xs font-medium text-white">{studentName}</td>
@@ -1833,6 +1858,7 @@ export function TeacherPortal() {
                             })}
                           </tbody>
                         </table>
+                        </>
                       );
                     })()}
                   </div>
