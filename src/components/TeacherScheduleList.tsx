@@ -20,6 +20,8 @@ export interface SubjectPeriod {
   studentsCount?: number;
   type?: 'MAIN' | 'ACTIVITY';
   teachingPartner?: string;
+  /** จำนวนครูที่ผูกกับคาบนี้ใน schedules.teacherIds (ไม่มี/1 = สอนคนเดียว) */
+  teacherCount?: number;
   partnerCheckedAttendance?: boolean;
   scheduleId?: string;          // schedules/{id} — ใช้ยื่นคำขอเช็คชื่อย้อนหลัง
   level?: string;               // ระดับชั้น เช่น ม.5/8
@@ -195,26 +197,21 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
     );
   };
 
-  const renderActivityDetails = (period: SubjectPeriod) => {
-    if (period.type !== 'ACTIVITY') return null;
+  // แถบ "สอนร่วม" แสดงเฉพาะคาบที่มีครูร่วมจริง (teacherIds > 1 หรือระบุ teachingPartner) —
+  // ห้ามแสดงจำนวนครู/สถานะซิงก์ตายตัวให้ทุกคาบกิจกรรม
+  const renderCoTeachingDetails = (period: SubjectPeriod) => {
+    const count = period.teacherCount ?? 0;
+    if (count <= 1 && !period.teachingPartner) return null;
     return (
       <div className="mt-3 p-3 bg-slate-900/60 rounded-xl border border-slate-850 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {period.type === 'ACTIVITY' ? (
-                      <span className="bg-purple-500/25 text-purple-300 font-extrabold px-2.5 py-1 rounded-md border border-purple-500/30">
-                        กิจกรรมร่วม (2 ท่าน)
-                      </span>
-                    ) : (
-                      <span className="bg-purple-500/25 text-purple-300 font-extrabold px-2.5 py-1 rounded-md border border-purple-500/30">
-                        ครูสอนร่วม
-                      </span>
-                    )}
-                    {period.teachingPartner && (
-                      <span className="text-slate-300 font-bold">
-                        สอนร่วมกับ {period.teachingPartner}
-                      </span>
-                    )}
-                  </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="bg-purple-500/25 text-purple-300 font-extrabold px-2.5 py-1 rounded-md border border-purple-500/30">
+            {period.type === 'ACTIVITY' ? 'กิจกรรมร่วม' : 'ครูสอนร่วม'}{count > 1 ? ` (${count} ท่าน)` : ''}
+          </span>
+          {period.teachingPartner && (
+            <span className="text-slate-300 font-bold">สอนร่วมกับ {period.teachingPartner}</span>
+          )}
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           {period.partnerCheckedAttendance ? (
             <span className="text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-1 rounded-md flex items-center gap-1">
@@ -409,7 +406,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                       {renderPostTeachingBtn(period, 'btn-log')}
                     </div>
                   </div>
-                  {renderActivityDetails(period)}
+                  {renderCoTeachingDetails(period)}
                 </div>
               );
             }
@@ -494,7 +491,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                       {renderPostTeachingBtn(period, 'btn-live-log')}
                     </div>
                   </div>
-                  {renderActivityDetails(period)}
+                  {renderCoTeachingDetails(period)}
                 </div>
               );
             }
@@ -568,7 +565,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                     {renderPostTeachingBtn(period, 'btn-upcoming-log')}
                   </div>
                 </div>
-                {renderActivityDetails(period)}
+                {renderCoTeachingDetails(period)}
               </div>
             );
           })
