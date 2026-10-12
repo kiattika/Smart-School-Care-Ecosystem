@@ -55,7 +55,7 @@ export function emptyStudentInfo(base: { studentId: string; studentUid: string; 
     gender: '', birthDate: '', nationality: '', ethnicity: '', religion: '',
     prevEducationLevel: '', prevGpa: '', prevSchool: '', prevAffiliation: '', prevSubdistrict: '', prevDistrict: '', prevProvince: '', prevPhone: '',
     weightKg: null, heightCm: null, bloodType: '', chronicDisease: '',
-    registeredSameAsCurrent: true, registeredAddress: '', currentAddress: null,
+    registeredSameAsCurrent: true, registeredAddress: '', registeredAddressStructured: null, currentAddress: null,
     siblings: { onlyChild: false, birthOrder: null, totalSiblings: null, brothers: null, sisters: null, halfOlder: null, halfYounger: null, studying: null },
     closestInFamily: [], closestOther: '', consultWho: [], consultOther: '', consultHotline: '',
     livesWith: '', livesWithOther: '', commuteMode: '', commuteOther: '', commuteDuration: '',
@@ -110,6 +110,10 @@ const phoneOk = (p: string) => !p.trim() || /^0[0-9]{8,9}$/.test(p.replace(/[-\s
 export function validateStudentInfo(s: StudentHomeVisitInfo, opts: { centralAddress?: string } = {}): string[] {
   const e: string[] = [];
   if (!opts.centralAddress?.trim()) e.push(...validateThaiAddress(s.currentAddress));
+  // ที่อยู่ตามทะเบียนบ้าน: ถ้าไม่เหมือนที่อยู่ปัจจุบัน ต้องกรอกแบบแยกช่องให้ครบ (ข้อมูลเก่าที่พิมพ์เองไว้แล้วผ่านโดยไม่บังคับกรอกใหม่)
+  if (!s.registeredSameAsCurrent && !(s.registeredAddressStructured == null && s.registeredAddress.trim())) {
+    e.push(...validateThaiAddress(s.registeredAddressStructured).map(m => `ที่อยู่ตามทะเบียนบ้าน: ${m}`));
+  }
   if (!s.gender) e.push('เลือกเพศ');
   if (!s.birthDate) e.push('เลือกวัน/เดือน/ปีเกิด');
   if (!s.nationality.trim()) e.push('ระบุสัญชาติ (ไม่ทราบให้ใส่ -)');
