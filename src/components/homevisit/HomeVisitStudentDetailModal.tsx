@@ -1,6 +1,7 @@
 import React from 'react';
-import { X, MapPin, Phone, Mail, Navigation, ClipboardList, Home, Camera, StickyNote } from 'lucide-react';
-import type { Student, StudentHomeLocation, HomeVisitRecord } from '../../types';
+import { X, MapPin, Phone, Mail, Navigation, ClipboardList, Home, Camera, StickyNote, FileText } from 'lucide-react';
+import type { Student, StudentHomeLocation, HomeVisitRecord, StudentHomeVisitInfo, FamilyHomeVisitInfo } from '../../types';
+import { HomeVisitInfoPanel } from './HomeVisitInfoPanel';
 import { formatDistance } from '../../utils/geoUtils';
 
 /**
@@ -12,6 +13,10 @@ interface Props {
   location?: StudentHomeLocation;
   distanceFromSchoolM: number | null;
   record?: HomeVisitRecord;
+  studentInfo: StudentHomeVisitInfo | null;
+  familyInfo: FamilyHomeVisitInfo | null;
+  todayYmd: string;
+  onOpenDocument?: () => void;
   onClose: () => void;
   onOpenForm: () => void;
 }
@@ -27,7 +32,7 @@ const Row = ({ icon, label, children }: { icon: React.ReactNode; label: string; 
 );
 const None = () => <span className="text-slate-500">ยังไม่มีข้อมูล</span>;
 
-export function HomeVisitStudentDetailModal({ student, location, distanceFromSchoolM, record, onClose, onOpenForm }: Props) {
+export function HomeVisitStudentDetailModal({ student, location, distanceFromSchoolM, record, studentInfo, familyInfo, todayYmd, onOpenDocument, onClose, onOpenForm }: Props) {
   const address = student.homeLocation?.address || (student as any).address || '';
   const riskLabel = record ? (record.riskLevel === 'HIGH' ? 'เสี่ยงสูง' : record.riskLevel === 'MEDIUM' ? 'เฝ้าระวัง' : 'ปกติ') : '';
   return (
@@ -75,17 +80,24 @@ export function HomeVisitStudentDetailModal({ student, location, distanceFromSch
             ) : <div className="text-xs text-slate-500">ยังไม่มีรูป</div>}
           </div>
 
+          <HomeVisitInfoPanel student={student} studentInfo={studentInfo} familyInfo={familyInfo} todayYmd={todayYmd} />
+
           <div className="bg-black/20 border border-white/5 rounded-xl p-4">
             <div className="text-xs font-bold text-slate-300 mb-1.5">การเยี่ยมบ้านปีการศึกษานี้</div>
             {record ? (
               <div className="text-sm text-slate-200 space-y-1">
                 <div>เยี่ยมเมื่อ {new Date(record.visitedDate + 'T00:00:00').toLocaleDateString('th-TH')} โดย {record.advisorName || '-'}</div>
                 <div className="text-xs text-slate-400">ระดับความเสี่ยง: <span className="text-slate-200 font-semibold">{riskLabel}</span>{record.urgentReferral ? ' · ส่งต่อผู้บริหาร' : ''}</div>
-                {record.teacherOpinion && <div className="text-xs text-slate-300 whitespace-pre-wrap">“{record.teacherOpinion}”</div>}
+                {record.summary && <div className="text-xs text-slate-300 whitespace-pre-wrap">“{record.summary}”</div>}
               </div>
             ) : <div className="text-xs text-slate-500">ยังไม่ได้บันทึกการเยี่ยมบ้านในปีการศึกษานี้</div>}
           </div>
 
+          {record && onOpenDocument && (
+            <button onClick={onOpenDocument} className="w-full bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
+              <FileText className="w-4 h-4" /> เอกสารสรุปการเยี่ยมบ้าน (พิมพ์/บันทึกเป็น PDF)
+            </button>
+          )}
           <button onClick={onOpenForm} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2">
             <ClipboardList className="w-4 h-4" /> {record ? 'ดู/แก้ไขแบบบันทึกการเยี่ยมบ้าน' : 'บันทึกการเยี่ยมบ้าน'}
           </button>
