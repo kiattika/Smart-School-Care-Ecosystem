@@ -42,7 +42,6 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
   const {
     detailedLeaveRequests,
     submitDetailedLeave,
-    approveDetailedLeave,
     students,
     courses,
     user
@@ -442,18 +441,6 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
                       </div>
                     )}
 
-                    {/* Teacher Quick Approve Button (if teacher logged in) */}
-                    {item.status === 'PENDING' && (
-                      <div className="pt-2 flex justify-end gap-2">
-                        <button
-                          onClick={() => approveDetailedLeave(item.id, 'อนุมัติการลาตามใบรับรองแพทย์')}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow cursor-pointer flex items-center gap-1"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          <span>(ครู) อนุมัติใบลา</span>
-                        </button>
-                      </div>
-                    )}
                   </div>
                 ))}
 
