@@ -2731,3 +2731,38 @@ export async function deleteReferenceOverride(kind: 'reference_schools' | 'refer
     handleFirestoreError(error, OperationType.DELETE, `${kind}/${id}`);
   }
 }
+
+/** อ่าน override ทั้งหมดครั้งเดียว (ใช้ตอนส่งออก/วางแผนนำเข้า) — อ่านได้เมื่อล็อกอิน */
+export async function fetchAllReferenceOverrides<T>(kind: 'reference_schools' | 'reference_villages'): Promise<T[]> {
+  try {
+    const snap = await getDocs(collection(db, kind));
+    return snap.docs.map(d => ({ ...d.data(), id: d.id } as T));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, kind);
+    return [];
+  }
+}
+
+/** เขียน/ลบ override เป็นชุด (batch ละ ≤ 400 รายการ) — เฉพาะ SUPER_ADMIN (บังคับที่ rules) ล้มเหลวจะ throw ไม่แจ้งสำเร็จปลอม */
+export async function commitReferenceChanges(
+  kind: 'reference_schools' | 'reference_villages',
+  writes: ({ id: string } & object)[],
+  deleteIds: string[],
+): Promise<void> {
+  const ops: Array<{ type: 'set'; id: string; data: object } | { type: 'delete'; id: string }> = [
+    ...writes.map(w => ({ type: 'set' as const, id: w.id, data: w })),
+    ...deleteIds.map(id => ({ type: 'delete' as const, id })),
+  ];
+  try {
+    for (let i = 0; i < ops.length; i += 400) {
+      const batch = writeBatch(db);
+      for (const op of ops.slice(i, i + 400)) {
+        const ref = doc(db, kind, op.id);
+        if (op.type === 'set') batch.set(ref, op.data); else batch.delete(ref);
+      }
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, kind);
+  }
+}
