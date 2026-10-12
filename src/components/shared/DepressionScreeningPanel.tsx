@@ -32,6 +32,9 @@ import {
   openNineQGrant,
   recordNineQOnBehalf,
   recordParentNotice,
+  recordStudentMet,
+  loadStudentFollowups,
+  type StudentFollowupDoc,
   revokeNineQGrant,
   saveEightQ,
 } from '../../services/screeningService';
@@ -249,6 +252,7 @@ function StudentScreeningDetail({
 }) {
   const [grants, setGrants] = useState<Array<NineQGrantDoc & { id: string }>>([]);
   const [notices, setNotices] = useState<ParentNoticeDoc[]>([]);
+  const [followups, setFollowups] = useState<StudentFollowupDoc[]>([]);
   const [tick, setTick] = useState(0);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -266,6 +270,7 @@ function StudentScreeningDetail({
     let cancelled = false;
     loadNineQGrants(studentId).then((g) => { if (!cancelled) setGrants(g as Array<NineQGrantDoc & { id: string }>); }).catch((e) => console.warn('[screening] grants load notice:', e?.message || e));
     loadParentNotices(studentId).then((n) => { if (!cancelled) setNotices(n); }).catch((e) => console.warn('[screening] notices load notice:', e?.message || e));
+    loadStudentFollowups(studentId).then((f) => { if (!cancelled) setFollowups(f); }).catch((e) => console.warn('[screening] followups load notice:', e?.message || e));
     return () => { cancelled = true; };
   }, [studentId, tick]);
 
@@ -472,6 +477,9 @@ function StudentScreeningDetail({
         studentId={studentId} reasons={reasons} notices={notices} actor={actor} busy={busy} run={run}
         nineQId={record.nineSummary?.id} eightQId={record.eightQ?.id} canEightQ={capsRead8QDetail && !!record.eightQ}
       />
+
+      {/* พบนักเรียนแล้ว — ปิดงาน 9Q ธงแดงในกระดิ่ง (คู่กับการแจ้งผู้ปกครอง) */}
+      <StudentMetSection studentId={studentId} followups={followups} actor={actor} busy={busy} run={run} nineQId={record.nineSummary?.id} redFlag={!!record.nineSummary?.redFlagItem9} />
     </div>
   );
 }
@@ -540,6 +548,48 @@ function ParentNoticeSection({
       {err && <p role="alert" className="text-rose-400">{err}</p>}
       <div className="flex justify-end">
         <button type="button" onClick={submit} disabled={busy || !actor} className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-slate-700 hover:bg-slate-600 disabled:opacity-50">บันทึกว่าแจ้งผู้ปกครองแล้ว</button>
+      </div>
+    </div>
+  );
+}
+
+function StudentMetSection({
+  studentId, followups, actor, busy, run, nineQId, redFlag,
+}: {
+  studentId: string; followups: StudentFollowupDoc[]; actor: { uid: string; name: string } | null; busy: boolean;
+  run: (fn: () => Promise<void>, okText: string | (() => string)) => Promise<void> | undefined;
+  nineQId?: string; redFlag: boolean;
+}) {
+  const [note, setNote] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const metForThis = !!nineQId && followups.some((f) => f.screeningId === nineQId);
+
+  const submit = () => {
+    setErr(null);
+    if (!actor) return;
+    if (!nineQId) { setErr('ยังไม่มีผล 9Q ให้ผูกบันทึก'); return; }
+    return run(async () => {
+      await recordStudentMet(studentId, { screeningId: nineQId, by: actor, metAt: format(new Date(), "yyyy-MM-dd'T'HH:mm"), note });
+      setNote('');
+    }, 'บันทึกว่าพบนักเรียนแล้ว');
+  };
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-slate-950/40 p-3 space-y-2 text-xs" data-testid="student-met-section">
+      <div className="font-bold text-slate-200">พบนักเรียน</div>
+      <p className="text-[10px] text-slate-500">บันทึกหลังพบนักเรียนจริง — ปิดงาน 9Q ธงแดงในกระดิ่งแจ้งเตือน (ใช้แทนหรือเสริมการแจ้งผู้ปกครองก็ได้)</p>
+      {followups.length > 0 && (
+        <ul className="space-y-1" data-testid="student-met-log">
+          {followups.map((f) => (
+            <li key={f.id} className="text-slate-300">✓ พบนักเรียนแล้ว โดย {f.metByName} · {f.metAt.replace('T', ' ')}{f.note ? ` · ${f.note}` : ''}</li>
+          ))}
+        </ul>
+      )}
+      {redFlag && !metForThis && <p className="text-amber-300">ผล 9Q ล่าสุดมีธงแดง — ยังไม่มีบันทึกการพบนักเรียนสำหรับผลนี้</p>}
+      <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder="หมายเหตุ (ไม่บังคับ)" aria-label="หมายเหตุการพบนักเรียน" className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-slate-200 outline-none focus:border-purple-500" />
+      {err && <p role="alert" className="text-rose-400">{err}</p>}
+      <div className="flex justify-end">
+        <button type="button" onClick={submit} disabled={busy || !actor || !nineQId} className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-slate-700 hover:bg-slate-600 disabled:opacity-50">บันทึกว่าพบนักเรียนแล้ว</button>
       </div>
     </div>
   );

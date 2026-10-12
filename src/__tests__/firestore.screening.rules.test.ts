@@ -403,6 +403,38 @@ describe.skipIf(!EMULATOR_HOST)('คัดกรองซึมเศร้า 2
     });
   });
 
+  // ═════════ บันทึก "พบนักเรียนแล้ว" (ปิดงาน 9Q ธงแดงในกระดิ่ง) ═════════
+  describe('student follow-up log (พบนักเรียนแล้ว)', () => {
+    const met = (uid: string, over: Record<string, unknown> = {}) => ({
+      kind: 'STUDENT_MET', screeningId: '9q-1', metByUid: uid, metByName: 'ครู', metAt: '2026-10-12T10:00', ...over,
+    });
+    const P = (id: string) => `student_screening_followups/${SID}/entries/${id}`;
+
+    it('GUIDANCE and the homeroom teacher of that room can log it as themselves; others and the student cannot', async () => {
+      await seed('ACTIVE');
+      await assertSucceeds(guidance().doc(P('m1')).set(met('guid-uid')));
+      await assertSucceeds(homeroom().doc(P('m2')).set(met('hr-uid', { note: 'คุยแล้ว' })));
+      await assertFails(homeroom().doc(P('m3')).set(met('guid-uid')));
+      await assertFails(homeroomOtherRoom().doc(P('m4')).set(met('hr2-uid')));
+      await assertFails(subjectTeacher().doc(P('m5')).set(met('sub-uid')));
+      await assertFails(student().doc(P('m6')).set(met(STU_UID)));
+      await assertFails(student().doc(P('m1')).get());
+      await assertFails(executive().doc(P('m1')).get());
+      await assertSucceeds(homeroom().doc(P('m1')).get());
+    });
+
+    it('append-only with a strict shape; only SUPER_ADMIN can delete', async () => {
+      await seed('ACTIVE');
+      await assertSucceeds(guidance().doc(P('m1')).set(met('guid-uid')));
+      await assertFails(guidance().doc(P('m1')).update({ note: 'แก้' }));
+      await assertFails(guidance().doc(P('m1')).delete());
+      await assertFails(guidance().doc(P('m7')).set(met('guid-uid', { kind: 'PARENT' })));
+      await assertFails(guidance().doc(P('m8')).set(met('guid-uid', { screeningId: '' })));
+      await assertFails(guidance().doc(P('m9')).set(met('guid-uid', { score: 9 })));
+      await assertSucceeds(superAdmin().doc(P('m1')).delete());
+    });
+  });
+
   // ═════════ school_settings/guidance_status (cache ที่ใช้ตัดสินสิทธิ์) ═════════
   describe('school_settings/guidance_status', () => {
     it('any signed-in user can read it but NOBODY can write it from a client — not even SUPER_ADMIN (only the Admin SDK in Cloud Functions)', async () => {

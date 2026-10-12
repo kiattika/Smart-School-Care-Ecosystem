@@ -77,9 +77,9 @@ describe('กระดิ่งงานค้างของบุคลาก�
   });
   it('บทบาทอื่นไม่ได้งานของคนอื่นไปแสดง และไม่ subscribe เกินสิทธิ์', () => {
     expect(buildStaffTasks({ activeRole: 'SUBJECT_TEACHER', roomLeaves: leaves, lateRequests: late })).toEqual([]);
-    expect(staffTaskSources('SUBJECT_TEACHER')).toEqual({ leaves: false, lateRequests: false });
-    expect(staffTaskSources('HOMEROOM_TEACHER')).toEqual({ leaves: true, lateRequests: false });
-    expect(staffTaskSources('DEPUTY_DIRECTOR_ACADEMIC')).toEqual({ leaves: false, lateRequests: true });
+    expect(staffTaskSources('SUBJECT_TEACHER')).toEqual({ leaves: false, lateRequests: false, screening: false });
+    expect(staffTaskSources('HOMEROOM_TEACHER')).toEqual({ leaves: true, lateRequests: false, screening: true });
+    expect(staffTaskSources('DEPUTY_DIRECTOR_ACADEMIC')).toEqual({ leaves: false, lateRequests: true, screening: false });
   });
   it('รวมจำนวนทั้งหมด', () => {
     expect(totalStaffTasks([{ kind: 'LEAVE', label: '', count: 2, where: '' }, { kind: 'LATE_ATTENDANCE', label: '', count: 3, where: '' }])).toBe(5);

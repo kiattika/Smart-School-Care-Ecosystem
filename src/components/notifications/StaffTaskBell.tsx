@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Bell, ClipboardList } from 'lucide-react';
 import { useStore } from '../../store';
 import { subscribeLeaveRequests, subscribeLateAttendanceRequests } from '../../services/firestoreService';
+import { useScreeningBellData, type ScreeningBellMode } from '../../hooks/useScreeningBellData';
 import { buildStaffTasks, staffTaskSources, totalStaffTasks } from '../../lib/staffTasks';
 import type { DetailedLeaveRequest, LateAttendanceRequestRecord } from '../../types';
 
@@ -11,6 +12,7 @@ import type { DetailedLeaveRequest, LateAttendanceRequestRecord } from '../../ty
  * เปลี่ยนตามบทบาทที่ใช้งานอยู่ (activeRole) และ subscribe เฉพาะข้อมูลที่บทบาทนั้นมีสิทธิ์เห็นตาม firestore.rules:
  *  - HOMEROOM_TEACHER → ใบลานักเรียนห้องที่ตัวเองเป็นครูที่ปรึกษา (homeroomClass จาก user.profile.assignments)
  *  - DEPUTY_DIRECTOR_ACADEMIC / SUPER_ADMIN → คำขอเช็คชื่อย้อนหลังที่รออนุมัติ
+ *  - GUIDANCE_COUNSELOR / HOMEROOM_TEACHER → คัดกรอง 2Q บวก (รอ 9Q) และ 9Q ธงแดง (รอแจ้งผู้ปกครอง/พบนักเรียน) — แสดงเฉพาะจำนวน
  * คำนวณสดจากข้อมูลจริง (src/lib/staffTasks.ts) — จัดการงานแล้วจะหายจากกระดิ่งเอง ไม่มีรายการ "ยังไม่อ่าน" ค้าง
  * panel render ผ่าน React Portal เหมือน NotificationBell (กันถูก stacking context ของ motion.div ทับ)
  */
@@ -22,6 +24,9 @@ export function StaffTaskBell({ activeRole }: { activeRole: string }) {
   const [roomLeaves, setRoomLeaves] = useState<DetailedLeaveRequest[]>([]);
   const [lateRequests, setLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const [openCount, setOpenCount] = useState(0);
+  const screeningMode: ScreeningBellMode = !sources.screening ? null : activeRole === 'GUIDANCE_COUNSELOR' ? 'GUIDANCE' : 'HOMEROOM';
+  const screening = useScreeningBellData(user?.uid ? screeningMode : null, myRoom, openCount);
   const [panelPos, setPanelPos] = useState<{ top: number; right: number } | null>(null);
   const buttonWrapRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -38,6 +43,7 @@ export function StaffTaskBell({ activeRole }: { activeRole: string }) {
 
   useEffect(() => {
     if (!isOpen || !buttonWrapRef.current) return;
+    setOpenCount((c) => c + 1);
     const rect = buttonWrapRef.current.getBoundingClientRect();
     setPanelPos({ top: rect.bottom + 8, right: Math.max(8, window.innerWidth - rect.right) });
   }, [isOpen]);
@@ -53,9 +59,9 @@ export function StaffTaskBell({ activeRole }: { activeRole: string }) {
   }, [isOpen]);
 
   // บทบาทนี้ไม่มีงานค้างประเภทใดให้ติดตามเลย → ไม่แสดงกระดิ่ง (ไม่โชว์กระดิ่งว่างที่ไม่เคยมีวันแจ้งอะไร)
-  if (!sources.leaves && !sources.lateRequests) return null;
+  if (!sources.leaves && !sources.lateRequests && !sources.screening) return null;
 
-  const tasks = buildStaffTasks({ activeRole, roomLeaves, lateRequests });
+  const tasks = buildStaffTasks({ activeRole, roomLeaves, lateRequests, screening });
   const total = totalStaffTasks(tasks);
 
   const panel = isOpen && panelPos && createPortal(
