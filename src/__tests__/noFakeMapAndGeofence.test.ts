@@ -55,3 +55,29 @@ describe('guard: ไม่มีหน้าเยี่ยมบ้านจำ
     expect(src).not.toMatch(/availableRooms/);
   });
 });
+
+describe('guard: เช็คอิน GPS/ประตู ต้องแจ้งความล้มเหลวจริง', () => {
+  it('บริการบันทึก GPS/ประตู throw ผ่าน handleFirestoreError (ไม่กลืนเป็น console.warn)', () => {
+    const src = readSource('src/services/firestoreService.ts');
+    for (const fn of ['saveGPSCheckInLogFirestore', 'saveGateAttendanceRecordFirestore']) {
+      const i = src.indexOf(`export async function ${fn}`);
+      const block = src.slice(i, i + 600);
+      expect(block).toContain('handleFirestoreError(error, OperationType.WRITE');
+      expect(block).not.toMatch(/console\.warn/);
+    }
+  });
+  it('store: addGPSCheckInLog await การเขียนก่อนอัปเดต state และไม่เดานักเรียนจากรหัสขึ้นต้น 695', () => {
+    const src = readSource('src/store.ts');
+    const i = src.indexOf('addGPSCheckInLog: async');
+    const block = src.slice(i, src.indexOf('updateSchoolGeofenceConfig:', i));
+    expect(block).toMatch(/await saveGPSCheckInLogFirestore\(newLog\)/);
+    expect(block).not.toMatch(/startsWith\('695'\)|\.catch\(err => console\.warn/);
+    expect(src).not.toMatch(/recordGateAttendance|36\.4 \+ Number/);
+  });
+  it('modal: ไม่มี setTimeout จำลองการบันทึก และแสดง error จริง', () => {
+    const src = readSource('src/components/GPSGeofenceCheckinModal.tsx');
+    expect(src).toMatch(/await addGPSCheckInLog\(/);
+    expect(src).toMatch(/setCheckinError\(/);
+    expect(src).not.toMatch(/\}, 600\);/);
+  });
+});
