@@ -646,10 +646,16 @@ service cloud.firestore {
                          // นักเรียนที่เชื่อมแล้วต้องตรงกับค่าจริงเสมอ — เทียบกับ doc ที่ไม่มีอยู่ get() จะ error = ปฏิเสธ
                          request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '') &&
                          request.resource.data.respondentUid == request.auth.uid &&
+                         // ผู้กรอกต้องกรอกได้เฉพาะ "มุมมองของตัวเอง" — นักเรียนกรอกได้แค่ STUDENT, ผู้ปกครองแค่ PARENT,
+                         // ครูที่ปรึกษาแค่ TEACHER (กันนักเรียนกรอกแทนครู/ผู้ปกครองแล้วล็อกการกรอกของจริงทั้งปี
+                         // เพราะ doc id ตายตัวต่อ (นักเรียน, ผู้ประเมิน, ปี))
                          (
-                           isSelfStudent(request.resource.data.studentId) ||
-                           (isSignedIn() && request.auth.uid == studentField(request.resource.data.studentId, 'parentUid', '__none__')) ||
-                           isHomeroomTeacherOf(studentField(request.resource.data.studentId, 'room', '__none__'))
+                           (request.resource.data.evaluatorType == 'STUDENT' &&
+                            isSelfStudent(request.resource.data.studentId)) ||
+                           (request.resource.data.evaluatorType == 'PARENT' && isSignedIn() &&
+                            request.auth.uid == studentField(request.resource.data.studentId, 'parentUid', '__none__')) ||
+                           (request.resource.data.evaluatorType == 'TEACHER' &&
+                            isHomeroomTeacherOf(studentField(request.resource.data.studentId, 'room', '__none__')))
                          )
                        );
 

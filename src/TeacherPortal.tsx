@@ -311,18 +311,40 @@ export function TeacherPortal() {
   // รายวิชาสำหรับ "สมุดบันทึกคะแนน" — ต้องเป็นวิชาที่ครูคนนี้เป็นผู้สอนหลักจริงเท่านั้น
   // (ไม่รวมคาบสอนแทน/สลับคาบ — คนสอนแทนไม่ใช่ผู้ให้คะแนน) และจัดกลุ่มตาม "รหัสวิชา + ห้อง"
   // 1 กลุ่ม ไม่ใช่แยกรายคาบ (เดิม dropdown ขึ้นวิชาเดียวซ้ำหลายบรรทัดตามจำนวนคาบ/สัปดาห์)
+  // ชุมนุม (elective) — นักเรียนสมัครเอง คละห้อง: รายชื่อต้องมาจาก activity_enrollments ไม่ใช่ห้องเรียน
+  // (ย้ายขึ้นมาก่อน gradebookCourses เพราะสมุดบันทึกคะแนนต้องใช้รายการชุมนุมที่ครูรับผิดชอบ)
+  const { configs: electiveConfigs, configById: electiveConfigById, counts: electiveCounts } = useElectiveActivities();
+
   const gradebookCourses: Course[] = useMemo(() => {
     const seen = new Set<string>();
     const out: Course[] = [];
     for (const c of myCourses) {
       if (c.roleLabel) continue; // สอนแทน / สลับคาบเรียน — ข้าม
+      // คาบ "กิจกรรมชุมนุม" จากตารางสอน (ห้อง Non-Student) ไม่มีรายชื่อนักเรียน — แทนด้วยชุมนุมจริงที่ครูรับผิดชอบด้านล่าง
+      if (/ชุมนุม/.test(c.name || '') && /^non-student$/i.test((c.room || '').trim())) continue;
       const key = `${c.code}__${(c.room || '').replace(/^M\./i, 'ม.')}`;
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(c);
     }
+    // ชุมนุมที่ครูคนนี้รับผิดชอบจริง (elective_activities_config.responsibleTeacherUids = staff doc id)
+    // id `elective_<configId>` เหมือนที่หน้าเช็คชื่อใช้ — className ใช้ id เดียวกันเป็นรหัสห้อง (ไม่มี level/room)
+    const term = out[0]?.term || '1/2569';
+    for (const cfg of electiveConfigs) {
+      if (!isStaffIn(user, cfg.responsibleTeacherUids)) continue;
+      out.push({
+        id: `elective_${cfg.id}`,
+        code: `ELECTIVE_${cfg.id}`,
+        name: cfg.name,
+        room: '',
+        term,
+        attendanceTaken: false,
+        subjectType: 'ACTIVITY',
+        className: `elective_${cfg.id}`,
+      } as Course);
+    }
     return out;
-  }, [myCourses]);
+  }, [myCourses, electiveConfigs, user]);
 
   const [view, setView] = useState<'dashboard' | 'class' | 'active_learning'>('dashboard');
   const [activeCourse, setActiveCourse] = useState<Course | null>(null);
@@ -469,7 +491,8 @@ export function TeacherPortal() {
 
     setGradebookLoading(true);
 
-    getStudentsByClass(targetClassName).then((fetchedStudents) => {
+    // ชุมนุม: รายชื่อมาจาก activity_enrollments (effect ด้านล่าง) ไม่ใช่ getStudentsByClass
+    if (!selectedGradebookCourseId.startsWith('elective_')) getStudentsByClass(targetClassName).then((fetchedStudents) => {
       if (fetchedStudents && fetchedStudents.length > 0) {
         setGradebookStudents(fetchedStudents);
       } else {
@@ -501,6 +524,22 @@ export function TeacherPortal() {
     });
   }, [selectedGradebookCourseId]);
 
+  // รายชื่อนักเรียนในชุมนุมที่เลือกในสมุดบันทึกคะแนน — real-time จาก activity_enrollments (สมัครจริงเท่านั้น)
+  const [gradebookElectiveEnrollments, setGradebookElectiveEnrollments] = useState<ActivityEnrollment[] | null>(null);
+  useEffect(() => {
+    if (!selectedGradebookCourseId.startsWith('elective_')) { setGradebookElectiveEnrollments(null); return; }
+    return subscribeActiveEnrollmentsByActivity(selectedGradebookCourseId.slice('elective_'.length), setGradebookElectiveEnrollments);
+  }, [selectedGradebookCourseId]);
+  useEffect(() => {
+    if (gradebookElectiveEnrollments === null) return;
+    setGradebookStudents(
+      gradebookElectiveEnrollments
+        .map(e => (students || []).find(s => s.studentId === e.studentId))
+        .filter((s): s is Student => !!s)
+    );
+    setGradebookLoading(false);
+  }, [gradebookElectiveEnrollments, students]);
+
   // ELECTIVE (ชุมนุม/กิจกรรมตามความสนใจ — นักเรียนสมัครเอง คละห้อง) vs WHOLE_CLASS (ยกห้อง/วิชาหลัก)
   // — กรองด้วย room เดิมใช้ไม่ได้กับ ELECTIVE เพราะนักเรียนคละห้องมาเลือกเอง (ดู elective_activities_config)
   //
@@ -509,7 +548,6 @@ export function TeacherPortal() {
   // — ตรวจแทนว่า (1) คาบที่กำลังสอนอยู่คือคาบ "ชุมนุม" ทั่วไปตามชื่อที่ import มาจริง (เหมือน keyword
   // ที่ detectSubjectType ใช้จำแนก ACTIVITY) และ (2) ครูคนนี้มีชุมนุมที่ตัวเองรับผิดชอบอยู่จริงไหม —
   // ถ้าใช่ทั้งคู่ ถือว่ากำลังสอนชุมนุมของตัวเอง ดึงรายชื่อจาก activity_enrollments ของชุมนุมนั้น
-  const { configs: electiveConfigs, configById: electiveConfigById, counts: electiveCounts } = useElectiveActivities();
   // TASK 2.3: ตรวจว่า activeCourse ที่เปิดอยู่ตอนนี้คือชุมนุม ด้วย courseId prefix `elective_` ที่ตั้งไว้
   // ตอนสร้าง virtual period (ดูจุด rawMappedPeriods ด้านล่าง) แทนการเดาจาก "ชุมนุมแรกที่ครูรับผิดชอบ" +
   // ชื่อคาบมีคำว่า "ชุมนุม" แบบเดิม — เดิมพังเมื่อครูรับผิดชอบมากกว่า 1 ชุมนุม (index ผิดชุมนุม) หรือ
@@ -1632,7 +1670,11 @@ export function TeacherPortal() {
                       if (gradebookStudents.length === 0) {
                         return (
                           <div className="text-center py-12 text-slate-400 border border-dashed border-slate-800/80 rounded-xl p-8">
-                            <p className="text-slate-300 font-medium">ไม่พบข้อมูลนักเรียนในห้อง {targetClassName}</p>
+                            <p className="text-slate-300 font-medium">
+                              {selectedGradebookCourseId.startsWith('elective_')
+                                ? 'ยังไม่มีนักเรียนสมัครชุมนุมนี้'
+                                : `ไม่พบข้อมูลนักเรียนในห้อง ${targetClassName}`}
+                            </p>
                           </div>
                         );
                       }

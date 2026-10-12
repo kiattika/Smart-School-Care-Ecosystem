@@ -35,6 +35,7 @@ export interface AttendanceLogRow {
   courseName: string;
   status: AttendanceStatusValue;
   checkedByName: string;
+  source: string; // HOMEROOM_DEFAULT | PERIOD_OVERRIDE | '' (ข้อมูลเก่า)
 }
 
 const dayKeyOfDate = (date: string): string => {
@@ -88,6 +89,7 @@ export function buildStudentAttendanceLog(
       courseName: course?.name || '',
       status,
       checkedByName: rec.checkedByName || '',
+      source: rec.source || '',
     });
   }
   return rows.sort((a, b) => b.date.localeCompare(a.date) || (a.periodNumber ?? 99) - (b.periodNumber ?? 99));
