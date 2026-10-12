@@ -2588,3 +2588,46 @@ export function subscribeHomeVisitRecordsByRoom(
     return () => {};
   }
 }
+
+
+/**
+ * ข้อมูลเยี่ยมบ้านฝั่งนักเรียน/ผู้ปกครอง (แบบ สพฐ.) — เอกสารถาวรต่อนักเรียน แก้ไขได้ตลอด
+ * โยน error ต่อให้ UI แจ้งผู้ใช้
+ */
+const HV_STUDENT_COL = 'home_visit_student_info';
+const HV_FAMILY_COL = 'home_visit_family_info';
+export async function saveStudentHomeVisitInfo(info: import('../types').StudentHomeVisitInfo): Promise<void> {
+  await setDoc(doc(db, HV_STUDENT_COL, info.studentId), { ...info, updatedAt: new Date().toISOString() });
+}
+export async function saveFamilyHomeVisitInfo(info: import('../types').FamilyHomeVisitInfo): Promise<void> {
+  await setDoc(doc(db, HV_FAMILY_COL, info.studentId), { ...info, updatedAt: new Date().toISOString() });
+}
+function subscribeSingle<T>(col: string, id: string, onUpdate: (v: T | null) => void): () => void {
+  try {
+    return onSnapshot(doc(db, col, id), (snap) => onUpdate(snap.exists() ? (snap.data() as T) : null),
+      (e) => { console.warn(`[subscribe ${col}] Listener error:`, e.message); onUpdate(null); });
+  } catch (e) { console.warn(`[subscribe ${col}] Setup error:`, e); return () => {}; }
+}
+export const subscribeStudentHomeVisitInfo = (studentId: string, cb: (v: import('../types').StudentHomeVisitInfo | null) => void) => subscribeSingle(HV_STUDENT_COL, studentId, cb);
+export const subscribeFamilyHomeVisitInfo = (studentId: string, cb: (v: import('../types').FamilyHomeVisitInfo | null) => void) => subscribeSingle(HV_FAMILY_COL, studentId, cb);
+
+function subscribeByRoom<T>(col: string, room: string, onUpdate: (rows: T[]) => void): () => void {
+  try {
+    return onSnapshot(query(collection(db, col), where('homeroomClass', '==', room)),
+      (snap) => onUpdate(snap.docs.map(d => d.data() as T)),
+      (e) => { console.warn(`[subscribe ${col}] Listener error:`, e.message); onUpdate([]); });
+  } catch (e) { console.warn(`[subscribe ${col}] Setup error:`, e); return () => {}; }
+}
+export const subscribeStudentHomeVisitInfoByRoom = (room: string, cb: (rows: import('../types').StudentHomeVisitInfo[]) => void) => subscribeByRoom(HV_STUDENT_COL, room, cb);
+export const subscribeFamilyHomeVisitInfoByRoom = (room: string, cb: (rows: import('../types').FamilyHomeVisitInfo[]) => void) => subscribeByRoom(HV_FAMILY_COL, room, cb);
+
+/** ผู้บริหาร: อ่านทั้งโรงเรียน (ใช้สรุปเป็นจำนวน/สัดส่วนเท่านั้น ห้ามแสดงชื่อรายบุคคล) */
+function subscribeAllDocs<T>(col: string, onUpdate: (rows: T[]) => void): () => void {
+  try {
+    return onSnapshot(collection(db, col), (snap) => onUpdate(snap.docs.map(d => d.data() as T)),
+      (e) => { console.warn(`[subscribeAll ${col}] Listener error:`, e.message); onUpdate([]); });
+  } catch (e) { console.warn(`[subscribeAll ${col}] Setup error:`, e); return () => {}; }
+}
+export const subscribeAllHomeVisitRecords = (cb: (rows: import('../types').HomeVisitRecord[]) => void) => subscribeAllDocs(HOME_VISIT_COL, cb);
+export const subscribeAllStudentHomeVisitInfo = (cb: (rows: import('../types').StudentHomeVisitInfo[]) => void) => subscribeAllDocs(HV_STUDENT_COL, cb);
+export const subscribeAllFamilyHomeVisitInfo = (cb: (rows: import('../types').FamilyHomeVisitInfo[]) => void) => subscribeAllDocs(HV_FAMILY_COL, cb);

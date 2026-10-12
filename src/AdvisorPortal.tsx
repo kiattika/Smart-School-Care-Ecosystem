@@ -34,6 +34,10 @@ import { useHomeVisitRecords } from './hooks/useHomeVisitRecords';
 import { currentYearRecords } from './lib/homeVisitForm';
 import { HomeVisitStudentDetailModal } from './components/homevisit/HomeVisitStudentDetailModal';
 import { HomeVisitFormModal } from './components/homevisit/HomeVisitFormModal';
+import { HomeVisitSummaryPanel } from './components/homevisit/HomeVisitSummaryPanel';
+import { summarizeHomeVisit } from './lib/homeVisitAnalytics';
+import { HomeVisitDocumentModal } from './components/homevisit/HomeVisitDocumentModal';
+import { useRoomStudentHomeVisitInfo, useRoomFamilyHomeVisitInfo } from './hooks/useHomeVisitData';
 import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
 import { AdvisorGpsCheckInPanel } from './components/homevisit/AdvisorGpsCheckInPanel';
 import { AdvisorGateCheckInPanel } from './components/student-parent/AdvisorGateCheckInPanel';
@@ -151,6 +155,13 @@ export function AdvisorPortal() {
   const [visitFormStudentId, setVisitFormStudentId] = useState<string | null>(null);
   const { records: visitRecords } = useHomeVisitRecords(myRoom || undefined);
   const visitRecordsByStudent = useMemo(() => currentYearRecords(visitRecords, todayStr), [visitRecords, todayStr]);
+  const { data: roomStudentInfo } = useRoomStudentHomeVisitInfo(myRoom || undefined);
+  const { data: roomFamilyInfo } = useRoomFamilyHomeVisitInfo(myRoom || undefined);
+  const studentInfoById = useMemo(() => new Map(roomStudentInfo.map(i => [i.studentId, i])), [roomStudentInfo]);
+  const familyInfoById = useMemo(() => new Map(roomFamilyInfo.map(i => [i.studentId, i])), [roomFamilyInfo]);
+  const roomVisitSummary = useMemo(() => summarizeHomeVisit({ totalStudents: myStudents.length, records: visitRecords, studentInfo: roomStudentInfo, familyInfo: roomFamilyInfo, todayYmd: todayStr }), [myStudents.length, visitRecords, roomStudentInfo, roomFamilyInfo, todayStr]);
+  const [visitDocStudentId, setVisitDocStudentId] = useState<string | null>(null);
+  const visitDocStudent = myStudents.find(st => st.studentId === visitDocStudentId) || null;
   const visitDetailStudent = myStudents.find(st => st.studentId === visitDetailStudentId) || null;
   const visitFormStudent = myStudents.find(st => st.studentId === visitFormStudentId) || null;
   const distanceFromSchool = (sid: string): number | null => {
@@ -436,6 +447,9 @@ export function AdvisorPortal() {
           )}
           {activeTab === 'visit-planner' && (
             <div className="animate-in fade-in duration-300 space-y-6">
+            <div className="bg-[#1c1f2b] border border-white/10 rounded-xl p-4">
+              <HomeVisitSummaryPanel title={`สารสนเทศเยี่ยมบ้าน ห้อง ${myRoom || '-'}`} s={roomVisitSummary} />
+            </div>
             <div className="bg-[#1c1f2b] border border-white/10 rounded-xl p-4">
               <AdvisorHomeLocationMap homeroomClass={myRoom} students={myStudents} />
             </div>
@@ -1119,6 +1133,10 @@ export function AdvisorPortal() {
            location={homeLocByStudent.get(visitDetailStudent.studentId)}
            distanceFromSchoolM={distanceFromSchool(visitDetailStudent.studentId)}
            record={visitRecordsByStudent.get(visitDetailStudent.studentId)}
+           studentInfo={studentInfoById.get(visitDetailStudent.studentId) || null}
+           familyInfo={familyInfoById.get(visitDetailStudent.studentId) || null}
+           todayYmd={todayStr}
+           onOpenDocument={() => setVisitDocStudentId(visitDetailStudent.studentId)}
            onClose={() => setVisitDetailStudentId(null)}
            onOpenForm={() => setVisitFormStudentId(visitDetailStudent.studentId)}
          />
@@ -1129,11 +1147,26 @@ export function AdvisorPortal() {
            location={homeLocByStudent.get(visitFormStudent.studentId)}
            distanceFromSchoolM={distanceFromSchool(visitFormStudent.studentId)}
            existing={visitRecordsByStudent.get(visitFormStudent.studentId)}
+           studentInfo={studentInfoById.get(visitFormStudent.studentId) || null}
+           familyInfo={familyInfoById.get(visitFormStudent.studentId) || null}
            homeroomClass={myRoom || ''}
-           advisor={{ uid: user?.uid || '', name: user?.profile ? `${user.profile.prefix || ''}${user.profile.firstName} ${user.profile.lastName}`.trim() : (user?.displayName || '') }}
+           advisor={{ uid: user?.uid || '', name: user?.profile ? `${user.profile.prefix || ''}${user.profile.firstName} ${user.profile.lastName}`.trim() : (user?.displayName || ''), position: user?.profile?.position || '' }}
            todayYmd={todayStr}
            onClose={() => setVisitFormStudentId(null)}
            onSaved={(msg) => { setVisitFormStudentId(null); setVisitDetailStudentId(null); setToastMessage(msg); }}
+         />
+       )}
+
+       {visitDocStudent && visitRecordsByStudent.get(visitDocStudent.studentId) && (
+         <HomeVisitDocumentModal
+           student={visitDocStudent}
+           location={homeLocByStudent.get(visitDocStudent.studentId)}
+           distanceFromSchoolM={distanceFromSchool(visitDocStudent.studentId)}
+           record={visitRecordsByStudent.get(visitDocStudent.studentId)!}
+           studentInfo={studentInfoById.get(visitDocStudent.studentId) || null}
+           familyInfo={familyInfoById.get(visitDocStudent.studentId) || null}
+           todayYmd={todayStr}
+           onClose={() => setVisitDocStudentId(null)}
          />
        )}
 
