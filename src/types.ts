@@ -1178,7 +1178,7 @@ export interface StoreState {
   gpsCheckInLogs: GPSCheckInLog[];
 
   // Actions
-  addActiveLearningPoints: (studentId: string, points: number, category?: ActiveLearningCategory, note?: string, courseId?: string) => void;
+  addActiveLearningPoints: (studentId: string, points: number, category?: ActiveLearningCategory, note?: string, courseId?: string) => Promise<void>;
   setUser: (user: User | null) => void;
   /** เดินนาฬิกา (เรียกโดย useAppClock) — production = เวลาจริงเสมอ */
   tickClock: (now?: Date) => void;
@@ -1188,7 +1188,7 @@ export interface StoreState {
   setCurrentPeriod: (period: string) => void;
   cycleAttendanceStatus: (courseId: string, studentId: string) => void;
   setAttendanceStatus: (courseId: string, studentId: string, status: AttendanceStatus) => void;
-  adjustBehaviorScore: (studentId: string, amount: number, reason?: string) => void;
+  adjustBehaviorScore: (studentId: string, amount: number, reason?: string) => Promise<void>;
   moveStudentSeat: (studentId: string, newSeatIndex: number | null) => void;
   resetClassroomSeats: (room?: string) => void;
   autoAssignClassroomSeats: (room?: string, capacity?: number) => void;

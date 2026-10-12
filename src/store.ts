@@ -200,9 +200,9 @@ export const useStore = create<StoreState>((set, get) => ({
   // (updateBehaviorScoreAndTriggerAlert — เขียนไว้แล้วแต่ไม่เคยถูกเรียกใช้จริงมาก่อน) ซึ่งอัปเดต
   // students/{id}.behaviorScore + riskLevel, บันทึก discipline_logs, และสร้าง parent_notifications/
   // parent_conferences ของจริงให้เอง — ตัวเลขไหลกลับมาที่ UI ผ่าน useRealStudents() (real-time) แทน
-  adjustBehaviorScore: (studentId: string, amount: number, reason?: string) => {
-    updateBehaviorScoreAndTriggerAlert(studentId, amount, reason || 'ปรับคะแนนพฤติกรรมด่วนโดยครูผู้สอน')
-      .catch(err => console.warn('[adjustBehaviorScore] Firestore update failed:', err));
+  // รอผลเขียนจริง — ล้มเหลวแล้ว throw ให้ผู้เรียกแจ้งครู (ห้ามโชว์ว่าสำเร็จทั้งที่คะแนนไม่ถูกบันทึก)
+  adjustBehaviorScore: async (studentId: string, amount: number, reason?: string) => {
+    await updateBehaviorScoreAndTriggerAlert(studentId, amount, reason || 'ปรับคะแนนพฤติกรรมด่วนโดยครูผู้สอน');
   },
 
   // NOTE: คำขอเช็คชื่อย้อนหลังย้ายไป Firestore แล้ว (late_attendance_requests + firestoreService)
@@ -844,7 +844,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }).catch(err => console.warn('Firestore parent notification notice:', err));
   },
 
-  addActiveLearningPoints: (studentId: string, points: number, category: ActiveLearningCategory = 'GENERAL', note?: string, courseId?: string) => {
+  addActiveLearningPoints: async (studentId: string, points: number, category: ActiveLearningCategory = 'GENERAL', note?: string, courseId?: string) => {
     const newLog: ActiveLearningRecord = {
       id: `al-log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       studentId,
@@ -854,9 +854,10 @@ export const useStore = create<StoreState>((set, get) => ({
       note,
       awardedAt: new Date().toISOString()
     };
-    saveActiveLearningLogFirestore(newLog).catch(err => console.warn('Firestore active learning notice:', err));
+    // เขียน Firestore สำเร็จก่อนค่อยอัปเดตแต้มในหน้าจอ (ล้มเหลว = throw ไม่แสดงแต้มที่ไม่มีอยู่จริง)
+    await saveActiveLearningLogFirestore(newLog);
 
-    return set((state) => {
+    set((state) => {
       const currentPoints = state.activeLearningPoints[studentId] || 0;
       const newPoints = Math.max(0, currentPoints + points);
       return {

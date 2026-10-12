@@ -1899,7 +1899,7 @@ export async function saveActiveLearningLogFirestore(record: ActiveLearningRecor
       createdAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.warn('[saveActiveLearningLogFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${record.id}`);
   }
 }
 

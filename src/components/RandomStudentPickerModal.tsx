@@ -60,6 +60,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   
   // Active spinning animation state
   const [isSpinning, setIsSpinning] = useState(false);
+  const [awardError, setAwardError] = useState<string | null>(null);
   const [spinningPreviewStudent, setSpinningPreviewStudent] = useState<Student | null>(null);
   const [spinningPreviewGroup, setSpinningPreviewGroup] = useState<ClassroomDeskGroup | null>(null);
   
@@ -238,16 +239,22 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   };
 
   // Award Active Learning Points to Individual Student
-  const handleAwardIndividualPoints = (student: Student, points: number) => {
-    addActiveLearningPoints(
-      student.studentId,
-      points,
-      'ANSWER',
-      `กิจกรรมสุ่มตอบคำถาม Active Learning (+${points} คะแนน)`,
-      courseId
-    );
-    adjustBehaviorScore(student.studentId, points);
-    
+  const handleAwardIndividualPoints = async (student: Student, points: number) => {
+    setAwardError(null);
+    try {
+      await addActiveLearningPoints(
+        student.studentId,
+        points,
+        'ANSWER',
+        `กิจกรรมสุ่มตอบคำถาม Active Learning (+${points} คะแนน)`,
+        courseId
+      );
+      await adjustBehaviorScore(student.studentId, points);
+    } catch {
+      setAwardError('บันทึกคะแนนไม่สำเร็จ — ตรวจสอบสิทธิ์และการเชื่อมต่อ แล้วลองใหม่');
+      return;
+    }
+
     setAwardedStudents(prev => ({
       ...prev,
       [student.studentId]: (prev[student.studentId] || 0) + points
@@ -259,17 +266,23 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   };
 
   // Award Active Learning Points to ENTIRE GROUP / TABLE
-  const handleAwardGroupPoints = (group: ClassroomDeskGroup, points: number) => {
-    group.students.forEach(student => {
-      addActiveLearningPoints(
+  const handleAwardGroupPoints = async (group: ClassroomDeskGroup, points: number) => {
+    setAwardError(null);
+    const results = await Promise.allSettled(group.students.map(async student => {
+      await addActiveLearningPoints(
         student.studentId,
         points,
         'COLLABORATION',
         `กิจกรรมกลุ่ม/โต๊ะเรียน: ${group.name} (+${points} คะแนน)`,
         courseId
       );
-      adjustBehaviorScore(student.studentId, points);
-    });
+      await adjustBehaviorScore(student.studentId, points);
+    }));
+    const failed = results.filter(r => r.status === 'rejected').length;
+    if (failed > 0) {
+      setAwardError(`บันทึกคะแนนไม่สำเร็จ ${failed} จาก ${group.students.length} คน — ตรวจสอบสิทธิ์และการเชื่อมต่อ แล้วลองใหม่`);
+      if (failed === group.students.length) return;
+    }
 
     setGroupAwardedPoints(prev => prev + points);
     setAwardedStudents(prev => {
@@ -564,6 +577,10 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                       </div>
                     )}
 
+                    {awardError && (
+                      <div className="mt-3 px-4 py-1.5 bg-rose-500/15 text-rose-300 border border-rose-500/30 rounded-xl text-xs">{awardError}</div>
+                    )}
+
                     {/* Quick Award Buttons */}
                     <div className="mt-5 pt-4 border-t border-white/10 w-full flex items-center justify-center gap-2">
                       <button
@@ -683,6 +700,9 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                     </div>
                   </div>
 
+                  {awardError && (
+                    <div className="w-full px-3 py-1.5 bg-rose-500/15 text-rose-300 border border-rose-500/30 rounded-xl text-xs">{awardError}</div>
+                  )}
                   <div className="flex items-center gap-2 ml-auto">
                     <button
                       id="group-award-plus-1"
