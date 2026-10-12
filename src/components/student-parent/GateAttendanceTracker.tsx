@@ -23,7 +23,14 @@ import {
 import { useStore } from '../../store';
 import { GateAttendanceRecord, DetailedLeaveRequest, AttendanceStatus, Student } from '../../types';
 import { GPSGeofenceCheckinModal } from '../GPSGeofenceCheckinModal';
-import { subscribeGateAttendanceLogs } from '../../services/firestoreService';
+import {
+  subscribeGateAttendanceLogs,
+  subscribeLeaveRequests,
+  createLeaveRequest,
+  acknowledgeLeaveRequest,
+  createParentNotification,
+} from '../../services/firestoreService';
+import { countLeaveDays, canParentAcknowledge, leaveStatusLabel, normalizeLeaveStatus, LEAVE_REASON_MAX, validateLeaveForm } from '../../lib/leaveFlow';
 import { DatePicker } from '../shared/DatePicker';
 import { NoStudentNotice } from './NoStudentNotice';
 import { attendanceStatsFromCounts } from '../../lib/studentAttendanceStats';
@@ -40,9 +47,6 @@ export function GateAttendanceTracker(props: GateAttendanceTrackerProps) {
 
 function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentView = false }: GateAttendanceTrackerProps) {
   const {
-    detailedLeaveRequests,
-    submitDetailedLeave,
-    approveDetailedLeave,
     students,
     courses,
     user
@@ -62,38 +66,86 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
 
   const student = studentProp as Student;
   const logs = gateAttendanceLogs.filter(l => l.studentId === student.studentId);
-  const leaves = detailedLeaveRequests.filter(l => l.studentId === student.studentId);
+  // ใบลาจริงจาก Firestore แบบ real-time — นักเรียนอ่านด้วย studentUid, ผู้ปกครองด้วย parentUid (ตรงกับ firestore.rules)
+  const [allLeaves, setAllLeaves] = useState<DetailedLeaveRequest[]>([]);
+  useEffect(() => {
+    if (!user?.uid) { setAllLeaves([]); return; }
+    return subscribeLeaveRequests(setAllLeaves, isParentView ? { parentUid: user.uid } : { studentUid: user.uid });
+  }, [user?.uid, isParentView]);
+  const leaves = allLeaves.filter(l => l.studentId === student.studentId);
 
   const [activeTab, setActiveTab] = useState<'gate' | 'subject' | 'leave'>('gate');
   const [isGPSModalOpen, setIsGPSModalOpen] = useState(false);
 
-  // e-Leave form state
+  // e-Leave form state — เริ่มว่าง (ไม่เติมวันที่/ไฟล์แนบสมมติ)
   const [leaveType, setLeaveType] = useState<'SICK' | 'PERSONAL' | 'ACTIVITY'>('SICK');
-  const [startDate, setStartDate] = useState('2026-08-22');
-  const [endDate, setEndDate] = useState('2026-08-23');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [leaveReason, setLeaveReason] = useState('');
-  const [attachedFile, setAttachedFile] = useState<string | null>(null);
-  const [leaveSubmitSuccess, setLeaveSubmitSuccess] = useState(false);
+  const [leaveSubmitSuccess, setLeaveSubmitSuccess] = useState<string | null>(null);
+  const [leaveSubmitError, setLeaveSubmitError] = useState<string | null>(null);
+  const [leaveSubmitting, setLeaveSubmitting] = useState(false);
+  const [ackBusyId, setAckBusyId] = useState<string | null>(null);
 
-  const handleLeaveSubmit = (e: React.FormEvent) => {
+  const leaveDays = countLeaveDays(startDate, endDate);
+
+  const handleLeaveSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!leaveReason.trim()) return;
+    setLeaveSubmitSuccess(null);
+    setLeaveSubmitError(null);
+    if (!user?.uid) { setLeaveSubmitError('ไม่พบข้อมูลผู้ใช้ — เข้าสู่ระบบใหม่แล้วลองอีกครั้ง'); return; }
+    const errs = validateLeaveForm({ leaveType, startDate, endDate, reason: leaveReason });
+    if (errs.length > 0) { setLeaveSubmitError(errs.join(' · ')); return; }
+    setLeaveSubmitting(true);
+    try {
+      const created = await createLeaveRequest({
+        student: {
+          studentId: student.studentId,
+          studentUid: student.studentUid || '',
+          parentUid: student.parentUid || null,
+          room: student.room || '',
+        },
+        submitter: { role: isParentView ? 'parent' : 'student', uid: user.uid, name: isParentView ? `ผู้ปกครองของ ${student.name}` : student.name },
+        form: { leaveType, startDate, endDate, reason: leaveReason },
+      });
+      // แจ้งผู้ปกครอง (เมื่อนักเรียนยื่นเอง) ให้กดรับทราบ — แจ้งเตือนเป็นผลพลอยได้ ไม่ทำให้การยื่นล้มเหลว
+      if (!isParentView && created.parentUid) {
+        createParentNotification({
+          parentUid: created.parentUid,
+          studentUid: created.studentUid,
+          studentId: created.studentId,
+          studentName: student.name,
+          title: '📝 บุตรหลานยื่นใบลา — รอท่านรับทราบ',
+          message: `${student.name} ยื่นใบลา${created.leaveType === 'SICK' ? 'ป่วย' : created.leaveType === 'PERSONAL' ? 'กิจ' : 'กิจกรรม'} ${created.startDate}${created.startDate !== created.endDate ? ` ถึง ${created.endDate}` : ''} (${created.totalDays} วัน) กรุณากด "รับทราบ" ที่แท็บใบลา เพื่อส่งต่อครูที่ปรึกษา`,
+          type: 'warning',
+        }).catch(err => console.warn('[leave] parent notification failed:', err));
+      }
+      setLeaveReason('');
+      setStartDate('');
+      setEndDate('');
+      setLeaveSubmitSuccess(
+        isParentView ? 'ส่งใบลาถึงครูที่ปรึกษาแล้ว'
+          : created.parentUid ? 'ยื่นใบลาแล้ว — รอผู้ปกครองรับทราบ จึงจะส่งต่อครูที่ปรึกษา'
+          : 'ยื่นใบลาแล้ว — ส่งถึงครูที่ปรึกษา (ยังไม่มีผู้ปกครองเชื่อมบัญชีกับนักเรียนคนนี้)'
+      );
+    } catch (err: any) {
+      setLeaveSubmitError(err?.message || 'ยื่นใบลาไม่สำเร็จ ลองอีกครั้ง');
+    } finally {
+      setLeaveSubmitting(false);
+    }
+  };
 
-    submitDetailedLeave({
-      studentId: student.studentId,
-      leaveType,
-      startDate,
-      endDate,
-      totalDays: 2,
-      reason: leaveReason,
-      attachmentName: attachedFile || 'ใบรับรองแพทย์_เอกสารแนบ.pdf',
-      submittedBy: isParentView ? 'ผู้ปกครอง (LINE)' : student.name
-    });
-
-    setLeaveReason('');
-    setAttachedFile(null);
-    setLeaveSubmitSuccess(true);
-    setTimeout(() => setLeaveSubmitSuccess(false), 4000);
+  const handleAcknowledge = async (leave: DetailedLeaveRequest) => {
+    if (!user?.uid) return;
+    setAckBusyId(leave.id);
+    setLeaveSubmitError(null);
+    try {
+      await acknowledgeLeaveRequest(leave.id, user.uid);
+    } catch (err: any) {
+      setLeaveSubmitError(err?.message || 'รับทราบไม่สำเร็จ ลองอีกครั้ง');
+    } finally {
+      setAckBusyId(null);
+    }
   };
 
   // สถิติการเข้าเรียนสะสมจริงจาก students/{id}.attendanceStats (derived cache ที่ sync คู่กับ attendance_records)
@@ -284,15 +336,8 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
               แบบฟอร์มยื่นใบลาออนไลน์ (e-Leave Form)
             </h3>
             <p className="text-[11px] text-slate-400 mb-4">
-              ผู้ปกครองสามารถยื่นใบลาป่วยหรือลากิจ พร้อมแนบหลักฐานเอกสารรับรอง
+              นักเรียนหรือผู้ปกครองยื่นใบลาป่วย/ลากิจ/ลากิจกรรมได้ที่นี่ (ยังไม่รองรับการแนบไฟล์ — ส่งเอกสารให้ครูที่ปรึกษาโดยตรง)
             </p>
-
-            {leaveSubmitSuccess && (
-              <div className="p-3 mb-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>ส่งใบลาเรียบร้อยแล้ว ครูประจำชั้นจะได้รับการแจ้งเตือนทันที</span>
-              </div>
-            )}
 
             <form onSubmit={handleLeaveSubmit} className="space-y-4">
               <div>
@@ -352,31 +397,25 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
                   onChange={(e) => setLeaveReason(e.target.value)}
                   placeholder="ระบุอาการป่วย หรือสาเหตุความจำเป็นในการลากิจ..."
                   rows={3}
+                  maxLength={LEAVE_REASON_MAX}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-indigo-500 resize-none"
                   required
                 ></textarea>
               </div>
 
-              <div>
-                <label className="text-[11px] font-medium text-slate-300 block mb-1">แนบไฟล์ใบรับรองแพทย์ / เอกสารประกอบ:</label>
-                <div 
-                  onClick={() => setAttachedFile('ใบรับรองแพทย์_รพ.อุตรดิตถ์.pdf')}
-                  className="border-2 border-dashed border-slate-700 hover:border-indigo-500/60 rounded-2xl p-3 text-center cursor-pointer transition-all bg-slate-800/30"
-                >
-                  <Upload className="w-5 h-5 text-indigo-400 mx-auto mb-1" />
-                  <span className="text-xs text-slate-300 font-medium block">
-                    {attachedFile ? `📎 ${attachedFile}` : 'คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวาง'}
-                  </span>
-                  <span className="text-[10px] text-slate-500">รองรับ PDF, JPG, PNG (สูงสุด 5MB)</span>
-                </div>
-              </div>
-
+              {leaveDays > 0 && <p className="text-[11px] text-slate-400">รวม {leaveDays} วัน</p>}
+              {leaveSubmitError && <p role="alert" className="text-[11px] text-rose-400">{leaveSubmitError}</p>}
+              {leaveSubmitSuccess && <p role="status" className="text-[11px] text-emerald-400">{leaveSubmitSuccess}</p>}
+              <p className="text-[10px] text-slate-500">
+                {isParentView ? 'ใบลาที่ผู้ปกครองยื่น จะส่งถึงครูที่ปรึกษาทันที' : 'ใบลาที่นักเรียนยื่น ผู้ปกครองต้องกดรับทราบก่อน จึงจะส่งต่อครูที่ปรึกษา'}
+              </p>
               <button
                 type="submit"
-                className="w-full py-3 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
+                disabled={leaveSubmitting}
+                className="w-full py-3 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>ส่งใบลาออนไลน์ (Submit Leave Request)</span>
+                <span>{leaveSubmitting ? 'กำลังบันทึก…' : 'ส่งใบลาออนไลน์ (Submit Leave Request)'}</span>
               </button>
             </form>
           </div>
@@ -390,7 +429,7 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
                     <Calendar className="w-4 h-4 text-indigo-400" />
                     ประวัติการยื่นใบลาและสถานะการอนุมัติ
                   </h3>
-                  <p className="text-[11px] text-slate-400">เมื่อครูอนุมัติ ระบบจะปรับบัญชีเวลาเรียนและคัดกรองการสุ่มอัตโนมัติ</p>
+                  <p className="text-[11px] text-slate-400">ใบลาจะถึงครูที่ปรึกษาตามลำดับขั้น และเห็นสถานะที่นี่แบบเรียลไทม์</p>
                 </div>
               </div>
 
@@ -415,12 +454,12 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
                       </div>
 
                       <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
-                        item.status === 'APPROVED' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
-                        item.status === 'REJECTED' ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' :
-                        'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
+                        normalizeLeaveStatus(item.status) === 'APPROVED' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+                        normalizeLeaveStatus(item.status) === 'REJECTED' ? 'bg-rose-500/10 border-rose-500/30 text-rose-400' :
+                        'bg-amber-500/10 border-amber-500/30 text-amber-400'
                       }`}>
-                        {item.status === 'APPROVED' ? '✅ อนุมัติแล้ว' :
-                         item.status === 'REJECTED' ? '❌ ไม่อนุมัติ' : '⏳ รอครูประจำชั้นตรวจสอบ'}
+                        {normalizeLeaveStatus(item.status) === 'APPROVED' ? '✅ ' : normalizeLeaveStatus(item.status) === 'REJECTED' ? '❌ ' : '⏳ '}
+                        {leaveStatusLabel(item.status, { noParentLinked: item.noParentLinked })}
                       </span>
                     </div>
 
@@ -428,29 +467,32 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
                       {item.reason}
                     </p>
 
-                    {item.attachmentName && (
-                      <div className="text-[11px] text-indigo-400 flex items-center gap-1.5">
-                        <FileText className="w-3.5 h-3.5" />
-                        <span>เอกสารแนบ: {item.attachmentName}</span>
-                      </div>
-                    )}
+                    <div className="text-[10px] text-slate-500">
+                      ยื่นโดย {item.submittedBy}{item.parentAcknowledgedAt ? ' · ผู้ปกครองรับทราบแล้ว' : ''}
+                    </div>
 
                     {item.teacherRemarks && (
                       <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-800/80 flex items-center justify-between">
                         <span>ความเห็นครู: {item.teacherRemarks}</span>
-                        {item.approvedBy && <span className="text-[10px] text-emerald-400">({item.approvedBy})</span>}
+                        {item.decidedBy && <span className="text-[10px] text-emerald-400">({item.decidedBy})</span>}
+                      </div>
+                    )}
+                    {!item.teacherRemarks && item.decidedBy && (
+                      <div className="text-[11px] text-slate-400 pt-1 border-t border-slate-800/80">
+                        ตัดสินโดย {item.decidedBy}
                       </div>
                     )}
 
-                    {/* Teacher Quick Approve Button (if teacher logged in) */}
-                    {item.status === 'PENDING' && (
-                      <div className="pt-2 flex justify-end gap-2">
+                    {/* ผู้ปกครองกดรับทราบใบที่นักเรียนยื่น — ส่งต่อครูที่ปรึกษา (นักเรียน/ครูไม่เห็นปุ่มนี้) */}
+                    {isParentView && canParentAcknowledge(item.status) && (
+                      <div className="pt-2 flex justify-end">
                         <button
-                          onClick={() => approveDetailedLeave(item.id, 'อนุมัติการลาตามใบรับรองแพทย์')}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow cursor-pointer flex items-center gap-1"
+                          onClick={() => handleAcknowledge(item)}
+                          disabled={ackBusyId === item.id}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-xl text-xs font-bold transition-all shadow cursor-pointer flex items-center gap-1"
                         >
                           <Check className="w-3.5 h-3.5" />
-                          <span>(ครู) อนุมัติใบลา</span>
+                          <span>{ackBusyId === item.id ? 'กำลังบันทึก…' : 'รับทราบและส่งต่อครูที่ปรึกษา'}</span>
                         </button>
                       </div>
                     )}
@@ -465,12 +507,6 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
               </div>
             </div>
 
-            <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl text-[11px] text-indigo-300 flex items-center gap-2 mt-4">
-              <Sparkles className="w-4 h-4 text-indigo-400 shrink-0" />
-              <span>
-                เมื่อใบลาได้รับการอนุมัติ นักเรียนจะได้รับการยกเว้นจากการเรียกสุ่มใน Random Student Picker ในช่วงเวลาที่ลาโดยอัตโนมัติ
-              </span>
-            </div>
           </div>
         </div>
       )}

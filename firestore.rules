@@ -399,13 +399,77 @@ service cloud.firestore {
 
     // 16. Detailed Leave Requests
     match /detailed_leave_requests/{leaveId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('HOMEROOM_TEACHER') || 
-                     hasRole('EXECUTIVE') || 
-                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('HOMEROOM_TEACHER') || 
-                      (isSignedIn() && (request.resource.data.studentId == request.auth.uid || request.resource.data.parentUid == request.auth.uid || request.resource.data.parentId == request.auth.uid));
+      // สายงาน (ตรงกับ src/lib/leaveFlow.ts):
+      //   นักเรียนยื่น → PENDING_PARENT → (ผู้ปกครองรับทราบ) → PENDING_TEACHER → (ครูที่ปรึกษาห้องนั้น) → APPROVED/REJECTED
+      //   ผู้ปกครองยื่น → PENDING_TEACHER ทันที; นักเรียนที่ยังไม่มีผู้ปกครองเชื่อมบัญชี → PENDING_TEACHER + noParentLinked
+      // อ่าน: เจ้าของ (นักเรียน/ผู้ปกครอง) + ครูที่ปรึกษาห้องนั้น + SUPER_ADMIN/EXECUTIVE — query ต้องกรองด้วย
+      // studentUid / parentUid / homeroomClass ตามผู้ดู
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('EXECUTIVE') ||
+                     isHomeroomTeacherOf(resource.data.homeroomClass) ||
+                     (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
+
+      // สร้าง: ฟิลด์ครบ/ไม่เกิน + uid/ห้อง/ผู้ปกครองต้องตรง students/{studentId} จริง + สถานะเริ่มต้นตามผู้ยื่นเท่านั้น
+      // (ห้ามยื่นเป็นสถานะ APPROVED/REJECTED เอง)
+      allow create: if request.resource.data.keys().hasOnly([
+                         'id', 'studentId', 'studentUid', 'parentUid', 'homeroomClass', 'leaveType', 'startDate', 'endDate',
+                         'totalDays', 'reason', 'status', 'submittedByRole', 'submittedByUid', 'submittedBy', 'submittedAt',
+                         'noParentLinked', 'parentAcknowledgedAt', 'updatedAt'])
+                    && request.resource.data.keys().hasAll([
+                         'id', 'studentId', 'studentUid', 'parentUid', 'homeroomClass', 'leaveType', 'startDate', 'endDate',
+                         'totalDays', 'reason', 'status', 'submittedByRole', 'submittedByUid', 'submittedBy', 'submittedAt',
+                         'noParentLinked', 'parentAcknowledgedAt'])
+                    && request.resource.data.id == leaveId
+                    && request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__')
+                    && request.resource.data.homeroomClass == studentField(request.resource.data.studentId, 'room', '__none__')
+                    && request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', null)
+                    && request.resource.data.leaveType in ['SICK', 'PERSONAL', 'ACTIVITY', 'OTHER']
+                    && request.resource.data.startDate is string && request.resource.data.startDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                    && request.resource.data.endDate is string && request.resource.data.endDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                    && request.resource.data.endDate >= request.resource.data.startDate
+                    && request.resource.data.totalDays is int && request.resource.data.totalDays >= 1 && request.resource.data.totalDays <= 60
+                    && request.resource.data.reason is string && request.resource.data.reason.size() >= 1 && request.resource.data.reason.size() <= 500
+                    && request.resource.data.submittedByUid == request.auth.uid
+                    && request.resource.data.parentAcknowledgedAt == null
+                    && (
+                      // นักเรียนยื่นเอง: มีผู้ปกครองเชื่อมบัญชี → รอผู้ปกครอง; ไม่มี → ส่งครูเลยพร้อมธงบอกเหตุผล
+                      (isSelfStudent(request.resource.data.studentId)
+                        && request.resource.data.submittedByRole == 'student'
+                        && ((request.resource.data.parentUid != null
+                              && request.resource.data.status == 'PENDING_PARENT'
+                              && request.resource.data.noParentLinked == false)
+                            || (request.resource.data.parentUid == null
+                              && request.resource.data.status == 'PENDING_TEACHER'
+                              && request.resource.data.noParentLinked == true)))
+                      // ผู้ปกครองตัวจริงของนักเรียนยื่นแทน: ส่งถึงครูที่ปรึกษาทันที
+                      || (request.resource.data.parentUid != null
+                        && request.auth.uid == request.resource.data.parentUid
+                        && request.resource.data.submittedByRole == 'parent'
+                        && request.resource.data.status == 'PENDING_TEACHER'
+                        && request.resource.data.noParentLinked == false)
+                    );
+
+      allow update: if (
+                        // ผู้ปกครองตัวจริงกด "รับทราบ" ใบที่นักเรียนยื่น: รอผู้ปกครอง → รอครู เท่านั้น
+                        isSignedIn() && resource.data.parentUid != null && request.auth.uid == resource.data.parentUid
+                        && resource.data.status == 'PENDING_PARENT'
+                        && request.resource.data.status == 'PENDING_TEACHER'
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                             .hasOnly(['status', 'parentAcknowledgedAt', 'parentAcknowledgedBy', 'updatedAt'])
+                        && request.resource.data.parentAcknowledgedAt is string
+                        && request.resource.data.parentAcknowledgedBy == request.auth.uid
+                      ) || (
+                        // ครูที่ปรึกษาห้องนั้น (หรือ SUPER_ADMIN) ตัดสิน เฉพาะใบที่ผ่านขั้นผู้ปกครองแล้ว (ข้ามขั้นไม่ได้)
+                        (hasRole('SUPER_ADMIN') || isHomeroomTeacherOf(resource.data.homeroomClass))
+                        && resource.data.status == 'PENDING_TEACHER'
+                        && request.resource.data.status in ['APPROVED', 'REJECTED']
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                             .hasOnly(['status', 'teacherRemarks', 'decidedBy', 'decidedByStaffId', 'decidedAt', 'updatedAt'])
+                        && request.resource.data.decidedBy is string && request.resource.data.decidedBy.size() > 0
+                        && request.resource.data.teacherRemarks is string && request.resource.data.teacherRemarks.size() <= 500
+                      );
+      // ลบไม่ได้ (เป็นหลักฐานการลา)
+      allow delete: if false;
     }
 
     // 17. GPS Check-in Logs

@@ -1,3 +1,4 @@
+import { StaffTaskBell } from './notifications/StaffTaskBell';
 import React, { useState, useRef, useEffect } from 'react';
 import { 
   Shield, 
@@ -365,6 +366,9 @@ export function NavbarWithRoleSwitcher({
           <span className="sm:hidden text-[10.5px] text-emerald-300">GPS</span>
         </button>
         
+        {/* กระดิ่งงานค้างตามบทบาทที่ใช้งานอยู่ (ไม่แสดงถ้าบทบาทนี้ไม่มีงานให้ติดตาม) */}
+        <StaffTaskBell activeRole={activeRole} />
+
         {/* Role Switcher Selector */}
         <div className="relative" ref={roleDropdownRef}>
           <button

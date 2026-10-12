@@ -43,13 +43,13 @@ import { AdvisorGpsCheckInPanel } from './components/homevisit/AdvisorGpsCheckIn
 import { AdvisorGateCheckInPanel } from './components/student-parent/AdvisorGateCheckInPanel';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 import { motion, AnimatePresence } from 'motion/react';
+import { AdvisorLeaveInbox, hasApprovedLeaveOn } from './components/advisor/AdvisorLeaveInbox';
+import { subscribeLeaveRequests } from './services/firestoreService';
 
 
 export function AdvisorPortal() {
   const {
     user,
-    leaveRequests,
-    updateLeaveRequestStatus,
     updateStudentProfile
   } = useStore();
 
@@ -66,6 +66,13 @@ export function AdvisorPortal() {
   const [attendanceOverrides, setAttendanceOverrides] = useState<Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>>({});
 
   const myRoom = user?.profile?.assignments?.homeroomClass;
+
+  // ใบลานักเรียนห้องที่ฉันเป็นครูที่ปรึกษา — real-time จาก Firestore (rules: isHomeroomTeacherOf(homeroomClass))
+  const [roomLeaves, setRoomLeaves] = useState<import('./types').DetailedLeaveRequest[]>([]);
+  useEffect(() => {
+    if (!myRoom) { setRoomLeaves([]); return; }
+    return subscribeLeaveRequests(setRoomLeaves, { homeroomClass: myRoom });
+  }, [myRoom]);
 
   // แบบประเมินตนเองของนักเรียนในห้อง — listener สดจาก Firestore (เดิมอ่านจาก store ที่ไม่มี listener จึงว่างเสมอ)
   const [selfAssessments, setSelfAssessments] = useState<Record<string, import('./types').StudentSelfAssessment>>({});
@@ -185,7 +192,6 @@ export function AdvisorPortal() {
   const [editParentEmail, setEditParentEmail] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   
-  const pendingLeaves = leaveRequests.filter(r => r.status === 'PENDING');
   
   const handleStudentClick = (id: string) => {
     setSelectedStudentId(id);
@@ -284,49 +290,7 @@ export function AdvisorPortal() {
               <div className="lg:col-span-1 flex flex-col gap-6">
                 
                 {/* Leave Requests Inbox */}
-                <div className="bg-[#1c1f2b] border border-white/10 rounded-xl overflow-hidden flex flex-col flex-1 shadow-lg">
-                   <div className="p-4 border-b border-white/10 bg-slate-900/50 flex items-center justify-between">
-                     <div className="flex items-center gap-2">
-                       <FileText className="w-5 h-5 text-indigo-400" />
-                       <h2 className="font-bold text-indigo-400">ใบลาดิจิทัล (รออนุมัติ)</h2>
-                     </div>
-                     {pendingLeaves.length > 0 && (
-                       <span className="bg-indigo-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{pendingLeaves.length}</span>
-                     )}
-                   </div>
-                   <div className="p-4 space-y-3 overflow-y-auto">
-                     {pendingLeaves.length > 0 ? (
-                       pendingLeaves.map(req => {
-                         const student = students.find(s => s.studentId === req.studentId);
-                         return (
-                           <div key={req.id} className="bg-white/5 border border-white/10 rounded-lg p-3">
-                             <div className="flex justify-between items-start mb-1">
-                               <div className="font-bold text-sm text-slate-200">{student?.name}</div>
-                               <div className="text-[10px] text-slate-500 bg-black/20 px-1.5 py-0.5 rounded">{format(req.date, 'd MMM yyyy', { locale: th })}</div>
-                             </div>
-                             <p className="text-xs text-slate-400 mb-3 bg-black/20 p-2 rounded line-clamp-2">{req.reason}</p>
-                             <div className="flex gap-2">
-                               <button 
-                                 onClick={() => updateLeaveRequestStatus(req.id, 'APPROVED')}
-                                 className="flex-1 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 border border-emerald-500/30 py-1.5 rounded text-xs font-bold transition-colors flex items-center justify-center gap-1"
-                               >
-                                 <CheckCircle className="w-3.5 h-3.5" /> อนุมัติ
-                               </button>
-                               <button 
-                                 onClick={() => updateLeaveRequestStatus(req.id, 'REJECTED')}
-                                 className="flex-1 bg-rose-600/20 text-rose-400 hover:bg-rose-600/30 border border-rose-500/30 py-1.5 rounded text-xs font-bold transition-colors flex items-center justify-center gap-1"
-                               >
-                                 <XCircle className="w-3.5 h-3.5" /> ไม่อนุมัติ
-                               </button>
-                             </div>
-                           </div>
-                         )
-                       })
-                     ) : (
-                       <div className="text-center py-8 text-slate-500 text-sm">ไม่มีใบลาที่รออนุมัติ</div>
-                     )}
-                   </div>
-                </div>
+                <AdvisorLeaveInbox leaves={roomLeaves} students={students} />
 
               </div>
 
@@ -370,7 +334,7 @@ export function AdvisorPortal() {
                     
                     // สถานะประจำวันอ่านจากการเช็คชื่อจริง (attendance_records ของวันนี้ — merge เข้า myStudents แล้ว)
                     const morning = student.attendance.morningStatus;
-                    const hasApprovedLeave = leaveRequests.some(r => r.studentId === student.studentId && r.status === 'APPROVED');
+                    const hasApprovedLeave = hasApprovedLeaveOn(roomLeaves, student.studentId, format(new Date(), 'yyyy-MM-dd'));
 
                     let dailyStatusText = "มาเรียนปกติ";
                     let dailyStatusColor = "text-emerald-400";

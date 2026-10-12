@@ -42,8 +42,6 @@ import {
   saveSelfAssessmentRecord, 
   updateStudentProfileFirestore,
   saveGateAttendanceRecordFirestore,
-  saveDetailedLeaveRequestFirestore,
-  updateDetailedLeaveStatusFirestore,
   saveGPSCheckInLogFirestore,
   saveSchoolGeofenceConfigFirestore,
   saveSubstituteAssignmentFirestore,
@@ -110,7 +108,6 @@ export const useStore = create<StoreState>((set, get) => ({
   globalCourses: [],
   homeroomAssignments: {},
   analytics: [],
-  leaveRequests: [],
   scheduleConfig: {
     isActivityDay: false,
     shortenMinutes: 0
@@ -122,7 +119,6 @@ export const useStore = create<StoreState>((set, get) => ({
 
   // Student & Parent Extended Initial State (Clean empty arrays / objects)
   gateAttendanceLogs: [],
-  detailedLeaveRequests: [],
   semesterHealthLogs: {},
   chronicIllnesses: {},
   allergies: {},
@@ -212,17 +208,6 @@ export const useStore = create<StoreState>((set, get) => ({
     updateBehaviorScoreAndTriggerAlert(studentId, amount, reason || 'ปรับคะแนนพฤติกรรมด่วนโดยครูผู้สอน')
       .catch(err => console.warn('[adjustBehaviorScore] Firestore update failed:', err));
   },
-
-  submitLeaveRequest: (studentId: string, date: Date, reason: string) => set((state) => ({
-    leaveRequests: [
-      ...state.leaveRequests,
-      { id: Date.now().toString(), studentId, date, reason, status: 'PENDING' }
-    ]
-  })),
-
-  updateLeaveRequestStatus: (id: string, status: 'APPROVED' | 'REJECTED') => set((state) => ({
-    leaveRequests: state.leaveRequests.map(req => req.id === id ? { ...req, status } : req)
-  })),
 
   // NOTE: คำขอเช็คชื่อย้อนหลังย้ายไป Firestore แล้ว (late_attendance_requests + firestoreService)
   // — เดิม action นี้เขียนแค่ local state ทำให้คำขอหายข้าม session
@@ -952,104 +937,8 @@ export const useStore = create<StoreState>((set, get) => ({
     }).catch(err => console.warn('Firestore parent notification notice:', err));
   },
 
-  submitDetailedLeave: (req) => {
-    const newLeave: DetailedLeaveRequest = {
-      ...req,
-      id: `leave-${Date.now()}`,
-      status: 'PENDING',
-      submittedAt: new Date().toISOString()
-    };
-    saveDetailedLeaveRequestFirestore(newLeave).catch(err => console.warn('Firestore leave request notice:', err));
-
-    let leaveStudentName = 'นักเรียน';
-    let leaveParentUid = '';
-    let leaveStudentUid: string | undefined;
-
-    set((state) => {
-      const student = state.students.find(s => s.studentId === req.studentId);
-      leaveStudentName = student ? student.name : 'นักเรียน';
-      leaveParentUid = (student as any)?.parentUid || (student as any)?.parentId || '';
-      leaveStudentUid = student?.studentUid;
-
-      return {
-        detailedLeaveRequests: [newLeave, ...state.detailedLeaveRequests]
-      };
-    });
-
-    createParentNotification({
-      parentUid: leaveParentUid,
-      studentUid: leaveStudentUid,
-      studentId: req.studentId,
-      studentName: leaveStudentName,
-      title: '📝 ยื่นใบลาออนไลน์ (e-Leave) เรียบร้อยแล้ว',
-      message: `ใบลาประเภท ${req.leaveType === 'SICK' ? 'ลาป่วย' : 'ลากิจ'} สำหรับวันที่ ${req.startDate} ถึง ${req.endDate} อยู่ระหว่างรอครูประจำชั้นตรวจสอบ`,
-      type: 'info',
-    }).catch(err => console.warn('Firestore parent notification notice:', err));
-  },
-
-  approveDetailedLeave: (id: string, teacherRemarks?: string) => {
-    updateDetailedLeaveStatusFirestore(id, 'APPROVED', teacherRemarks).catch(err => console.warn('Firestore leave approval notice:', err));
-
-    let approvedStudentId = '';
-    let approvedStudentName = 'นักเรียน';
-    let approvedParentUid = '';
-    let approvedStudentUid: string | undefined;
-
-    set((state) => {
-      const updated = state.detailedLeaveRequests.map(l => {
-        if (l.id === id) {
-          return {
-            ...l,
-            status: 'APPROVED' as const,
-            teacherRemarks: teacherRemarks || 'อนุมัติการลาเรียบร้อย',
-            approvedBy: 'ครูกิตติศักดิ์ (ครูประจำชั้น)'
-          };
-        }
-        return l;
-      });
-
-      const targetLeave = state.detailedLeaveRequests.find(l => l.id === id);
-      const studentId = targetLeave ? targetLeave.studentId : '';
-      const student = state.students.find(s => s.studentId === studentId);
-      approvedStudentId = studentId;
-      approvedStudentName = student ? student.name : 'นักเรียน';
-      approvedParentUid = (student as any)?.parentUid || (student as any)?.parentId || '';
-      approvedStudentUid = student?.studentUid;
-
-      // Auto-update student morning status to LEAVE if applicable
-      const updatedStudents = state.students.map(s => {
-        if (s.studentId === studentId) {
-          return {
-            ...s,
-            attendance: {
-              ...s.attendance,
-              morningStatus: 'LEAVE' as const,
-              checkInMethod: 'MANUAL' as const,
-              checkInTime: 'อนุมัติการลา'
-            }
-          };
-        }
-        return s;
-      });
-
-      return {
-        detailedLeaveRequests: updated,
-        students: updatedStudents
-      };
-    });
-
-    if (approvedStudentId) {
-      createParentNotification({
-        parentUid: approvedParentUid,
-        studentUid: approvedStudentUid,
-        studentId: approvedStudentId,
-        studentName: approvedStudentName,
-        title: '✅ ใบลาได้รับการอนุมัติแล้ว',
-        message: `ครูประจำชั้นได้อนุมัติใบลาของ ${approvedStudentName} เรียบร้อยแล้ว และระบบได้บันทึกการลาในสมุดบัญชีเวลาเรียน`,
-        type: 'info',
-      }).catch(err => console.warn('Firestore parent notification notice:', err));
-    }
-  },
+  // ใบลานักเรียนย้ายไป Firestore จริงทั้งสาย (createLeaveRequest/acknowledgeLeaveRequest/decideLeaveRequest ใน
+  // firestoreService + subscribeLeaveRequests) — ไม่มีสถานะใบลาใน store อีกต่อไป (เดิม session-local + ผู้อนุมัติฝังชื่อ)
 
   // FIX: save2QScreening/submitSDQAssessment เดิม fire-and-forget การเขียน Firestore จริง (.catch แค่ console.warn)
   // แล้ว set optimistic state ทันทีไม่ว่าผลจริงจะเป็นอย่างไร — ผู้ใช้เห็น "บันทึกสำเร็จ" ปลอมทั้งที่

@@ -29,6 +29,7 @@ import {
 } from '../lib/studentAttendanceStats';
 import { emptyShared, fillMissing, sharedFromAssessment, sharedFromInfo, sharedEqual, type SharedFields } from '../lib/homeVisitShared';
 import { emptyStudentInfo } from '../lib/homeVisitData';
+import { countLeaveDays, initialLeaveStatus, validateLeaveForm, type LeaveSubmitterRole, type LeaveType } from '../lib/leaveFlow';
 import { diffCourseAttendance, computeCourseStatsMap } from '../lib/courseAttendanceStats';
 import type { AttendanceRecordFull } from '../lib/attendanceHistory';
 import { 
@@ -1011,32 +1012,110 @@ export function subscribeDisciplineLogs(
 }
 
 /**
- * Detailed Leave Requests Persistence
+ * ใบลานักเรียน (detailed_leave_requests) — เขียน/อ่านจริงทุกขั้น ไม่กลืน error (ต้องให้ UI รู้ว่าบันทึกไม่สำเร็จ)
+ * ลำดับ: ดู src/lib/leaveFlow.ts + firestore.rules (ต้องตรงกัน)
  */
-export async function saveDetailedLeaveRequestFirestore(request: DetailedLeaveRequest): Promise<void> {
-  const collectionPath = 'detailed_leave_requests';
+const LEAVE_COL = 'detailed_leave_requests';
+
+export interface CreateLeaveInput {
+  student: { studentId: string; studentUid: string; parentUid?: string | null; room: string };
+  submitter: { role: LeaveSubmitterRole; uid: string; name: string };
+  form: { leaveType: LeaveType; startDate: string; endDate: string; reason: string };
+}
+
+/** ยื่นใบลา — ตรวจฟอร์ม + ประทับ uid/ห้องจากข้อมูลนักเรียนจริง แล้วเขียน Firestore; throw ถ้าไม่สำเร็จ */
+export async function createLeaveRequest(input: CreateLeaveInput): Promise<DetailedLeaveRequest> {
+  const errs = validateLeaveForm(input.form);
+  if (errs.length > 0) throw new Error(errs.join(' / '));
+  const { student, submitter, form } = input;
+  if (!student.studentUid) throw new Error('ยังไม่มีบัญชีนักเรียนที่เชื่อมกับรหัสนี้ — ติดต่อโรงเรียน');
+  if (!student.room) throw new Error('ไม่พบห้องเรียนของนักเรียน — ติดต่อโรงเรียน');
+  const parentUid = student.parentUid || null;
+  if (submitter.role === 'parent' && !parentUid) throw new Error('บัญชีผู้ปกครองยังไม่ได้เชื่อมกับนักเรียนคนนี้');
+  const ref = doc(collection(db, LEAVE_COL));
+  const record: DetailedLeaveRequest = {
+    id: ref.id,
+    studentId: student.studentId,
+    studentUid: student.studentUid,
+    parentUid,
+    homeroomClass: student.room,
+    leaveType: form.leaveType,
+    startDate: form.startDate,
+    endDate: form.endDate,
+    totalDays: countLeaveDays(form.startDate, form.endDate),
+    reason: form.reason.trim(),
+    status: initialLeaveStatus(submitter.role, !!parentUid),
+    submittedByRole: submitter.role,
+    submittedByUid: submitter.uid,
+    submittedBy: submitter.name,
+    submittedAt: new Date().toISOString(),
+    noParentLinked: !parentUid,
+    parentAcknowledgedAt: null,
+  };
   try {
-    const ref = doc(db, collectionPath, request.id);
-    await setDoc(ref, {
-      ...request,
-      updatedAt: serverTimestamp()
-    }, { merge: true });
+    await setDoc(ref, { ...record, updatedAt: serverTimestamp() });
   } catch (error) {
-    console.warn('[saveDetailedLeaveRequestFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.CREATE, `${LEAVE_COL}/${ref.id}`);
+  }
+  return record;
+}
+
+/** ผู้ปกครองกด "รับทราบ" ใบลาที่นักเรียนยื่น → ส่งต่อครูที่ปรึกษา */
+export async function acknowledgeLeaveRequest(leaveId: string, parentUid: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, LEAVE_COL, leaveId), {
+      status: 'PENDING_TEACHER',
+      parentAcknowledgedAt: new Date().toISOString(),
+      parentAcknowledgedBy: parentUid,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${LEAVE_COL}/${leaveId}`);
   }
 }
 
-export async function updateDetailedLeaveStatusFirestore(id: string, status: 'APPROVED' | 'REJECTED', remarks?: string): Promise<void> {
-  const collectionPath = 'detailed_leave_requests';
+/** ครูที่ปรึกษา (หรือ SUPER_ADMIN) อนุมัติ/ไม่อนุมัติ — บันทึกชื่อผู้กดจริงและ staffId */
+export async function decideLeaveRequest(
+  leaveId: string,
+  decision: 'APPROVED' | 'REJECTED',
+  decider: { name: string; staffId?: string },
+  remarks = '',
+): Promise<void> {
+  if (!decider.name) throw new Error('ไม่พบข้อมูลผู้ใช้ — เข้าสู่ระบบใหม่แล้วลองอีกครั้ง');
   try {
-    const ref = doc(db, collectionPath, id);
-    await updateDoc(ref, {
-      status,
-      teacherRemarks: remarks || '',
-      updatedAt: serverTimestamp()
+    await updateDoc(doc(db, LEAVE_COL, leaveId), {
+      status: decision,
+      teacherRemarks: remarks.trim(),
+      decidedBy: decider.name,
+      decidedByStaffId: decider.staffId || '',
+      decidedAt: new Date().toISOString(),
+      updatedAt: serverTimestamp(),
     });
   } catch (error) {
-    console.warn('[updateDetailedLeaveStatusFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.UPDATE, `${LEAVE_COL}/${leaveId}`);
+  }
+}
+
+/** real-time ใบลาตามผู้ดู: นักเรียน (studentUid) / ผู้ปกครอง (parentUid) / ครูที่ปรึกษา (homeroomClass) — ต้องส่งเงื่อนไขให้ตรง rules */
+export function subscribeLeaveRequests(
+  onUpdate: (leaves: DetailedLeaveRequest[]) => void,
+  filter: { studentUid?: string; parentUid?: string; homeroomClass?: string },
+): () => void {
+  const field = filter.parentUid ? 'parentUid' : filter.studentUid ? 'studentUid' : filter.homeroomClass ? 'homeroomClass' : null;
+  const value = filter.parentUid || filter.studentUid || filter.homeroomClass;
+  if (!field || !value) { onUpdate([]); return () => {}; }
+  try {
+    return onSnapshot(query(collection(db, LEAVE_COL), where(field, '==', value)), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as DetailedLeaveRequest));
+      list.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeLeaveRequests] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeLeaveRequests] setup error:', error);
+    return () => {};
   }
 }
 
