@@ -6,8 +6,6 @@ import {
   Check, 
   LogOut, 
   BookOpen, 
-  Users, 
-  GraduationCap, 
   Award,
   Lock,
   Building,
@@ -445,38 +443,6 @@ export function NavbarWithRoleSwitcher({
                 })}
               </div>
 
-              {/* Portal Views (Parent & Student) */}
-              <div className="border-t border-slate-800/80 pt-2 mt-2 space-y-1">
-                <div className="px-2 py-1 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                  มุมมองระบบอื่นๆ (Portal Views)
-                </div>
-                <button
-                  onClick={() => {
-                    const { setUser, user: currentUser } = useStore.getState();
-                    if (currentUser) {
-                      setUser({ ...currentUser, role: 'parent' });
-                    }
-                    setIsRoleDropdownOpen(false);
-                  }}
-                  className="w-full text-left p-2 rounded-xl hover:bg-emerald-500/10 border border-transparent hover:border-emerald-500/20 transition-all flex items-center gap-2.5 cursor-pointer text-emerald-400 text-xs font-semibold"
-                >
-                  <Users className="w-4 h-4 text-emerald-400" />
-                  <span>มุมมองผู้ปกครอง (Parent Module)</span>
-                </button>
-                <button
-                  onClick={() => {
-                    const { setUser, user: currentUser } = useStore.getState();
-                    if (currentUser) {
-                      setUser({ ...currentUser, role: 'student' });
-                    }
-                    setIsRoleDropdownOpen(false);
-                  }}
-                  className="w-full text-left p-2 rounded-xl hover:bg-indigo-500/10 border border-transparent hover:border-indigo-500/20 transition-all flex items-center gap-2.5 cursor-pointer text-indigo-400 text-xs font-semibold"
-                >
-                  <GraduationCap className="w-4 h-4 text-indigo-400" />
-                  <span>มุมมองนักเรียน (Student Portal)</span>
-                </button>
-              </div>
             </div>
           )}
         </div>
