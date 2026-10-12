@@ -178,7 +178,7 @@ export function StudentManagementPage({ onGoToImport, onOpenIdRegistry }: { onGo
             address: data.homeLocation?.address || data.address || '',
             homeLocation: data.homeLocation || {
               address: data.address || '',
-              coordinates: [13.7563, 100.5018],
+              coordinates: null,
               routeImage: ''
             },
             attendance: data.attendance || {
@@ -438,7 +438,7 @@ export function StudentManagementPage({ onGoToImport, onOpenIdRegistry }: { onGo
         avatar: formPhotoUrl.trim(),
         homeLocation: {
           address: formAddress.trim(),
-          coordinates: [13.7563, 100.5018],
+          coordinates: null,
           routeImage: ''
         },
         address: formAddress.trim(),

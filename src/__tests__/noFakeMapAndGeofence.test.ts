@@ -35,11 +35,19 @@ describe('guard: GPS modal', () => {
   });
 });
 
-describe('guard: เยี่ยมบ้านเช็คอินพิกัดจริง / ไม่มีซิงค์รายชื่อปลอม', () => {
-  it('HomeVisitPortal ใช้ navigator.geolocation ไม่มีพิกัดกรุงเทพฝังตาย', () => {
-    const src = readSource('src/HomeVisitPortal.tsx');
-    expect(src).toMatch(/navigator\.geolocation\.getCurrentPosition/);
-    expect(src).not.toMatch(/13\.7563|100\.5018/);
+describe('guard: ไม่มีหน้าเยี่ยมบ้านจำลอง / ส่งการบ้านจำลอง / พิกัดบ้านสมมติ', () => {
+  it('ลบ HomeVisitPortal (หน้ามือถือจำลอง เก็บใน store แล้วหาย) และ store ไม่มี homeVisits/submitHomeVisit', () => {
+    expect(readSource('src/store.ts')).not.toMatch(/submitHomeVisit|homeVisits:/);
+    expect(readSource('src/types.ts')).not.toMatch(/interface HomeVisit \{|submitHomeVisit/);
+  });
+  it('ไม่มีส่งการบ้านใน store/โมดูล (ไม่มีฝั่งครูรับงาน) และไม่ fallback รหัสนักเรียนตัวอย่าง', () => {
+    expect(readSource('src/store.ts')).not.toMatch(/submitHomework|homeworkAssignments/);
+    expect(readSource('src/components/student-parent/AcademicHomeworkModule.tsx')).not.toMatch(/submitHomework|homeworkAssignments|6950801|รายงาน_ฟิสิกส์/);
+  });
+  it('นำเข้า/แก้ไข/อ่านนักเรียนไม่เติมพิกัดบ้านสมมติ (กรุงเทพ)', () => {
+    for (const f of ['src/components/BulkDataImportModal.tsx', 'src/components/StudentManagementPage.tsx', 'src/hooks/useRealStudents.ts']) {
+      expect(readSource(f)).not.toMatch(/13\.7563|100\.5018/);
+    }
   });
   it('TeacherPortal ไม่มีการซิงค์รายชื่อ "40 คน สำเร็จ" ปลอม และไม่ฝังรายการห้อง', () => {
     const src = readSource('src/TeacherPortal.tsx');

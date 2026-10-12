@@ -38,7 +38,7 @@ export interface Student {
   photoUrl: string;        // ลิงก์รูปถ่ายหน้าตรง
   homeLocation: {
     address: string;       // ที่อยู่บ้าน
-    coordinates: [number, number]; // [Lat, Lng] เผื่อไปดึง Google Maps
+    coordinates: [number, number] | null; // [Lat, Lng] — null = ยังไม่มีพิกัดจริง (พิกัดจริงอยู่ที่ student_home_locations); ห้ามเติมพิกัดสมมติ
     routeImage: string;    // ลิงก์รูปแผนที่ดาวเทียมจำลองเส้นทางจากบ้าน -> รร.
   };
   attendance: {
@@ -402,15 +402,6 @@ export type ProposeSubstitutePayload = { id?: string } & Omit<
   SubstituteAssignment,
   'id' | 'status' | 'currentApprovalStage' | 'approvalChain' | 'createdAt' | 'updatedAt' | 'postTeachingDueAt'
 >;
-
-export interface HomeVisit {
-  studentId: string;
-  advisorEmail: string;
-  visitedAt: string;
-  geoVerified: boolean;
-  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
-  photoUploaded: boolean;
-}
 
 export interface SchoolDuty {
   dutyId: string;
@@ -1007,24 +998,6 @@ export interface ReportCardTerm {
 
 export type ReportCardSemester = ReportCardTerm;
 
-export interface HomeworkAssignment {
-  id: string;
-  studentId?: string;
-  courseCode: string;
-  courseName: string;
-  title: string;
-  description: string;
-  dueDate: string;
-  assignedDate: string;
-  maxScore: number;
-  status: 'ASSIGNED' | 'SUBMITTED' | 'GRADED' | 'OVERDUE';
-  submittedFile?: string;
-  submittedAt?: string;
-  scoreReceived?: number;
-  score?: number;
-  teacherFeedback?: string;
-  feedback?: string;
-}
 
 export interface ExamScheduleItem {
   id: string;
@@ -1150,7 +1123,6 @@ export interface StoreState {
   substituteAssignments: SubstituteAssignment[];
   staffDirectory: UserProfile[]; // รายชื่อบุคลากรจริงจาก Firestore 'staff' collection (real-time)
 
-  homeVisits: HomeVisit[];
   schoolDuties: SchoolDuty[];
   administrativeTasks: AdministrativeTask[];
   studentScores: StudentScore[];
@@ -1188,7 +1160,6 @@ export interface StoreState {
   digitalCertificates: DigitalCertificate[];
   volunteerRecords: VolunteerHourRecord[];
   reportCards: Record<string, ReportCardTerm[]>;
-  homeworkAssignments: HomeworkAssignment[];
   examSchedules: ExamScheduleItem[];
   billingInvoices: BillingInvoice[];
   parentTeacherMessages: ParentTeacherMessage[];
@@ -1272,7 +1243,6 @@ export interface StoreState {
     }
   ) => Promise<void>;
 
-  submitHomeVisit: (visit: HomeVisit) => void;
   updateSchoolDutyStatus: (dutyId: string, status: 'CHECKED_IN' | 'ABSENT') => void;
   submitSchoolDutyLog: (dutyId: string) => void;
   updateAdministrativeTaskStatus: (taskId: string, status: 'COMPLETED_ON_TIME' | 'COMPLETED_LATE') => void;
@@ -1293,7 +1263,6 @@ export interface StoreState {
   addPortfolioItem: (item: Omit<PortfolioItem, 'id' | 'isVerifiedByTeacher'>) => void;
   addDigitalCertificate: (cert: Omit<DigitalCertificate, 'id'>) => void;
   submitVolunteerHours: (record: Omit<VolunteerHourRecord, 'id' | 'status'>) => void;
-  submitHomework: (assignmentId: string, fileName: string) => void;
   sendParentTeacherMessage: (studentId: string, senderRole: ParentTeacherMessage['senderRole'], senderName: string, message: string) => void;
 
   // GPS Geofence Actions

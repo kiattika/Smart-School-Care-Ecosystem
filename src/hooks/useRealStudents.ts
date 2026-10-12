@@ -94,7 +94,7 @@ function mapDocToStudent(id: string, data: any): Student {
       : undefined,
     homeLocation: {
       address: data.homeLocation?.address || data.address || '',
-      coordinates: data.homeLocation?.coordinates || [13.7563, 100.5018],
+      coordinates: data.homeLocation?.coordinates ?? null,
       routeImage: data.homeLocation?.routeImage || '',
     },
     attendance: {

@@ -18,40 +18,23 @@ import {
   FileText
 } from 'lucide-react';
 import { useStore } from '../../store';
-import { ReportCardTerm, HomeworkAssignment, ExamScheduleItem } from '../../types';
+import { ReportCardTerm, ExamScheduleItem } from '../../types';
 
 export function AcademicHomeworkModule({ studentId }: { studentId: string }) {
   const { 
     reportCards, 
-    homeworkAssignments, 
     examSchedules, 
-    submitHomework,
     students 
   } = useStore();
 
   const student = students.find(s => s.studentId === studentId) || students[0];
-  const reports: ReportCardTerm[] = (reportCards && reportCards[student?.studentId]) || (reportCards && reportCards['6950801']) || [];
-  const assignments = homeworkAssignments;
+  const reports: ReportCardTerm[] = (reportCards && reportCards[student?.studentId]) || [];
   const exams = examSchedules;
 
-  const [activeTab, setActiveTab] = useState<'reportcard' | 'homework' | 'exams'>('reportcard');
+  const [activeTab, setActiveTab] = useState<'reportcard' | 'exams'>('reportcard');
   const [selectedSemester, setSelectedSemester] = useState<string>(reports[0]?.semester || reports[0]?.term || '1/2569');
   
-  // Homework submit state
-  const [selectedHwId, setSelectedHwId] = useState<string | null>(null);
-  const [hwFileName, setHwFileName] = useState('รายงาน_ฟิสิกส์_การเคลื่อนที่แบบฮาร์มอนิกอย่างง่าย.pdf');
-  const [submitSuccess, setSubmitSuccess] = useState(false);
-
   const currentReport = reports.find(r => (r.semester || r.term) === selectedSemester) || reports[0];
-
-  const handleSubmitHomework = (hwId: string) => {
-    submitHomework(hwId, hwFileName);
-    setSubmitSuccess(true);
-    setTimeout(() => {
-      setSubmitSuccess(false);
-      setSelectedHwId(null);
-    }, 2500);
-  };
 
   return (
     <div className="space-y-6">
@@ -67,17 +50,6 @@ export function AcademicHomeworkModule({ studentId }: { studentId: string }) {
         >
           <FileSpreadsheet className="w-3.5 h-3.5" />
           <span>สมุดรายงานผล ปพ.6</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('homework')}
-          className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === 'homework'
-              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <BookOpen className="w-3.5 h-3.5" />
-          <span>การบ้าน & ภาระงาน</span>
         </button>
         <button
           onClick={() => setActiveTab('exams')}
@@ -228,98 +200,6 @@ export function AcademicHomeworkModule({ studentId }: { studentId: string }) {
                 สถานะ: ผ่านการเลื่อนชั้น (PROMOTED)
               </span>
             </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'homework' && (
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <BookOpen className="w-4 h-4 text-emerald-400" />
-                การบ้าน ภาระงาน และโครงงานที่ได้รับมอบหมาย (Homework Tracker)
-              </h3>
-              <p className="text-[11px] text-slate-400">ติดตามกำหนดส่งงานและส่งไฟล์งานออนไลน์</p>
-            </div>
-            <span className="px-3 py-1 rounded-full bg-slate-800 text-slate-300 text-xs font-medium border border-slate-700">
-              รวม {assignments.length} ภาระงาน
-            </span>
-          </div>
-
-          <div className="space-y-4">
-            {assignments.map((hw) => (
-              <div
-                key={hw.id}
-                className="bg-slate-900/70 border border-slate-800 hover:border-slate-700 rounded-3xl p-5 backdrop-blur-md shadow-xl transition-all space-y-3"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-mono font-bold">
-                      {hw.courseCode}
-                    </span>
-                    <span className="text-xs text-slate-400">{hw.courseName}</span>
-                  </div>
-
-                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border self-start sm:self-auto ${
-                    hw.status === 'GRADED' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
-                    hw.status === 'SUBMITTED' ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' :
-                    'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
-                  }`}>
-                    {hw.status === 'GRADED' ? `✅ ตรวจแล้ว (${hw.scoreReceived ?? hw.score ?? hw.maxScore}/${hw.maxScore} คะแนน)` :
-                     hw.status === 'SUBMITTED' ? '📩 ส่งแล้ว (รอตรวจ)' : '⏳ ยังไม่ส่ง'}
-                  </span>
-                </div>
-
-                <div>
-                  <h4 className="text-sm font-bold text-white">{hw.title}</h4>
-                  <p className="text-xs text-slate-300 mt-1 leading-relaxed">{hw.description}</p>
-                </div>
-
-                <div className="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-2 text-slate-400">
-                    <Clock className="w-3.5 h-3.5 text-amber-400" />
-                    <span>กำหนดส่ง: <strong className="text-slate-200">{hw.dueDate}</strong></span>
-                  </div>
-
-                  {hw.status === 'ASSIGNED' || hw.status === 'OVERDUE' ? (
-                    <div className="flex items-center gap-2">
-                      {selectedHwId === hw.id ? (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            value={hwFileName}
-                            onChange={(e) => setHwFileName(e.target.value)}
-                            className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white"
-                          />
-                          <button
-                            onClick={() => handleSubmitHomework(hw.id)}
-                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
-                          >
-                            <Send className="w-3 h-3" /> ยืนยันส่ง
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setSelectedHwId(hw.id)}
-                          className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
-                        >
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>แนบไฟล์และส่งการบ้าน</span>
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-[11px] text-slate-400 flex items-center gap-2">
-                      <span>ไฟล์ที่ส่ง: <span className="text-indigo-300 font-mono">{hw.submittedFile}</span></span>
-                      {(hw.teacherFeedback || hw.feedback) && (
-                        <span className="text-emerald-400 font-medium">💬 ครู: "{hw.teacherFeedback || hw.feedback}"</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       )}
