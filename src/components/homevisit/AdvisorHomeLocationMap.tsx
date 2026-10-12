@@ -39,7 +39,7 @@ export function AdvisorHomeLocationMap({ homeroomClass, students }: { homeroomCl
   }, [students]);
 
   const center = useMemo<[number, number]>(() => {
-    if (locs.length === 0) return [17.6251, 100.0932]; // อุตรดิตถ์
+    if (locs.length === 0) return [17.6251, 100.0932]; // อุตรดิตถ์ (ใช้เฉพาะตอนไม่มีหมุดให้แสดง — แผนที่ไม่ถูก render)
     const lat = locs.reduce((a, l) => a + l.latitude, 0) / locs.length;
     const lng = locs.reduce((a, l) => a + l.longitude, 0) / locs.length;
     return [lat, lng];
@@ -79,8 +79,9 @@ export function AdvisorHomeLocationMap({ homeroomClass, students }: { homeroomCl
         <div className="h-[420px] rounded-2xl border border-white/10 overflow-hidden isolate">
           <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%', backgroundColor: '#05070a' }}>
             <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+              maxZoom={19}
             />
             {locs.map(l => (
               <Marker key={l.studentId} position={[l.latitude, l.longitude]} icon={pinIcon}>

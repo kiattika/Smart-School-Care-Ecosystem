@@ -13,6 +13,7 @@ import {
   Trophy as NavLeaderboardIcon,
   Repeat as NavSubstituteIcon,
   History as NavRecordsIcon,
+  BarChart3 as NavAttendanceStatsIcon,
   ClipboardList as NavGradebookIcon,
 } from 'lucide-react';
 import { writeTimestamp } from './lib/appClock';
@@ -20,6 +21,7 @@ import { useSchoolCalendar } from './hooks/useSchoolCalendar';
 import { DatePicker } from './components/shared/DatePicker';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
+import { TeacherAttendanceStatsPanel } from './components/attendance/TeacherAttendanceStatsPanel';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests, subscribeHiddenGradebookCourses, hideGradebookCourse, unhideGradebookCourse } from './services/firestoreService';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from './lib/firebase';
@@ -363,7 +365,7 @@ export function TeacherPortal() {
   const [viewingRecord, setViewingRecord] = useState<PostTeachingRecord | null>(null);
 
   // New States for Dashboard Navigation
-  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence'>('courses');
+  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats'>('courses');
   const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
   // ขอลากิจ/ไปราชการด้วยตนเอง — reuse SubstituteTeachingModule เต็มรูปแบบ (ไม่สร้างฟอร์มซ้ำ)
   const [showSubSelfService, setShowSubSelfService] = useState(false);
@@ -379,13 +381,14 @@ export function TeacherPortal() {
   // Dynamic Role-Based Access Control (RBAC) Tab Filtering
   const availableDashboardTabs = useMemo(() => {
     const rawTabs: Array<{
-      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence';
+      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats';
       label: string;
       icon: React.ComponentType<{ className?: string }>;
       count: number;
       hideForRoles?: string[];
     }> = [
       { id: 'courses', label: 'ตารางสอนและการเข้าเรียน', icon: NavCoursesIcon, count: myCourses.length },
+      { id: 'attendance-stats', label: 'สถิติการเข้าเรียนรายบุคคล', icon: NavAttendanceStatsIcon, count: 0 },
       { id: 'gps-geofence', label: 'พิกัดดาวเทียม & เช็คอิน (GPS Geofence)', icon: NavGpsIcon, count: 0 },
       { id: 'teaching-load', label: 'ตารางภาระงานสอน (Teaching Load)', icon: NavLoadIcon, count: 6, hideForRoles: ['SUBJECT_TEACHER'] },
       { id: 'leaderboard', label: 'กระดานคะแนน Active Learning (Leaderboard)', icon: NavLeaderboardIcon, count: Object.values(activeLearningPoints).filter(p => p > 0).length },
@@ -778,13 +781,14 @@ export function TeacherPortal() {
         checkedAt: format(new Date(), 'HH:mm'),
         isLocked: true,
         source: isHrActive ? 'HOMEROOM_DEFAULT' : 'PERIOD_OVERRIDE',
-        // คาบโฮมรูมไม่ผูกรายวิชา — คาบอื่นส่งรหัสวิชาเพื่อ sync สถิติรายวิชาของนักเรียน
-        ...(isHrActive ? {} : { courseCode: activeCourse?.code, courseName: activeCourse?.name }),
+        // ส่งรหัสวิชา/กิจกรรมของคาบ (รวมโฮมรูม) เพื่อ sync สถิติรายวิชาของนักเรียน
+        courseCode: activeCourse?.code,
+        courseName: activeCourse?.name,
         students: studentStatuses
       });
 
       if (isHrActive) {
-        await saveHomeroomAttendance(studentStatuses);
+        await saveHomeroomAttendance(studentStatuses, activeCourse ? { code: activeCourse.code, name: activeCourse.name } : null);
       }
 
       markAttendanceDone(courseId);
@@ -1453,6 +1457,13 @@ export function TeacherPortal() {
                     </div>
                   </div>
               </div>
+            )}
+
+            {dashboardTab === 'attendance-stats' && (
+              <TeacherAttendanceStatsPanel
+                rooms={myTaughtRooms}
+                myCourseCodes={myCourses.map(c => c.code)}
+              />
             )}
 
             {dashboardTab === 'records' && (

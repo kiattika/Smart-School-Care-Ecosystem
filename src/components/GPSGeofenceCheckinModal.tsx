@@ -24,6 +24,8 @@ import {
   Check
 } from 'lucide-react';
 import { useStore } from '../store';
+import { useSchoolGeofence } from '../hooks/useSchoolGeofence';
+import { saveSchoolGeofenceConfigFirestore } from '../services/firestoreService';
 import { 
   Coordinates, 
   SchoolGeofenceConfig, 
@@ -42,18 +44,20 @@ interface GPSGeofenceCheckinModalProps {
 export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinModalProps) {
   const { 
     user, 
-    schoolGeofenceConfig, 
     gpsCheckInLogs, 
     addGPSCheckInLog, 
     updateSchoolGeofenceConfig 
   } = useStore();
+  // พิกัด/รัศมีโรงเรียนจริงจาก Firestore (school_settings/geofence_config) — ไม่เดาจากค่า default ในโค้ด
+  const { config: schoolGeofenceConfig, configured: geofenceConfigured, loaded: geofenceLoaded } = useSchoolGeofence();
+  // แท็บตั้งค่าพิกัดโรงเรียน: เฉพาะผู้ดูแลระบบ (ตรงกับ firestore.rules ที่ให้ SUPER_ADMIN เขียน school_settings เท่านั้น)
+  const canConfigure = (user?.activeRole || user?.role || '').toString().toUpperCase() === 'SUPER_ADMIN';
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'CHECKIN' | 'HISTORY' | 'SETTINGS'>('CHECKIN');
-  const [currentCoords, setCurrentCoords] = useState<Coordinates>({
-    latitude: schoolGeofenceConfig.centerCoordinates.latitude + 0.00015,
-    longitude: schoolGeofenceConfig.centerCoordinates.longitude + 0.00010,
-  });
-  const [accuracy, setAccuracy] = useState<number>(5);
+  // เริ่มต้น null = ยังไม่ได้อ่านพิกัดจริงจากเครื่อง (เดิมตั้งเป็นจุดในโรงเรียนปลอมๆ ทำให้ดูเหมือนอยู่ในเขตทันที)
+  const [currentCoords, setCurrentCoords] = useState<Coordinates | null>(null);
+  const [accuracy, setAccuracy] = useState<number | null>(null);
   const [isLocating, setIsLocating] = useState<boolean>(false);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [isRealGPSActive, setIsRealGPSActive] = useState<boolean>(false);
@@ -69,11 +73,23 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
   const [tempLng, setTempLng] = useState<number>(schoolGeofenceConfig.centerCoordinates.longitude);
   const [settingsSavedToast, setSettingsSavedToast] = useState<boolean>(false);
 
+  useEffect(() => {
+    setTempRadius(schoolGeofenceConfig.radiusMeters);
+    setTempLat(schoolGeofenceConfig.centerCoordinates.latitude);
+    setTempLng(schoolGeofenceConfig.centerCoordinates.longitude);
+  }, [schoolGeofenceConfig.radiusMeters, schoolGeofenceConfig.centerCoordinates.latitude, schoolGeofenceConfig.centerCoordinates.longitude]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Calculate geofence status
-  const geofenceResult = isWithinSchoolGeofence(currentCoords, schoolGeofenceConfig);
-  const bearingDegrees = calculateBearing(currentCoords, schoolGeofenceConfig.centerCoordinates);
+  const myId = user?.profile?.id || user?.uid;
+  const myLogs = gpsCheckInLogs.filter(l => !myId || l.userId === myId);
+  const hasFix = currentCoords !== null;
+  const coords: Coordinates = currentCoords ?? schoolGeofenceConfig.centerCoordinates;
+  const rawGeofence = isWithinSchoolGeofence(coords, schoolGeofenceConfig);
+  // ยังไม่มีพิกัดจริง หรือ admin ยังไม่ตั้งพิกัดโรงเรียน = เช็คอินไม่ได้
+  const geofenceResult = { ...rawGeofence, isInside: hasFix && geofenceConfigured && rawGeofence.isInside };
+  const bearingDegrees = calculateBearing(coords, schoolGeofenceConfig.centerCoordinates);
   const directionThai = getThaiDirection(bearingDegrees);
 
   // Function to acquire real device geolocation
@@ -167,8 +183,8 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
 
   // Perform Check-in or Check-out
   const handlePerformCheckIn = (type: 'ENTRY' | 'EXIT') => {
-    if (!geofenceResult.isInside) {
-      alert('คุณอยู่นอกเขตรัศมีโรงเรียน ไม่สามารถบันทึกเวลาได้');
+    if (!geofenceResult.isInside || !currentCoords) {
+      alert('คุณอยู่นอกเขตรัศมีโรงเรียน หรือยังไม่ได้พิกัดจาก GPS ไม่สามารถบันทึกเวลาได้');
       return;
     }
 
@@ -211,7 +227,7 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
         distanceMeters: geofenceResult.distanceMeters,
         isInsideGeofence: true,
         status,
-        accuracyMeters: accuracy,
+        accuracyMeters: accuracy ?? 0,
         nearestGate: geofenceResult.nearestGateName,
         selfieUrl: selfiePreview || undefined,
         notes: checkinNote || (isRealGPSActive ? 'พิกัดดาวเทียมจริง (High Precision GPS)' : 'พิกัด Geofence')
@@ -228,16 +244,22 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
     }, 600);
   };
 
-  const handleSaveSettings = () => {
-    updateSchoolGeofenceConfig({
+  const handleSaveSettings = async () => {
+    if (!canConfigure) return;
+    setSettingsError(null);
+    const next = {
+      ...schoolGeofenceConfig,
       radiusMeters: tempRadius,
-      centerCoordinates: {
-        latitude: tempLat,
-        longitude: tempLng
-      }
-    });
-    setSettingsSavedToast(true);
-    setTimeout(() => setSettingsSavedToast(false), 3000);
+      centerCoordinates: { latitude: tempLat, longitude: tempLng },
+    };
+    try {
+      await saveSchoolGeofenceConfigFirestore(next);
+      updateSchoolGeofenceConfig({ radiusMeters: tempRadius, centerCoordinates: { latitude: tempLat, longitude: tempLng } });
+      setSettingsSavedToast(true);
+      setTimeout(() => setSettingsSavedToast(false), 3000);
+    } catch {
+      setSettingsError('บันทึกไม่สำเร็จ — ตรวจสอบสิทธิ์ผู้ดูแลระบบและการเชื่อมต่อ แล้วลองใหม่');
+    }
   };
 
   if (!isOpen) return null;
@@ -263,12 +285,16 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
                   <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
                     ระบบเช็คอินพิกัดดาวเทียม (GPS Geofence)
                   </h3>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                    Live GPS
-                  </span>
+                  {isRealGPSActive && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      Live GPS
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-400 truncate max-w-xs sm:max-w-md">
-                  {schoolGeofenceConfig.schoolName} (รัศมี {schoolGeofenceConfig.radiusMeters} ม.)
+                  {geofenceConfigured
+                    ? `${schoolGeofenceConfig.schoolName} (รัศมี ${schoolGeofenceConfig.radiusMeters} ม.)`
+                    : geofenceLoaded ? 'โรงเรียนยังไม่ได้ตั้งพิกัดเช็คอิน' : 'กำลังโหลดการตั้งค่าโรงเรียน…'}
                 </p>
               </div>
             </div>
@@ -304,8 +330,9 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
                 }`}
               >
                 <History className="w-3.5 h-3.5" />
-                ประวัติการลงชื่อ ({gpsCheckInLogs.length})
+                ประวัติการลงชื่อ ({myLogs.length})
               </button>
+              {canConfigure && (
               <button
                 onClick={() => setActiveTab('SETTINGS')}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap ${
@@ -317,6 +344,7 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
                 <Sliders className="w-3.5 h-3.5" />
                 ตั้งค่าพิกัด/รัศมี
               </button>
+              )}
             </div>
 
             <button
@@ -396,7 +424,11 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
                     {/* Geofence Status & Live Telemetry */}
                     <div className="flex-1 w-full text-center sm:text-left space-y-2">
                       <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
-                        {geofenceResult.isInside ? (
+                        {!hasFix || !geofenceConfigured ? (
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-700/40 border border-slate-600/50 text-slate-300 text-xs font-bold shadow-sm">
+                            {!geofenceConfigured ? (geofenceLoaded ? 'โรงเรียนยังไม่ได้ตั้งพิกัดเช็คอิน (แจ้งผู้ดูแลระบบ)' : 'กำลังโหลดการตั้งค่า…') : 'รอพิกัดจาก GPS ของอุปกรณ์'}
+                          </div>
+                        ) : geofenceResult.isInside ? (
                           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold shadow-sm">
                             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                             อยู่ในรัศมีโรงเรียน (In Geofence Zone)
@@ -409,14 +441,14 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
                         )}
 
                         <span className="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 text-[11px] font-mono border border-slate-700/60">
-                          ความแม่นยำ ±{accuracy} ม.
+                          {accuracy !== null ? `ความแม่นยำ ±${accuracy} ม.` : 'รอสัญญาณ GPS'}
                         </span>
                       </div>
 
                       <div className="space-y-1 pt-1">
                         <div className="flex items-baseline justify-center sm:justify-start gap-2">
                           <span className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-                            {formatDistance(geofenceResult.distanceMeters)}
+                            {hasFix && geofenceConfigured ? formatDistance(geofenceResult.distanceMeters) : '—'}
                           </span>
                           <span className="text-xs text-slate-400">
                             จากจุดศูนย์กลางสถานศึกษา
@@ -424,7 +456,9 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
                         </div>
 
                         <p className="text-xs text-slate-300">
-                          {geofenceResult.isInside ? (
+                          {!hasFix || !geofenceConfigured ? (
+                            <span className="text-slate-400 font-medium">ยังเช็คอินไม่ได้จนกว่าจะได้พิกัดจริงและโรงเรียนตั้งพิกัดไว้แล้ว</span>
+                          ) : geofenceResult.isInside ? (
                             <span className="text-emerald-300 font-medium">
                               ✓ พิกัดพร้อมลงชื่อเข้า/ออก ใกล้จุด {geofenceResult.nearestGateName}
                             </span>
@@ -438,9 +472,15 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
 
                       {/* Coordinates Telemetry */}
                       <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-center sm:justify-start gap-x-3 gap-y-1 text-[11px] font-mono text-slate-400">
-                        <span>Lat: {currentCoords.latitude.toFixed(6)}</span>
-                        <span>Lng: {currentCoords.longitude.toFixed(6)}</span>
-                        <span className="text-indigo-400">{directionThai}</span>
+                        {hasFix ? (
+                          <>
+                            <span>Lat: {coords.latitude.toFixed(6)}</span>
+                            <span>Lng: {coords.longitude.toFixed(6)}</span>
+                            <span className="text-indigo-400">{directionThai}</span>
+                          </>
+                        ) : (
+                          <span>ยังไม่ได้พิกัดจากอุปกรณ์ — กดอนุญาต Location หรือกด “รีเฟรช GPS”</span>
+                        )}
                       </div>
                     </div>
 
@@ -527,7 +567,7 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
                     )}
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-semibold text-slate-200">รูปถ่ายยืนยันตัวตน</p>
-                      <p className="text-[10.5px] text-slate-400">ภาพเซลฟี่ขณะเช็คอิน (ไม่บังคับ)</p>
+                      <p className="text-[10.5px] text-slate-400">แนบรูปเซลฟี่ (ไม่บังคับ — ไม่ได้ใช้ยืนยันตัวตนอัตโนมัติ)</p>
                     </div>
                   </div>
 
@@ -580,17 +620,17 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold text-slate-300">
-                    ประวัติการเช็คอินพิกัดดาวเทียมวันนี้ ({gpsCheckInLogs.length} รายการ)
+                    ประวัติการเช็คอินพิกัดดาวเทียมวันนี้ ({myLogs.length} รายการ)
                   </h4>
                 </div>
 
-                {gpsCheckInLogs.length === 0 ? (
+                {myLogs.length === 0 ? (
                   <div className="text-center py-10 text-slate-500 text-xs">
                     ยังไม่มีประวัติการเช็คอินพิกัดดาวเทียมในวันนี้
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-                    {gpsCheckInLogs.map((log) => (
+                    {myLogs.map((log) => (
                       <div
                         key={log.id}
                         className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800 flex items-center justify-between gap-3"
@@ -642,7 +682,7 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
             )}
 
             {/* TAB: SETTINGS */}
-            {activeTab === 'SETTINGS' && (
+            {activeTab === 'SETTINGS' && canConfigure && (
               <div className="space-y-4">
                 <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-3">
                   <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs">
@@ -650,6 +690,9 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
                     <span>ปรับแต่งพิกัดศูนย์กลางและรัศมี Geofence ของโรงเรียน</span>
                   </div>
 
+                  {settingsError && (
+                    <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs">{settingsError}</div>
+                  )}
                   {settingsSavedToast && (
                     <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
                       <Check className="w-4 h-4 text-emerald-400" />
@@ -720,7 +763,7 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
           <div className="px-5 py-3 border-t border-slate-800/80 bg-slate-950/60 flex items-center justify-between text-xs text-slate-400 shrink-0">
             <div className="flex items-center gap-1.5">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span className="text-[11px]">ระบบเข้ารหัสและตรวจสอบการปลอมแปลงพิกัด (Anti-Spoofing Enabled)</span>
+              <span className="text-[11px]">พิกัดอ่านจากอุปกรณ์ของคุณ ใช้เพื่อตรวจว่าอยู่ในรัศมีโรงเรียนเท่านั้น</span>
             </div>
             <button
               onClick={onClose}
