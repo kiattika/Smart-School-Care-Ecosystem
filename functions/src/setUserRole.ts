@@ -8,6 +8,7 @@ import { refreshGuidanceStatusSafely } from './guidanceStatus';
 import { FIRESTORE_DATABASE_ID } from './config';
 import { selfDemotionError } from './roleGuards';
 import { isStaffInactive } from './access';
+import { NON_STAFF_ROLES } from './staffValidation';
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -45,6 +46,13 @@ export const assignUserRole = functions.https.onCall(async (data, context) => {
   if (typeof staffId !== 'string' || !staffId || staffId.includes('/') || !Array.isArray(roles) ||
       !roles.every((r: unknown) => typeof r === 'string' && /^[A-Z_]+$/.test(r))) {
     throw new functions.https.HttpsError('invalid-argument', 'staffId and an array of role strings are required.');
+  }
+
+  // STUDENT/PARENT ไม่ใช่บทบาทบุคลากร (ครูที่ได้ STUDENT จะผ่านเงื่อนไข hasRole('STUDENT') ใน rules) —
+  // เหมือน createStaffMember; ถอดออกได้ (ส่ง roles ที่ไม่มีสองค่านี้) แต่ใส่เข้าไปไม่ได้
+  const nonStaff = (roles as string[]).filter((r) => NON_STAFF_ROLES.includes(r));
+  if (nonStaff.length > 0) {
+    throw new functions.https.HttpsError('invalid-argument', `บุคลากรมีบทบาท ${nonStaff.join(', ')} ไม่ได้ (เป็นบทบาทของนักเรียน/ผู้ปกครอง)`);
   }
 
   // 2. staff/{staffId} ต้องมีอยู่จริง — ตรวจก่อนเขียนอะไรทั้งสิ้น จะได้ไม่เหลือสถานะครึ่งๆ กลางๆ

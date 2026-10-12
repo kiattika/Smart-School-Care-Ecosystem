@@ -65,6 +65,12 @@ export const ROLE_NAMES_TH: Record<UserRole, string> = {
   STUDENT: 'นักเรียน',
 };
 
+/** STUDENT/PARENT ไม่ใช่บทบาทบุคลากร — นักเรียนระบุจากทะเบียนนักเรียน/รูปแบบอีเมล, ผู้ปกครองยังไม่มีทางล็อกอิน
+ *  (ฝั่ง Cloud Functions ปฏิเสธเหมือนกัน: NON_STAFF_ROLES ใน functions/src/staffValidation.ts) */
+export const NON_STAFF_ROLE_KEYS: readonly string[] = ['STUDENT', 'PARENT'];
+const STAFF_ROLE_ENTRIES = (Object.entries(ROLE_NAMES_TH) as [UserRole, string][])
+  .filter(([roleKey]) => !NON_STAFF_ROLE_KEYS.includes(roleKey));
+
 // สีกำกับแต่ละบทบาทสำหรับ Badge
 export const ROLE_COLORS: Record<UserRole, { bg: string; text: string; border: string }> = {
   SUPER_ADMIN: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/20' },
@@ -314,7 +320,8 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
     setFormFirstName(staff.firstName);
     setFormLastName(staff.lastName);
     setFormPosition(staff.position);
-    setFormRoles([...staff.roles]);
+    // บุคลากรเก่าที่เคยถูกติ๊ก STUDENT/PARENT: ไม่แสดงในฟอร์ม และถูกถอนออกเมื่อกดบันทึก
+    setFormRoles(staff.roles.filter(r => !NON_STAFF_ROLE_KEYS.includes(r)));
     setFormDept(staff.assignments?.departmentId || '');
     setFormHomeroom(staff.assignments?.homeroomClass || '');
     setFormSubjects(staff.assignments?.teachingSubjects ? [...staff.assignments.teachingSubjects] : []);
@@ -628,7 +635,7 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
             className="w-full bg-slate-950 border border-white/10 rounded-xl pl-20 pr-4 py-2.5 text-xs text-slate-200 focus:border-indigo-500 outline-none transition-all appearance-none cursor-pointer"
           >
             <option value="ALL">ทั้งหมด (ทุกบทบาท)</option>
-            {Object.entries(ROLE_NAMES_TH).map(([roleKey, roleName]) => (
+            {STAFF_ROLE_ENTRIES.map(([roleKey, roleName]) => (
               <option key={roleKey} value={roleKey}>{roleName}</option>
             ))}
           </select>
@@ -901,7 +908,7 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                 <p className="text-[10px] text-slate-500">ติ๊กเลือกบทบาทที่บุคลากรคนนี้รับผิดชอบในโรงเรียน</p>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {Object.entries(ROLE_NAMES_TH).map(([roleKey, roleName]) => {
+                  {STAFF_ROLE_ENTRIES.map(([roleKey, roleName]) => {
                     const isChecked = formRoles.includes(roleKey as UserRole);
                     return (
                       <button
@@ -1178,8 +1185,7 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
               <div className="space-y-1.5">
                 <span className="text-slate-400">บทบาท * (อย่างน้อย 1)</span>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                  {(Object.entries(ROLE_NAMES_TH) as [UserRole, string][])
-                    .filter(([roleKey]) => roleKey !== 'STUDENT' && roleKey !== 'PARENT')
+                  {STAFF_ROLE_ENTRIES
                     .map(([roleKey, roleName]) => (
                       <label key={roleKey} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-slate-900/60 border border-white/5 cursor-pointer">
                         <input
