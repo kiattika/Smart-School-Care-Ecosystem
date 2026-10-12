@@ -951,7 +951,23 @@ service cloud.firestore {
 
       // ถอน: แก้ได้เฉพาะ removedAt/removedBy/removedReason เท่านั้น — นักเรียนถอนตัวเอง
       // (removedBy ต้องเป็น null) หรือครูรับผิดชอบชุมนุมนั้นถอน (removedBy ต้องเป็น uid ตัวเอง)
-      allow update: if request.resource.data.diff(resource.data).affectedKeys().hasOnly(['removedAt', 'removedBy', 'removedReason'])
+      allow update: if (
+                         // นักเรียนสมัครใหม่หลังถอน: doc ต้องเคยถอนแล้ว, กลับเป็น active (removedAt/By/Reason = null),
+                         // แตะได้เฉพาะ enrolledAt + ฟิลด์สถานะ, และชุมนุมต้องยังเปิดรับสมัคร
+                         hasRole('STUDENT')
+                         && resource.data.studentUid == request.auth.uid
+                         && resource.data.removedAt != null
+                         && request.resource.data.removedAt == null
+                         && request.resource.data.removedBy == null
+                         && request.resource.data.get('removedReason', null) == null
+                         && request.resource.data.studentUid == request.auth.uid
+                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['enrolledAt', 'removedAt', 'removedBy', 'removedReason'])
+                         && (
+                           !exists(/databases/$(database)/documents/elective_activities_config/$(resource.data.activityId)) ||
+                           get(/databases/$(database)/documents/elective_activities_config/$(resource.data.activityId)).data.get('enrollmentStatus', 'OPEN') == 'OPEN'
+                         )
+                       ) || (
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['removedAt', 'removedBy', 'removedReason'])
                        && (
                          (hasRole('STUDENT') && resource.data.studentUid == request.auth.uid && request.resource.data.removedBy == null) ||
                          (
@@ -960,7 +976,7 @@ service cloud.firestore {
                            isResponsibleTeacherOfActivity(resource.data.activityId)
                          ) ||
                          hasRole('SUPER_ADMIN')
-                       );
+                       ));
 
       allow delete: if false;
     }

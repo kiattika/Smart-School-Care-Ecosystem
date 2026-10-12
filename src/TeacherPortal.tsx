@@ -876,20 +876,19 @@ export function TeacherPortal() {
   // ระดับชั้น + ห้อง (เช่น "ม.5/8 (943)") ตามด้วยรายวิชาที่ท่านสอนในห้องนั้น
   // คาบกิจกรรมที่ไม่มีห้องนักเรียนจริง (room = "Non-Student") ไม่มีรายชื่อให้คำนวณ จึงไม่แสดง
   const attendanceRoomOptions = useMemo(() => {
-    const byRoom = new Map<string, { level: string; courses: string[] }>();
+    // หนึ่งตัวเลือก = ห้อง + รายวิชา (ห้องเดียวกันสอนหลายวิชา แยกดูสถิติรายวิชาได้)
+    const out: { value: string; room: string; courseCode: string; label: string }[] = [];
+    const seen = new Set<string>();
     for (const c of myCourses) {
-      if (!c.room || /^non-student$/i.test(c.room.trim())) continue;
-      const e = byRoom.get(c.room) || { level: '', courses: [] };
-      if (!e.level && c.level) e.level = c.level;
-      const label = `${c.code} ${c.name}`.trim();
-      if (label && !e.courses.includes(label)) e.courses.push(label);
-      byRoom.set(c.room, e);
+      if (!c.room || /^non-student$/i.test(c.room.trim()) || !c.code) continue;
+      const value = `${c.room}||${c.code}`;
+      if (seen.has(value)) continue;
+      seen.add(value);
+      const lv = (c.level || '').trim().replace(/^M\.\s*/i, 'ม.');
+      const head = lv && !isSameRoom(c.room, lv) ? `${lv} (${c.room})` : (lv || c.room);
+      out.push({ value, room: c.room, courseCode: c.code, label: `${head} — ${`${c.code} ${c.name}`.trim()}` });
     }
-    return Array.from(byRoom.entries()).map(([room, e]) => {
-      const lv = (e.level || '').trim().replace(/^M\.\s*/i, 'ม.');
-      const head = lv && !isSameRoom(room, lv) ? `${lv} (${room})` : (lv || room);
-      return { value: room, label: e.courses.length ? `${head} — ${e.courses.join(', ')}` : head };
-    });
+    return out.sort((a, b) => a.label.localeCompare(b.label, 'th'));
   }, [myCourses]);
   const attendanceRange = useMemo(() => defaultAttendanceDateRange(30), []);
   const { records: myRoomsAttendanceRecords } = useRoomAttendanceRecords(myTaughtRooms, attendanceRange);
@@ -1517,11 +1516,7 @@ export function TeacherPortal() {
             )}
 
             {dashboardTab === 'attendance-stats' && (
-              <TeacherAttendanceStatsPanel
-                rooms={attendanceRoomOptions.map(o => o.value)}
-                roomLabels={Object.fromEntries(attendanceRoomOptions.map(o => [o.value, o.label]))}
-                myCourseCodes={myCourses.map(c => c.code)}
-              />
+              <TeacherAttendanceStatsPanel options={attendanceRoomOptions} />
             )}
 
             {dashboardTab === 'records' && (
@@ -1628,7 +1623,7 @@ export function TeacherPortal() {
                     >
                       <option value="">-- เลือกรายวิชา --</option>
                       {visibleGradebookCourses.map(c => (
-                        <option key={c.id} value={c.id}>{c.code} {formatCourseTitle(c.name, c.level, c.room)}</option>
+                        <option key={c.id} value={c.id}>{c.id.startsWith('elective_') ? `ชุมนุม ${c.name}` : `${c.code} ${formatCourseTitle(c.name, c.level, c.room)}`}</option>
                       ))}
                     </select>
                   </div>
