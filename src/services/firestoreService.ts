@@ -315,6 +315,9 @@ export async function updateBehaviorScoreAndTriggerAlert(
       transaction.set(logRef, {
         studentId,
         studentName,
+        // uid ของเจ้าของ/ผู้ปกครอง — ให้ rules เปิดให้นักเรียน/ผู้ปกครองอ่านประวัติของตัวเองได้ (query where studentUid/parentUid)
+        studentUid,
+        parentUid: parentUid || null,
         type: scoreDeducted < 0 ? 'deduction' : 'addition',
         points: scoreDeducted,
         reason,
@@ -878,6 +881,53 @@ export function subscribeGateAttendanceLogs(
     });
   } catch (error) {
     console.warn('[subscribeGateAttendanceLogs] setup error:', error);
+    return () => {};
+  }
+}
+
+export interface DisciplineLogRecord {
+  id: string;
+  studentId: string;
+  type: 'deduction' | 'addition';
+  /** ค่าติดลบ = ตัดคะแนน, บวก = เพิ่มคะแนน */
+  points: number;
+  reason: string;
+  date: string;
+  recordedBy: string;
+}
+
+/** ประวัติเพิ่ม-ตัดคะแนนความประพฤติของตัวเอง/บุตรหลาน (discipline_logs) — ใหม่สุดก่อน
+ *  เฉพาะรายการที่มี studentUid/parentUid (เขียนตั้งแต่เพิ่ม field นี้) — รายการเก่ากว่านั้นไม่แสดง */
+export function subscribeDisciplineLogs(
+  onUpdate: (logs: DisciplineLogRecord[]) => void,
+  filter: { parentUid?: string; studentUid?: string },
+): () => void {
+  try {
+    const clauses = [];
+    if (filter.parentUid) clauses.push(where('parentUid', '==', filter.parentUid));
+    if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
+    if (clauses.length === 0) { onUpdate([]); return () => {}; }
+    return onSnapshot(query(collection(db, 'discipline_logs'), ...clauses), (snap) => {
+      const list = snap.docs.map(d => {
+        const x = d.data() as Record<string, any>;
+        return {
+          id: d.id,
+          studentId: String(x.studentId || ''),
+          type: x.type === 'addition' ? 'addition' : 'deduction',
+          points: Number(x.points) || 0,
+          reason: String(x.reason || ''),
+          date: String(x.date || ''),
+          recordedBy: String(x.recordedBy || ''),
+        } as DisciplineLogRecord;
+      });
+      list.sort((a, b) => b.date.localeCompare(a.date));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeDisciplineLogs] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeDisciplineLogs] setup error:', error);
     return () => {};
   }
 }

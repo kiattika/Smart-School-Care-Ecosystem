@@ -1,3 +1,4 @@
+import { format } from 'date-fns';
 import { cn } from "./lib/utils";
 import React, { useEffect, useState } from 'react';
 import { useStore } from './store';
@@ -28,21 +29,18 @@ import {
 
 import { GateAttendanceTracker } from './components/student-parent/GateAttendanceTracker';
 import { HealthMentalWellbeingModule } from './components/student-parent/HealthMentalWellbeingModule';
-import { SocioeconomicWelfareModule } from './components/student-parent/SocioeconomicWelfareModule';
 import { BehaviorDisciplineModule } from './components/student-parent/BehaviorDisciplineModule';
-import { PortfolioActivityVault } from './components/student-parent/PortfolioActivityVault';
+import { StudentDaySchedule } from './components/student-parent/StudentDaySchedule';
 import { ParentPortfolioView } from './components/portfolio/ParentPortfolioView';
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
-import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 import { NotificationBell } from './components/notifications/NotificationBell';
 
 export function ParentPortal() {
   const {
     user,
     attendanceRecords,
-    parentTeacherMessages,
-    selfAssessments
+    parentTeacherMessages
   } = useStore();
   // นักเรียนของผู้ปกครองคนนี้จาก Firestore สด — query filter ด้วย parentUid (ผ่าน firestore.rules)
   const { students: linkedStudents } = useRealStudents({ parentUid: user?.uid });
@@ -71,14 +69,12 @@ export function ParentPortal() {
   // FIX (Task 0): เดิมอ่านจาก StudentAnalytics (session-local store, ว่างเปล่าเสมอ) → ตัวเลขที่เห็น
   // เป็น fallback 98 ตายตัวทุกครั้ง ไม่เคยเปลี่ยนตามพฤติกรรมจริง — ตอนนี้อ่านจาก students/{id}.behaviorScore
   // ของจริงผ่าน useRealStudents() (real-time)
-  const bScore = student?.behaviorScore ?? 100;
-  const myAssessment = selfAssessments[student?.studentId || '38502'];
-
+  const bScore = student?.behaviorScore;
+  
   const [activeTab, setActiveTab] = useState<
-    'timeline' | 'gate' | 'health' | 'socio' | 'behavior' | 'portfolio' | 'academic' | 'services'
+    'timeline' | 'gate' | 'health' | 'behavior' | 'portfolio' | 'academic' | 'services'
   >('timeline');
 
-  const [viewDetailModal, setViewDetailModal] = useState(false);
 
   if (!student) {
     return (
@@ -93,7 +89,7 @@ export function ParentPortal() {
 
   // Unpaid invoices count
   const pendingInvoices = billingInvoices.filter(i => i.studentId === student.studentId && (i.status === 'PENDING' || i.status === 'OVERDUE'));
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = format(new Date(), 'yyyy-MM-dd'); // วันที่ท้องถิ่น (toISOString เป็น UTC → ก่อน 07:00 ไทยได้เมื่อวาน)
   const studentGateLogs = gateAttendanceLogs.filter(g => g.studentId === student.studentId);
   const recentGateLog = studentGateLogs[0];
   const todayEntryLog = studentGateLogs.find(g => g.date === todayStr && g.type === 'ENTRY');
@@ -201,18 +197,6 @@ export function ParentPortal() {
           </button>
 
           <button
-            onClick={() => setActiveTab('socio')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'socio'
-                ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-lg shadow-cyan-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <MapPin className="w-4 h-4" />
-            <span>3. เยี่ยมบ้าน & ข้อมูลครอบครัว</span>
-          </button>
-
-          <button
             onClick={() => setActiveTab('behavior')}
             className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
               activeTab === 'behavior'
@@ -221,7 +205,7 @@ export function ParentPortal() {
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
-            <span>4. คะแนนพฤติกรรม & บันทึก</span>
+            <span>3. คะแนนความประพฤติ</span>
           </button>
 
           <button
@@ -233,7 +217,7 @@ export function ParentPortal() {
             }`}
           >
             <FolderGit2 className="w-4 h-4" />
-            <span>5. แฟ้มผลงาน & TCAS</span>
+            <span>4. แฟ้มผลงาน</span>
           </button>
 
           <button
@@ -245,7 +229,7 @@ export function ParentPortal() {
             }`}
           >
             <BookOpen className="w-4 h-4" />
-            <span>6. ผลการเรียน ปพ.6 & การบ้าน</span>
+            <span>5. ผลการเรียน & การบ้าน</span>
           </button>
 
           <button
@@ -257,7 +241,7 @@ export function ParentPortal() {
             }`}
           >
             <CreditCard className="w-4 h-4" />
-            <span>7. ชำระเงิน & นัดพบครู</span>
+            <span>6. ชำระเงิน & นัดพบครู</span>
           </button>
         </div>
       </div>
@@ -321,42 +305,14 @@ export function ParentPortal() {
             {/* Quick Metrics */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div 
-                onClick={() => setActiveTab('academic')}
-                className="bg-slate-900/70 border border-slate-800 hover:border-indigo-500/40 rounded-3xl p-5 backdrop-blur-md cursor-pointer transition-all space-y-1"
-              >
-                <div className="flex items-center justify-between text-indigo-400 mb-1">
-                  <Award className="w-5 h-5" />
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10">ปพ.6</span>
-                </div>
-                <span className="text-xs text-slate-400 block">ผลการเรียนเฉลี่ย</span>
-                <span className="text-2xl font-black text-indigo-400">3.88</span>
-                <p className="text-[10px] text-slate-400">เกรด 4.00 ทุกวิชาหลัก</p>
-              </div>
-
-              <div 
                 onClick={() => setActiveTab('behavior')}
                 className="bg-slate-900/70 border border-slate-800 hover:border-emerald-500/40 rounded-3xl p-5 backdrop-blur-md cursor-pointer transition-all space-y-1"
               >
                 <div className="flex items-center justify-between text-emerald-400 mb-1">
                   <ShieldCheck className="w-5 h-5" />
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10">เกณฑ์ดีเยี่ยม</span>
                 </div>
                 <span className="text-xs text-slate-400 block">คะแนนความประพฤติ</span>
-                <span className="text-2xl font-black text-emerald-400">{bScore} / 100</span>
-                <p className="text-[10px] text-slate-400">ระดับ Diamond Scholar</p>
-              </div>
-
-              <div 
-                onClick={() => setActiveTab('health')}
-                className="bg-slate-900/70 border border-slate-800 hover:border-pink-500/40 rounded-3xl p-5 backdrop-blur-md cursor-pointer transition-all space-y-1"
-              >
-                <div className="flex items-center justify-between text-pink-400 mb-1">
-                  <HeartPulse className="w-5 h-5" />
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-pink-500/10">สุขภาพ</span>
-                </div>
-                <span className="text-xs text-slate-400 block">คัดกรอง 2Q</span>
-                <span className="text-2xl font-black text-emerald-400">ปกติ</span>
-                <p className="text-[10px] text-slate-400">ไม่มีภาวะซึมเศร้า</p>
+                <span className="text-2xl font-black text-emerald-400">{bScore !== undefined ? `${bScore} / 100` : 'ยังไม่มีข้อมูล'}</span>
               </div>
 
               <div 
@@ -369,10 +325,10 @@ export function ParentPortal() {
                 </div>
                 <span className="text-xs text-slate-400 block">ค่าบำรุงการศึกษา</span>
                 <span className={`text-2xl font-black ${pendingInvoices.length > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                  {pendingInvoices.length > 0 ? `฿${pendingInvoices.reduce((a,c) => a + (c?.totalAmount ?? (c as any)?.amount ?? 0), 0).toLocaleString()}` : 'ครบถ้วน'}
+                  {pendingInvoices.length > 0 ? `฿${pendingInvoices.reduce((a,c) => a + (c?.totalAmount ?? (c as any)?.amount ?? 0), 0).toLocaleString()}` : 'ไม่มียอดค้าง'}
                 </span>
                 <p className="text-[10px] text-slate-400">
-                  {pendingInvoices.length > 0 ? 'รอดำเนินการชำระ' : 'ออกใบเสร็จแล้ว'}
+                  {pendingInvoices.length > 0 ? 'รอดำเนินการชำระ' : 'ไม่มียอดค้างชำระ'}
                 </p>
               </div>
             </div>
@@ -426,7 +382,7 @@ export function ParentPortal() {
 
             {/* Recent Communication & Self Assessment Detail Button */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              <div className="lg:col-span-8 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-4">
+              <div className="lg:col-span-12 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
                     <MessageSquare className="w-4 h-4 text-emerald-400" />
@@ -464,30 +420,9 @@ export function ParentPortal() {
                 })()}
               </div>
 
-              <div className="lg:col-span-4 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl flex flex-col justify-between space-y-4">
-                <div>
-                  <h4 className="text-sm font-bold text-white mb-1">ผลการประเมินตนเองของนักเรียน</h4>
-                  <p className="text-xs text-slate-400">
-                    แบบประเมินสุขภาวะ กิจกรรม และความพร้อมทางการเรียน
-                  </p>
-                </div>
-
-                <div className="p-3.5 bg-slate-800/40 rounded-2xl border border-slate-800 text-xs space-y-1">
-                  <span className="text-slate-400">สถานะการประเมิน:</span>
-                  <p className="text-emerald-400 font-bold">
-                    {myAssessment?.isCompleted ? '✓ ประเมินเรียบร้อยแล้ว' : 'ยังไม่เสร็จสิ้น'}
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => setViewDetailModal(true)}
-                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold border border-slate-700 transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  <FileText className="w-4 h-4 text-emerald-400" />
-                  <span>ดูรายละเอียดผลการประเมิน</span>
-                </button>
-              </div>
             </div>
+
+            <StudentDaySchedule room={student.room} />
           </div>
         )}
 
@@ -501,11 +436,6 @@ export function ParentPortal() {
           <HealthMentalWellbeingModule studentId={student.studentId} student={student} isParentView={true} />
         )}
 
-        {/* 3. Socioeconomic Welfare & Home Visit */}
-        {activeTab === 'socio' && (
-          <SocioeconomicWelfareModule studentId={student.studentId} student={student} />
-        )}
-
         {/* 4. Behavior & Conduct */}
         {activeTab === 'behavior' && (
           <BehaviorDisciplineModule student={student} isParentView={true} />
@@ -513,12 +443,7 @@ export function ParentPortal() {
 
         {/* 5. Portfolio Vault & TCAS */}
         {activeTab === 'portfolio' && (
-          <div className="space-y-8">
-            <ParentPortfolioView parentUid={user?.uid} studentId={student.studentId} />
-            <div className="border-t border-slate-800 pt-6">
-              <PortfolioActivityVault studentId={student.studentId} />
-            </div>
-          </div>
+          <ParentPortfolioView parentUid={user?.uid} studentId={student.studentId} />
         )}
 
         {/* 6. Academic Reports & Homework */}
@@ -533,15 +458,6 @@ export function ParentPortal() {
 
       </div>
 
-      {/* Student Self-Assessment Detail Modal for Parent */}
-      {viewDetailModal && (
-        <StudentAssessmentDetailModal
-          student={student}
-          assessment={myAssessment}
-          viewerRole="PARENT"
-          onClose={() => setViewDetailModal(false)}
-        />
-      )}
     </div>
   );
 }

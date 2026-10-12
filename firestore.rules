@@ -167,7 +167,11 @@ service cloud.firestore {
       allow read: if hasRole('SUPER_ADMIN') || 
                      hasRole('HOMEROOM_TEACHER') || 
                      hasRole('EXECUTIVE') || 
-                     hasRole('GUIDANCE_COUNSELOR');
+                     hasRole('GUIDANCE_COUNSELOR') ||
+                     // นักเรียน/ผู้ปกครองอ่านประวัติคะแนนความประพฤติของตัวเอง/บุตรหลานได้ (ผูกด้วย uid ในเอกสาร
+                     // ที่ updateBehaviorScoreAndTriggerAlert เขียน — รายการเก่าที่ไม่มี field นี้ = อ่านไม่ได้)
+                     (isSignedIn() && (resource.data.get('studentUid', null) == request.auth.uid ||
+                                       resource.data.get('parentUid', null) == request.auth.uid));
       allow write: if hasRole('SUPER_ADMIN') || 
                       hasRole('SUBJECT_TEACHER') || 
                       hasRole('HOMEROOM_TEACHER');
