@@ -1498,7 +1498,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('elective_activities_config/club-1').update({ enrollmentStatus: 'OPEN' }); });
       await assertSucceeds(asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/club-1_std-e1').update(reenroll));
       // active แล้วสมัครซ้ำผ่าน update ไม่ได้ (ต้องเคยถอนเท่านั้น)
-      await assertFails(asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/club-1_std-e1').update(reenroll));
+      await assertFails(asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/club-1_std-e1').update({ ...reenroll, enrolledAt: new Date(Date.now() + 1000).toISOString() }));
     });
 
     it('ครูที่ไม่ใช่ผู้รับผิดชอบชุมนุมนั้นถอนชื่อนักเรียนไม่ได้', async () => {
