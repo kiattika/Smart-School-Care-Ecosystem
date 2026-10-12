@@ -1,6 +1,6 @@
 import { cn, isSameRoom } from "./lib/utils";
 import { Student } from "./types";
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from './store';
 import { useRealStudents } from "./hooks/useRealStudents";
 import { useHomeroomAttendance } from "./hooks/useHomeroomAttendance";
@@ -23,7 +23,7 @@ import { AdvisorSdqPanel } from './components/advisor/AdvisorSdqPanel';
 import { DepressionScreeningPanel } from './components/shared/DepressionScreeningPanel';
 import { useGuidanceStatus, useRoomScreeningRecords } from './hooks/useDepressionScreening';
 import { AdvisorStudentDetailModal } from './components/advisor/AdvisorStudentDetailModal';
-import { recomputeCourseAttendanceStatsForRoom } from './services/firestoreService';
+import { recomputeCourseAttendanceStatsForRoom, subscribeSelfAssessmentsByRoom } from './services/firestoreService';
 import { useRoomAttendanceRecordsFull } from './hooks/useRoomAttendanceRecords';
 import { useTeacherFirestoreSchedule } from './hooks/useTeacherFirestoreSchedule';
 import { isScheduleForRoom } from './lib/studentDaySchedule';
@@ -50,8 +50,7 @@ export function AdvisorPortal() {
     user,
     leaveRequests,
     updateLeaveRequestStatus,
-    updateStudentProfile,
-    selfAssessments
+    updateStudentProfile
   } = useStore();
 
   // อ่านรายชื่อนักเรียนจาก Firestore สด (real-time) แทน Zustand store แบบ session-local
@@ -67,6 +66,13 @@ export function AdvisorPortal() {
   const [attendanceOverrides, setAttendanceOverrides] = useState<Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>>({});
 
   const myRoom = user?.profile?.assignments?.homeroomClass;
+
+  // แบบประเมินตนเองของนักเรียนในห้อง — listener สดจาก Firestore (เดิมอ่านจาก store ที่ไม่มี listener จึงว่างเสมอ)
+  const [selfAssessments, setSelfAssessments] = useState<Record<string, import('./types').StudentSelfAssessment>>({});
+  useEffect(() => {
+    if (!myRoom) { setSelfAssessments({}); return; }
+    return subscribeSelfAssessmentsByRoom(myRoom, setSelfAssessments);
+  }, [myRoom]);
 
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   // ไม่มีห้องประจำชั้นใน profile = '' → useHomeroomAttendance ไม่ query/ไม่เขียน (ห้ามเติมห้องปลอมแทน)

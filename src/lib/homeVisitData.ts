@@ -1,4 +1,4 @@
-import type { FamilyHomeVisitInfo, StudentHomeVisitInfo, ParentInfo, GuardianInfo, FriendInfo, StudentSelfAssessment } from '../types';
+import type { FamilyHomeVisitInfo, StudentHomeVisitInfo, ParentInfo, GuardianInfo, FriendInfo,  } from '../types';
 
 /* ───────── ตัวเลือกตามแบบ สพฐ. ───────── */
 export const DISADVANTAGE_OPTIONS = [
@@ -100,32 +100,6 @@ export function distanceBracketFromMeters(m: number | null): string {
   if (km <= 20) return DISTANCE_BRACKETS[3];
   if (km <= 40) return DISTANCE_BRACKETS[4];
   return DISTANCE_BRACKETS[5];
-}
-
-/**
- * เติมต้นทางจากแบบประเมินตนเอง 30 ข้อ (ข้อ 7-11 ของแบบประเมิน) → ข้อ 11, 17, 18, 20 ของ สพฐ.
- * เติมเฉพาะค่าที่แมปได้ชัดเจนข้อเดียว; ที่กำกวม (เช่น "เดิน/ขี่จักรยาน", "บิดา หรือ มารดา") ไม่เดา — คืนเป็น hint ให้นักเรียนเลือกเอง
- */
-export interface AssessmentPrefill {
-  livesWith?: string; commuteMode?: string; commuteDuration?: string; consultWho?: string[];
-  hints: { livesWith?: string; commuteMode?: string; commuteDuration?: string };
-}
-export function prefillFromSelfAssessment(a: StudentSelfAssessment | null | undefined): AssessmentPrefill {
-  const out: AssessmentPrefill = { hints: {} };
-  if (!a || !a.isCompleted || !a.familyBackground) return out;
-  const fb = a.familyBackground;
-  const lw: Record<string, string | undefined> = {
-    'บิดาและมารดา': 'บิดาและมารดา', 'ปู่ ย่า ตา ยาย หรือญาติผู้ใหญ่': 'ผู้ปกครองที่ไม่ใช่บิดา มารดา',
-    'หอพัก / อยู่คนเดียว': 'พักอยู่คนเดียว (เช่าหอพัก/บ้านเช่า)', 'อื่นๆ': 'อื่น ๆ',
-  };
-  if (fb.livingWith in lw && lw[fb.livingWith]) out.livesWith = lw[fb.livingWith]; else if (fb.livingWith) out.hints.livesWith = fb.livingWith;
-  const tr: Record<string, string> = { 'รถประจำทาง / รถสองแถว': 'รถโดยสารประจำทาง/รับจ้าง', 'รถจักรยานยนต์': 'จักรยานยนต์ส่วนตัว', 'ขับรถยนต์มาเอง': 'รถส่วนตัว' };
-  if (fb.transportation in tr) out.commuteMode = tr[fb.transportation]; else if (fb.transportation) out.hints.commuteMode = fb.transportation;
-  if (fb.travelTime === 'น้อยกว่า 15 นาที' || fb.travelTime === '15-30 นาที') out.commuteDuration = COMMUTE_DURATIONS[0];
-  else if (fb.travelTime) out.hints.commuteDuration = fb.travelTime;
-  const cw: Record<string, string> = { 'ผู้ปกครอง': 'ผู้ปกครอง', 'เพื่อนสนิทใน-นอกโรงเรียน': 'เพื่อน', 'คุณครู': 'ครู', 'เก็บไว้คนเดียว/จัดการเอง': 'เก็บไว้ในใจ ไม่เล่าให้ใครฟัง', 'อื่นๆ': 'อื่น ๆ' };
-  if (fb.consultPerson in cw) out.consultWho = [cw[fb.consultPerson]];
-  return out;
 }
 
 /* ───────── ตรวจความครบถ้วน ───────── */

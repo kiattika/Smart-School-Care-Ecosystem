@@ -94,12 +94,14 @@ export function HomeVisitFormModal({ student, location, distanceFromSchoolM, exi
     setErrors(errs);
     if (errs.length) return;
     setSaving(true); setSaveError(null);
+    let stage: 'upload' | 'save' = 'upload';
     try {
       const up = async (c?: CompressedImage) => (c ? uploadHomeVisitPhoto(advisor.uid, c.blob) : '');
       const exteriorPhotoUrl = pending.exterior[0] ? await up(pending.exterior[0]) : form.exteriorPhotoUrl;
       const interiorPhotoUrl = pending.interior[0] ? await up(pending.interior[0]) : form.interiorPhotoUrl;
       const extraNew: string[] = [];
       for (const c of pending.extra) extraNew.push(await up(c));
+      stage = 'save';
       const rec = buildHomeVisitRecord({
         form: { ...form, exteriorPhotoUrl, interiorPhotoUrl, extraPhotoUrls: [...form.extraPhotoUrls, ...extraNew] },
         studentId: student.studentId, studentUid: student.studentUid, homeroomClass,
@@ -109,8 +111,11 @@ export function HomeVisitFormModal({ student, location, distanceFromSchoolM, exi
       ([...pending.exterior, ...pending.interior, ...pending.extra] as CompressedImage[]).forEach(p => URL.revokeObjectURL(p.previewUrl));
       onSaved(`บันทึกการเยี่ยมบ้าน ${student.name} แล้ว`);
     } catch (e) {
-      console.warn('[HomeVisitFormModal] save failed', e);
-      setSaveError('บันทึกไม่สำเร็จ — ตรวจสอบการเชื่อมต่อ/สิทธิ์ครูที่ปรึกษาห้องนี้ แล้วลองใหม่ (ข้อมูลที่กรอกยังอยู่)');
+      console.warn('[HomeVisitFormModal] save failed at', stage, e);
+      const code = (e as { code?: string })?.code || (e as Error)?.message || 'unknown';
+      setSaveError(stage === 'upload'
+        ? `อัปโหลดรูปไม่สำเร็จ (${code}) — ตรวจว่า deploy storage.rules แล้วและรูปไม่เกิน 5MB จากนั้นลองใหม่ (ข้อมูลที่กรอกยังอยู่)`
+        : `บันทึกข้อมูลไม่สำเร็จ (${code}) — ตรวจสิทธิ์ครูที่ปรึกษาห้อง ${homeroomClass || '-'} และว่า deploy firestore.rules แล้ว จากนั้นลองใหม่ (ข้อมูลที่กรอกยังอยู่)`);
     } finally { setSaving(false); }
   };
 

@@ -18,10 +18,14 @@ import {
   Users
 } from 'lucide-react';
 import { StudentSelfAssessment, Student } from '../types';
+import { LIVES_WITH, COMMUTE_MODES, COMMUTE_DURATIONS, CONSULT_OPTIONS } from '../lib/homeVisitData';
+import { sharedFromAssessment, fillMissing, type SharedFields } from '../lib/homeVisitShared';
 
 interface Props {
   student: Student;
   existingAssessment?: StudentSelfAssessment;
+  /** ค่าที่ใช้ร่วมกับแบบเก็บข้อมูลเยี่ยมบ้าน (ข้อ 7, 8, 9, 11) — เติมเฉพาะช่องที่ยังว่าง */
+  sharedPrefill?: SharedFields;
   onSave: (assessment: StudentSelfAssessment) => Promise<void>;
   onClose?: () => void;
 }
@@ -29,6 +33,7 @@ interface Props {
 export const StudentSelfAssessmentForm: React.FC<Props> = ({
   student,
   existingAssessment,
+  sharedPrefill,
   onSave,
   onClose
 }) => {
@@ -37,12 +42,27 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
   const [showSuccessToast, setShowSuccessToast] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Form State initialized with existing assessment or sensible defaults for current student
+  // ตัวเลือกข้อ 7, 8, 9, 11 ใช้ชุดเดียวกับแบบ สพฐ.; เอกสารรุ่นเก่าแปลงเป็นตัวเลือกใหม่เฉพาะที่ตรงกันชัดเจน ที่เหลือให้เลือกใหม่
+  const legacyHints = sharedFromAssessment(existingAssessment).hints;
+  function withSharedFamily(a: StudentSelfAssessment): StudentSelfAssessment {
+    const own = sharedFromAssessment(a).shared;
+    const merged = sharedPrefill ? fillMissing(own, sharedPrefill) : own;
+    return {
+      ...a,
+      familyBackground: {
+        ...a.familyBackground,
+        livingWith: merged.livesWith, transportation: merged.commuteMode, travelTime: merged.commuteDuration,
+        responsibilities: a.familyBackground?.responsibilities || [], consultPerson: merged.consultWho,
+      },
+    };
+  }
+
+  // Form State initialized with existing assessment or empty answers for current student
   const [formData, setFormData] = useState<StudentSelfAssessment>(() => {
     if (existingAssessment) {
-      return existingAssessment;
+      return withSharedFamily(existingAssessment);
     }
-    return {
+    return withSharedFamily({
       studentId: student.studentId || '',
       studentName: student.name || 'นักเรียน',
       isCompleted: false,
@@ -54,12 +74,13 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
         contactChannels: ['LINE ID / Instagram / Facebook'],
         contactDetail: ''
       },
+      // ไม่ตั้งค่าเริ่มต้นแทนนักเรียน — ช่องที่ใช้ร่วมกับฟอร์มเยี่ยมบ้านเติมจากฟอร์มนั้นถ้ามีข้อมูล
       familyBackground: {
-        livingWith: 'บิดาและมารดา',
-        transportation: 'รถจักรยานยนต์',
-        travelTime: '15-30 นาที',
-        responsibilities: ['งานบ้าน'],
-        consultPerson: 'ผู้ปกครอง'
+        livingWith: '',
+        transportation: '',
+        travelTime: '',
+        responsibilities: [],
+        consultPerson: []
       },
       identity: {
         threeWords: '',
@@ -88,7 +109,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
         supportNeeded: '',
         privateMessageToTeacher: ''
       }
-    };
+    });
   });
 
   const steps = [
@@ -149,6 +170,12 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
       setSubmitError('ไม่พบรหัสนักเรียนของบัญชีนี้ — ยกเลิกการบันทึก กรุณาติดต่อครูประจำชั้นหรือผู้ดูแลระบบ');
       return;
     }
+    const fb = formData.familyBackground;
+    if (!fb.livingWith || !fb.transportation || !fb.travelTime || fb.consultPerson.length === 0) {
+      setSubmitError('กรุณาตอบข้อ 7, 8, 9 และ 11 ให้ครบ (ข้อมูลชุดนี้ใช้ร่วมกับแบบเก็บข้อมูลเยี่ยมบ้าน)');
+      setCurrentStep(2);
+      return;
+    }
     setSubmitError(null);
     setIsSubmitting(true);
     try {
@@ -176,11 +203,11 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
 
   // Helper options
   const contactOptions = ['เบอร์โทรศัพท์ส่วนตัว', 'LINE ID / Instagram / Facebook', 'อีเมล', 'Discord'];
-  const livingWithOptions = ['บิดาและมารดา', 'บิดา หรือ มารดา (ฝ่ายใดฝ่ายหนึ่ง)', 'ปู่ ย่า ตา ยาย หรือญาติผู้ใหญ่', 'หอพัก / อยู่คนเดียว', 'อื่นๆ'];
-  const transportationOptions = ['ผู้ปกครองรับ-ส่ง', 'รถประจำทาง / รถสองแถว', 'รถจักรยานยนต์', 'รถสาธารณะ / รถโรงเรียน', 'เดิน/ขี่จักรยาน', 'ขับรถยนต์มาเอง'];
-  const travelTimeOptions = ['น้อยกว่า 15 นาที', '15-30 นาที', '31-60 นาที', 'มากกว่า 1 ชั่วโมง'];
+  const livingWithOptions = LIVES_WITH;
+  const transportationOptions = COMMUTE_MODES;
+  const travelTimeOptions = COMMUTE_DURATIONS;
   const responsibilitiesOptions = ['งานบ้าน', 'ดูแลน้อง/ผู้สูงอายุ', 'ช่วยธุรกิจครอบครัว', 'ทำงานพิเศษหารายได้เสริม', 'ไม่มีภาระพิเศษ'];
-  const consultOptions = ['ผู้ปกครอง', 'เพื่อนสนิทใน-นอกโรงเรียน', 'คุณครู', 'เก็บไว้คนเดียว/จัดการเอง', 'อื่นๆ'];
+  const consultOptions = CONSULT_OPTIONS;
   const groupRoles = [
     { title: 'ผู้นำกลุ่ม', desc: 'วางแผน แจกแจงงาน และควบคุมเวลา' },
     { title: 'ค้นหาข้อมูลวิเคราะห์', desc: 'รวบรวมเนื้อหา ตรวจสอบความถูกต้อง' },
@@ -421,6 +448,9 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                 <label className="block text-xs font-semibold text-slate-200 mb-2">
                   ข้อ 7: ปัจจุบันนักเรียนพักอาศัยอยู่กับใคร
                 </label>
+                {legacyHints.livesWith && !formData.familyBackground.livingWith && (
+                  <p className="text-[11px] text-sky-300 mb-2">เคยตอบไว้ว่า “{legacyHints.livesWith}” — ตัวเลือกปรับให้ตรงกับแบบเยี่ยมบ้าน กรุณาเลือกใหม่</p>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
                   {livingWithOptions.map(opt => (
                     <button
@@ -444,11 +474,15 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                   <label className="block text-xs font-semibold text-slate-200 mb-2">
                     ข้อ 8: การเดินทางมาโรงเรียนส่วนใหญ่ใช้พาหนะใด
                   </label>
+                  {legacyHints.commuteMode && !formData.familyBackground.transportation && (
+                    <p className="text-[11px] text-sky-300 mb-2">เคยตอบไว้ว่า “{legacyHints.commuteMode}” — กรุณาเลือกใหม่ตามตัวเลือกปัจจุบัน</p>
+                  )}
                   <select
                     value={formData.familyBackground.transportation}
                     onChange={(e) => handleSingleFieldChange('familyBackground', 'transportation', e.target.value)}
                     className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-800"
                   >
+                    <option value="" disabled>— เลือกพาหนะ —</option>
                     {transportationOptions.map(opt => (
                       <option key={opt} value={opt}>{opt}</option>
                     ))}
@@ -459,6 +493,9 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                   <label className="block text-xs font-semibold text-slate-200 mb-2">
                     ข้อ 9: ระยะเวลาที่ใช้ในการเดินทางมาโรงเรียน (เฉลี่ย)
                   </label>
+                  {legacyHints.commuteDuration && !formData.familyBackground.travelTime && (
+                    <p className="text-[11px] text-sky-300 mb-2">เคยตอบไว้ว่า “{legacyHints.commuteDuration}” — กรุณาเลือกใหม่ตามตัวเลือกปัจจุบัน</p>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     {travelTimeOptions.map(opt => (
                       <button
@@ -510,16 +547,16 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-200 mb-2">
-                  ข้อ 11: เมื่อมีเรื่องสบายใจ หรือไม่สบายใจ นักเรียนปรึกษาใครบ่อยที่สุด
+                  ข้อ 11: เมื่อทุกข์ใจ/มีปัญหา ส่วนใหญ่นักเรียนปรึกษาใคร (เลือกได้มากกว่า 1 ข้อ)
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   {consultOptions.map(opt => (
                     <button
                       type="button"
                       key={opt}
-                      onClick={() => handleSingleFieldChange('familyBackground', 'consultPerson', opt)}
+                      onClick={() => handleCheckboxToggle('familyBackground', 'consultPerson', opt)}
                       className={`p-3 rounded-xl border text-xs text-left transition-all ${
-                        formData.familyBackground.consultPerson === opt
+                        formData.familyBackground.consultPerson.includes(opt)
                           ? 'border-indigo-600 bg-indigo-500/10 text-indigo-200 font-semibold ring-1 ring-indigo-500'
                           : 'border-slate-800 hover:border-slate-700 text-slate-200'
                       }`}

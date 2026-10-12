@@ -298,7 +298,7 @@ export const StudentAssessmentDetailModal: React.FC<Props> = ({
                   </div>
                   <div>
                     <span className="text-slate-400 block">ผู้ที่ปรึกษาบ่อยที่สุด (ข้อ 11):</span>
-                    <span className="font-semibold text-slate-800">{assessment.familyBackground?.consultPerson || '-'}</span>
+                    <span className="font-semibold text-slate-800">{(Array.isArray(assessment.familyBackground?.consultPerson) ? assessment.familyBackground.consultPerson.join(', ') : (assessment.familyBackground?.consultPerson as unknown as string)) || '-'}</span>
                   </div>
                 </div>
               </div>

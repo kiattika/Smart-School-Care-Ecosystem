@@ -44,6 +44,9 @@ import { subscribeGateAttendanceLogs, getSelfAssessmentRecord } from './services
 import { GateAttendanceRecord, StudentSelfAssessment } from './types';
 import { StudentPortfolioSection } from './components/portfolio/StudentPortfolioSection';
 import { StudentHomeLocationForm } from './components/homevisit/StudentHomeLocationForm';
+import { useStudentHomeVisitInfo } from './hooks/useHomeVisitData';
+import { sharedFromInfo, sharedFromAssessment } from './lib/homeVisitShared';
+import { syncSharedToHomeVisitInfo } from './services/firestoreService';
 import { StudentHomeVisitInfoForm } from './components/homevisit/StudentHomeVisitInfoForm';
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
@@ -86,14 +89,22 @@ export function StudentPortal() {
     myStudents.find(s => s.studentId === selectedStudentId) || myStudents[0];
 
   const studentIdForAssessment = student?.studentId;
+  const [assessmentLoadError, setAssessmentLoadError] = useState<string | null>(null);
+  const [assessmentLoaded, setAssessmentLoaded] = useState(false);
   useEffect(() => {
-    if (!studentIdForAssessment) { setSavedAssessment(null); return; }
+    if (!studentIdForAssessment) { setSavedAssessment(null); setAssessmentLoaded(false); return; }
     let cancelled = false;
     getSelfAssessmentRecord(studentIdForAssessment)
-      .then(r => { if (!cancelled) setSavedAssessment(r); })
-      .catch(() => { if (!cancelled) setSavedAssessment(null); });
+      .then(r => { if (!cancelled) { setSavedAssessment(r); setAssessmentLoadError(null); setAssessmentLoaded(true); } })
+      .catch((e) => {
+        // ไม่กลืนเงียบ — เดิมอ่านไม่ได้แล้วแสดงเหมือนยังไม่เคยทำ ทำให้นักเรียนเข้าใจว่าข้อมูลหาย
+        console.warn('[StudentPortal] load self-assessment failed', e);
+        if (!cancelled) { setSavedAssessment(null); setAssessmentLoadError('อ่านแบบประเมินที่บันทึกไว้ไม่สำเร็จ (ไม่ใช่ว่าข้อมูลหาย) ลองรีเฟรชหน้า หากยังเป็นอีกให้แจ้งผู้ดูแลระบบ'); setAssessmentLoaded(true); }
+      });
     return () => { cancelled = true; };
   }, [studentIdForAssessment, assessmentVersion]);
+  // ค่าที่ใช้ร่วมกับแบบเก็บข้อมูลเยี่ยมบ้าน — เติมแบบประเมินตนเองเฉพาะช่องที่ยังว่าง
+  const { data: homeVisitInfo, loading: homeVisitInfoLoading } = useStudentHomeVisitInfo(studentIdForAssessment);
 
   if (studentsLoading) {
     return (
@@ -196,13 +207,13 @@ export function StudentPortal() {
             { id: 'overview', label: 'ภาพรวม (Overview)', icon: User },
             { id: 'gate', label: '1. การเข้าเรียน & Gate', icon: Scan },
             { id: 'health', label: '2. สุขภาพกาย & จิต (2Q/SDQ)', icon: Activity },
-            { id: 'socio', label: '3. ที่อยู่บ้าน & เยี่ยมบ้าน', icon: MapPin },
-            { id: 'behavior', label: '4. คะแนนความประพฤติ', icon: ShieldCheck },
+            { id: 'assessment', label: '3. แบบประเมินตนเอง 30 ข้อ', icon: Brain },
+            { id: 'socio', label: '4. ที่อยู่บ้าน & เยี่ยมบ้าน', icon: MapPin },
+            { id: 'behavior', label: '5. คะแนนความประพฤติ', icon: ShieldCheck },
             { id: 'electives', label: 'สมัครชุมนุม', icon: Users },
-            { id: 'portfolio', label: '5. แฟ้มผลงาน', icon: FolderGit2 },
-            { id: 'academic', label: '6. ปพ.6 & การบ้าน & สอบ', icon: BookOpen },
-            { id: 'parent', label: '7. ชำระเงิน & นัดพบครู', icon: CreditCard },
-            { id: 'assessment', label: 'ประเมินตนเอง', icon: Brain },
+            { id: 'portfolio', label: '6. แฟ้มผลงาน', icon: FolderGit2 },
+            { id: 'academic', label: '7. ปพ.6 & การบ้าน & สอบ', icon: BookOpen },
+            { id: 'parent', label: '8. ชำระเงิน & นัดพบครู', icon: CreditCard },
           ]}>
       {/* Main Content Area */}
       <div className="transition-all duration-300">
@@ -393,17 +404,34 @@ export function StudentPortal() {
         {/* Self Assessment Form */}
         {activeTab === 'assessment' && (
           <div className="space-y-6 animate-in fade-in duration-300">
-            <StudentSelfAssessmentForm
-              student={student}
-              existingAssessment={myAssessment}
-              onSave={async (assessment) => {
-                await saveSelfAssessment(assessment);
-                setAssessmentVersion(v => v + 1);
-              }}
-              onClose={() => setActiveTab('overview')}
-            />
+            {assessmentLoadError && <div role="alert" className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-200">{assessmentLoadError}</div>}
+            {(!assessmentLoaded || homeVisitInfoLoading) ? (
+              <div className="p-6 text-sm text-slate-400 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> กำลังโหลดแบบประเมินที่บันทึกไว้…</div>
+            ) : (
+              <StudentSelfAssessmentForm
+                student={student}
+                existingAssessment={myAssessment}
+                sharedPrefill={sharedFromInfo(homeVisitInfo)}
+                onSave={async (assessment) => {
+                  if (!user?.uid) throw new Error('ไม่พบผู้ใช้ที่ล็อกอิน');
+                  // denormalize ห้อง/uid ให้ครูที่ปรึกษาอ่านได้ (firestore.rules ตรวจกับ students)
+                  await saveSelfAssessment({ ...assessment, studentUid: user.uid, homeroomClass: student.room || '' });
+                  // ค่าร่วมไปเติมฟอร์มเยี่ยมบ้านฝั่งนักเรียน (เฉพาะช่องที่ว่าง) — ล้มเหลวไม่ทำให้การส่งแบบประเมินล้ม
+                  try {
+                    const fb = assessment.familyBackground;
+                    await syncSharedToHomeVisitInfo(
+                      { studentId: student.studentId, studentUid: user.uid, homeroomClass: student.room || '' },
+                      sharedFromAssessment({ ...assessment, familyBackground: fb }).shared,
+                    );
+                  } catch (e) { console.warn('[StudentPortal] sync to home visit info failed', e); }
+                  setAssessmentVersion(v => v + 1);
+                }}
+                onClose={() => setActiveTab('overview')}
+              />
+            )}
           </div>
         )}
+
 
       </div>
       </PortalSidebarLayout>

@@ -4,9 +4,10 @@ import { format } from 'date-fns';
 import type { Student, StudentHomeVisitInfo, FriendInfo } from '../../types';
 import { DatePicker } from '../shared/DatePicker';
 import { useStudentHomeVisitInfo } from '../../hooks/useHomeVisitData';
-import { saveStudentHomeVisitInfo, getSelfAssessmentRecord } from '../../services/firestoreService';
+import { saveStudentHomeVisitInfo, getSelfAssessmentRecord, syncSharedToSelfAssessment } from '../../services/firestoreService';
+import { sharedFromAssessment, sharedFromInfo, fillMissing, emptyShared, type SharedFields, type LegacyHints } from '../../lib/homeVisitShared';
 import {
-  normalizeStudentInfo, validateStudentInfo, prefillFromSelfAssessment, AssessmentPrefill, ageFromBirthDate, bodyShapeFromBmi,
+  normalizeStudentInfo, validateStudentInfo, ageFromBirthDate, bodyShapeFromBmi,
   PREV_EDUCATION_LEVELS, BLOOD_TYPES, CLOSEST_FAMILY, CONSULT_OPTIONS, LIVES_WITH, COMMUTE_MODES, COMMUTE_DURATIONS,
 } from '../../lib/homeVisitData';
 import { inputCls, Section, Label, SourceTag, Chips, Single, toNum, toggleIn, ErrorList } from './formParts';
@@ -41,26 +42,30 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
   const base = useMemo(() => ({ studentId: student.studentId, studentUid, homeroomClass: student.room || '' }), [student.studentId, studentUid, student.room]);
   const { data: saved, loading } = useStudentHomeVisitInfo(student.studentId);
   const [form, setForm] = useState<StudentHomeVisitInfo>(() => normalizeStudentInfo(null, base));
-  const [prefill, setPrefill] = useState<AssessmentPrefill>({ hints: {} });
+  const [fromAssessment, setFromAssessment] = useState<{ shared: SharedFields; hints: LegacyHints } | null>(null);
   const [initialised, setInitialised] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  useEffect(() => { getSelfAssessmentRecord(student.studentId).then(a => setPrefill(prefillFromSelfAssessment(a))).catch(() => {}); }, [student.studentId]);
-
-  // เริ่มต้นฟอร์มครั้งเดียวเมื่อโหลดเอกสารที่บันทึกไว้เสร็จ: ถ้ายังไม่เคยบันทึก → เติมจากแบบประเมินตนเอง
+  // ค่าร่วมจากแบบประเมินตนเอง (ไม่มี/อ่านไม่ได้ = ไม่เติม) — รอให้อ่านเสร็จก่อนเริ่มฟอร์ม กันเติมช้าทับสิ่งที่พิมพ์
   useEffect(() => {
-    if (loading || initialised) return;
+    let cancelled = false;
+    getSelfAssessmentRecord(student.studentId)
+      .then(a => { if (!cancelled) setFromAssessment(sharedFromAssessment(a)); })
+      .catch(() => { if (!cancelled) setFromAssessment({ shared: emptyShared(), hints: {} }); });
+    return () => { cancelled = true; };
+  }, [student.studentId]);
+  const prefill = fromAssessment ?? { shared: emptyShared(), hints: {} as LegacyHints };
+
+  // เริ่มต้นฟอร์มครั้งเดียว: ใช้เอกสารที่บันทึกไว้ แล้วเติมช่องร่วมที่ยังว่างจากแบบประเมินตนเอง (ไม่ทับค่าที่กรอกแล้ว)
+  useEffect(() => {
+    if (loading || initialised || !fromAssessment) return;
     const norm = normalizeStudentInfo(saved, base);
-    if (!saved) {
-      if (prefill.livesWith) norm.livesWith = prefill.livesWith;
-      if (prefill.commuteMode) norm.commuteMode = prefill.commuteMode;
-      if (prefill.commuteDuration) norm.commuteDuration = prefill.commuteDuration;
-      if (prefill.consultWho) norm.consultWho = prefill.consultWho;
-    }
+    const merged = fillMissing(sharedFromInfo(norm), fromAssessment.shared);
+    norm.livesWith = merged.livesWith; norm.commuteMode = merged.commuteMode; norm.commuteDuration = merged.commuteDuration; norm.consultWho = merged.consultWho;
     setForm(norm); setInitialised(true);
-  }, [loading, saved, prefill, base, initialised]);
+  }, [loading, saved, fromAssessment, base, initialised]);
 
   const set = <K extends keyof StudentHomeVisitInfo>(k: K, v: StudentHomeVisitInfo[K]) => setForm(f => ({ ...f, [k]: v }));
   const sib = (k: keyof StudentHomeVisitInfo['siblings'], v: any) => setForm(f => ({ ...f, siblings: { ...f.siblings, [k]: v } }));
@@ -73,12 +78,15 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
     setErrors(errs); setMsg(null);
     if (errs.length) return;
     setSaving(true);
-    try { await saveStudentHomeVisitInfo({ ...form, ...base }); setMsg({ ok: true, text: 'บันทึกข้อมูลแล้ว ครูที่ปรึกษาจะเห็นข้อมูลนี้ตอนเยี่ยมบ้าน' }); }
+    try { await saveStudentHomeVisitInfo({ ...form, ...base });
+      // แชร์ค่าร่วมไปเติมแบบประเมินตนเอง (เฉพาะช่องที่ยังว่าง) — ล้มเหลวไม่ทำให้การบันทึกหลักล้ม
+      try { await syncSharedToSelfAssessment(base, sharedFromInfo(form)); } catch (e) { console.warn('[StudentHomeVisitInfoForm] sync to self-assessment failed', e); }
+      setMsg({ ok: true, text: 'บันทึกข้อมูลแล้ว ครูที่ปรึกษาจะเห็นข้อมูลนี้ตอนเยี่ยมบ้าน' }); }
     catch (e) { console.warn('[StudentHomeVisitInfoForm] save failed', e); setMsg({ ok: false, text: 'บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง (ข้อมูลที่กรอกยังอยู่)' }); }
     finally { setSaving(false); }
   };
 
-  if (loading && !initialised) return <div className="p-6 text-sm text-slate-400 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> กำลังโหลด…</div>;
+  if (!initialised) return <div className="p-6 text-sm text-slate-400 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> กำลังโหลด…</div>;
 
   return (
     <div className="space-y-6">
@@ -97,7 +105,7 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
       <Section title="ข้อ 1 ข้อมูลพื้นฐาน">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div><Label required>เพศ</Label><Single options={['ชาย', 'หญิง']} value={form.gender === 'M' ? 'ชาย' : form.gender === 'F' ? 'หญิง' : ''} onPick={o => set('gender', o === 'ชาย' ? 'M' : 'F')} /></div>
-          <div><Label required>วัน/เดือน/ปีเกิด</Label><DatePicker value={form.birthDate} onChange={v => set('birthDate', v)} max={todayYmd} ariaLabel="วันเกิด" /></div>
+          <div><Label required>วัน/เดือน/ปีเกิด</Label><DatePicker yearFirst value={form.birthDate} onChange={v => set("birthDate", v)} max={todayYmd} ariaLabel="วันเกิด" /></div>
           <div><Label>อายุ (ระบบคำนวณ)</Label><div className="text-sm text-slate-200 py-2">{age ? `${age.years} ปี ${age.months} เดือน` : '-'}</div></div>
           <div><Label required>สัญชาติ</Label><input className={inputCls} value={form.nationality} onChange={e => set('nationality', e.target.value)} placeholder="เช่น ไทย" /></div>
           <div><Label required>เชื้อชาติ</Label><input className={inputCls} value={form.ethnicity} onChange={e => set('ethnicity', e.target.value)} placeholder="เช่น ไทย" /></div>
@@ -157,7 +165,7 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
           {form.closestInFamily.includes('อื่น ๆ') && <input className={cn2(inputCls)} placeholder="ระบุ" value={form.closestOther} onChange={e => set('closestOther', e.target.value)} />}</div>
         <div>
           <Label required>เมื่อทุกข์ใจ/มีปัญหา ส่วนใหญ่ปรึกษาใคร (เลือกได้หลายข้อ)</Label>
-          {prefill.consultWho && !saved && <div className="text-[10px] text-sky-300 mb-1">เติมให้จากแบบประเมินตนเองแล้ว ตรวจและแก้ได้</div>}
+          {fromAssessment && fromAssessment.shared.consultWho.length > 0 && !saved?.consultWho?.length && <div className="text-[10px] text-sky-300 mb-1">เติมให้จากแบบประเมินตนเองแล้ว ตรวจและแก้ได้</div>}
           <Chips options={CONSULT_OPTIONS} value={form.consultWho} onToggle={o => set('consultWho', toggleIn(form.consultWho, o))} />
           {form.consultWho.includes('Hotline') && <input className={cn2(inputCls)} placeholder="ระบุ Hotline" value={form.consultHotline} onChange={e => set('consultHotline', e.target.value)} />}
           {form.consultWho.includes('อื่น ๆ') && <input className={cn2(inputCls)} placeholder="ระบุ" value={form.consultOther} onChange={e => set('consultOther', e.target.value)} />}

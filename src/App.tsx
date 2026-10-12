@@ -152,13 +152,14 @@ export default function App() {
             ) : user.role === 'executive' ? (
               <ExecutivePortal />
             ) : user.role === 'student' ? (
-              <div className="min-h-[100dvh] w-full bg-slate-950 sm:bg-slate-900 flex items-center justify-center p-0 sm:p-4">
+              // shrink-0 + items-start: เนื้อหายาวกว่าจอต้องดันความสูง wrapper ให้ scroll ได้ (เดิม items-center + flex-shrink ทำให้ส่วนบนล้นขึ้นไปนอกจอเลื่อนกลับไม่ได้)
+              <div className="min-h-[100dvh] shrink-0 w-full bg-slate-950 sm:bg-slate-900 flex items-start justify-center p-0 sm:p-4">
                 <StudentPortal />
               </div>
             ) : user.role === 'admin' ? (
               <AdminPortal />
             ) : user.role === 'parent' && (user.profile?.roles || []).includes('PARENT') ? (
-              <div className="min-h-[100dvh] w-full bg-slate-950 sm:bg-slate-900 flex items-center justify-center p-0 sm:p-4">
+              <div className="min-h-[100dvh] shrink-0 w-full bg-slate-950 sm:bg-slate-900 flex items-start justify-center p-0 sm:p-4">
                 <ParentPortal />
               </div>
             ) : (

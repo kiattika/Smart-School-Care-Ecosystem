@@ -7,7 +7,8 @@ describe('ฟอร์มประเมินตนเองใช้ธีม�
     expect(src).toMatch(/id="student-self-assessment-form-container" className="bg-slate-900\/70/);
   });
   it('ส่วนเนื้อหาไม่มีพื้นขาว/ตัวหนังสือเทาเข้มบนพื้นมืด', () => {
-    const content = src.split('\n').slice(270).join('\n');
+    // ตัดส่วนหัว/ตัวบอกขั้น (ตั้งใจใช้พื้นขาวโปร่ง) ด้วย marker แทนเลขบรรทัดที่เลื่อนทุกครั้งที่แก้ไฟล์
+    const content = src.slice(src.indexOf('SECTION 1'));
     expect(content).not.toMatch(/\bbg-white(?![/\w-])|\bbg-slate-50\b|\btext-slate-(700|900)\b|\bborder-slate-(200|300)\b/);
   });
   it('ช่องกรอกมีตัวหนังสือสีสว่าง', () => {
