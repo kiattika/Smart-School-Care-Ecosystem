@@ -2560,3 +2560,31 @@ export function subscribeSemesterHealthLogs(
     return () => {};
   }
 }
+
+
+/**
+ * บันทึกการเยี่ยมบ้าน (แบบ สพฐ.) — home_visit_records/{studentId}_{ปีการศึกษา}
+ * โยน error ต่อให้ UI แจ้งผู้ใช้ (ห้ามแสดง "บันทึกแล้ว" ทั้งที่ไม่ได้บันทึก)
+ */
+const HOME_VISIT_COL = 'home_visit_records';
+export async function saveHomeVisitRecord(rec: import('../types').HomeVisitRecord): Promise<void> {
+  await setDoc(doc(db, HOME_VISIT_COL, rec.id), rec);
+}
+
+export function subscribeHomeVisitRecordsByRoom(
+  homeroomClass: string,
+  onUpdate: (rows: import('../types').HomeVisitRecord[]) => void
+): () => void {
+  try {
+    const q = query(collection(db, HOME_VISIT_COL), where('homeroomClass', '==', homeroomClass));
+    return onSnapshot(q, (snap) => {
+      onUpdate(snap.docs.map(d => ({ ...d.data(), id: d.id } as import('../types').HomeVisitRecord)));
+    }, (error) => {
+      console.warn('[subscribeHomeVisitRecordsByRoom] Listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeHomeVisitRecordsByRoom] Setup error:', error);
+    return () => {};
+  }
+}

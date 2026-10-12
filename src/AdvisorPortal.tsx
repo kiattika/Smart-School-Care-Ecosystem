@@ -30,6 +30,10 @@ import { isScheduleForRoom } from './lib/studentDaySchedule';
 import { useStudentHomeLocations } from './hooks/useStudentHomeLocations';
 import { useSchoolGeofence } from './hooks/useSchoolGeofence';
 import { calculateHaversineDistance, formatDistance } from './utils/geoUtils';
+import { useHomeVisitRecords } from './hooks/useHomeVisitRecords';
+import { currentYearRecords } from './lib/homeVisitForm';
+import { HomeVisitStudentDetailModal } from './components/homevisit/HomeVisitStudentDetailModal';
+import { HomeVisitFormModal } from './components/homevisit/HomeVisitFormModal';
 import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
 import { AdvisorGpsCheckInPanel } from './components/homevisit/AdvisorGpsCheckInPanel';
 import { AdvisorGateCheckInPanel } from './components/student-parent/AdvisorGateCheckInPanel';
@@ -43,8 +47,6 @@ export function AdvisorPortal() {
     leaveRequests,
     updateLeaveRequestStatus,
     updateStudentProfile,
-    submitHomeVisit,
-    homeVisits,
     selfAssessments
   } = useStore();
 
@@ -145,10 +147,16 @@ export function AdvisorPortal() {
     detailRange,
   );
   const [showLineModal, setShowLineModal] = useState(false);
-  const [showReportModal, setShowReportModal] = useState(false);
-  
-  type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
-  const [reportForm, setReportForm] = useState({ condition: 3, notes: '', urgent: false, geoVerified: false, riskLevel: 'LOW' as RiskLevel, photoUploaded: false, checkingGPS: false });
+  const [visitDetailStudentId, setVisitDetailStudentId] = useState<string | null>(null);
+  const [visitFormStudentId, setVisitFormStudentId] = useState<string | null>(null);
+  const { records: visitRecords } = useHomeVisitRecords(myRoom || undefined);
+  const visitRecordsByStudent = useMemo(() => currentYearRecords(visitRecords, todayStr), [visitRecords, todayStr]);
+  const visitDetailStudent = myStudents.find(st => st.studentId === visitDetailStudentId) || null;
+  const visitFormStudent = myStudents.find(st => st.studentId === visitFormStudentId) || null;
+  const distanceFromSchool = (sid: string): number | null => {
+    const hl = homeLocByStudent.get(sid);
+    return hl && geofenceConfigured ? calculateHaversineDistance(geofenceConfig.centerCoordinates, { latitude: hl.latitude, longitude: hl.longitude }) : null;
+  };
 
   // Custom Morning Attendance & Profile states
   const [routeModalStudent, setRouteModalStudent] = useState<Student | null>(null);
@@ -175,9 +183,7 @@ export function AdvisorPortal() {
 
   const handleReportClick = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setSelectedStudentId(id);
-    setShowReportModal(true);
-    setReportForm({ condition: 3, notes: '', urgent: false, geoVerified: false, riskLevel: 'LOW', photoUploaded: false, checkingGPS: false });
+    setVisitFormStudentId(id);
   };
 
   const selectedStudent = students.find(s => s.studentId === selectedStudentId);
@@ -439,7 +445,7 @@ export function AdvisorPortal() {
                   <MapPin className="w-5 h-5" /> เยี่ยมบ้านนักเรียนห้อง {myRoom || '-'}
                 </h2>
                 <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded font-bold">
-                  ยังไม่ได้บันทึกเยี่ยม {myStudents.filter(st => !homeVisits.some(v => v.studentId === st.studentId)).length} คน
+                  ยังไม่ได้บันทึกเยี่ยมปีนี้ {myStudents.filter(st => !visitRecordsByStudent.has(st.studentId)).length} คน
                 </span>
               </div>
               {myStudents.length === 0 ? (
@@ -448,10 +454,10 @@ export function AdvisorPortal() {
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {myStudents.map((student) => {
                     const hl = homeLocByStudent.get(student.studentId);
-                    const isCompleted = homeVisits.some(v => v.studentId === student.studentId);
-                    const distM = hl && geofenceConfigured ? calculateHaversineDistance(geofenceConfig.centerCoordinates, { latitude: hl.latitude, longitude: hl.longitude }) : null;
+                    const isCompleted = visitRecordsByStudent.has(student.studentId);
+                    const distM = distanceFromSchool(student.studentId);
                     return (
-                      <div key={student.studentId} className="bg-black/20 border border-white/5 rounded-xl p-4 hover:border-emerald-500/30 transition-all cursor-pointer" onClick={() => handleStudentClick(student.studentId)}>
+                      <div key={student.studentId} className="bg-black/20 border border-white/5 rounded-xl p-4 hover:border-emerald-500/30 transition-all cursor-pointer" onClick={() => setVisitDetailStudentId(student.studentId)}>
                         <div className="flex gap-3 mb-3">
                           <img src={student.photoUrl || student.avatar} alt="" className="w-10 h-10 rounded-full object-cover" />
                           <div className="min-w-0">
@@ -1106,155 +1112,29 @@ export function AdvisorPortal() {
          </div>
 
        )}
-       {/* Teacher Field Report Modal */}
-       {showReportModal && selectedStudent && (
-         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
-           <div className="bg-[#1c1f2b] border border-white/10 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col">
-             <div className="p-4 border-b border-white/10 flex justify-between items-center sticky top-0 bg-[#1c1f2b]/90 backdrop-blur z-10">
-               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                 <ClipboardList className="w-5 h-5 text-emerald-400" /> บันทึกการเยี่ยมบ้าน: {selectedStudent.name}
-               </h2>
-               <button onClick={() => setShowReportModal(false)} className="text-slate-400 hover:text-white transition-colors">
-                 <X className="w-5 h-5" />
-               </button>
-             </div>
-             
-             <div className="p-6 space-y-5">
-               <div>
-                 <label className="block text-sm font-bold text-slate-300 mb-2">สภาพแวดล้อมที่พักอาศัย (1 = แย่มาก, 5 = ดีมาก)</label>
-                 <div className="flex gap-2">
-                   {[1,2,3,4,5].map(score => (
-                     <button
-                       key={score}
-                       onClick={() => setReportForm({...reportForm, condition: score})}
-                       className={cn(
-                         "flex-1 py-2 rounded-lg border font-bold transition-all",
-                         reportForm.condition === score 
-                           ? "bg-indigo-500/20 border-indigo-500 text-indigo-300 shadow-[0_0_10px_rgba(99,102,241,0.2)]" 
-                           : "bg-black/20 border-white/10 text-slate-400 hover:bg-white/5"
-                
-                       )}>
-                       {score}
-                     </button>
-                   ))}
-                 </div>
-               </div>
-
-               <div>
-                 <label className="block text-sm font-bold text-slate-300 mb-2">บันทึกเพิ่มเติมจากครู (Social Environment Notes)</label>
-                 <textarea 
-                   value={reportForm.notes}
-                   onChange={e => setReportForm({...reportForm, notes: e.target.value})}
-                   className="w-full bg-black/20 border border-white/10 rounded-lg p-3 text-sm text-white focus:border-indigo-500 outline-none h-32 resize-none"
-                   placeholder="เช่น สภาพชุมชนแออัด, ผู้ปกครองดูแลเอาใจใส่ดี..."
-                 />
-               </div>
-
-               <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-4 flex items-center justify-between">
-                 <div>
-                   <h4 className="font-bold text-rose-400 flex items-center gap-2">
-                     <AlertTriangle className="w-4 h-4" /> ส่งต่อผู้บริหาร (Urgent Case)
-                   </h4>
-                   <p className="text-xs text-rose-400/70 mt-1">ต้องการความช่วยเหลือฉุกเฉิน (เช่น ทุน, สภาพจิตใจ)</p>
-                 </div>
-                 <button 
-                   onClick={() => setReportForm({...reportForm, urgent: !reportForm.urgent})}
-                   className={cn(
-                     "w-12 h-6 rounded-full transition-colors relative",
-                     reportForm.urgent ? "bg-rose-500" : "bg-slate-700"
-                   )}
-                 >
-                   <div className={cn(
-                     "absolute top-1 w-4 h-4 rounded-full bg-white transition-transform",
-                     reportForm.urgent ? "right-1" : "left-1"
-                   )} />
-                 </button>
-               </div>
-
-               {/* New KPIs: Geo Verify, Photo, Risk Level */}
-               <div className="space-y-4 pt-2 border-t border-white/5">
-                 <div className="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-white/5">
-                   <div>
-                     <h4 className="text-sm font-bold text-slate-200">ยืนยันพิกัด GPS</h4>
-                     <p className="text-[10px] text-slate-400 mt-0.5">ระยะห่าง 50m จากพิกัดบ้าน</p>
-                   </div>
-                   <button 
-                     onClick={() => {
-                       setReportForm(prev => ({...prev, checkingGPS: true}));
-                       setTimeout(() => {
-                         setReportForm(prev => ({...prev, geoVerified: true, checkingGPS: false}));
-                       }, 1000);
-                     }}
-                     disabled={reportForm.geoVerified || reportForm.checkingGPS}
-                     className={cn(
-                       "px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1",
-                       reportForm.geoVerified ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-indigo-600 hover:bg-indigo-500 text-white"
-                     )}
-                   >
-                     {reportForm.checkingGPS ? <span className="animate-spin text-lg leading-none">⟳</span> : reportForm.geoVerified ? <CheckCircle className="w-3.5 h-3.5" /> : <MapPin className="w-3.5 h-3.5" />}
-                     {reportForm.checkingGPS ? 'กำลังตรวจสอบ...' : reportForm.geoVerified ? 'ยืนยันแล้ว' : 'กดเพื่อเช็คพิกัด'}
-                   </button>
-                 </div>
-
-                 <div className="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-white/5">
-                   <div>
-                     <h4 className="text-sm font-bold text-slate-200">รูปถ่ายหน้าบ้าน</h4>
-                     <p className="text-[10px] text-slate-400 mt-0.5">อัปโหลดรูปถ่ายพร้อมนักเรียน</p>
-                   </div>
-                   <button 
-                     onClick={() => setReportForm({...reportForm, photoUploaded: !reportForm.photoUploaded})}
-                     className={cn(
-                       "px-3 py-1.5 rounded-lg text-xs font-bold transition-all border",
-                       reportForm.photoUploaded ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-slate-700/50 text-slate-300 border-white/10 hover:bg-slate-700"
-                     )}
-                   >
-                     {reportForm.photoUploaded ? '✓ จำลองอัปโหลดสำเร็จ' : 'จำลองอัปโหลดภาพ'}
-                   </button>
-                 </div>
-
-                 <div>
-                   <label className="block text-sm font-bold text-slate-300 mb-2">ระดับความเสี่ยง (Risk Level)</label>
-                   <div className="grid grid-cols-3 gap-2">
-                     {(['LOW', 'MEDIUM', 'HIGH'] as RiskLevel[]).map(level => {
-                       const label = level === 'LOW' ? 'ปกติ' : level === 'MEDIUM' ? 'เฝ้าระวัง' : 'เสี่ยงสูง';
-                       const colorClass = level === 'LOW' ? "emerald" : level === 'MEDIUM' ? "amber" : "rose";
-                       const isActive = reportForm.riskLevel === level;
-                       return (
-                         <button
-                           key={level}
-                           onClick={() => setReportForm({...reportForm, riskLevel: level})}
-                           className={cn(
-                             "py-2 rounded-lg border font-bold text-xs transition-all",
-                             isActive ? `bg-${colorClass}-500/20 border-${colorClass}-500 text-${colorClass}-400` : "bg-black/20 border-white/10 text-slate-400 hover:bg-white/5"
-                           )}
-                         >
-                           {label}
-                         </button>
-                       )
-                     })}
-                   </div>
-                 </div>
-               </div>
-
-               <button 
-                 onClick={() => {
-                   submitHomeVisit({
-                     studentId: selectedStudent.studentId,
-                     advisorEmail: user?.email || '',
-                     visitedAt: new Date().toISOString(),
-                     geoVerified: reportForm.geoVerified,
-                     riskLevel: reportForm.riskLevel,
-                     photoUploaded: reportForm.photoUploaded
-                   });
-                   setShowReportModal(false);
-                 }}
-                 className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors shadow-lg mt-4"
-               >
-                 บันทึกข้อมูลเข้าระบบ
-               </button>
-             </div>
-           </div>
-         </div>
+       {/* รายละเอียดสำหรับเยี่ยมบ้าน + แบบบันทึกการเยี่ยมบ้าน (สพฐ.) */}
+       {visitDetailStudent && !visitFormStudent && (
+         <HomeVisitStudentDetailModal
+           student={visitDetailStudent}
+           location={homeLocByStudent.get(visitDetailStudent.studentId)}
+           distanceFromSchoolM={distanceFromSchool(visitDetailStudent.studentId)}
+           record={visitRecordsByStudent.get(visitDetailStudent.studentId)}
+           onClose={() => setVisitDetailStudentId(null)}
+           onOpenForm={() => setVisitFormStudentId(visitDetailStudent.studentId)}
+         />
+       )}
+       {visitFormStudent && (
+         <HomeVisitFormModal
+           student={visitFormStudent}
+           location={homeLocByStudent.get(visitFormStudent.studentId)}
+           distanceFromSchoolM={distanceFromSchool(visitFormStudent.studentId)}
+           existing={visitRecordsByStudent.get(visitFormStudent.studentId)}
+           homeroomClass={myRoom || ''}
+           advisor={{ uid: user?.uid || '', name: user?.profile ? `${user.profile.prefix || ''}${user.profile.firstName} ${user.profile.lastName}`.trim() : (user?.displayName || '') }}
+           todayYmd={todayStr}
+           onClose={() => setVisitFormStudentId(null)}
+           onSaved={(msg) => { setVisitFormStudentId(null); setVisitDetailStudentId(null); setToastMessage(msg); }}
+         />
        )}
 
        {/* Student Self-Assessment Detail Modal */}

@@ -69,6 +69,7 @@ function mapDocToStudent(id: string, data: any): Student {
     parentUid: data.parentUid || data.parentId || undefined,
     parentId: data.parentId || data.parentUid || undefined,
     parentEmail: data.parentEmail || '',
+    parentMobile: data.parentMobile || '',
     studentUid: data.studentUid || undefined,
     // FIX (Task 0 — ตรวจสอบ behaviorScore): เดิม hook นี้ไม่ map field นี้เลย ทำให้ทุกหน้าที่ใช้
     // useRealStudents() ต้อง fallback ไปอ่านจาก StudentAnalytics (session-local, dead) แทน
