@@ -70,6 +70,8 @@ export interface Student {
   // ผู้ปกครอง/นักเรียนดูได้โดยไม่ต้องมีสิทธิ์ query attendance_records ทั้งห้อง — ครู/ครูที่ปรึกษา
   // ใช้ useRoomAttendanceRecords (real-time, เลือกช่วงวันที่ได้) แทนเพราะมีสิทธิ์อ่านตรงอยู่แล้ว
   attendanceStats?: { present: number; absent: number; late: number; leave: number };
+  // ยอดสะสมแยกรายวิชา key = รหัสวิชา (sanitize แล้ว) — sync ตอนครูเช็คชื่อคาบวิชา ดู lib/courseAttendanceStats.ts
+  courseAttendanceStats?: Record<string, { code?: string; name?: string; present?: number; absent?: number; late?: number; leave?: number }>;
   // คณะสี — รากฐานสำหรับระบบคะแนนถ้วยในอนาคต (ยังไม่คำนวณคะแนนถ้วยตอนนี้) ดู HouseConfig
   houseId?: string | null;
 }
