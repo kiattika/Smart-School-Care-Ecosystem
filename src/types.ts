@@ -603,18 +603,29 @@ export interface GPSCheckInLog {
 export interface DetailedLeaveRequest {
   id: string;
   studentId: string;
+  /** Firebase Auth UID ของนักเรียน / ผู้ปกครอง (null = ยังไม่มีผู้ปกครองเชื่อมบัญชี) — ประทับตอนยื่น ตรงกับ students/{studentId} จริง */
+  studentUid: string;
+  parentUid: string | null;
+  /** ห้องของนักเรียนตอนยื่น (students.room) — ใช้ให้ครูที่ปรึกษาห้องนั้นเห็นและตัดสิน */
+  homeroomClass: string;
   leaveType: 'SICK' | 'PERSONAL' | 'ACTIVITY' | 'OTHER';
   startDate: string;
   endDate: string;
   totalDays: number;
   reason: string;
-  attachmentUrl?: string;
-  attachmentName?: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  /** PENDING_PARENT → PENDING_TEACHER → APPROVED/REJECTED; 'PENDING' = ข้อมูลเก่า (ถือเป็นรอครู) */
+  status: 'PENDING_PARENT' | 'PENDING_TEACHER' | 'APPROVED' | 'REJECTED' | 'PENDING';
+  submittedByRole: 'student' | 'parent';
+  submittedByUid: string;
   submittedBy: string;
   submittedAt: string;
+  noParentLinked: boolean;
+  parentAcknowledgedAt?: string | null;
+  parentAcknowledgedBy?: string | null;
   teacherRemarks?: string;
-  approvedBy?: string;
+  decidedBy?: string;
+  decidedByStaffId?: string;
+  decidedAt?: string;
 }
 
 export interface SemesterHealthRecord {
@@ -1114,7 +1125,6 @@ export interface StoreState {
   homeroomAssignments: Record<string, string>; // teacherEmail -> roomName
   analytics: StudentAnalytics[];
   attendanceRecords: Record<string, Record<string, AttendanceStatus>>; // mapped by courseId -> studentId
-  leaveRequests: LeaveRequest[];
   scheduleConfig: ScheduleConfig;
   schoolCheckInRecords: Record<string, { status: AttendanceStatus, time?: Date }>;
   
@@ -1141,7 +1151,6 @@ export interface StoreState {
 
   // Student & Parent Module Extended State
   gateAttendanceLogs: GateAttendanceRecord[];
-  detailedLeaveRequests: DetailedLeaveRequest[];
   semesterHealthLogs: Record<string, SemesterHealthRecord[]>;
   chronicIllnesses: Record<string, ChronicIllness[]>;
   allergies: Record<string, AllergyRecord[]>;
@@ -1192,8 +1201,6 @@ export interface StoreState {
   cycleAttendanceStatus: (courseId: string, studentId: string) => void;
   setAttendanceStatus: (courseId: string, studentId: string, status: AttendanceStatus) => void;
   adjustBehaviorScore: (studentId: string, amount: number, reason?: string) => void;
-  submitLeaveRequest: (studentId: string, date: Date, reason: string) => void;
-  updateLeaveRequestStatus: (id: string, status: 'APPROVED' | 'REJECTED') => void;
   moveStudentSeat: (studentId: string, newSeatIndex: number | null) => void;
   resetClassroomSeats: (room?: string) => void;
   autoAssignClassroomSeats: (room?: string, capacity?: number) => void;
@@ -1261,8 +1268,6 @@ export interface StoreState {
 
   // Extended Student & Parent Module Actions
   recordGateAttendance: (studentId: string, type: 'ENTRY' | 'EXIT', method: GateAttendanceRecord['method']) => void;
-  submitDetailedLeave: (request: Omit<DetailedLeaveRequest, 'id' | 'submittedAt' | 'status'>) => void;
-  approveDetailedLeave: (id: string, teacherRemarks?: string) => void;
   // ทั้ง 3 action นี้คืน Promise ที่ resolve ก็ต่อเมื่อ Firestore เขียนสำเร็จจริง (reject ถ้า rules
   // ปฏิเสธ/offline ฯลฯ) — ผู้เรียกต้อง await แล้วค่อยแสดง "บันทึกสำเร็จ" ห้ามโชว์ optimistic ก่อนเช็คผล
   save2QScreening: (studentId: string, q1: boolean, q2: boolean) => Promise<void>;

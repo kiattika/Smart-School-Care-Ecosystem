@@ -1225,6 +1225,155 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // 15b. detailed_leave_requests — นักเรียน/ผู้ปกครองยื่น → ผู้ปกครองรับทราบ → ครูที่ปรึกษาตัดสิน
+  describe('detailed_leave_requests collection', () => {
+    const STU_UID = 'stu-uid-l1';
+    const STU_ID = 'l-std-1';
+    const ROOM = 'ม.5/8';
+    const PARENT_UID = 'parent-l1';
+    const HR_UID = 'hr-l1';
+    const COL = 'detailed_leave_requests';
+    const stu = () => asUser(STU_UID, ['STUDENT']).firestore();
+    const par = () => asUser(PARENT_UID, ['PARENT']).firestore();
+    const hr = () => asUser(HR_UID, ['HOMEROOM_TEACHER'], { staffId: HR_UID }).firestore();
+    const otherHr = () => asUser('other-hr-l', ['HOMEROOM_TEACHER'], { staffId: 'other-hr-l' }).firestore();
+
+    async function seed(opts: { parent?: boolean } = {}) {
+      const withParent = opts.parent !== false;
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({
+          studentId: STU_ID, studentUid: STU_UID, room: ROOM, name: 'Leave Kid',
+          ...(withParent ? { parentUid: PARENT_UID } : {}),
+        });
+        await ctx.firestore().doc(`staff/${HR_UID}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+        await ctx.firestore().doc('staff/other-hr-l').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+      });
+    }
+    const leave = (id: string, over: Record<string, unknown> = {}) => ({
+      id, studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID, homeroomClass: ROOM,
+      leaveType: 'SICK', startDate: '2026-10-13', endDate: '2026-10-14', totalDays: 2, reason: 'ไข้หวัด',
+      status: 'PENDING_PARENT', submittedByRole: 'student', submittedByUid: STU_UID, submittedBy: 'Leave Kid',
+      submittedAt: '2026-10-12T00:00:00.000Z', noParentLinked: false, parentAcknowledgedAt: null,
+      ...over,
+    });
+    async function put(id: string, over: Record<string, unknown> = {}) {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`${COL}/${id}`).set(leave(id, over)); });
+    }
+
+    describe('create', () => {
+      it('student with a linked parent starts at PENDING_PARENT', async () => {
+        await seed();
+        await assertSucceeds(stu().doc(`${COL}/c1`).set(leave('c1')));
+      });
+      it('denies a student creating an already-APPROVED / skip-parent leave', async () => {
+        await seed();
+        await assertFails(stu().doc(`${COL}/c2`).set(leave('c2', { status: 'APPROVED' })));
+        await assertFails(stu().doc(`${COL}/c3`).set(leave('c3', { status: 'PENDING_TEACHER' })));
+      });
+      it('student without a linked parent goes straight to the teacher with noParentLinked', async () => {
+        await seed({ parent: false });
+        await assertSucceeds(stu().doc(`${COL}/c4`).set(leave('c4', { parentUid: null, status: 'PENDING_TEACHER', noParentLinked: true })));
+        await assertFails(stu().doc(`${COL}/c5`).set(leave('c5', { parentUid: null, status: 'PENDING_PARENT', noParentLinked: true })));
+      });
+      it('the real parent can submit; it goes to the teacher immediately', async () => {
+        await seed();
+        await assertSucceeds(par().doc(`${COL}/c6`).set(leave('c6', { status: 'PENDING_TEACHER', submittedByRole: 'parent', submittedByUid: PARENT_UID, submittedBy: 'ผู้ปกครอง' })));
+        await assertFails(par().doc(`${COL}/c7`).set(leave('c7', { status: 'PENDING_PARENT', submittedByRole: 'parent', submittedByUid: PARENT_UID })));
+      });
+      it('denies another parent/student submitting for this child', async () => {
+        await seed();
+        await assertFails(asUser('stranger-parent', ['PARENT']).firestore().doc(`${COL}/c8`).set(leave('c8', { status: 'PENDING_TEACHER', submittedByRole: 'parent', submittedByUid: 'stranger-parent' })));
+        await assertFails(asUser('stranger-stu', ['STUDENT']).firestore().doc(`${COL}/c9`).set(leave('c9', { submittedByUid: 'stranger-stu' })));
+      });
+      it('denies faked homeroomClass / studentUid / parentUid and bad shape', async () => {
+        await seed();
+        await assertFails(stu().doc(`${COL}/d1`).set(leave('d1', { homeroomClass: 'ม.6/1' })));
+        await assertFails(stu().doc(`${COL}/d2`).set(leave('d2', { parentUid: 'someone-else' })));
+        await assertFails(stu().doc(`${COL}/d3`).set(leave('d3', { endDate: '2026-10-01' })));
+        await assertFails(stu().doc(`${COL}/d4`).set(leave('d4', { totalDays: 99 })));
+        await assertFails(stu().doc(`${COL}/d5`).set(leave('d5', { reason: '' })));
+        await assertFails(stu().doc(`${COL}/d6`).set({ ...leave('d6'), approvedBy: 'ครู' }));
+        await assertFails(stu().doc(`${COL}/other-id`).set(leave('d7')));
+      });
+    });
+
+    describe('update', () => {
+      it('students and parents can never approve (self-approval blocked)', async () => {
+        await seed();
+        await put('u1', { status: 'PENDING_TEACHER' });
+        await assertFails(stu().doc(`${COL}/u1`).update({ status: 'APPROVED' }));
+        await assertFails(par().doc(`${COL}/u1`).update({ status: 'APPROVED', decidedBy: 'x', teacherRemarks: '' }));
+      });
+      it('the linked parent acknowledges a PENDING_PARENT leave (and nothing else)', async () => {
+        await seed();
+        await put('u2');
+        await assertFails(par().doc(`${COL}/u2`).update({ status: 'APPROVED' }));
+        await assertFails(par().doc(`${COL}/u2`).update({ status: 'PENDING_TEACHER', parentAcknowledgedAt: 'x', parentAcknowledgedBy: PARENT_UID, reason: 'แก้เหตุผล' }));
+        await assertSucceeds(par().doc(`${COL}/u2`).update({ status: 'PENDING_TEACHER', parentAcknowledgedAt: '2026-10-12T01:00:00.000Z', parentAcknowledgedBy: PARENT_UID }));
+      });
+      it('another parent cannot acknowledge', async () => {
+        await seed();
+        await put('u3');
+        await assertFails(asUser('stranger-parent', ['PARENT']).firestore().doc(`${COL}/u3`).update({ status: 'PENDING_TEACHER', parentAcknowledgedAt: 'x', parentAcknowledgedBy: 'stranger-parent' }));
+      });
+      it('the homeroom teacher cannot decide before the parent acknowledged', async () => {
+        await seed();
+        await put('u4');
+        await assertFails(hr().doc(`${COL}/u4`).update({ status: 'APPROVED', decidedBy: 'ครู', teacherRemarks: '' }));
+      });
+      it('the homeroom teacher of that room approves/rejects a PENDING_TEACHER leave', async () => {
+        await seed();
+        await put('u5', { status: 'PENDING_TEACHER' });
+        await put('u6', { status: 'PENDING_TEACHER' });
+        await assertSucceeds(hr().doc(`${COL}/u5`).update({ status: 'APPROVED', decidedBy: 'ครูที่ปรึกษา', decidedByStaffId: HR_UID, decidedAt: '2026-10-12T02:00:00.000Z', teacherRemarks: 'อนุมัติ' }));
+        await assertSucceeds(hr().doc(`${COL}/u6`).update({ status: 'REJECTED', decidedBy: 'ครูที่ปรึกษา', decidedByStaffId: HR_UID, decidedAt: '2026-10-12T02:00:00.000Z', teacherRemarks: 'ไม่มีเอกสาร' }));
+      });
+      it('a teacher of another room cannot decide; decided leaves are final', async () => {
+        await seed();
+        await put('u7', { status: 'PENDING_TEACHER' });
+        await assertFails(otherHr().doc(`${COL}/u7`).update({ status: 'APPROVED', decidedBy: 'ครูห้องอื่น', teacherRemarks: '' }));
+        await put('u8', { status: 'APPROVED', decidedBy: 'ครู', teacherRemarks: '' });
+        await assertFails(hr().doc(`${COL}/u8`).update({ status: 'REJECTED', decidedBy: 'ครู', teacherRemarks: '' }));
+      });
+      it('a decision cannot edit the student-entered content', async () => {
+        await seed();
+        await put('u9', { status: 'PENDING_TEACHER' });
+        await assertFails(hr().doc(`${COL}/u9`).update({ status: 'APPROVED', decidedBy: 'ครู', teacherRemarks: '', reason: 'เปลี่ยนเหตุผล' }));
+        await assertFails(hr().doc(`${COL}/u9`).update({ status: 'APPROVED', decidedBy: '', teacherRemarks: '' }));
+      });
+    });
+
+    describe('read / delete', () => {
+      it('owner student, linked parent and the homeroom teacher can read; others cannot', async () => {
+        await seed();
+        await put('r1');
+        await assertSucceeds(stu().doc(`${COL}/r1`).get());
+        await assertSucceeds(par().doc(`${COL}/r1`).get());
+        await assertSucceeds(hr().doc(`${COL}/r1`).get());
+        await assertFails(otherHr().doc(`${COL}/r1`).get());
+        await assertFails(asUser('stranger-stu', ['STUDENT']).firestore().doc(`${COL}/r1`).get());
+        await assertFails(asUser('stranger-parent', ['PARENT']).firestore().doc(`${COL}/r1`).get());
+      });
+      it('queries by studentUid / parentUid / homeroomClass work for the right viewer', async () => {
+        await seed();
+        await put('r2');
+        const q = (db: any, f: string, v: string) => getDocs(query(collection(db, COL), where(f, '==', v)));
+        await assertSucceeds(q(stu(), 'studentUid', STU_UID));
+        await assertSucceeds(q(par(), 'parentUid', PARENT_UID));
+        await assertSucceeds(q(hr(), 'homeroomClass', ROOM));
+        await assertFails(q(otherHr(), 'homeroomClass', ROOM));
+        await assertFails(q(par(), 'studentUid', STU_UID));
+      });
+      it('nobody can delete a leave', async () => {
+        await seed();
+        await put('x1');
+        await assertFails(stu().doc(`${COL}/x1`).delete());
+        await assertFails(hr().doc(`${COL}/x1`).delete());
+        await assertFails(asRole('SUPER_ADMIN').firestore().doc(`${COL}/x1`).delete());
+      });
+    });
+  });
+
   // 16. student_portfolio_entries — นักเรียนบันทึกผลงานเอง + ครูที่ปรึกษาอนุมัติ
   describe('student_portfolio_entries collection', () => {
     const STU_UID = 'stu-uid-p1';
