@@ -21,6 +21,7 @@ import {
   GraduationCap
 } from 'lucide-react';
 import { useStore } from '../../store';
+import { NoStudentNotice } from './NoStudentNotice';
 import { EMPTY_SDQ_ANSWERS } from '../shared/SdqQuestionnaireForm';
 import { SdqAnswers } from '../../lib/sdqQuestionnaire';
 import { SdqEntryForm, EMPTY_IMPACT_FORM, ImpactFormValues } from '../shared/SdqEntryForm';
@@ -39,11 +40,21 @@ import {
   Student
 } from '../../types';
 
-export function HealthMentalWellbeingModule({
+type HealthMentalWellbeingModuleProps = { studentId: string; student?: Student; isParentView?: boolean };
+
+/** ไม่มีนักเรียนจริง = empty state (ห้าม fallback เป็นนักเรียนปลอม/คนแรกของ store — อาจเป็นลูกคนอื่น) */
+export function HealthMentalWellbeingModule(props: HealthMentalWellbeingModuleProps) {
+  const students = useStore(s => s.students);
+  const student = props.student || students.find(s => s.studentId === props.studentId);
+  if (!student) return <NoStudentNotice />;
+  return <HealthMentalWellbeingModuleInner {...props} student={student} />;
+}
+
+function HealthMentalWellbeingModuleInner({
   studentId,
   student: studentProp,
   isParentView = false
-}: { studentId: string; student?: Student; isParentView?: boolean }) {
+}: HealthMentalWellbeingModuleProps) {
   const user = useStore(s => s.user);
   const {
     chronicIllnesses,
@@ -95,30 +106,10 @@ export function HealthMentalWellbeingModule({
     return () => unsubscribe();
   }, [user?.uid, isParentView]);
 
-  const defaultStudent: Student = {
-    id: studentId || 'default-student',
-    studentId: studentId || '69501',
-    name: 'นักเรียน (กำลังโหลดข้อมูล)',
-    fullName: 'นักเรียน (กำลังโหลดข้อมูล)',
-    nickname: '',
-    photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    studentNo: 1,
-    number: 1,
-    grade: 'ม.5',
-    room: '1',
-    seatIndex: null,
-    homeLocation: {
-      address: 'อุตรดิตถ์',
-      coordinates: [17.6201, 100.0993],
-      routeImage: ''
-    },
-    attendance: { morningStatus: 'PRESENT', checkInMethod: 'SCAN', checkInTime: '07:45 น.' }
-  };
   // ใช้ student ของจริงที่ผู้เรียก (StudentPortal/ParentPortal) ดึงมาจาก useRealStudents() ถ้าส่งมาให้
   // แทนการค้นจาก state.students ของ Zustand (session-local ไม่เคยมี listener ผูกไว้ — ค่า studentUid/
   // parentUid ที่ต้องใช้ยืนยันตัวตนตอนเขียน Firestore จริงจะไม่มีวันครบถ้วนถ้าพึ่ง state นี้)
-  const student = studentProp || students.find(s => s.studentId === studentId) || students[0] || defaultStudent;
+  const student = studentProp as Student;
   // เฉพาะของนักเรียนคนนี้ (listener filter ด้วย studentUid/parentUid ของผู้ใช้อยู่แล้ว แต่ผู้ปกครอง
   // ที่มีบุตรหลานหลายคนจะได้หลาย record — กรองตาม studentId ที่กำลังดูอีกชั้น) เรียงเก่า→ใหม่
   const healthLogs = semHealthLogs.filter(l => l.studentId === student.studentId);

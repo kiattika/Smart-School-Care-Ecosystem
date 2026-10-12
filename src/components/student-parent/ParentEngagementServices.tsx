@@ -18,6 +18,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { useStore } from '../../store';
+import { NoStudentNotice } from './NoStudentNotice';
 import { subscribeBillingInvoices, submitPaymentSlip } from '../../services/firestoreService';
 import { uploadBillingFile } from '../../services/storageService';
 import { validateBillingFile, buildSlipSubmissionPatch, canSubmitSlip } from '../../lib/billingPayment';
@@ -27,11 +28,21 @@ import { PromptPayQr } from '../shared/PromptPayQr';
 import { useBillingPaymentInfo } from '../../hooks/useBillingPaymentInfo';
 import { hasPaymentChannel } from '../../lib/billingPaymentInfo';
 
-export function ParentEngagementServices({
+type ParentEngagementServicesProps = { studentId: string; student?: Student; isParentView?: boolean };
+
+/** ไม่มีนักเรียนจริง = empty state (ห้าม fallback เป็นนักเรียนปลอม/คนแรกของ store — อาจเป็นลูกคนอื่น) */
+export function ParentEngagementServices(props: ParentEngagementServicesProps) {
+  const students = useStore(s => s.students);
+  const student = props.student || students.find(s => s.studentId === props.studentId);
+  if (!student) return <NoStudentNotice />;
+  return <ParentEngagementServicesInner {...props} student={student} />;
+}
+
+function ParentEngagementServicesInner({
   studentId,
   student: studentProp,
   isParentView = false
-}: { studentId: string; student?: Student; isParentView?: boolean }) {
+}: ParentEngagementServicesProps) {
   const user = useStore(s => s.user);
   const {
     parentTeacherMessages,
@@ -41,30 +52,10 @@ export function ParentEngagementServices({
     students
   } = useStore();
 
-  const defaultStudent: Student = {
-    id: studentId || 'default-student',
-    studentId: studentId || '69501',
-    name: 'นักเรียน (กำลังโหลดข้อมูล)',
-    fullName: 'นักเรียน (กำลังโหลดข้อมูล)',
-    nickname: '',
-    photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    studentNo: 1,
-    number: 1,
-    grade: 'ม.5',
-    room: '1',
-    seatIndex: null,
-    homeLocation: {
-      address: 'อุตรดิตถ์',
-      coordinates: [17.6201, 100.0993],
-      routeImage: ''
-    },
-    attendance: { morningStatus: 'PRESENT', checkInMethod: 'SCAN', checkInTime: '07:45 น.' }
-  };
   // ใช้ student ของจริงที่ผู้เรียก (StudentPortal/ParentPortal) ดึงมาจาก useRealStudents() ถ้าส่งมาให้
   // แทนการค้นจาก state.students ของ Zustand (session-local ไม่เคยมี listener ผูกไว้ — ค่า studentUid/
   // parentUid ที่ต้องใช้กรอง query ใบแจ้งหนี้จริงจะไม่มีวันครบถ้วนถ้าพึ่ง state นี้)
-  const student = studentProp || students.find(s => s.studentId === studentId) || students[0] || defaultStudent;
+  const student = studentProp as Student;
 
   // TASK 2 (เฟส 2 การเงิน): ใบแจ้งหนี้จริงจาก Firestore แบบ real-time แทน state.billingInvoices
   // ของ Zustand (ไม่เคยมี listener ผูกไว้เลย — ผู้ปกครองเขียนจ่ายเงินได้จริงแต่ไม่เคยเห็นยอดที่ต้องจ่าย)

@@ -505,7 +505,7 @@ export function StudentPortal() {
 
         {/* 1. Gate Attendance Tracker */}
         {activeTab === 'gate' && (
-          <GateAttendanceTracker studentId={student.studentId} isParentView={false} />
+          <GateAttendanceTracker studentId={student.studentId} student={student} isParentView={false} />
         )}
 
         {/* 2. Health & Mental Well-being */}

@@ -25,8 +25,20 @@ import { GateAttendanceRecord, DetailedLeaveRequest, AttendanceStatus, Student }
 import { GPSGeofenceCheckinModal } from '../GPSGeofenceCheckinModal';
 import { subscribeGateAttendanceLogs } from '../../services/firestoreService';
 import { DatePicker } from '../shared/DatePicker';
+import { NoStudentNotice } from './NoStudentNotice';
+import { attendanceStatsFromCounts } from '../../lib/studentAttendanceStats';
 
-export function GateAttendanceTracker({ studentId, isParentView = false }: { studentId: string; isParentView?: boolean }) {
+type GateAttendanceTrackerProps = { studentId: string; student?: Student; isParentView?: boolean };
+
+/** ไม่มีนักเรียนจริง = empty state (ห้าม fallback เป็นนักเรียนปลอม/คนแรกของ store — อาจเป็นลูกคนอื่น) */
+export function GateAttendanceTracker(props: GateAttendanceTrackerProps) {
+  const students = useStore(s => s.students);
+  const student = props.student || students.find(s => s.studentId === props.studentId);
+  if (!student) return <NoStudentNotice />;
+  return <GateAttendanceTrackerInner {...props} student={student} />;
+}
+
+function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentView = false }: GateAttendanceTrackerProps) {
   const {
     detailedLeaveRequests,
     submitDetailedLeave,
@@ -48,27 +60,7 @@ export function GateAttendanceTracker({ studentId, isParentView = false }: { stu
     );
   }, [user?.uid, isParentView]);
 
-  const defaultStudent: Student = {
-    id: studentId || 'default-student',
-    studentId: studentId || '69501',
-    name: 'นักเรียน (กำลังโหลดข้อมูล)',
-    fullName: 'นักเรียน (กำลังโหลดข้อมูล)',
-    nickname: '',
-    photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    studentNo: 1,
-    number: 1,
-    grade: 'ม.5',
-    room: '1',
-    seatIndex: null,
-    homeLocation: {
-      address: 'อุตรดิตถ์',
-      coordinates: [17.6201, 100.0993],
-      routeImage: ''
-    },
-    attendance: { morningStatus: 'PRESENT', checkInMethod: 'SCAN', checkInTime: '07:45 น.' }
-  };
-  const student = students.find(s => s.studentId === studentId) || students[0] || defaultStudent;
+  const student = studentProp as Student;
   const logs = gateAttendanceLogs.filter(l => l.studentId === student.studentId);
   const leaves = detailedLeaveRequests.filter(l => l.studentId === student.studentId);
 
@@ -104,18 +96,9 @@ export function GateAttendanceTracker({ studentId, isParentView = false }: { stu
     setTimeout(() => setLeaveSubmitSuccess(false), 4000);
   };
 
-  // Mock subject attendance stats
-  const subjectAttendanceList = [
-    { code: 'ค32101', name: 'คณิตศาสตร์พื้นฐาน', present: 28, late: 1, leave: 1, absent: 0, total: 30, rate: 96.6 },
-    { code: 'ค32201', name: 'คณิตศาสตร์เพิ่มเติม', present: 38, late: 2, leave: 0, absent: 0, total: 40, rate: 95.0 },
-    { code: 'ว32202', name: 'ฟิสิกส์ 2', present: 36, late: 1, leave: 2, absent: 1, total: 40, rate: 92.5 },
-    { code: 'ว32222', name: 'เคมี 2', present: 29, late: 0, leave: 1, absent: 0, total: 30, rate: 96.7 },
-    { code: 'ว32242', name: 'ชีววิทยา 2', present: 28, late: 1, leave: 1, absent: 0, total: 30, rate: 93.3 },
-    { code: 'อ32101', name: 'ภาษาอังกฤษเพื่อการสื่อสาร', present: 19, late: 0, leave: 1, absent: 0, total: 20, rate: 95.0 },
-    { code: 'ท32101', name: 'ภาษาไทยพื้นฐาน', present: 20, late: 0, leave: 0, absent: 0, total: 20, rate: 100.0 }
-  ];
-
-  const avgAttendance = 95.6;
+  // สถิติการเข้าเรียนสะสมจริงจาก students/{id}.attendanceStats (derived cache ที่ sync คู่กับ attendance_records)
+  // ยังไม่มีสถิติแยกรายวิชา: attendance_records เก็บเป็นเอกสารต่อห้อง/คาบ ผู้ปกครอง-นักเรียนอ่านตรงไม่ได้ตาม rules
+  const attStats = attendanceStatsFromCounts(student.studentId, student.attendanceStats);
 
   return (
     <div className="space-y-6">
@@ -141,7 +124,7 @@ export function GateAttendanceTracker({ studentId, isParentView = false }: { stu
           }`}
         >
           <TrendingUp className="w-3.5 h-3.5" />
-          <span>สถิติรายวิชา</span>
+          <span>สถิติการเข้าเรียน</span>
         </button>
         <button
           onClick={() => setActiveTab('leave')}
@@ -242,76 +225,53 @@ export function GateAttendanceTracker({ studentId, isParentView = false }: { stu
       )}
 
       {activeTab === 'subject' && (
-        <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-indigo-400" />
-                สถิติการเข้าเรียนรายวิชา (Subject-Wise Attendance Analytics)
-              </h3>
-              <p className="text-[11px] text-slate-400">
-                เกณฑ์ผ่านการประเมินเวลาเรียน สพฐ.: ต้องเข้าเรียนไม่น้อยกว่า 80% ของเวลาเรียนทั้งหมด
-              </p>
+        <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-5" data-testid="attendance-stats">
+          <div>
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-indigo-400" />
+              สถิติการเข้าเรียนสะสม
+            </h3>
+            <p className="text-[11px] text-slate-400">
+              นับจากการเช็คชื่อจริงทุกครั้งที่ครูบันทึก (ไม่นับ "ลา" ในอัตราการเข้าเรียน) — เกณฑ์เดิมของระบบคือไม่ต่ำกว่า {attStats.threshold}%
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center text-[11px]">
+            <div className="bg-slate-800/50 border border-slate-800 rounded-2xl p-3">
+              <span className="text-slate-400 block">มาเรียน</span>
+              <span className="text-lg font-black text-emerald-400">{attStats.present}</span>
             </div>
-            
-            <div className="flex items-center gap-3 bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3">
-              <div>
-                <p className="text-[10px] text-slate-400">อัตราการเข้าเรียนเฉลี่ยรวม</p>
-                <p className="text-lg font-black text-emerald-400">{avgAttendance}%</p>
-              </div>
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                <ShieldCheck className="w-5 h-5" />
-              </div>
+            <div className="bg-slate-800/50 border border-slate-800 rounded-2xl p-3">
+              <span className="text-slate-400 block">มาสาย</span>
+              <span className="text-lg font-black text-amber-400">{attStats.late}</span>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-800 rounded-2xl p-3">
+              <span className="text-slate-400 block">ลา</span>
+              <span className="text-lg font-black text-blue-400">{attStats.leave}</span>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-800 rounded-2xl p-3">
+              <span className="text-slate-400 block">ขาด</span>
+              <span className="text-lg font-black text-rose-400">{attStats.absent}</span>
+            </div>
+            <div className="col-span-2 sm:col-span-1 bg-slate-800/50 border border-slate-800 rounded-2xl p-3">
+              <span className="text-slate-400 block">อัตราเข้าเรียน</span>
+              <span className={`text-lg font-black ${attStats.isBelowThreshold ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {attStats.attendanceRate !== null ? `${attStats.attendanceRate}%` : '—'}
+              </span>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {subjectAttendanceList.map((subj) => (
-              <div
-                key={subj.code}
-                className="bg-slate-800/40 border border-slate-800 hover:border-indigo-500/40 rounded-2xl p-4 transition-all"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-bold mr-2">
-                      {subj.code}
-                    </span>
-                    <span className="text-xs font-bold text-slate-200">{subj.name}</span>
-                  </div>
-                  <span className={`text-xs font-extrabold ${subj.rate >= 90 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {subj.rate}%
-                  </span>
-                </div>
-
-                {/* Progress bar */}
-                <div className="w-full bg-slate-900 rounded-full h-2 mb-3 overflow-hidden border border-slate-800">
-                  <div 
-                    className={`h-full rounded-full ${subj.rate >= 90 ? 'bg-emerald-500' : 'bg-amber-500'}`}
-                    style={{ width: `${subj.rate}%` }}
-                  ></div>
-                </div>
-
-                <div className="grid grid-cols-4 gap-2 text-center text-[10px]">
-                  <div className="bg-slate-900/60 p-1.5 rounded-lg border border-slate-800">
-                    <span className="text-slate-400 block">มาเรียน</span>
-                    <span className="font-bold text-emerald-400">{subj.present}</span>
-                  </div>
-                  <div className="bg-slate-900/60 p-1.5 rounded-lg border border-slate-800">
-                    <span className="text-slate-400 block">สาย</span>
-                    <span className="font-bold text-amber-400">{subj.late}</span>
-                  </div>
-                  <div className="bg-slate-900/60 p-1.5 rounded-lg border border-slate-800">
-                    <span className="text-slate-400 block">ลา</span>
-                    <span className="font-bold text-blue-400">{subj.leave}</span>
-                  </div>
-                  <div className="bg-slate-900/60 p-1.5 rounded-lg border border-slate-800">
-                    <span className="text-slate-400 block">ขาด</span>
-                    <span className="font-bold text-rose-400">{subj.absent}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          {attStats.attendanceRate === null && (
+            <p className="text-[11px] text-slate-400 text-center">ยังไม่มีข้อมูลเช็คชื่อของนักเรียนคนนี้</p>
+          )}
+          {attStats.isBelowThreshold && (
+            <p role="alert" className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
+              อัตราการเข้าเรียนต่ำกว่าเกณฑ์ {attStats.threshold}% — ควรติดตามกับครูที่ปรึกษา
+            </p>
+          )}
+          <p className="text-[11px] text-slate-500">
+            สถิติแยกรายวิชายังไม่เปิดให้ดูในหน้านี้ ขณะนี้แสดงเฉพาะยอดรวมทุกวิชา
+          </p>
         </div>
       )}
 
