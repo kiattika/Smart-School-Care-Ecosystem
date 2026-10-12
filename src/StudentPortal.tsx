@@ -1,5 +1,6 @@
 import { cn } from "./lib/utils";
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { format } from 'date-fns';
 import { useStore } from './store';
 import { useRealStudents } from './hooks/useRealStudents';
 import { attendanceStatsFromCounts } from './lib/studentAttendanceStats';
@@ -35,9 +36,10 @@ import { NotificationBell } from './components/notifications/NotificationBell';
 import { GateAttendanceTracker } from './components/student-parent/GateAttendanceTracker';
 import { StudentElectiveEnrollment } from './components/student-parent/StudentElectiveEnrollment';
 import { HealthMentalWellbeingModule } from './components/student-parent/HealthMentalWellbeingModule';
-import { SocioeconomicWelfareModule } from './components/student-parent/SocioeconomicWelfareModule';
 import { BehaviorDisciplineModule } from './components/student-parent/BehaviorDisciplineModule';
-import { PortfolioActivityVault } from './components/student-parent/PortfolioActivityVault';
+import { StudentDaySchedule } from './components/student-parent/StudentDaySchedule';
+import { subscribeGateAttendanceLogs, getSelfAssessmentRecord } from './services/firestoreService';
+import { GateAttendanceRecord, StudentSelfAssessment } from './types';
 import { StudentPortfolioSection } from './components/portfolio/StudentPortfolioSection';
 import { StudentHomeLocationForm } from './components/homevisit/StudentHomeLocationForm';
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
@@ -47,10 +49,7 @@ import { StudentAssessmentDetailModal } from './components/StudentAssessmentDeta
 import { StudentProfilePhotoEditor } from './components/student-parent/StudentProfilePhotoEditor';
 
 export function StudentPortal() {
-  const {
-    selfAssessments,
-    saveSelfAssessment
-  } = useStore();
+  const { saveSelfAssessment } = useStore();
   const user = useStore(s => s.user);
 
   // อ่าน record ของตัวเองจาก Firestore สด — ไม่พึ่ง Zustand store ที่ว่างเมื่อล็อกอินใหม่/คนละเครื่อง
@@ -67,10 +66,31 @@ export function StudentPortal() {
   const [viewDetailModal, setViewDetailModal] = useState(false);
   const [showPhotoEditor, setShowPhotoEditor] = useState(false);
 
+  // ประตูโรงเรียนวันนี้ (จริงจาก gate_attendance_logs ของตัวเอง — query ด้วย studentUid ให้ผ่าน rules)
+  const [gateLogs, setGateLogs] = useState<GateAttendanceRecord[]>([]);
+  useEffect(() => {
+    if (!user?.uid) { setGateLogs([]); return; }
+    return subscribeGateAttendanceLogs(setGateLogs, { studentUid: user.uid });
+  }, [user?.uid]);
+
+  // ผลประเมินตนเองที่บันทึกไว้จริงใน Firestore (เดิมอ่านจาก store ที่ว่างเมื่อเปิดหน้าใหม่ → ขึ้น "รอการประเมิน" ทั้งที่ส่งไปแล้ว)
+  const [savedAssessment, setSavedAssessment] = useState<StudentSelfAssessment | null>(null);
+  const [assessmentVersion, setAssessmentVersion] = useState(0);
+
   // Student resolution — โดยปกติ STUDENT จะเห็น record เดียว (ของตัวเอง);
   // selectedStudentId ใช้เฉพาะ DEV profile switcher ถ้ามีมากกว่าหนึ่ง
   const student =
     myStudents.find(s => s.studentId === selectedStudentId) || myStudents[0];
+
+  const studentIdForAssessment = student?.studentId;
+  useEffect(() => {
+    if (!studentIdForAssessment) { setSavedAssessment(null); return; }
+    let cancelled = false;
+    getSelfAssessmentRecord(studentIdForAssessment)
+      .then(r => { if (!cancelled) setSavedAssessment(r); })
+      .catch(() => { if (!cancelled) setSavedAssessment(null); });
+    return () => { cancelled = true; };
+  }, [studentIdForAssessment, assessmentVersion]);
 
   if (studentsLoading) {
     return (
@@ -96,25 +116,13 @@ export function StudentPortal() {
     );
   }
 
-  // FIX (Task 0): เดิมอ่านจาก StudentAnalytics (session-local store, ว่างเปล่าเสมอ) → ตัวเลขที่เห็น
-  // เป็น fallback 98 ตายตัวทุกครั้ง — ตอนนี้อ่านจาก students/{id}.behaviorScore ของจริง (real-time)
-  const bScore = student.behaviorScore ?? 100;
-  const myAssessment = selfAssessments[student.studentId];
+  // คะแนนความประพฤติจริงจาก students/{id}.behaviorScore (real-time)
+  const bScore = student.behaviorScore;
+  const myAssessment = savedAssessment || undefined;
 
-  // Behavior level calculation
-  const level = Math.floor(bScore / 20) + 1;
-  const levelName = 
-    level >= 5 ? 'Diamond Scholar' :
-    level >= 4 ? 'Platinum Scholar' :
-    level >= 3 ? 'Gold Scholar' :
-    level >= 2 ? 'Silver Scholar' : 'Bronze Scholar';
-
-  const schedule = [
-    { time: '08:30 - 09:20', period: 'คาบ 1', subject: 'คณิตศาสตร์พื้นฐาน (ค32101)', room: 'อาคาร 4 ห้อง 421', status: 'PRESENT' },
-    { time: '09:20 - 10:10', period: 'คาบ 2', subject: 'ฟิสิกส์ 2 (ว32202)', room: 'ห้องแล็บฟิสิกส์ 2', status: 'PRESENT' },
-    { time: '10:10 - 11:00', period: 'คาบ 3', subject: 'ภาษาไทย 3 (ท32101)', room: 'อาคาร 3 ห้อง 312', status: 'UNMARKED' },
-    { time: '11:00 - 11:50', period: 'คาบ 4', subject: 'เคมี 2 (ว32222)', room: 'ห้องแล็บเคมี 1', status: 'UNMARKED' },
-  ];
+  // ประตูโรงเรียนวันนี้ (วันที่ตามเวลาท้องถิ่น ไม่ใช่ UTC)
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const todayEntryLog = gateLogs.find(g => g.studentId === student.studentId && g.date === todayStr && g.type === 'ENTRY');
 
   return (
     <div className="w-full max-w-7xl mx-auto p-3 sm:p-6 text-slate-100 min-h-screen space-y-6">
@@ -137,9 +145,6 @@ export function StudentPortal() {
                 <Camera className="w-3.5 h-3.5" />
               </button>
             )}
-            <span className="absolute -bottom-1.5 -right-1.5 px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black shadow">
-              ONLINE
-            </span>
           </div>
 
           <div>
@@ -147,17 +152,13 @@ export function StudentPortal() {
               <span className="px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-mono text-xs font-bold border border-indigo-500/30">
                 รหัส: {student.studentId}
               </span>
-              <span className="text-xs text-slate-400">
-                ชั้น ม.{student.room || '5/8'} เลขที่ {student.studentNo}
-              </span>
-              <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/30">
-                ⭐ {levelName} ({bScore} คะแนน)
-              </span>
+              {(student.room || student.studentNo) && (
+                <span className="text-xs text-slate-400">
+                  {student.room ? `ห้อง ${student.room}` : ''}{student.room && student.studentNo ? ' ' : ''}{student.studentNo ? `เลขที่ ${student.studentNo}` : ''}
+                </span>
+              )}
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-white">{student.name}</h1>
-            <p className="text-xs text-slate-400 mt-0.5">
-              โรงเรียนสมาร์ทแคร์วิทยาลัย • แผนการเรียนวิทยาศาสตร์-คณิตศาสตร์ (AI & Innovation)
-            </p>
           </div>
         </div>
 
@@ -173,7 +174,7 @@ export function StudentPortal() {
               >
                 {myStudents.map(s => (
                   <option key={s.studentId} value={s.studentId}>
-                    {s.name} (ม.{s.room || '5/8'})
+                    {s.name}{s.room ? ` (${s.room})` : ''}
                   </option>
                 ))}
               </select>
@@ -231,7 +232,7 @@ export function StudentPortal() {
             }`}
           >
             <MapPin className="w-4 h-4" />
-            <span>3. เยี่ยมบ้าน & ทุน กสศ.</span>
+            <span>3. ที่อยู่บ้าน & เยี่ยมบ้าน</span>
           </button>
 
           <button
@@ -243,7 +244,7 @@ export function StudentPortal() {
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
-            <span>4. ความประพฤติ & ใบรับรอง ปพ.</span>
+            <span>4. คะแนนความประพฤติ</span>
           </button>
 
           <button
@@ -267,7 +268,7 @@ export function StudentPortal() {
             }`}
           >
             <FolderGit2 className="w-4 h-4" />
-            <span>5. Portfolio & TCAS 10 หน้า</span>
+            <span>5. แฟ้มผลงาน</span>
           </button>
 
           <button
@@ -314,58 +315,36 @@ export function StudentPortal() {
         {/* OVERVIEW DASHBOARD */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
-            {/* Quick Metrics Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div 
+            {/* Quick Metrics Grid — เฉพาะตัวเลขที่มีข้อมูลจริงรองรับ */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div
                 onClick={() => setActiveTab('gate')}
                 className="bg-slate-900/70 border border-slate-800 hover:border-indigo-500/40 rounded-3xl p-5 backdrop-blur-md cursor-pointer transition-all space-y-1"
               >
                 <div className="flex items-center justify-between text-indigo-400 mb-1">
                   <Scan className="w-5 h-5" />
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10">07:28 น.</span>
+                  {todayEntryLog && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10">{todayEntryLog.timestamp}</span>
+                  )}
                 </div>
-                <span className="text-xs text-slate-400 block">สแกนเข้าประตูโรงเรียน</span>
-                <span className="text-lg font-black text-white">ตรงเวลา (On Time)</span>
-                <p className="text-[10px] text-emerald-400">🌡️ 36.5°C ปกติ</p>
+                <span className="text-xs text-slate-400 block">สแกนเข้าประตูโรงเรียนวันนี้</span>
+                <span className="text-lg font-black text-white">
+                  {todayEntryLog ? (todayEntryLog.status === 'LATE' ? 'มาสาย' : 'ตรงเวลา') : 'ยังไม่มีข้อมูลวันนี้'}
+                </span>
+                {todayEntryLog?.gateName && <p className="text-[10px] text-slate-400">{todayEntryLog.gateName}</p>}
               </div>
 
-              <div 
+              <div
                 onClick={() => setActiveTab('behavior')}
                 className="bg-slate-900/70 border border-slate-800 hover:border-emerald-500/40 rounded-3xl p-5 backdrop-blur-md cursor-pointer transition-all space-y-1"
               >
                 <div className="flex items-center justify-between text-emerald-400 mb-1">
                   <ShieldCheck className="w-5 h-5" />
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10">ระดับเพชร</span>
                 </div>
                 <span className="text-xs text-slate-400 block">คะแนนความประพฤติ</span>
-                <span className="text-lg font-black text-emerald-400">{bScore} / 100</span>
-                <p className="text-[10px] text-slate-400">ไม่เคยถูกตัดคะแนน</p>
-              </div>
-
-              <div 
-                onClick={() => setActiveTab('academic')}
-                className="bg-slate-900/70 border border-slate-800 hover:border-purple-500/40 rounded-3xl p-5 backdrop-blur-md cursor-pointer transition-all space-y-1"
-              >
-                <div className="flex items-center justify-between text-purple-400 mb-1">
-                  <Award className="w-5 h-5" />
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/10">Top 3%</span>
-                </div>
-                <span className="text-xs text-slate-400 block">ผลการเรียนเฉลี่ยสะสม (GPAX)</span>
-                <span className="text-lg font-black text-purple-400">3.88</span>
-                <p className="text-[10px] text-slate-400">อันดับที่ 4 ของสายชั้น</p>
-              </div>
-
-              <div 
-                onClick={() => setActiveTab('portfolio')}
-                className="bg-slate-900/70 border border-slate-800 hover:border-pink-500/40 rounded-3xl p-5 backdrop-blur-md cursor-pointer transition-all space-y-1"
-              >
-                <div className="flex items-center justify-between text-pink-400 mb-1">
-                  <FolderGit2 className="w-5 h-5" />
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-pink-500/10">TCAS 69</span>
-                </div>
-                <span className="text-xs text-slate-400 block">จิตอาสา & กิจกรรม</span>
-                <span className="text-lg font-black text-white">68 ชม.</span>
-                <p className="text-[10px] text-emerald-400">✓ ครบตามเกณฑ์ สพฐ.</p>
+                <span className="text-lg font-black text-emerald-400">
+                  {bScore !== undefined ? `${bScore} / 100` : 'ยังไม่มีข้อมูล'}
+                </span>
               </div>
             </div>
 
@@ -416,47 +395,10 @@ export function StudentPortal() {
               );
             })()}
 
-            {/* Timetable & Active Schedule */}
+            {/* ตารางเรียนวันนี้ + บัตรประจำตัว */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              <div className="lg:col-span-7 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-indigo-400" />
-                      ตารางเรียนประจำวัน (Today's Class Schedule)
-                    </h3>
-                    <p className="text-[11px] text-slate-400">วันพฤหัสบดีที่ 20 สิงหาคม 2569</p>
-                  </div>
-                  <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-bold">
-                    กำลังเรียน คาบ 2
-                  </span>
-                </div>
-
-                <div className="space-y-3">
-                  {schedule.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3.5 bg-slate-800/40 border border-slate-800 rounded-2xl flex items-center justify-between gap-3 hover:border-indigo-500/30 transition-all"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex flex-col items-center justify-center text-indigo-300">
-                          <span className="text-[10px] font-bold">{item.period}</span>
-                        </div>
-                        <div>
-                          <h4 className="text-xs font-bold text-white">{item.subject}</h4>
-                          <span className="text-[11px] text-slate-400">{item.time} • {item.room}</span>
-                        </div>
-                      </div>
-
-                      <span className={`text-[10px] font-bold px-2 py-1 rounded-full border ${
-                        item.status === 'PRESENT' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
-                        'bg-slate-800 border-slate-700 text-slate-400'
-                      }`}>
-                        {item.status === 'PRESENT' ? '✓ เช็คชื่อแล้ว' : 'ยังไม่ถึงเวลา'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+              <div className="lg:col-span-7">
+                <StudentDaySchedule room={student.room} />
               </div>
 
               {/* Digital Student Identity Pass */}
@@ -513,15 +455,10 @@ export function StudentPortal() {
           <HealthMentalWellbeingModule studentId={student.studentId} student={student} isParentView={false} />
         )}
 
-        {/* 3. Socioeconomic & Home Visit */}
-        {activeTab === 'socio' && (
-          <div className="space-y-8">
-            {user?.uid && (
-              <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-5">
-                <StudentHomeLocationForm student={student} studentUid={user.uid} />
-              </div>
-            )}
-            <SocioeconomicWelfareModule studentId={student.studentId} student={student} />
+        {/* 3. ที่อยู่บ้าน & พิกัดสำหรับเยี่ยมบ้าน (บันทึกจริงลง Firestore) */}
+        {activeTab === 'socio' && user?.uid && (
+          <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-5">
+            <StudentHomeLocationForm student={student} studentUid={user.uid} />
           </div>
         )}
 
@@ -535,14 +472,9 @@ export function StudentPortal() {
           <StudentElectiveEnrollment student={student} />
         )}
 
-        {/* 5. Portfolio — บันทึกผลงานเอง (Firestore + อนุมัติโดยครูที่ปรึกษา) + คลังผลงานเดิม */}
-        {activeTab === 'portfolio' && (
-          <div className="space-y-8">
-            {user?.uid && <StudentPortfolioSection student={student} studentUid={user.uid} />}
-            <div className="border-t border-slate-800 pt-6">
-              <PortfolioActivityVault studentId={student.studentId} />
-            </div>
-          </div>
+        {/* 5. แฟ้มผลงาน — บันทึกผลงานเอง (Firestore + อนุมัติโดยครูที่ปรึกษา) */}
+        {activeTab === 'portfolio' && user?.uid && (
+          <StudentPortfolioSection student={student} studentUid={user.uid} />
         )}
 
         {/* 6. Academic Reports & Homework */}
@@ -563,6 +495,7 @@ export function StudentPortal() {
               existingAssessment={myAssessment}
               onSave={async (assessment) => {
                 await saveSelfAssessment(assessment);
+                setAssessmentVersion(v => v + 1);
               }}
               onClose={() => setActiveTab('overview')}
             />

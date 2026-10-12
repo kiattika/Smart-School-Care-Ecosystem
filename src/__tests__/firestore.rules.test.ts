@@ -341,6 +341,24 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(asAnonymous().firestore().doc('discipline_logs/log-01').get());
     });
 
+    it('lets a student / parent read only logs carrying their own uid; never other children\'s or uid-less old logs', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('discipline_logs/mine').set({ studentId: 'std-101', studentUid: 'stu-uid-1', parentUid: 'par-uid-1', points: -5 });
+        await ctx.firestore().doc('discipline_logs/other').set({ studentId: 'std-102', studentUid: 'stu-uid-2', parentUid: 'par-uid-2', points: -5 });
+        await ctx.firestore().doc('discipline_logs/old').set({ studentId: 'std-101', points: -5 });
+        await ctx.firestore().doc('discipline_logs/nullparent').set({ studentId: 'std-103', studentUid: 'stu-uid-3', parentUid: null, points: 5 });
+      });
+      await assertSucceeds(asUser('stu-uid-1', ['STUDENT']).firestore().doc('discipline_logs/mine').get());
+      await assertSucceeds(asUser('par-uid-1', ['PARENT']).firestore().doc('discipline_logs/mine').get());
+      await assertFails(asUser('stu-uid-1', ['STUDENT']).firestore().doc('discipline_logs/other').get());
+      await assertFails(asUser('par-uid-1', ['PARENT']).firestore().doc('discipline_logs/other').get());
+      await assertFails(asUser('stu-uid-1', ['STUDENT']).firestore().doc('discipline_logs/old').get());
+      // parentUid เป็น null ต้องไม่ match ผู้ใช้ใดๆ (กัน null == null)
+      await assertFails(asUser('par-uid-9', ['PARENT']).firestore().doc('discipline_logs/nullparent').get());
+      // และเขียนเองไม่ได้
+      await assertFails(asUser('stu-uid-1', ['STUDENT']).firestore().doc('discipline_logs/x').set({ studentId: 'std-101', studentUid: 'stu-uid-1', points: 50 }));
+    });
+
     it('allows SUBJECT_TEACHER, HOMEROOM_TEACHER, SUPER_ADMIN to write discipline logs', async () => {
       await assertSucceeds(
         asRole('SUBJECT_TEACHER').firestore().doc('discipline_logs/log-new-1').set({ studentId: 'std-101', points: -2 })
