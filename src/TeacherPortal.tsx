@@ -1116,6 +1116,7 @@ export function TeacherPortal() {
                     studentsCount: item.studentsCount,
                     type: item.type,
                     teachingPartner: item.teachingPartner,
+                    teacherCount: Array.isArray(item.teacherIds) ? new Set(item.teacherIds).size : undefined,
                     partnerCheckedAttendance: item.partnerCheckedAttendance,
                     attendanceSummary
                   });
