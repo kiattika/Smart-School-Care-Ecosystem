@@ -208,7 +208,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
   const stressOptions = ['ไม่เคยเลย', 'เป็นบางครั้ง', 'บ่อยครั้ง', 'รู้สึกกดดันมาก'];
 
   return (
-    <div id="student-self-assessment-form-container" className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+    <div id="student-self-assessment-form-container" className="bg-slate-900/70 rounded-2xl shadow-xl border border-slate-800 backdrop-blur-md text-slate-200 overflow-hidden">
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-sky-700 text-white p-6 relative">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -278,8 +278,8 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
       <div className="p-6 md:p-8">
         {/* Toast Notification */}
         {showSuccessToast && (
-          <div className="mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center gap-3 text-emerald-800 text-sm font-medium animate-fadeIn">
-            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+          <div className="mb-6 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-3 text-emerald-200 text-sm font-medium animate-fadeIn">
+            <CheckCircle2 className="w-5 h-5 text-emerald-300 shrink-0" />
             <span>บันทึกข้อมูลแบบประเมินตนเองเรียบร้อยแล้ว ครูประจำวิชาและครูที่ปรึกษาได้รับข้อมูลแล้วครับ!</span>
           </div>
         )}
@@ -291,17 +291,17 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
           {/* SECTION 1: Basic Info */}
           {currentStep === 1 && (
             <div id="section-1-basic-info" className="space-y-6 animate-fadeIn">
-              <div className="border-b border-slate-100 pb-4">
-                <div className="flex items-center gap-2 text-blue-700 font-bold text-lg">
+              <div className="border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-2 text-blue-300 font-bold text-lg">
                   <User className="w-5 h-5" />
                   <span>ส่วนที่ 1: ข้อมูลพื้นฐานและการติดต่อ (ข้อ 1 - 6)</span>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">ข้อมูลทั่วไปเพื่อให้ครูและระบบสื่อสารกับนักเรียนได้อย่างถูกต้องและรวดเร็ว</p>
+                <p className="text-xs text-slate-400 mt-1">ข้อมูลทั่วไปเพื่อให้ครูและระบบสื่อสารกับนักเรียนได้อย่างถูกต้องและรวดเร็ว</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                     ข้อ 1: คำนำหน้านาม ชื่อ-นามสกุล <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -310,13 +310,13 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                     value={formData.basicInfo.titleFullName}
                     onChange={(e) => handleSingleFieldChange('basicInfo', 'titleFullName', e.target.value)}
                     placeholder="เช่น นายสมชาย ใจดี"
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                     ข้อ 2: ชื่อเล่นที่อยากให้คุณครูและเพื่อนๆ เรียก <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -325,13 +325,13 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                     value={formData.basicInfo.nickname}
                     onChange={(e) => handleSingleFieldChange('basicInfo', 'nickname', e.target.value)}
                     placeholder="เช่น ชาย, กิต, นิว"
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                     ข้อ 3: ระดับชั้น / ห้องเรียน <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -340,12 +340,12 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                     value={formData.basicInfo.gradeRoom}
                     onChange={(e) => handleSingleFieldChange('basicInfo', 'gradeRoom', e.target.value)}
                     placeholder="เช่น ม.5/8"
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-50"
+                    className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-slate-800/60"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                     ข้อ 4: เลขที่ <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -354,13 +354,13 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                     value={formData.basicInfo.studentNo}
                     onChange={(e) => handleSingleFieldChange('basicInfo', 'studentNo', e.target.value)}
                     placeholder="เช่น 1"
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                <label className="block text-xs font-semibold text-slate-200 mb-2">
                   ข้อ 5: ช่องทางการติดต่อที่สะดวกที่สุด (เลือกได้มากกว่า 1 ข้อ)
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -374,13 +374,13 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                         onClick={() => handleCheckboxToggle('basicInfo', 'contactChannels', opt)}
                         className={`p-3 rounded-xl border text-xs text-left transition-all flex items-center justify-between ${
                           isChecked
-                            ? 'border-blue-600 bg-blue-50/80 text-blue-900 font-semibold'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                            ? 'border-blue-600 bg-blue-500/10 text-blue-200 font-semibold'
+                            : 'border-slate-800 hover:border-slate-700 text-slate-200'
                         }`}
                       >
                         <span>{opt}</span>
                         <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${
-                          isChecked ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300'
+                          isChecked ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-700'
                         }`}>
                           {isChecked && <CheckCircle2 className="w-3 h-3" />}
                         </div>
@@ -391,7 +391,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                   ข้อ 6: ระบุเบอร์โทร / LINE ID / Instagram หรือช่องทางข้างต้นที่ครูสามารถติดต่อได้ <span className="text-rose-500">*</span>
                 </label>
                 <input
@@ -400,7 +400,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                   value={formData.basicInfo.contactDetail}
                   onChange={(e) => handleSingleFieldChange('basicInfo', 'contactDetail', e.target.value)}
                   placeholder="เช่น LINE: somchai_id, โทร: 089-xxx-xxxx"
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
             </div>
@@ -409,16 +409,16 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
           {/* SECTION 2: Background & Context */}
           {currentStep === 2 && (
             <div id="section-2-family-background" className="space-y-6 animate-fadeIn">
-              <div className="border-b border-slate-100 pb-4">
-                <div className="flex items-center gap-2 text-indigo-700 font-bold text-lg">
+              <div className="border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-2 text-indigo-300 font-bold text-lg">
                   <Bus className="w-5 h-5" />
                   <span>ส่วนที่ 2: ภูมิหลัง บริบทครอบครัว และการเดินทาง (ข้อ 7 - 11)</span>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">เพื่อให้คุณครูเข้าใจบริบทการใช้ชีวิต การเดินทาง และการจัดสรรเวลาของนักเรียน</p>
+                <p className="text-xs text-slate-400 mt-1">เพื่อให้คุณครูเข้าใจบริบทการใช้ชีวิต การเดินทาง และการจัดสรรเวลาของนักเรียน</p>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                <label className="block text-xs font-semibold text-slate-200 mb-2">
                   ข้อ 7: ปัจจุบันนักเรียนพักอาศัยอยู่กับใคร
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
@@ -429,8 +429,8 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                       onClick={() => handleSingleFieldChange('familyBackground', 'livingWith', opt)}
                       className={`p-3 rounded-xl border text-xs text-left transition-all ${
                         formData.familyBackground.livingWith === opt
-                          ? 'border-indigo-600 bg-indigo-50 text-indigo-900 font-semibold ring-1 ring-indigo-500'
-                          : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                          ? 'border-indigo-600 bg-indigo-500/10 text-indigo-200 font-semibold ring-1 ring-indigo-500'
+                          : 'border-slate-800 hover:border-slate-700 text-slate-200'
                       }`}
                     >
                       {opt}
@@ -441,13 +441,13 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  <label className="block text-xs font-semibold text-slate-200 mb-2">
                     ข้อ 8: การเดินทางมาโรงเรียนส่วนใหญ่ใช้พาหนะใด
                   </label>
                   <select
                     value={formData.familyBackground.transportation}
                     onChange={(e) => handleSingleFieldChange('familyBackground', 'transportation', e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                    className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-800"
                   >
                     {transportationOptions.map(opt => (
                       <option key={opt} value={opt}>{opt}</option>
@@ -456,7 +456,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  <label className="block text-xs font-semibold text-slate-200 mb-2">
                     ข้อ 9: ระยะเวลาที่ใช้ในการเดินทางมาโรงเรียน (เฉลี่ย)
                   </label>
                   <div className="grid grid-cols-2 gap-2">
@@ -467,8 +467,8 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                         onClick={() => handleSingleFieldChange('familyBackground', 'travelTime', opt)}
                         className={`p-2.5 rounded-xl border text-xs text-center transition-all ${
                           formData.familyBackground.travelTime === opt
-                            ? 'border-indigo-600 bg-indigo-50 text-indigo-900 font-semibold'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                            ? 'border-indigo-600 bg-indigo-500/10 text-indigo-200 font-semibold'
+                            : 'border-slate-800 hover:border-slate-700 text-slate-200'
                         }`}
                       >
                         {opt}
@@ -479,7 +479,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                <label className="block text-xs font-semibold text-slate-200 mb-2">
                   ข้อ 10: ภาระงานนอกเหนือจากการเรียนที่ต้องรับผิดชอบประจำ (เลือกได้มากกว่า 1 ข้อ)
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
@@ -492,13 +492,13 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                         onClick={() => handleCheckboxToggle('familyBackground', 'responsibilities', opt)}
                         className={`p-3 rounded-xl border text-xs text-left transition-all flex items-center justify-between ${
                           isChecked
-                            ? 'border-indigo-600 bg-indigo-50 text-indigo-900 font-semibold'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                            ? 'border-indigo-600 bg-indigo-500/10 text-indigo-200 font-semibold'
+                            : 'border-slate-800 hover:border-slate-700 text-slate-200'
                         }`}
                       >
                         <span>{opt}</span>
                         <div className={`w-4 h-4 rounded-md border flex items-center justify-center ${
-                          isChecked ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-300'
+                          isChecked ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-700'
                         }`}>
                           {isChecked && <CheckCircle2 className="w-3 h-3" />}
                         </div>
@@ -509,7 +509,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                <label className="block text-xs font-semibold text-slate-200 mb-2">
                   ข้อ 11: เมื่อมีเรื่องสบายใจ หรือไม่สบายใจ นักเรียนปรึกษาใครบ่อยที่สุด
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
@@ -520,8 +520,8 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                       onClick={() => handleSingleFieldChange('familyBackground', 'consultPerson', opt)}
                       className={`p-3 rounded-xl border text-xs text-left transition-all ${
                         formData.familyBackground.consultPerson === opt
-                          ? 'border-indigo-600 bg-indigo-50 text-indigo-900 font-semibold ring-1 ring-indigo-500'
-                          : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                          ? 'border-indigo-600 bg-indigo-500/10 text-indigo-200 font-semibold ring-1 ring-indigo-500'
+                          : 'border-slate-800 hover:border-slate-700 text-slate-200'
                       }`}
                     >
                       {opt}
@@ -535,16 +535,16 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
           {/* SECTION 3: Identity & Interests */}
           {currentStep === 3 && (
             <div id="section-3-identity" className="space-y-6 animate-fadeIn">
-              <div className="border-b border-slate-100 pb-4">
-                <div className="flex items-center gap-2 text-sky-700 font-bold text-lg">
+              <div className="border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-2 text-sky-300 font-bold text-lg">
                   <Compass className="w-5 h-5" />
                   <span>ส่วนที่ 3: ตัวตน นิสัย และความสนใจ (ข้อ 12 - 15)</span>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">สะท้อนจุดเด่น เอกลักษณ์เฉพาะตัว และบทบาทที่ถนัดเมื่อต้องทำงานร่วมกับผู้อื่น</p>
+                <p className="text-xs text-slate-400 mt-1">สะท้อนจุดเด่น เอกลักษณ์เฉพาะตัว และบทบาทที่ถนัดเมื่อต้องทำงานร่วมกับผู้อื่น</p>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                   ข้อ 12: เลือก 3 คำที่อธิบายความเป็นตัวตนของนักเรียนได้ดีที่สุด
                 </label>
                 <input
@@ -552,12 +552,12 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                   value={formData.identity.threeWords}
                   onChange={(e) => handleSingleFieldChange('identity', 'threeWords', e.target.value)}
                   placeholder="เช่น ร่าเริง, ช่างคิด, ชอบทดลอง หรือ ลุยๆ, จริงใจ, มีวินัย"
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                <label className="block text-xs font-semibold text-slate-200 mb-2">
                   ข้อ 13: งานอดิเรก หรือกิจกรรมที่ชอบทำมากที่สุดยามว่าง (เลือกได้มากกว่า 1 ข้อ)
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
@@ -570,12 +570,12 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                         onClick={() => handleCheckboxToggle('identity', 'hobbies', opt)}
                         className={`p-2.5 rounded-xl border text-xs text-left transition-all flex items-center justify-between ${
                           isChecked
-                            ? 'border-sky-600 bg-sky-50 text-sky-900 font-semibold'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                            ? 'border-sky-600 bg-sky-500/10 text-sky-200 font-semibold'
+                            : 'border-slate-800 hover:border-slate-700 text-slate-200'
                         }`}
                       >
                         <span>{opt}</span>
-                        {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-sky-600" />}
+                        {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-sky-300" />}
                       </button>
                     );
                   })}
@@ -583,7 +583,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                   ข้อ 14: ทักษะ ความสามารถพิเศษ หรือจุดแข็งที่นักเรียนภาคภูมิใจ
                 </label>
                 <textarea
@@ -591,12 +591,12 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                   value={formData.identity.specialSkills}
                   onChange={(e) => handleSingleFieldChange('identity', 'specialSkills', e.target.value)}
                   placeholder="เช่น วาดรูปดิจิทัล, ตัดต่อคลิป, เล่นดนตรีไทย, กีฬาบาสเกตบอล, การคำนวณเร็ว"
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                <label className="block text-xs font-semibold text-slate-200 mb-2">
                   ข้อ 15: เมื่อต้องทำงานกลุ่ม นักเรียนถนัดทำหน้าที่ใดมากที่สุด
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -609,15 +609,15 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                         onClick={() => handleSingleFieldChange('identity', 'groupRole', role.title)}
                         className={`p-3.5 rounded-xl border text-left transition-all ${
                           isSelected
-                            ? 'border-sky-600 bg-sky-50/80 text-sky-900 ring-2 ring-sky-500'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                            ? 'border-sky-600 bg-sky-500/10 text-sky-200 ring-2 ring-sky-500'
+                            : 'border-slate-800 hover:border-slate-700 text-slate-200'
                         }`}
                       >
-                        <div className="text-xs font-bold text-slate-900 flex items-center justify-between">
+                        <div className="text-xs font-bold text-white flex items-center justify-between">
                           <span>{role.title}</span>
-                          {isSelected && <CheckCircle2 className="w-4 h-4 text-sky-600" />}
+                          {isSelected && <CheckCircle2 className="w-4 h-4 text-sky-300" />}
                         </div>
-                        <div className="text-[11px] text-slate-500 mt-1">{role.desc}</div>
+                        <div className="text-[11px] text-slate-400 mt-1">{role.desc}</div>
                       </button>
                     );
                   })}
@@ -629,16 +629,16 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
           {/* SECTION 4: Learning Style & AI */}
           {currentStep === 4 && (
             <div id="section-4-learning-style" className="space-y-6 animate-fadeIn">
-              <div className="border-b border-slate-100 pb-4">
-                <div className="flex items-center gap-2 text-purple-700 font-bold text-lg">
+              <div className="border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-2 text-purple-300 font-bold text-lg">
                   <Brain className="w-5 h-5" />
                   <span>ส่วนที่ 4: สไตล์การเรียนรู้และทักษะยุคใหม่ (ข้อ 16 - 20)</span>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">ช่วยให้ครูประจำวิชาออกแบบกิจกรรมการสอน และการบ้านให้ตรงกับจริตของผู้เรียน</p>
+                <p className="text-xs text-slate-400 mt-1">ช่วยให้ครูประจำวิชาออกแบบกิจกรรมการสอน และการบ้านให้ตรงกับจริตของผู้เรียน</p>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                <label className="block text-xs font-semibold text-slate-200 mb-2">
                   ข้อ 16: รูปแบบการเรียนรู้ที่ทำให้นักเรียนเข้าใจเนื้อหาได้ดีที่สุด (เลือกได้สูงสุด 2 ข้อ)
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
@@ -651,15 +651,15 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                         onClick={() => handleCheckboxToggle('learningStyle', 'preferredStyles', opt.label, 2)}
                         className={`p-3.5 rounded-xl border text-left transition-all ${
                           isChecked
-                            ? 'border-purple-600 bg-purple-50 text-purple-900 ring-2 ring-purple-500'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                            ? 'border-purple-600 bg-purple-500/10 text-purple-200 ring-2 ring-purple-500'
+                            : 'border-slate-800 hover:border-slate-700 text-slate-200'
                         }`}
                       >
-                        <div className="text-xs font-bold text-slate-900 flex items-center justify-between">
+                        <div className="text-xs font-bold text-white flex items-center justify-between">
                           <span>{opt.label}</span>
-                          {isChecked && <CheckCircle2 className="w-4 h-4 text-purple-600" />}
+                          {isChecked && <CheckCircle2 className="w-4 h-4 text-purple-300" />}
                         </div>
-                        <div className="text-[11px] text-slate-500 mt-1">{opt.desc}</div>
+                        <div className="text-[11px] text-slate-400 mt-1">{opt.desc}</div>
                       </button>
                     );
                   })}
@@ -667,7 +667,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                <label className="block text-xs font-semibold text-slate-200 mb-2">
                   ข้อ 17: สิ่งที่เป็นอุปสรรคหรือข้อจำกัดต่อการเรียนรู้ของนักเรียน
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
@@ -680,12 +680,12 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                         onClick={() => handleCheckboxToggle('learningStyle', 'learningObstacles', opt)}
                         className={`p-2.5 rounded-xl border text-xs text-left transition-all flex items-center justify-between ${
                           isChecked
-                            ? 'border-purple-600 bg-purple-50 text-purple-900 font-semibold'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                            ? 'border-purple-600 bg-purple-500/10 text-purple-200 font-semibold'
+                            : 'border-slate-800 hover:border-slate-700 text-slate-200'
                         }`}
                       >
                         <span>{opt}</span>
-                        {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-purple-600" />}
+                        {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-purple-300" />}
                       </button>
                     );
                   })}
@@ -694,7 +694,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  <label className="block text-xs font-semibold text-slate-200 mb-2">
                     ข้อ 18: อุปกรณ์หลักที่ใช้นอกเวลาเรียนเพื่อค้นคว้า/ทำรายงาน
                   </label>
                   <div className="space-y-2">
@@ -707,12 +707,12 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                           onClick={() => handleCheckboxToggle('learningStyle', 'primaryDevices', opt)}
                           className={`w-full p-2.5 rounded-xl border text-xs text-left transition-all flex items-center justify-between ${
                             isChecked
-                              ? 'border-purple-600 bg-purple-50 text-purple-900 font-semibold'
-                              : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                              ? 'border-purple-600 bg-purple-500/10 text-purple-200 font-semibold'
+                              : 'border-slate-800 hover:border-slate-700 text-slate-200'
                           }`}
                         >
                           <span>{opt}</span>
-                          {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-purple-600" />}
+                          {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-purple-300" />}
                         </button>
                       );
                     })}
@@ -720,7 +720,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  <label className="block text-xs font-semibold text-slate-200 mb-2">
                     ข้อ 19: ประสบการณ์การใช้เครื่องมือ AI (เช่น ChatGPT, Gemini) ช่วยเรียน
                   </label>
                   <div className="space-y-2">
@@ -733,12 +733,12 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                           onClick={() => handleSingleFieldChange('learningStyle', 'aiExperience', opt.label)}
                           className={`w-full p-2.5 rounded-xl border text-left transition-all ${
                             isSelected
-                              ? 'border-purple-600 bg-purple-50 text-purple-900 ring-1 ring-purple-500'
-                              : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                              ? 'border-purple-600 bg-purple-500/10 text-purple-200 ring-1 ring-purple-500'
+                              : 'border-slate-800 hover:border-slate-700 text-slate-200'
                           }`}
                         >
-                          <div className="text-xs font-bold text-slate-900">{opt.label}</div>
-                          <div className="text-[11px] text-slate-500">{opt.desc}</div>
+                          <div className="text-xs font-bold text-white">{opt.label}</div>
+                          <div className="text-[11px] text-slate-400">{opt.desc}</div>
                         </button>
                       );
                     })}
@@ -747,7 +747,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                   ข้อ 20: สไตล์หรือบุคลิกของครูผู้สอนที่ทำให้นักเรียนเรียนได้อย่างมีความสุข
                 </label>
                 <textarea
@@ -755,7 +755,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                   value={formData.learningStyle.teacherStyle}
                   onChange={(e) => handleSingleFieldChange('learningStyle', 'teacherStyle', e.target.value)}
                   placeholder="เช่น ครูที่ใจดี เปิดโอกาสให้ถาม ไม่ดุ มีกิจกรรมให้เล่น และเข้าใจภาระการบ้าน"
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
               </div>
             </div>
@@ -764,22 +764,22 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
           {/* SECTION 5: Safety & Social Media */}
           {currentStep === 5 && (
             <div id="section-5-safety" className="space-y-6 animate-fadeIn">
-              <div className="border-b border-slate-100 pb-4">
+              <div className="border-b border-slate-800 pb-4">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-rose-700 font-bold text-lg">
+                  <div className="flex items-center gap-2 text-rose-300 font-bold text-lg">
                     <ShieldCheck className="w-5 h-5" />
                     <span>ส่วนที่ 5: ความสัมพันธ์ โซเชียลมีเดีย และความปลอดภัย (ข้อ 21 - 26)</span>
                   </div>
-                  <span className="px-2.5 py-1 bg-amber-50 text-amber-700 text-[11px] font-semibold rounded-lg border border-amber-200 flex items-center gap-1">
+                  <span className="px-2.5 py-1 bg-amber-500/10 text-amber-300 text-[11px] font-semibold rounded-lg border border-amber-500/30 flex items-center gap-1">
                     <HelpCircle className="w-3.5 h-3.5" />
                     ข้อมูลได้รับการคุ้มครองความเป็นส่วนตัว
                   </span>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">ข้อมูลส่วนนี้จะถูกใช้เพื่อดูแลความปลอดภัย ป้องกันการบูลลี่ และดูแลสุขภาวะทางใจของนักเรียน</p>
+                <p className="text-xs text-slate-400 mt-1">ข้อมูลส่วนนี้จะถูกใช้เพื่อดูแลความปลอดภัย ป้องกันการบูลลี่ และดูแลสุขภาวะทางใจของนักเรียน</p>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                <label className="block text-xs font-semibold text-slate-200 mb-2">
                   ข้อ 21: โซเชียลมีเดียที่นักเรียนใช้บ่อยที่สุด 2 อันดับแรก
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -792,12 +792,12 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                         onClick={() => handleCheckboxToggle('socialAndSafety', 'topSocialMedia', opt, 2)}
                         className={`p-2.5 rounded-xl border text-xs text-left transition-all flex items-center justify-between ${
                           isChecked
-                            ? 'border-rose-600 bg-rose-50 text-rose-900 font-semibold'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                            ? 'border-rose-600 bg-rose-500/10 text-rose-200 font-semibold'
+                            : 'border-slate-800 hover:border-slate-700 text-slate-200'
                         }`}
                       >
                         <span>{opt}</span>
-                        {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-rose-600" />}
+                        {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-rose-300" />}
                       </button>
                     );
                   })}
@@ -806,7 +806,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  <label className="block text-xs font-semibold text-slate-200 mb-2">
                     ข้อ 22: ประสบการณ์พบเห็นหรือโดนบูลลี่/ล้อเลียนในโรงเรียน
                   </label>
                   <div className="grid grid-cols-2 gap-2">
@@ -817,8 +817,8 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                         onClick={() => handleSingleFieldChange('socialAndSafety', 'schoolBullyingExperience', opt)}
                         className={`p-2.5 rounded-xl border text-xs text-center transition-all ${
                           formData.socialAndSafety.schoolBullyingExperience === opt
-                            ? 'border-rose-600 bg-rose-50 text-rose-900 font-semibold'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                            ? 'border-rose-600 bg-rose-500/10 text-rose-200 font-semibold'
+                            : 'border-slate-800 hover:border-slate-700 text-slate-200'
                         }`}
                       >
                         {opt}
@@ -828,7 +828,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  <label className="block text-xs font-semibold text-slate-200 mb-2">
                     ข้อ 23: ประสบการณ์ Cyberbullying บนโลกออนไลน์
                   </label>
                   <div className="grid grid-cols-2 gap-2">
@@ -839,8 +839,8 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                         onClick={() => handleSingleFieldChange('socialAndSafety', 'cyberbullyingExperience', opt)}
                         className={`p-2.5 rounded-xl border text-xs text-center transition-all ${
                           formData.socialAndSafety.cyberbullyingExperience === opt
-                            ? 'border-rose-600 bg-rose-50 text-rose-900 font-semibold'
-                            : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                            ? 'border-rose-600 bg-rose-500/10 text-rose-200 font-semibold'
+                            : 'border-slate-800 hover:border-slate-700 text-slate-200'
                         }`}
                       >
                         {opt}
@@ -852,15 +852,15 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-semibold text-slate-700">
+                  <label className="text-xs font-semibold text-slate-200">
                     ข้อ 24: ระดับความรู้สึกปลอดภัยและสบายใจเมื่ออยู่ที่โรงเรียน (1-5)
                   </label>
-                  <span className="text-sm font-bold text-rose-600 px-3 py-1 bg-rose-50 rounded-lg">
+                  <span className="text-sm font-bold text-rose-300 px-3 py-1 bg-rose-500/10 rounded-lg">
                     {formData.socialAndSafety.schoolSafetyScore} / 5 คะแนน
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-xs text-slate-500">1 (ไม่ปลอดภัย)</span>
+                  <span className="text-xs text-slate-400">1 (ไม่ปลอดภัย)</span>
                   <input
                     type="range"
                     min="1"
@@ -868,14 +868,14 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                     step="1"
                     value={formData.socialAndSafety.schoolSafetyScore}
                     onChange={(e) => handleSingleFieldChange('socialAndSafety', 'schoolSafetyScore', Number(e.target.value))}
-                    className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-rose-600"
+                    className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-rose-600"
                   />
-                  <span className="text-xs text-slate-500">5 (ปลอดภัยมากที่สุด)</span>
+                  <span className="text-xs text-slate-400">5 (ปลอดภัยมากที่สุด)</span>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                <label className="block text-xs font-semibold text-slate-200 mb-2">
                   ข้อ 25: เคยรู้สึกเครียดหรือไม่มั่นใจจากการเปรียบเทียบตัวเองกับคนอื่นบนโซเชียลไหม
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -886,8 +886,8 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                       onClick={() => handleSingleFieldChange('socialAndSafety', 'socialComparisonStress', opt)}
                       className={`p-2.5 rounded-xl border text-xs text-center transition-all ${
                         formData.socialAndSafety.socialComparisonStress === opt
-                          ? 'border-rose-600 bg-rose-50 text-rose-900 font-semibold'
-                          : 'border-slate-200 hover:border-slate-300 text-slate-700'
+                          ? 'border-rose-600 bg-rose-500/10 text-rose-200 font-semibold'
+                          : 'border-slate-800 hover:border-slate-700 text-slate-200'
                       }`}
                     >
                       {opt}
@@ -897,7 +897,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                   ข้อ 26: พื้นที่ฝากบอกครู: มีเรื่องการแกล้งกัน ปัญหาความปลอดภัย หรือในโลกออนไลน์ที่อยากให้ครูช่วยสอดส่องไหม
                 </label>
                 <textarea
@@ -905,7 +905,7 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                   value={formData.socialAndSafety.messageToTeacherSafety}
                   onChange={(e) => handleSingleFieldChange('socialAndSafety', 'messageToTeacherSafety', e.target.value)}
                   placeholder="เขียนบอกคุณครูได้เลยครับ ข้อมูลนี้เป็นความลับเฉพาะครูที่ปรึกษา"
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                  className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500"
                 />
               </div>
             </div>
@@ -914,16 +914,16 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
           {/* SECTION 6: Future Goals & Expectations */}
           {currentStep === 6 && (
             <div id="section-6-goals" className="space-y-6 animate-fadeIn">
-              <div className="border-b border-slate-100 pb-4">
-                <div className="flex items-center gap-2 text-emerald-700 font-bold text-lg">
+              <div className="border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-2 text-emerald-300 font-bold text-lg">
                   <Target className="w-5 h-5" />
                   <span>ส่วนที่ 6: เป้าหมาย อนาคต และข้อความถึงครู (ข้อ 27 - 30)</span>
                 </div>
-                <p className="text-xs text-slate-500 mt-1">ความฝันและเป้าหมายในอนาคต เพื่อให้โรงเรียนช่วยเตรียมความพร้อมและแนะแนวการศึกษาได้อย่างตรงทาง</p>
+                <p className="text-xs text-slate-400 mt-1">ความฝันและเป้าหมายในอนาคต เพื่อให้โรงเรียนช่วยเตรียมความพร้อมและแนะแนวการศึกษาได้อย่างตรงทาง</p>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                   ข้อ 27: เป้าหมายการศึกษาต่อ (คณะ/มหาวิทยาลัย) หรือสายอาชีพในอนาคตที่สนใจ <span className="text-rose-500">*</span>
                 </label>
                 <textarea
@@ -931,13 +931,13 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                   value={formData.futureGoals.careerGoals}
                   onChange={(e) => handleSingleFieldChange('futureGoals', 'careerGoals', e.target.value)}
                   placeholder="เช่น คณะวิศวกรรมคอมพิวเตอร์, คณะแพทย์, บริหารธุรกิจ, นิเทศศาสตร์, ศิลปินดิจิทัล ฯลฯ"
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                   ข้อ 28: สิ่งสำคัญที่สุดที่นักเรียนอยากพัฒนาตัวเองให้ดีขึ้นในระดับ ม.ปลาย
                 </label>
                 <textarea
@@ -945,12 +945,12 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                   value={formData.futureGoals.selfImprovement}
                   onChange={(e) => handleSingleFieldChange('futureGoals', 'selfImprovement', e.target.value)}
                   placeholder="เช่น การจัดสรรเวลาอ่านหนังสือ, ภาษาอังกฤษ, ความกล้าแสดงออก, การจัดการความเครียด"
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                   ข้อ 29: สิ่งที่อยากให้คุณครูหรือทางโรงเรียนช่วยเหลือ/สนับสนุนมากที่สุด
                 </label>
                 <textarea
@@ -958,13 +958,13 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                   value={formData.futureGoals.supportNeeded}
                   onChange={(e) => handleSingleFieldChange('futureGoals', 'supportNeeded', e.target.value)}
                   placeholder="เช่น การจัดกิจกรรมติวสอบเข้า, การแนะแนว Portfolio, คำปรึกษาเรื่องทุนการศึกษา"
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
 
-              <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200">
-                <label className="block text-xs font-semibold text-amber-900 mb-1.5 flex items-center gap-1.5">
-                  <AlertCircle className="w-4 h-4 text-amber-700" />
+              <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
+                <label className="block text-xs font-semibold text-amber-200 mb-1.5 flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-amber-300" />
                   ข้อ 30: สิ่งที่อยากบอกคุณครูเพิ่มเติม (ข้อมูลลับส่วนตัว / ข้อกังวลใจ)
                 </label>
                 <textarea
@@ -972,21 +972,21 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                   value={formData.futureGoals.privateMessageToTeacher}
                   onChange={(e) => handleSingleFieldChange('futureGoals', 'privateMessageToTeacher', e.target.value)}
                   placeholder="พื้นที่สำหรับบอกเล่าเรื่องราวส่วนตัว ปัญหาทางบ้าน หรือสิ่งที่อยากให้ครูรับทราบเฉพาะบุคคล..."
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+                  className="w-full px-3.5 py-2.5 text-sm text-white placeholder:text-slate-500 rounded-xl border border-amber-500/30 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-slate-800"
                 />
               </div>
             </div>
           )}
 
           {/* Navigation and Actions */}
-          <div className="mt-8 pt-6 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="mt-8 pt-6 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-2 w-full sm:w-auto">
               {currentStep > 1 && (
                 <button
                   type="button"
                   id="btn-prev-step"
                   onClick={() => setCurrentStep(prev => prev - 1)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all w-full sm:w-auto"
+                  className="px-4 py-2.5 rounded-xl border border-slate-700 text-slate-200 hover:bg-slate-800 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all w-full sm:w-auto"
                 >
                   <ChevronLeft className="w-4 h-4" />
                   <span>ย้อนกลับ</span>
@@ -1011,9 +1011,9 @@ export const StudentSelfAssessmentForm: React.FC<Props> = ({
                 id="btn-save-draft"
                 onClick={() => handleSubmit()}
                 disabled={isSubmitting}
-                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all w-full sm:w-auto"
+                className="px-4 py-2.5 rounded-xl border border-slate-700 text-slate-200 hover:bg-slate-800 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all w-full sm:w-auto"
               >
-                <Save className="w-4 h-4 text-slate-500" />
+                <Save className="w-4 h-4 text-slate-400" />
                 <span>บันทึกแบบร่าง</span>
               </button>
 
