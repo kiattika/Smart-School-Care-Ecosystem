@@ -2609,6 +2609,71 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // 16b. home_visit_student_info / home_visit_family_info — ข้อมูลเยี่ยมบ้านที่นักเรียน/ผู้ปกครองกรอกเอง
+  describe('home_visit_student_info / home_visit_family_info', () => {
+    const ROOM = 'ม.5/8', T_ID = 'teacher-07', T_UID = 'hr-uid-1';
+    const stu = (over: Record<string, unknown> = {}) => ({ studentId: '10001', studentUid: 'stu-1', homeroomClass: ROOM, ...over });
+    const fam = (over: Record<string, unknown> = {}) => ({ studentId: '10001', parentUid: 'par-1', homeroomClass: ROOM, ...over });
+    beforeEach(async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`staff/${T_ID}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+        await ctx.firestore().doc('staff/teacher-08').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+        await ctx.firestore().doc('students/10001').set({ studentId: '10001', room: ROOM, studentUid: 'stu-1', parentUid: 'par-1' });
+      });
+    });
+    const S = () => asUser('stu-1', ['STUDENT'], { studentId: '10001' }).firestore();
+    const P = () => asUser('par-1', ['PARENT']).firestore();
+    const HR = () => asUser(T_UID, ['HOMEROOM_TEACHER'], { staffId: T_ID }).firestore();
+
+    it('นักเรียนเจ้าของเขียน/อ่าน/แก้ของตัวเองได้ (ก่อนมีเอกสารก็อ่านได้)', async () => {
+      await assertSucceeds(S().doc('home_visit_student_info/10001').get());
+      await assertSucceeds(S().doc('home_visit_student_info/10001').set(stu()));
+      await assertSucceeds(S().doc('home_visit_student_info/10001').update({ nationality: 'ไทย' }));
+    });
+    it('ปฏิเสธ: นักเรียนเขียนแทนคนอื่น / uid ไม่ตรง / ห้องไม่ตรง / ผู้ปกครองเขียนเอกสารนักเรียน', async () => {
+      await assertFails(S().doc('home_visit_student_info/10002').set(stu({ studentId: '10002' })));
+      await assertFails(S().doc('home_visit_student_info/10001').set(stu({ studentUid: 'other' })));
+      await assertFails(S().doc('home_visit_student_info/10001').set(stu({ homeroomClass: 'ม.6/1' })));
+      await assertFails(P().doc('home_visit_student_info/10001').set(stu()));
+    });
+    it('ผู้ปกครองที่ผูก parentUid เขียน/อ่านเอกสารครอบครัวได้; นักเรียนอ่าน/เขียนไม่ได้; ผู้ปกครองคนอื่นไม่ได้', async () => {
+      await assertSucceeds(P().doc('home_visit_family_info/10001').set(fam()));
+      await assertSucceeds(P().doc('home_visit_family_info/10001').get());
+      await assertFails(S().doc('home_visit_family_info/10001').get());
+      await assertFails(S().doc('home_visit_family_info/10001').set(fam({ parentUid: 'stu-1' })));
+      const other = asUser('par-2', ['PARENT']).firestore();
+      await assertFails(other.doc('home_visit_family_info/10001').get());
+      await assertFails(other.doc('home_visit_family_info/10001').set(fam({ parentUid: 'par-2' })));
+      await assertFails(P().doc('home_visit_family_info/10001').set(fam({ homeroomClass: 'ม.6/1' })));
+    });
+    it('ครูที่ปรึกษาห้องนั้นอ่านได้ แต่เขียนไม่ได้; ห้องอื่น/ครูวิชา/ไม่ล็อกอินอ่านไม่ได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('home_visit_student_info/10001').set(stu());
+        await ctx.firestore().doc('home_visit_family_info/10001').set(fam());
+      });
+      for (const c of ['home_visit_student_info', 'home_visit_family_info']) {
+        await assertSucceeds(HR().doc(`${c}/10001`).get());
+        await assertFails(HR().doc(`${c}/10001`).update({ x: 1 }));
+        await assertFails(asUser('hr-uid-2', ['HOMEROOM_TEACHER'], { staffId: 'teacher-08' }).firestore().doc(`${c}/10001`).get());
+        await assertFails(asUser('subj', ['SUBJECT_TEACHER']).firestore().doc(`${c}/10001`).get());
+        await assertFails(asAnonymous().firestore().doc(`${c}/10001`).get());
+      }
+    });
+    it('EXECUTIVE/SUPER_ADMIN อ่านได้; ห้ามลบทุกบทบาท', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('home_visit_student_info/10001').set(stu());
+        await ctx.firestore().doc('home_visit_family_info/10001').set(fam());
+      });
+      for (const c of ['home_visit_student_info', 'home_visit_family_info']) {
+        await assertSucceeds(asUser('ex', ['EXECUTIVE']).firestore().doc(`${c}/10001`).get());
+        await assertSucceeds(asUser('adm', ['SUPER_ADMIN']).firestore().doc(`${c}/10001`).get());
+        await assertFails(asUser('adm', ['SUPER_ADMIN']).firestore().doc(`${c}/10001`).delete());
+      }
+      await assertFails(S().doc('home_visit_student_info/10001').delete());
+      await assertFails(P().doc('home_visit_family_info/10001').delete());
+    });
+  });
+
   // 16. home_visit_records — บันทึกเยี่ยมบ้าน (แบบ สพฐ.) เฉพาะครูที่ปรึกษาห้องนั้น/SUPER_ADMIN (+ EXECUTIVE อ่าน)
   describe('home_visit_records', () => {
     const ROOM = 'ม.5/8';

@@ -34,6 +34,8 @@ import { useHomeVisitRecords } from './hooks/useHomeVisitRecords';
 import { currentYearRecords } from './lib/homeVisitForm';
 import { HomeVisitStudentDetailModal } from './components/homevisit/HomeVisitStudentDetailModal';
 import { HomeVisitFormModal } from './components/homevisit/HomeVisitFormModal';
+import { HomeVisitSummaryPanel } from './components/homevisit/HomeVisitSummaryPanel';
+import { summarizeHomeVisit } from './lib/homeVisitAnalytics';
 import { HomeVisitDocumentModal } from './components/homevisit/HomeVisitDocumentModal';
 import { useRoomStudentHomeVisitInfo, useRoomFamilyHomeVisitInfo } from './hooks/useHomeVisitData';
 import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
@@ -157,6 +159,7 @@ export function AdvisorPortal() {
   const { data: roomFamilyInfo } = useRoomFamilyHomeVisitInfo(myRoom || undefined);
   const studentInfoById = useMemo(() => new Map(roomStudentInfo.map(i => [i.studentId, i])), [roomStudentInfo]);
   const familyInfoById = useMemo(() => new Map(roomFamilyInfo.map(i => [i.studentId, i])), [roomFamilyInfo]);
+  const roomVisitSummary = useMemo(() => summarizeHomeVisit({ totalStudents: myStudents.length, records: visitRecords, studentInfo: roomStudentInfo, familyInfo: roomFamilyInfo, todayYmd: todayStr }), [myStudents.length, visitRecords, roomStudentInfo, roomFamilyInfo, todayStr]);
   const [visitDocStudentId, setVisitDocStudentId] = useState<string | null>(null);
   const visitDocStudent = myStudents.find(st => st.studentId === visitDocStudentId) || null;
   const visitDetailStudent = myStudents.find(st => st.studentId === visitDetailStudentId) || null;
@@ -444,6 +447,9 @@ export function AdvisorPortal() {
           )}
           {activeTab === 'visit-planner' && (
             <div className="animate-in fade-in duration-300 space-y-6">
+            <div className="bg-[#1c1f2b] border border-white/10 rounded-xl p-4">
+              <HomeVisitSummaryPanel title={`สารสนเทศเยี่ยมบ้าน ห้อง ${myRoom || '-'}`} s={roomVisitSummary} />
+            </div>
             <div className="bg-[#1c1f2b] border border-white/10 rounded-xl p-4">
               <AdvisorHomeLocationMap homeroomClass={myRoom} students={myStudents} />
             </div>

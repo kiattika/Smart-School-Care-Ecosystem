@@ -53,6 +53,9 @@ import { ExecutiveLearnerAnalytics } from './components/ExecutiveLearnerAnalytic
 import { ExecutiveEngagementDashboard } from './components/ExecutiveEngagementDashboard';
 import { useStore } from './store';
 import { useRealStudents } from './hooks/useRealStudents';
+import { useSchoolHomeVisitData } from './hooks/useHomeVisitData';
+import { HomeVisitSummaryPanel } from './components/homevisit/HomeVisitSummaryPanel';
+import { summarizeHomeVisit } from './lib/homeVisitAnalytics';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   BarChart, Bar,
@@ -154,6 +157,9 @@ export function ExecutivePortal() {
   // (subscribe ที่ App.tsx ระดับ root ให้ผู้ใช้ที่ล็อกอินทุกคนเสมอ ดู CLAUDE.md) จึงเป็นข้อมูลจริงอยู่แล้ว
   // แต่ตัวส่วน (คาบเรียนวันนี้ทั้งโรงเรียน) ต้อง fetch schedules เองเพราะ ExecutivePortal ไม่เคยดึงมาก่อน
   const todayStr = format(new Date(), 'yyyy-MM-dd');
+  // สารสนเทศเยี่ยมบ้านระดับโรงเรียน — จำนวน/สัดส่วนเท่านั้น ไม่แสดงชื่อนักเรียน
+  const schoolVisit = useSchoolHomeVisitData();
+  const schoolVisitSummary = useMemo(() => summarizeHomeVisit({ totalStudents: students.length, records: schoolVisit.records, studentInfo: schoolVisit.studentInfo, familyInfo: schoolVisit.familyInfo, todayYmd: todayStr }), [students.length, schoolVisit.records, schoolVisit.studentInfo, schoolVisit.familyInfo, todayStr]);
   const [todayScheduledPeriodCount, setTodayScheduledPeriodCount] = useState<number | null>(null);
   const semester = useCurrentSemester();
   useEffect(() => {
@@ -189,7 +195,7 @@ export function ExecutivePortal() {
     ? Math.min(100, Math.round((todayCompletedPostTeachingCount / todayScheduledPeriodCount) * 100))
     : null;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'approvals' | 'analytics'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'approvals' | 'analytics' | 'homevisit'>('dashboard');
 
   const pendingApprovalsCount = lateAttendanceRequests.filter(r => r.status === 'PENDING').length;
 
@@ -199,6 +205,7 @@ export function ExecutivePortal() {
     { id: 'analytics', label: 'บทสรุปผู้เรียน', fullLabel: 'บทสรุปผู้เรียน (Learner DNA)', icon: Users, badge: null, color: 'text-blue-400' },
     { id: 'gis', label: 'แผนที่สารสนเทศ', fullLabel: 'แผนที่สารสนเทศ (GIS)', icon: MapIcon, badge: null, color: 'text-emerald-400' },
     { id: 'health', label: 'สุขภาวะ', fullLabel: 'สุขภาวะ (Health & Safety)', icon: Stethoscope, badge: null, color: 'text-emerald-400' },
+    { id: 'homevisit', label: 'เยี่ยมบ้าน', fullLabel: 'สารสนเทศเยี่ยมบ้าน (Home Visit)', icon: MapIcon, badge: null, color: 'text-emerald-400' },
     { id: 'approvals', label: 'กล่องคำขอ', fullLabel: 'กล่องคำขอ (Approvals)', icon: Inbox, badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : null, color: 'text-amber-400' },
   ] as const;
   
@@ -261,6 +268,7 @@ export function ExecutivePortal() {
               {activeTab === 'analytics' && 'Executive Learner Insights'}
               {activeTab === 'gis' && 'Spatial Intelligence (School GIS)'}
               {activeTab === 'health' && 'Student Wellness & Analytics'}
+              {activeTab === 'homevisit' && 'สารสนเทศเยี่ยมบ้านระดับโรงเรียน'}
               {activeTab === 'approvals' && 'Approval Inbox (กล่องคำขออนุมัติ)'}
             </h2>
           </div>
@@ -652,6 +660,12 @@ export function ExecutivePortal() {
           {/* TASK 7 (audit): tab "reports" (Report Center) ถูกลบออกทั้งหมด — ตารางห้องเรียน/ครูที่
               ปรึกษา hardcode เอง (ไม่ใช่ students/staff จริง) ปุ่ม "Export Report" เป็น setTimeout
               ปลอมล้วนไม่มีไฟล์ PDF ออกจริง ผิดกฎ CLAUDE.md */}
+
+          {activeTab === 'homevisit' && (
+            <div className="max-w-6xl mx-auto relative z-10 bg-[#1c1f2b] border border-white/10 rounded-xl p-5">
+              <HomeVisitSummaryPanel title="สารสนเทศเยี่ยมบ้านทั้งโรงเรียน (ปีการศึกษาปัจจุบัน)" s={schoolVisitSummary} />
+            </div>
+          )}
 
           {activeTab === 'approvals' && (
             <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
