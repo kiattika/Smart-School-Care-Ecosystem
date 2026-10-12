@@ -17,6 +17,23 @@ service cloud.firestore {
       return isSignedIn() && (request.auth.uid == userId || request.auth.token.email == userId);
     }
 
+    // school_settings/billing_payment: บัญชี/พร้อมเพย์ที่โรงเรียนรับโอน (ผู้ปกครองสร้าง QR จากค่านี้) — whitelist field + รูปแบบ
+    // ให้ตรงกับ src/lib/billingPaymentInfo.ts + promptPay.ts (PHONE = 10 หลักขึ้นต้น 0, NATIONAL_ID = 13 หลัก, EWALLET = 15 หลัก)
+    function isValidBillingPaymentInfo(d) {
+      return d.keys().hasOnly(['promptPayType', 'promptPayId', 'accountName', 'bankName', 'bankAccountNo', 'note', 'updatedAt', 'updatedBy'])
+        && d.keys().hasAll(['promptPayType', 'promptPayId', 'accountName', 'bankName', 'bankAccountNo', 'note'])
+        && d.promptPayType in ['NONE', 'PHONE', 'NATIONAL_ID', 'EWALLET']
+        && d.promptPayId is string
+        && ((d.promptPayType == 'NONE' && d.promptPayId == '')
+          || (d.promptPayType == 'PHONE' && d.promptPayId.matches('^0[0-9]{9}$'))
+          || (d.promptPayType == 'NATIONAL_ID' && d.promptPayId.matches('^[0-9]{13}$'))
+          || (d.promptPayType == 'EWALLET' && d.promptPayId.matches('^[0-9]{15}$')))
+        && d.accountName is string && d.accountName.size() <= 120
+        && d.bankName is string && d.bankName.size() <= 120
+        && d.bankAccountNo is string && d.bankAccountNo.size() <= 30
+        && d.note is string && d.note.size() <= 300;
+    }
+
     // school_settings/studentEmailFormat: ต้องมี prefix + domain ครบ (string, ตัวพิมพ์เล็ก) ผ่าน pattern เดียวกับ
     // functions/src/studentEmailFormat.ts และ src/lib/studentEmailFormat.ts และไม่มี field อื่นนอกจาก updatedAt/updatedBy
     function isValidStudentEmailFormat(d) {
@@ -279,7 +296,7 @@ service cloud.firestore {
       allow read: if isSignedIn();
       // studentEmailFormat มี block เฉพาะด้านล่าง (ตรวจรูปแบบข้อมูลด้วย) — ต้องกันออกจาก wildcard นี้
       // เพราะ rules หลาย match block ใช้ OR กัน: ถ้าไม่กัน SUPER_ADMIN เขียนค่าอะไรก็ได้ผ่านทางนี้ ข้ามการตรวจรูปแบบ
-      allow write: if hasRole('SUPER_ADMIN') && settingId != 'studentEmailFormat' && settingId != 'guidance_status';
+      allow write: if hasRole('SUPER_ADMIN') && settingId != 'studentEmailFormat' && settingId != 'guidance_status' && settingId != 'billing_payment';
     }
 
     // 10.2 สถานะ "มีครูแนะแนวที่ใช้งานอยู่" — cache ที่ Cloud Functions คำนวณ (functions/src/guidanceStatus.ts) ใช้ตัดสินสิทธิ์อ่าน 9Q/8Q
@@ -295,6 +312,14 @@ service cloud.firestore {
     match /school_settings/studentEmailFormat {
       allow read: if isSignedIn();
       allow create, update: if hasRole('SUPER_ADMIN') && isValidStudentEmailFormat(request.resource.data);
+      allow delete: if hasRole('SUPER_ADMIN');
+    }
+
+    // 10.3 บัญชีรับโอนเงินของโรงเรียน — อ่านได้ทุกคนที่ signed-in (ผู้ปกครอง/นักเรียนต้องเห็นเพื่อโอน) แก้ได้เฉพาะ SUPER_ADMIN
+    // และต้องผ่าน isValidBillingPaymentInfo — ห้ามลบ settingId != 'billing_payment' ใน wildcard ด้านบน
+    match /school_settings/billing_payment {
+      allow read: if isSignedIn();
+      allow create, update: if hasRole('SUPER_ADMIN') && isValidBillingPaymentInfo(request.resource.data);
       allow delete: if hasRole('SUPER_ADMIN');
     }
 

@@ -1335,14 +1335,6 @@ export function getCurrentAcademicYear(): string {
   return String(new Date().getFullYear() + 543);
 }
 
-/** QR mockup ผูกกับเลขที่ใบแจ้งหนี้จริง (ไม่ใช่ EMVCo PromptPay payload จริง — นอกขอบเขตงานนี้
- *  ที่ยืนยันแค่ "แจ้งค่าใช้จ่าย + ส่งใบเสร็จ" ไม่ใช่ระบบเชื่อมธนาคารจริง — คงรูปแบบ mock เดิมที่มีอยู่
- *  ในระบบไว้ แค่ทำให้ REF ที่ฝังในภาพตรงกับเลขที่ auditable จริงแทนเลขปลอมตายตัว) */
-function buildPromptPayQrMock(invoiceNumber: string, amount: number): string {
-  const payload = `PROMPTPAY-MOCK|REF:${invoiceNumber}|AMOUNT:${amount.toFixed(2)}`;
-  return `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(payload)}`;
-}
-
 export type CreateInvoiceInput = Pick<BillingInvoice, 'studentId' | 'title' | 'items' | 'totalAmount' | 'dueDate'> & {
   studentUid: string | null;
   parentUid: string | null;
@@ -1383,7 +1375,6 @@ export async function createBillingInvoice(
         totalAmount: data.totalAmount,
         dueDate: data.dueDate,
         status: 'PENDING',
-        promptPayQr: buildPromptPayQrMock(invoiceNumber, data.totalAmount),
         createdBy,
         createdAt: new Date().toISOString(),
       };
@@ -1438,7 +1429,6 @@ export async function createBillingInvoicesBulk(
             totalAmount: common.totalAmount,
             dueDate: common.dueDate,
             status: 'PENDING',
-            promptPayQr: buildPromptPayQrMock(invoiceNumber, common.totalAmount),
             createdBy,
             createdAt: now,
           };
