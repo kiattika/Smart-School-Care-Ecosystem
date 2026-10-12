@@ -696,6 +696,23 @@ service cloud.firestore {
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
+    // บันทึก "พบนักเรียนแล้ว" หลัง 9Q ธงแดง — ครูแนะแนว/ครูที่ปรึกษาของห้องเขียนหลังพบจริง; append-only (แก้ไม่ได้)
+    // ใช้ปิดงานในกระดิ่ง (คู่กับ "แจ้งผู้ปกครองแล้ว") ไม่มีผลคัดกรองใดๆ อยู่ในเอกสารนี้
+    match /student_screening_followups/{studentId}/entries/{entryId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId);
+      allow create: if (hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId))
+        && request.resource.data.keys().hasOnly(['kind', 'screeningId', 'metByUid', 'metByName', 'metAt', 'note'])
+        && request.resource.data.keys().hasAll(['kind', 'screeningId', 'metByUid', 'metByName', 'metAt'])
+        && request.resource.data.kind == 'STUDENT_MET'
+        && request.resource.data.screeningId is string && request.resource.data.screeningId.size() > 0
+        && request.resource.data.metByUid == request.auth.uid
+        && request.resource.data.metByName is string && request.resource.data.metByName.size() > 0
+        && request.resource.data.metAt is string
+        && (!('note' in request.resource.data.keys()) || (request.resource.data.note is string && request.resource.data.note.size() <= 500));
+      allow update: if false;
+      allow delete: if hasRole('SUPER_ADMIN');
+    }
+
     // FIX (ยืนยันจากโรงเรียน): SDQ กรอกได้ 3 กลุ่ม — นักเรียนประเมินตนเอง/ผู้ปกครอง/ครูที่ปรึกษา
     // ของห้องนั้นจริง (ต่างจาก 2Q/PHQ-9 ที่นักเรียนประเมินตนเองอย่างเดียว) เดิม rule เช็คแค่
     // self-attestation (request.resource.data.evaluatorId == auth.uid) — ผู้เขียนระบุ uid ตัวเองใน

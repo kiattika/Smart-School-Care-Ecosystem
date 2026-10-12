@@ -4,10 +4,11 @@ import { canTeacherDecide } from './leaveFlow';
  * กระดิ่งงานค้างของบุคลากร — คำนวณสดจากข้อมูลจริงที่ครูมีสิทธิ์เห็นตามบทบาทที่ใช้งานอยู่ (activeRole)
  * ไม่ใช่กล่องข้อความ: งานหายจากกระดิ่งเองเมื่อมีคนจัดการแล้ว (ไม่ค้างเป็น "ยังไม่อ่าน" ของเรื่องที่จบไปแล้ว)
  *
- * แหล่งที่ต่อแล้ว: ใบลานักเรียนรอครูที่ปรึกษา · คำขอเช็คชื่อย้อนหลัง/เข้าหลังเวลารอรองผอ.วิชาการ
- * ยังไม่ต่อ (ต้องตัดสินใจก่อน — ดูรายงานรอบนี้): 2Q บวก/9Q ธงแดง, คำขอนัดพบครูจากผู้ปกครอง
+ * แหล่งที่ต่อแล้ว: ใบลานักเรียนรอครูที่ปรึกษา · คำขอเช็คชื่อย้อนหลัง/เข้าหลังเวลารอรองผอ.วิชาการ ·
+ * คัดกรอง 2Q บวก (รอนักเรียนทำ 9Q) และ 9Q ธงแดง (รอแจ้งผู้ปกครอง/พบนักเรียน) ของครูแนะแนว/ครูที่ปรึกษา — นิยามใน screeningTasks.ts
+ * ยังไม่ต่อ: คำขอนัดพบครูจากผู้ปกครอง
  */
-export type StaffTaskKind = 'LEAVE' | 'LATE_ATTENDANCE';
+export type StaffTaskKind = 'LEAVE' | 'LATE_ATTENDANCE' | 'SCREENING_2Q' | 'SCREENING_RED_FLAG';
 
 export interface StaffTask {
   kind: StaffTaskKind;
@@ -23,13 +24,16 @@ export interface StaffTaskInput {
   roomLeaves: { status: string }[];
   /** คำขอเช็คชื่อย้อนหลังทั้งหมดที่ฉันมีสิทธิ์เห็น */
   lateRequests: { status: string }[];
+  /** จำนวนงานคัดกรองค้าง (นับจาก screeningTasks.ts) — ไม่ส่ง = ไม่มี */
+  screening?: { twoQ: number; redFlag: number };
 }
 
 export const LATE_REQUEST_APPROVER_ROLES = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN'] as const;
 
 /** บทบาทที่ต้องฟังใบลาห้อง / คำขอเข้าสาย — ใช้ตัดสินว่าจะ subscribe อะไร (ไม่ subscribe เกินสิทธิ์) */
-export function staffTaskSources(activeRole: string): { leaves: boolean; lateRequests: boolean } {
+export function staffTaskSources(activeRole: string): { leaves: boolean; lateRequests: boolean; screening: boolean } {
   return {
+    screening: activeRole === 'GUIDANCE_COUNSELOR' || activeRole === 'HOMEROOM_TEACHER',
     leaves: activeRole === 'HOMEROOM_TEACHER',
     lateRequests: (LATE_REQUEST_APPROVER_ROLES as readonly string[]).includes(activeRole),
   };
@@ -45,6 +49,11 @@ export function buildStaffTasks(input: StaffTaskInput): StaffTask[] {
   if (src.lateRequests) {
     const n = input.lateRequests.filter(r => r.status === 'PENDING').length;
     if (n > 0) tasks.push({ kind: 'LATE_ATTENDANCE', label: 'คำขอเช็คชื่อย้อนหลังรออนุมัติ', count: n, where: 'พอร์ทัลอนุมัติ' });
+  }
+  if (src.screening && input.screening) {
+    const where = input.activeRole === 'GUIDANCE_COUNSELOR' ? 'พอร์ทัลแนะแนว → คัดกรองสุขภาพจิต' : 'พอร์ทัลครูที่ปรึกษา → คัดกรองสุขภาพจิต';
+    if (input.screening.twoQ > 0) tasks.push({ kind: 'SCREENING_2Q', label: 'ผลคัดกรอง 2Q เป็นบวก รอนักเรียนทำ 9Q', count: input.screening.twoQ, where });
+    if (input.screening.redFlag > 0) tasks.push({ kind: 'SCREENING_RED_FLAG', label: 'ผล 9Q มีธงแดง รอแจ้งผู้ปกครองหรือพบนักเรียน', count: input.screening.redFlag, where });
   }
   return tasks;
 }

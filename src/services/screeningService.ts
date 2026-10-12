@@ -201,6 +201,49 @@ export async function recordParentNotice(studentId: string, input: {
   };
   if (input.note && input.note.trim()) data.note = input.note.trim().slice(0, 500);
   await addDoc(collection(db, `student_screening_notices/${studentId}/entries`), data);
+  notifyScreeningFollowupChanged();
+}
+
+/** ให้กระดิ่งงานค้างโหลดสถานะ "จัดการแล้ว" ใหม่ทันทีหลังบันทึกแจ้งผู้ปกครอง/พบนักเรียน (ไม่ต้องรอรอบ refresh) */
+export const SCREENING_FOLLOWUP_EVENT = 'ssc:screening-followup-changed';
+function notifyScreeningFollowupChanged() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(SCREENING_FOLLOWUP_EVENT));
+}
+
+export interface StudentFollowupDoc {
+  id: string;
+  kind: 'STUDENT_MET';
+  screeningId: string;
+  metByUid: string;
+  metByName: string;
+  metAt: string;
+  note?: string;
+}
+
+/** บันทึก "พบนักเรียนแล้ว" ผูกกับผล 9Q ฉบับนั้น — ปิดงาน 9Q ธงแดงในกระดิ่ง (error โยนต่อให้ผู้เรียก) */
+export async function recordStudentMet(studentId: string, input: {
+  screeningId: string;
+  by: { uid: string; name: string };
+  metAt: string;
+  note?: string;
+}): Promise<void> {
+  const data: Record<string, unknown> = {
+    kind: 'STUDENT_MET',
+    screeningId: input.screeningId,
+    metByUid: input.by.uid,
+    metByName: input.by.name,
+    metAt: input.metAt,
+  };
+  if (input.note && input.note.trim()) data.note = input.note.trim().slice(0, 500);
+  await addDoc(collection(db, `student_screening_followups/${studentId}/entries`), data);
+  notifyScreeningFollowupChanged();
+}
+
+export async function loadStudentFollowups(studentId: string): Promise<StudentFollowupDoc[]> {
+  const snap = await getDocs(collection(db, `student_screening_followups/${studentId}/entries`));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() } as StudentFollowupDoc))
+    .sort((a, b) => (b.metAt || '').localeCompare(a.metAt || ''));
 }
 
 export async function loadParentNotices(studentId: string): Promise<ParentNoticeDoc[]> {
