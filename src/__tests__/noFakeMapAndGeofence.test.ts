@@ -49,4 +49,9 @@ describe('guard: ไม่มีหน้าเยี่ยมบ้านจำ
       expect(readSource(f)).not.toMatch(/13\.7563|100\.5018/);
     }
   });
+  it('TeacherPortal ไม่มีการซิงค์รายชื่อ "40 คน สำเร็จ" ปลอม และไม่ฝังรายการห้อง', () => {
+    const src = readSource('src/TeacherPortal.tsx');
+    expect(src).not.toMatch(/ซิงค์รายชื่อนักเรียน 40 คน|handleSyncRoster|syncingCourseId/);
+    expect(src).not.toMatch(/availableRooms/);
+  });
 });
