@@ -1208,8 +1208,8 @@ export const useStore = create<StoreState>((set, get) => ({
     const newApt: ParentAppointment = {
       ...apt,
       id: `apt-${Date.now()}`,
-      status: 'CONFIRMED',
-      meetLink: apt.meetingType === 'ONLINE_MEET' ? 'https://meet.google.com/abc-defg-hij' : undefined
+      // คำขอนัดหมายจากผู้ปกครอง = รอครูยืนยัน (ห้ามตั้ง CONFIRMED เอง และห้ามแนบลิงก์ประชุมปลอม)
+      status: 'REQUESTED',
     };
     bookParentAppointmentFirestore(newApt).catch(err => console.warn('Firestore parent appointment notice:', err));
 

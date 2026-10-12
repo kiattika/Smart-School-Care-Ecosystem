@@ -121,13 +121,10 @@ export function ParentPortal() {
                 ระบบดูแลนักเรียนสำหรับผู้ปกครอง
               </span>
               <span className="text-xs text-slate-400">
-                รหัส: {student.studentId} • ห้อง ม.{student.room || '5/8'}
+                รหัส: {student.studentId}{student.room ? ` • ห้อง ม.${student.room}` : ''}
               </span>
             </div>
             <h1 className="text-xl sm:text-2xl font-black text-white">{student.name}</h1>
-            <p className="text-xs text-slate-400 mt-0.5">
-              ครูประจำชั้น: ครูกิตติศักดิ์ • เบอร์โทรฉุกเฉินโรงเรียน: 02-123-4567
-            </p>
           </div>
         </div>
 
@@ -156,7 +153,7 @@ export function ParentPortal() {
             >
               {linkedStudents.map(s => (
                 <option key={s.studentId} value={s.studentId}>
-                  {s.name} (ม.{s.room || '5/8'})
+                  {s.name}{s.room ? ` (ม.${s.room})` : ''}
                 </option>
               ))}
             </select>
@@ -443,15 +440,28 @@ export function ParentPortal() {
                   </button>
                 </div>
 
-                <div className="p-4 bg-slate-800/40 border border-slate-800 rounded-2xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white">ครูกิตติศักดิ์ (ครูประจำชั้น ม.5/8)</span>
-                    <span className="text-[10px] text-slate-500">วันนี้ 08:15 น.</span>
-                  </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    "สวัสดีครับคุณพ่อคุณแม่ น้องสมชายส่งรายงานโครงงานฟิสิกส์เรียบร้อยแล้วนะครับ ผลการเรียนอยู่ในเกณฑ์ดีเยี่ยม สามารถจองเวลานัดพบผู้ปกครองทาง Google Meet ได้เลยครับ"
-                  </p>
-                </div>
+                {(() => {
+                  // ข้อความล่าสุดที่ "ครู/โรงเรียนส่งมาจริง" ถึงนักเรียนคนนี้ — ไม่มี = empty state (ห้ามแสดงข้อความตัวอย่าง)
+                  const latest = [...parentTeacherMessages]
+                    .filter(m => m.studentId === student.studentId && m.senderRole !== 'PARENT')
+                    .slice(-1)[0];
+                  if (!latest) {
+                    return (
+                      <div className="p-4 bg-slate-800/40 border border-slate-800 rounded-2xl text-xs text-slate-400">
+                        ยังไม่มีข้อความจากครูหรือโรงเรียน
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="p-4 bg-slate-800/40 border border-slate-800 rounded-2xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white">{latest.senderName}</span>
+                        <span className="text-[10px] text-slate-500">{latest.timestamp}</span>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed">{latest.message}</p>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="lg:col-span-4 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl flex flex-col justify-between space-y-4">
