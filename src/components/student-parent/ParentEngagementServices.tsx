@@ -94,12 +94,14 @@ export function ParentEngagementServices({
   const [msgText, setMsgText] = useState('');
 
   // Appointment booking form state
-  const [teacherName, setTeacherName] = useState('ครูกิตติศักดิ์ (ครูประจำชั้น ม.5/8)');
-  const [appointmentDate, setAppointmentDate] = useState('2026-08-25');
+  // ไม่ตั้งค่าเริ่มต้นปลอม (ชื่อครู/วันที่/หัวข้อ) — ผู้ใช้ต้องกรอกเอง
+  const [teacherName, setTeacherName] = useState('');
+  const [appointmentDate, setAppointmentDate] = useState('');
   const [timeSlot, setTimeSlot] = useState('15:30 - 16:00 น.');
-  const [meetingType, setMeetingType] = useState<'IN_PERSON' | 'ONLINE_MEET'>('ONLINE_MEET');
-  const [topic, setTopic] = useState('ปรึกษาแนวทางการเตรียมตัวสอบ TCAS รอบ 1 Portfolio และผลการเรียน');
+  const [meetingType, setMeetingType] = useState<'IN_PERSON' | 'ONLINE_MEET'>('IN_PERSON');
+  const [topic, setTopic] = useState('');
   const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [bookingError, setBookingError] = useState('');
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,16 +114,7 @@ export function ParentEngagementServices({
       msgText
     );
     setMsgText('');
-
-    // Simulate teacher auto-response after 1.5 seconds
-    setTimeout(() => {
-      sendParentTeacherMessage(
-        student.studentId,
-        'TEACHER',
-        'ครูกิตติศักดิ์ (ครูประจำชั้น)',
-        'สวัสดีครับผู้ปกครอง ครูได้รับข้อความแล้วครับ จะดำเนินการตรวจสอบและประสานงานให้อย่างรวดเร็วครับ'
-      );
-    }, 1500);
+    // ห้ามสร้างข้อความตอบกลับของครูเอง — ข้อความของครูต้องมาจากครูที่ตอบจริงเท่านั้น
   };
 
   const handleConfirmPayment = () => {
@@ -137,15 +130,27 @@ export function ParentEngagementServices({
 
   const handleBookAppointment = (e: React.FormEvent) => {
     e.preventDefault();
+    setBookingError('');
+    // ผูกกับ Auth UID จริงเท่านั้น ห้ามสร้าง placeholder เช่น parent_<studentId>
+    const parentUid = user?.uid;
+    if (!parentUid) {
+      setBookingError('ไม่พบข้อมูลผู้ใช้ที่ล็อกอิน — กรุณาเข้าสู่ระบบใหม่ก่อนจองนัดหมาย');
+      return;
+    }
+    if (!teacherName.trim() || !appointmentDate) {
+      setBookingError('กรุณาระบุชื่อครูและวันที่นัดหมาย');
+      return;
+    }
     bookParentAppointment({
       studentId: student.studentId,
-      parentId: (student as any)?.parentUid || (student as any)?.parentId || `parent_${student.studentId}`,
-      teacherName,
+      parentId: parentUid,
+      teacherName: teacherName.trim(),
       date: appointmentDate,
       timeSlot,
       topic,
       meetingType,
-      locationOrLink: meetingType === 'ONLINE_MEET' ? 'https://meet.google.com/ssc-parent-conf' : 'ห้องแนะแนว อาคาร 1 ชั้น 2'
+      // ไม่สร้างลิงก์ประชุม/สถานที่ปลอม — ครูเป็นผู้แจ้งลิงก์หรือสถานที่เมื่อยืนยันนัดหมาย
+      locationOrLink: ''
     });
 
     setBookingSuccess(true);
@@ -394,10 +399,7 @@ export function ParentEngagementServices({
               </div>
               <div>
                 <h3 className="text-sm font-bold text-white">ห้องสนทนาครูประจำชั้น & ผู้ปกครอง</h3>
-                <p className="text-[11px] text-emerald-400 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  ครูกิตติศักดิ์ (ครูประจำชั้น ม.5/8) ออนไลน์
-                </p>
+                <p className="text-[11px] text-slate-400">ข้อความจะถึงครูเมื่อครูเปิดอ่าน — ไม่มีการตอบกลับอัตโนมัติ</p>
               </div>
             </div>
           </div>
@@ -462,22 +464,25 @@ export function ParentEngagementServices({
             {bookingSuccess && (
               <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>ยืนยันการนัดหมายเรียบร้อยแล้ว ระบบสร้างลิงก์การประชุมให้แล้ว</span>
+                <span>ส่งคำขอนัดหมายแล้ว รอครูยืนยันและแจ้งสถานที่/ลิงก์การประชุม</span>
               </div>
+            )}
+
+            {bookingError && (
+              <div role="alert" className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300">{bookingError}</div>
             )}
 
             <form onSubmit={handleBookAppointment} className="space-y-3 text-xs">
               <div>
                 <label className="text-slate-300 block mb-1">เลือกคุณครูที่ต้องการนัดหมาย:</label>
-                <select
+                <input
+                  type="text"
                   value={teacherName}
                   onChange={(e) => setTeacherName(e.target.value)}
+                  placeholder="ระบุชื่อครูที่ต้องการนัดพบ"
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                >
-                  <option value="ครูกิตติศักดิ์ (ครูประจำชั้น ม.5/8)">ครูกิตติศักดิ์ (ครูประจำชั้น ม.5/8)</option>
-                  <option value="ครูแนะแนวพิมพ์ชนก (หัวหน้างานแนะแนว)">ครูแนะแนวพิมพ์ชนก (หัวหน้างานแนะแนว)</option>
-                  <option value="ครูสมศักดิ์ (ครูผู้สอนวิชาฟิสิกส์)">ครูสมศักดิ์ (ครูผู้สอนวิชาฟิสิกส์)</option>
-                </select>
+                  required
+                />
               </div>
 
               <div>
@@ -553,7 +558,7 @@ export function ParentEngagementServices({
           <div className="lg:col-span-7 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-4">
             <h4 className="text-sm font-bold text-white flex items-center gap-2">
               <Clock className="w-4 h-4 text-purple-400" />
-              รายการนัดหมายและห้องประชุมออนไลน์ (Confirmed Appointments)
+              รายการนัดหมาย
             </h4>
 
             <div className="space-y-3">
@@ -564,8 +569,15 @@ export function ParentEngagementServices({
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-white">{apt.teacherName}</span>
-                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold">
-                      ✓ ยืนยันการนัดแล้ว
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      apt.status === 'CONFIRMED' || apt.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300'
+                        : apt.status === 'CANCELLED' ? 'bg-red-500/20 text-red-300'
+                        : 'bg-amber-500/20 text-amber-300'
+                    }`}>
+                      {apt.status === 'CONFIRMED' ? '✓ ยืนยันการนัดแล้ว'
+                        : apt.status === 'COMPLETED' ? '✓ พบกันแล้ว'
+                        : apt.status === 'CANCELLED' ? 'ยกเลิก'
+                        : '⏳ รอครูยืนยัน'}
                     </span>
                   </div>
 
@@ -578,9 +590,9 @@ export function ParentEngagementServices({
                       📅 {apt.date} • ⏱️ {apt.timeSlot}
                     </span>
 
-                    {apt.meetingType === 'ONLINE_MEET' ? (
+                    {apt.meetingType === 'ONLINE_MEET' && apt.meetLink ? (
                       <a
-                        href={apt.meetLink || '#'}
+                        href={apt.meetLink}
                         target="_blank"
                         rel="noreferrer"
                         className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center gap-1.5 shadow"
@@ -588,10 +600,14 @@ export function ParentEngagementServices({
                         <Video className="w-3.5 h-3.5" />
                         <span>เข้าห้อง Google Meet</span>
                       </a>
-                    ) : (
+                    ) : apt.locationOrLink ? (
                       <span className="text-slate-300 font-medium flex items-center gap-1">
                         <MapPin className="w-3.5 h-3.5 text-indigo-400" />
                         {apt.locationOrLink}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 flex items-center gap-1">
+                        {apt.status === 'REQUESTED' ? 'รอครูยืนยันสถานที่/ลิงก์การประชุม' : 'ยังไม่ได้ระบุสถานที่/ลิงก์'}
                       </span>
                     )}
                   </div>
