@@ -44,6 +44,7 @@ import { subscribeGateAttendanceLogs, getSelfAssessmentRecord } from './services
 import { GateAttendanceRecord, StudentSelfAssessment } from './types';
 import { StudentPortfolioSection } from './components/portfolio/StudentPortfolioSection';
 import { StudentHomeLocationForm } from './components/homevisit/StudentHomeLocationForm';
+import { StudentHomeVisitInfoForm } from './components/homevisit/StudentHomeVisitInfoForm';
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
 import { StudentSelfAssessmentForm } from './components/StudentSelfAssessmentForm';
@@ -354,9 +355,14 @@ export function StudentPortal() {
 
         {/* 3. ที่อยู่บ้าน & พิกัดสำหรับเยี่ยมบ้าน (บันทึกจริงลง Firestore) */}
         {activeTab === 'socio' && user?.uid && (
+          <>
           <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-5">
             <StudentHomeLocationForm student={student} studentUid={user.uid} />
           </div>
+          <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-5 mt-4">
+            <StudentHomeVisitInfoForm student={student} studentUid={user.uid} />
+          </div>
+          </>
         )}
 
         {/* 4. Behavior & Conduct Certificate */}

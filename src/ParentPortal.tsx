@@ -26,7 +26,8 @@ import {
   Bell,
   Sparkles,
   Phone,
-  AlertTriangle
+  AlertTriangle,
+  Users
 } from 'lucide-react';
 
 import { GateAttendanceTracker } from './components/student-parent/GateAttendanceTracker';
@@ -36,6 +37,7 @@ import { StudentDaySchedule } from './components/student-parent/StudentDaySchedu
 import { ParentPortfolioView } from './components/portfolio/ParentPortfolioView';
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
+import { FamilyHomeVisitInfoForm } from './components/homevisit/FamilyHomeVisitInfoForm';
 import { NotificationBell } from './components/notifications/NotificationBell';
 
 export function ParentPortal() {
@@ -74,7 +76,7 @@ export function ParentPortal() {
   const bScore = student?.behaviorScore;
   
   const [activeTab, setActiveTab] = useState<
-    'timeline' | 'gate' | 'health' | 'behavior' | 'portfolio' | 'academic' | 'services'
+    'timeline' | 'gate' | 'health' | 'behavior' | 'portfolio' | 'academic' | 'services' | 'family'
   >('timeline');
 
 
@@ -172,6 +174,7 @@ export function ParentPortal() {
           { id: 'portfolio', label: '4. แฟ้มผลงาน', icon: FolderGit2 },
           { id: 'academic', label: '5. ผลการเรียน & การบ้าน', icon: BookOpen },
           { id: 'services', label: '6. ชำระเงิน & นัดพบครู', icon: CreditCard },
+          { id: 'family', label: '7. ข้อมูลครอบครัว (เยี่ยมบ้าน)', icon: Users },
         ]}>
       {/* Main Content View */}
       <div className="transition-all duration-300">
@@ -384,6 +387,12 @@ export function ParentPortal() {
         {/* 7. Parent Engagement & e-Billing & Appointments */}
         {activeTab === 'services' && (
           <ParentEngagementServices studentId={student.studentId} student={student} isParentView={true} />
+        )}
+
+        {activeTab === 'family' && user?.uid && (
+          <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-5">
+            <FamilyHomeVisitInfoForm student={student} parentUid={user.uid} />
+          </div>
         )}
 
       </div>
