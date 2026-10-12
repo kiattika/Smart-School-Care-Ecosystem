@@ -40,3 +40,16 @@ describe('รอบ B ข้อ 2: สถิติการมาเรียน
     }
   });
 });
+
+describe('รอบ B: ผู้อนุมัติต้องเป็นคนที่กดจริง ไม่ฝังชื่อครู', () => {
+  it('store ไม่ฝังชื่อครูเป็นผู้อนุมัติ/ผู้ยืนยัน และใช้ผู้ใช้ปัจจุบัน', () => {
+    const src = readSource('src/store.ts');
+    expect(src).not.toMatch(/ครูกิตติศักดิ์/);
+    expect(src).toMatch(/approvedBy: get\(\)\.user\?\.displayName/);
+    expect(src).not.toMatch(/isVerifiedByTeacher: true/);
+  });
+  it('หน้านักเรียน/ผู้ปกครองไม่มีปุ่มอนุมัติใบลา (ไม่มีหน้าจอครูในโมดูลนี้)', () => {
+    const src = readSource('src/components/student-parent/GateAttendanceTracker.tsx');
+    expect(src).not.toMatch(/approveDetailedLeave|อนุมัติใบลา/);
+  });
+});
