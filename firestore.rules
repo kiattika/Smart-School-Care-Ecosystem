@@ -900,7 +900,9 @@ service cloud.firestore {
     match /staff_notifications/{notifId} {
       allow read: if isSignedIn() && request.auth.token.get('email', '') is string
                   && resource.data.recipientEmail == request.auth.token.get('email', '').lower();
-      allow create: if hasAnyRole() && !hasRole('STUDENT') && !hasRole('PARENT')
+      // หมายเหตุ: ห้ามใช้ !hasRole(...) ตรงนี้ — hasRole อ่าน token.primaryRole ซึ่งอาจไม่มี field → error เมื่อสาขา roles เป็น false (ผลคือปฏิเสธทุกคน)
+      allow create: if hasAnyRole()
+                    && !('STUDENT' in request.auth.token.get('roles', [])) && !('PARENT' in request.auth.token.get('roles', []))
                     && request.resource.data.keys().hasOnly(['id', 'recipientEmail', 'kind', 'title', 'message', 'refId', 'senderUid', 'senderName', 'createdAt', 'readAt'])
                     && request.resource.data.keys().hasAll(['id', 'recipientEmail', 'kind', 'title', 'message', 'refId', 'senderUid', 'senderName', 'createdAt', 'readAt'])
                     && request.resource.data.id == notifId
