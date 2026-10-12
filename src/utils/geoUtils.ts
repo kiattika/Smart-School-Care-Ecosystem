@@ -35,26 +35,8 @@ export const DEFAULT_SCHOOL_GEOFENCE: SchoolGeofenceConfig = {
   entryStartTime: '06:30',
   entryLateTime: '08:00',
   exitStartTime: '15:30',
-  gates: [
-    {
-      id: 'gate-1',
-      name: 'ประตู 1 (หน้าโรงเรียน - ถนนประชานิมิตร)',
-      coordinates: { latitude: 17.625620, longitude: 100.093200 },
-      radiusMeters: 120,
-    },
-    {
-      id: 'gate-2',
-      name: 'ประตู 2 (ด้านข้าง - หอประชุมใหญ่)',
-      coordinates: { latitude: 17.624950, longitude: 100.093850 },
-      radiusMeters: 100,
-    },
-    {
-      id: 'gate-3',
-      name: 'ประตู 3 (สนามกีฬาและอาคารพลศึกษา)',
-      coordinates: { latitude: 17.625800, longitude: 100.094100 },
-      radiusMeters: 150,
-    }
-  ]
+  // ประตูโรงเรียนแอดมินเป็นผู้กำหนดเอง (school_settings/geofence_config) — ไม่ฝังพิกัดประตูสมมติในโค้ด
+  gates: [],
 };
 
 /**

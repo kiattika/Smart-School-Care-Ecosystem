@@ -3,6 +3,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useStore } from '../store';
 import { DEFAULT_SCHOOL_GEOFENCE, SchoolGeofenceConfig } from '../utils/geoUtils';
+import { draftsToGates, gatesToDrafts } from '../lib/geofenceConfig';
 
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 
@@ -26,6 +27,8 @@ export function useSchoolGeofence(): { config: SchoolGeofenceConfig; configured:
               ...DEFAULT_SCHOOL_GEOFENCE,
               ...(d as SchoolGeofenceConfig),
               radiusMeters: isNum(d?.radiusMeters) ? d!.radiusMeters! : DEFAULT_SCHOOL_GEOFENCE.radiusMeters,
+              // ประตูมาจากที่แอดมินตั้งเท่านั้น (ไม่มี/ผิดรูปแบบ = ไม่มีประตู ไม่ย้อนไปใช้ค่าในโค้ด)
+              gates: draftsToGates(gatesToDrafts(d?.gates)),
             },
           });
           setState({ configured: true, loaded: true });
