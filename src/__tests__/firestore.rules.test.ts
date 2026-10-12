@@ -1374,6 +1374,88 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // 15c. student_leave_days — วันลาอนุมัติแล้ว (ไม่มีเหตุผล) ให้ครูประจำวิชาเห็นตอนเช็คชื่อ
+  describe('student_leave_days collection', () => {
+    const STU_UID = 'stu-uid-d1';
+    const STU_ID = 'd-std-1';
+    const ROOM = 'ม.5/8';
+    const HR_UID = 'hr-d1';
+    const LCOL = 'detailed_leave_requests';
+    const DCOL = 'student_leave_days';
+    const hr = () => asUser(HR_UID, ['HOMEROOM_TEACHER'], { staffId: HR_UID }).firestore();
+    const otherHr = () => asUser('other-hr-d', ['HOMEROOM_TEACHER'], { staffId: 'other-hr-d' }).firestore();
+    const subj = () => asUser('subj-d1', ['SUBJECT_TEACHER'], { staffId: 'subj-d1' }).firestore();
+    const day = (id: string, over: Record<string, unknown> = {}) => ({
+      leaveId: id, studentId: STU_ID, homeroomClass: ROOM, startDate: '2026-10-13', endDate: '2026-10-14',
+      createdAt: new Date(), ...over,
+    });
+    async function seed(id: string, status = 'PENDING_TEACHER') {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`staff/${HR_UID}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+        await ctx.firestore().doc('staff/other-hr-d').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+        await ctx.firestore().doc(`${LCOL}/${id}`).set({
+          id, studentId: STU_ID, studentUid: STU_UID, parentUid: null, homeroomClass: ROOM, leaveType: 'SICK',
+          startDate: '2026-10-13', endDate: '2026-10-14', totalDays: 2, reason: 'เรื่องส่วนตัว',
+          status, submittedByRole: 'student', submittedByUid: STU_UID, submittedBy: 'x',
+          submittedAt: '2026-10-12T00:00:00.000Z', noParentLinked: true, parentAcknowledgedAt: null,
+        });
+      });
+    }
+    const approve = { status: 'APPROVED', decidedBy: 'ครู', decidedByStaffId: HR_UID, decidedAt: '2026-10-12T02:00:00.000Z', teacherRemarks: '' };
+
+    it('approving a leave and writing its leave-day in one batch succeeds', async () => {
+      await seed('ld1');
+      const db = hr();
+      const b = db.batch();
+      b.update(db.doc(`${LCOL}/ld1`), approve);
+      b.set(db.doc(`${DCOL}/ld1`), day('ld1'));
+      await assertSucceeds(b.commit());
+    });
+    it('denies a leave-day without approving the leave in the same batch', async () => {
+      await seed('ld2');
+      await assertFails(hr().doc(`${DCOL}/ld2`).set(day('ld2')));
+    });
+    it('denies a leave-day for a REJECTED or already-decided leave', async () => {
+      await seed('ld3');
+      const db = hr();
+      const b = db.batch();
+      b.update(db.doc(`${LCOL}/ld3`), { ...approve, status: 'REJECTED' });
+      b.set(db.doc(`${DCOL}/ld3`), day('ld3'));
+      await assertFails(b.commit());
+      await seed('ld4', 'APPROVED');
+      await assertFails(hr().doc(`${DCOL}/ld4`).set(day('ld4')));
+    });
+    it('denies a leave-day whose student/room/dates differ from the leave, or with a reason field', async () => {
+      await seed('ld5');
+      for (const over of [{ studentId: 'other' }, { homeroomClass: 'ม.6/1' }, { endDate: '2026-12-31' }, { reason: 'เรื่องส่วนตัว' }]) {
+        const db = hr();
+        const b = db.batch();
+        b.update(db.doc(`${LCOL}/ld5`), approve);
+        b.set(db.doc(`${DCOL}/ld5`), day('ld5', over));
+        await assertFails(b.commit());
+      }
+    });
+    it('a teacher of another room cannot approve, so cannot create the leave-day', async () => {
+      await seed('ld6');
+      const db = otherHr();
+      const b = db.batch();
+      b.update(db.doc(`${LCOL}/ld6`), approve);
+      b.set(db.doc(`${DCOL}/ld6`), day('ld6'));
+      await assertFails(b.commit());
+    });
+    it('subject teachers can read leave-days but students/parents cannot; nobody can update or delete', async () => {
+      await seed('ld7');
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`${DCOL}/ld7`).set(day('ld7')); });
+      await assertSucceeds(subj().doc(`${DCOL}/ld7`).get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc(`${DCOL}/ld7`).get());
+      await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc(`${DCOL}/ld7`).get());
+      await assertFails(asUser('par-d', ['PARENT']).firestore().doc(`${DCOL}/ld7`).get());
+      await assertFails(hr().doc(`${DCOL}/ld7`).update({ endDate: '2026-12-31' }));
+      await assertFails(hr().doc(`${DCOL}/ld7`).delete());
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc(`${DCOL}/ld7`).delete());
+    });
+  });
+
   // 16. student_portfolio_entries — นักเรียนบันทึกผลงานเอง + ครูที่ปรึกษาอนุมัติ
   describe('student_portfolio_entries collection', () => {
     const STU_UID = 'stu-uid-p1';

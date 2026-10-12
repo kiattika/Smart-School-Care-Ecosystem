@@ -21,6 +21,7 @@ import { useSchoolCalendar } from './hooks/useSchoolCalendar';
 import { DatePicker } from './components/shared/DatePicker';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
+import { useLeaveStudentIds } from './hooks/useApprovedLeaveDays';
 import { rosterLevels, sortRoster, filterRosterByLevel, studentLevelLabel } from './lib/gradebookRoster';
 import { TeacherAttendanceStatsPanel } from './components/attendance/TeacherAttendanceStatsPanel';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests, subscribeHiddenGradebookCourses, hideGradebookCourse, unhideGradebookCourse } from './services/firestoreService';
@@ -153,6 +154,7 @@ export function TeacherPortal() {
   const { getStatusForDate } = useSchoolCalendar();
 
   const todayStr = format(currentDate, 'yyyy-MM-dd');
+  const leaveStudentIds = useLeaveStudentIds(todayStr);
   // ครูผู้สอน/ครูประจำชั้นเท่านั้นที่มีตารางสอน + ต้องอ่าน attendance_records
   // (role อนุมัติ เช่น DEPUTY_DIRECTOR_ACADEMIC ถูก route ไป ApprovalsPortal แล้ว — ไม่ถึงหน้านี้)
   const isTeacherRole = ['SUBJECT_TEACHER', 'HOMEROOM_TEACHER'].includes(user?.activeRole || '') || user?.role === 'teacher' || user?.role === 'advisor';
@@ -811,8 +813,9 @@ export function TeacherPortal() {
     try {
       const studentStatuses: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'> = {};
       courseStudents.forEach(student => {
-        const status = attendanceRecords[courseId]?.[student.studentId] || 'PRESENT';
-        studentStatuses[student.studentId] = (status === 'UNMARKED' ? 'PRESENT' : status) as any;
+        const marked = attendanceRecords[courseId]?.[student.studentId];
+        const status = marked && marked !== 'UNMARKED' ? marked : (leaveStudentIds.has(student.studentId) ? 'LEAVE' : 'PRESENT');
+        studentStatuses[student.studentId] = status as any;
       });
 
       const teacherName = user?.displayName || teacherId.split('@')[0];

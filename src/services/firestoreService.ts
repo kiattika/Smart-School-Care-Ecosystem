@@ -36,6 +36,7 @@ import {
   StudentSelfAssessment,
   GateAttendanceRecord,
   DetailedLeaveRequest,
+  StudentLeaveDay,
   GPSCheckInLog,
   TwoQuestionScreening,
   SDQAssessment,
@@ -1016,6 +1017,7 @@ export function subscribeDisciplineLogs(
  * ลำดับ: ดู src/lib/leaveFlow.ts + firestore.rules (ต้องตรงกัน)
  */
 const LEAVE_COL = 'detailed_leave_requests';
+const LEAVE_DAYS_COL = 'student_leave_days';
 
 export interface CreateLeaveInput {
   student: { studentId: string; studentUid: string; parentUid?: string | null; room: string };
@@ -1083,7 +1085,9 @@ export async function decideLeaveRequest(
 ): Promise<void> {
   if (!decider.name) throw new Error('ไม่พบข้อมูลผู้ใช้ — เข้าสู่ระบบใหม่แล้วลองอีกครั้ง');
   try {
-    await updateDoc(doc(db, LEAVE_COL, leaveId), {
+    const leaveRef = doc(db, LEAVE_COL, leaveId);
+    const batch = writeBatch(db);
+    batch.update(leaveRef, {
       status: decision,
       teacherRemarks: remarks.trim(),
       decidedBy: decider.name,
@@ -1091,8 +1095,41 @@ export async function decideLeaveRequest(
       decidedAt: new Date().toISOString(),
       updatedAt: serverTimestamp(),
     });
+    if (decision === 'APPROVED') {
+      // สำเนา "วันลา" แบบไม่มีเหตุผล ให้ครูประจำวิชาเห็นตอนเช็คชื่อ — เขียนใน batch เดียวกับการอนุมัติ (ผ่านทั้งคู่หรือไม่ผ่านเลย)
+      const snap = await getDoc(leaveRef);
+      const leave = snap.data();
+      if (!leave) throw new Error('ไม่พบใบลา');
+      batch.set(doc(db, LEAVE_DAYS_COL, leaveId), {
+        leaveId,
+        studentId: leave.studentId,
+        homeroomClass: leave.homeroomClass,
+        startDate: leave.startDate,
+        endDate: leave.endDate,
+        createdAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `${LEAVE_COL}/${leaveId}`);
+  }
+}
+
+/** real-time วันลาที่อนุมัติแล้ว (ไม่มีเหตุผล) ที่ยังไม่จบก่อน fromYmd — ครูผู้สอนใช้ติ๊ก "ลา" ล่วงหน้าในรายการเช็คชื่อ */
+export function subscribeApprovedLeaveDays(
+  onUpdate: (days: StudentLeaveDay[]) => void,
+  fromYmd: string,
+): () => void {
+  try {
+    return onSnapshot(query(collection(db, LEAVE_DAYS_COL), where('endDate', '>=', fromYmd)), (snap) => {
+      onUpdate(snap.docs.map(d => d.data() as StudentLeaveDay));
+    }, (error) => {
+      console.warn('[subscribeApprovedLeaveDays] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeApprovedLeaveDays] setup error:', error);
+    return () => {};
   }
 }
 

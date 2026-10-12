@@ -27,10 +27,14 @@ interface TakeAttendanceModalProps {
   students: Student[];
   currentDate?: Date;
   initialAttendance?: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>;
+  /** นักเรียนที่มีใบลาอนุมัติครอบคลุมวันนี้ — ติ๊ก "ลา" ให้ล่วงหน้าเมื่อยังไม่มีสถานะบันทึก (ครูแก้เองได้) */
+  leaveStudentIds?: ReadonlySet<string>;
   teacherId?: string;
   teacherName?: string;
   onAttendanceSaved: (newStatuses: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>) => void;
 }
+
+const EMPTY_LEAVE_IDS: ReadonlySet<string> = new Set();
 
 export const TakeAttendanceModal: React.FC<TakeAttendanceModalProps> = ({
   isOpen,
@@ -39,6 +43,7 @@ export const TakeAttendanceModal: React.FC<TakeAttendanceModalProps> = ({
   students,
   currentDate = new Date(),
   initialAttendance = {},
+  leaveStudentIds = EMPTY_LEAVE_IDS,
   teacherId,
   teacherName = 'ครูผู้สอน',
   onAttendanceSaved
@@ -47,7 +52,7 @@ export const TakeAttendanceModal: React.FC<TakeAttendanceModalProps> = ({
   const [statuses, setStatuses] = useState<Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>>(() => {
     const map: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'> = {};
     students.forEach(s => {
-      map[s.studentId] = initialAttendance[s.studentId] || 'PRESENT';
+      map[s.studentId] = initialAttendance[s.studentId] || (leaveStudentIds.has(s.studentId) ? 'LEAVE' : 'PRESENT');
     });
     return map;
   });
@@ -62,12 +67,12 @@ export const TakeAttendanceModal: React.FC<TakeAttendanceModalProps> = ({
     if (isOpen) {
       const map: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'> = {};
       students.forEach(s => {
-        map[s.studentId] = initialAttendance[s.studentId] || 'PRESENT';
+        map[s.studentId] = initialAttendance[s.studentId] || (leaveStudentIds.has(s.studentId) ? 'LEAVE' : 'PRESENT');
       });
       setStatuses(map);
       setErrorMessage(null);
     }
-  }, [isOpen, students, initialAttendance]);
+  }, [isOpen, students, initialAttendance, leaveStudentIds]);
 
   // Status counters
   const counts = useMemo(() => {
@@ -118,7 +123,8 @@ export const TakeAttendanceModal: React.FC<TakeAttendanceModalProps> = ({
   const handleMarkAllPresent = () => {
     const next: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'> = {};
     students.forEach(s => {
-      next[s.studentId] = 'PRESENT';
+      // นักเรียนที่มีใบลาอนุมัติและยังติ๊ก "ลา" อยู่ คงไว้ — ครูเปลี่ยนรายคนเองได้ถ้าเด็กมาเรียนจริง
+      next[s.studentId] = leaveStudentIds.has(s.studentId) && statuses[s.studentId] === 'LEAVE' ? 'LEAVE' : 'PRESENT';
     });
     setStatuses(next);
   };
@@ -344,6 +350,11 @@ export const TakeAttendanceModal: React.FC<TakeAttendanceModalProps> = ({
                         <span>{student.name}</span>
                         {student.nickname && (
                           <span className="text-xs text-slate-400 font-normal">({student.nickname})</span>
+                        )}
+                        {leaveStudentIds.has(student.studentId) && (
+                          <span className="text-[10px] font-semibold text-sky-300 bg-sky-500/10 border border-sky-500/30 rounded px-1.5 py-0.5" data-testid="leave-approved-badge">
+                            มีใบลาอนุมัติ
+                          </span>
                         )}
                       </div>
                       <div className="text-[11px] text-slate-400 font-mono">

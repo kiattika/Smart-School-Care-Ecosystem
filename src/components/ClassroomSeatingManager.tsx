@@ -46,6 +46,8 @@ import { CreateGroupModal } from './seating/CreateGroupModal';
 import { TakeAttendanceModal } from './seating/TakeAttendanceModal';
 import { getAttendanceRecord } from '../services/firestoreService';
 import { format } from 'date-fns';
+import { useLeaveStudentIds } from '../hooks/useApprovedLeaveDays';
+import { withLeavePrefill } from '../lib/leaveAttendance';
 import { 
   getSeatingLayoutFromFirestore, 
   saveSeatingLayoutToFirestore,
@@ -226,7 +228,12 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
   // gating: เฉพาะ record ของคาบนี้จริง ๆ (โฮมรูม default ไม่นับว่า "เช็คคาบนี้แล้ว")
   const currentAttendance = firestoreAttendance || attendanceRecords[courseId] || attendanceRecords[course.code] || {};
   // ค่าที่ pre-fill ในฟอร์มเช็คชื่อ: คาบนี้ > โฮมรูมตอนเช้า > store
-  const attendancePrefill = firestoreAttendance || homeroomDefault || attendanceRecords[courseId] || attendanceRecords[course.code] || {};
+  const leaveStudentIds = useLeaveStudentIds(format(currentDate || new Date(), 'yyyy-MM-dd'));
+  // นักเรียนที่มีใบลาอนุมัติวันนี้ → ติ๊ก "ลา" ให้ล่วงหน้าเฉพาะคนที่ยังไม่มีสถานะ (ของที่บันทึก/โฮมรูมมาก่อนเสมอ; ครูแก้ได้)
+  const attendancePrefill = withLeavePrefill(
+    firestoreAttendance || homeroomDefault || attendanceRecords[courseId] || attendanceRecords[course.code] || {},
+    leaveStudentIds,
+  );
   const hasAttendanceRecords = Object.keys(currentAttendance).length > 0;
   // Gated strictly when real student attendance statuses exist
   const isAttendanceDone = hasAttendanceRecords;
@@ -1409,6 +1416,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
         students={courseStudents}
         currentDate={currentDate}
         initialAttendance={attendancePrefill}
+        leaveStudentIds={leaveStudentIds}
         teacherId={user?.uid}
         teacherName={user?.displayName || 'ครูผู้สอน'}
         onAttendanceSaved={(newStatuses) => {
