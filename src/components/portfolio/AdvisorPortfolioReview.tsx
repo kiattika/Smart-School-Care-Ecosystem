@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Award, GraduationCap, Briefcase, HandHeart, CheckCircle2, XCircle, Loader2, FolderCheck, Paperclip } from 'lucide-react';
 import { useStore } from '../../store';
+import { useRealStudents } from '../../hooks/useRealStudents';
+import { portfolioDecisionNotice } from '../../lib/studentNotices';
 import { StudentPortfolioEntry, StudentPortfolioEntryType } from '../../types';
 import {
   subscribeStudentPortfolioEntries,
   decideStudentPortfolioEntry,
+  createParentNotification,
 } from '../../services/firestoreService';
 
 /**
@@ -23,6 +26,7 @@ const TYPE_META: Record<StudentPortfolioEntryType, { label: string; icon: React.
 
 export function AdvisorPortfolioReview({ homeroomClass }: { homeroomClass?: string }) {
   const user = useStore(s => s.user);
+  const { students } = useRealStudents();
   const [entries, setEntries] = useState<StudentPortfolioEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -57,6 +61,16 @@ export function AdvisorPortfolioReview({ homeroomClass }: { homeroomClass?: stri
         uid: user.uid,
         name: user.displayName || user.email || 'ครูที่ปรึกษา',
       }, reason);
+      // แจ้งนักเรียนเจ้าของรายการ (และผู้ปกครองถ้ามี) — ผลพลอยได้ ไม่ทำให้การตรวจล้มเหลว
+      const stu = students.find(x => x.studentId === entry.studentId);
+      const text = portfolioDecisionNotice(entry, decision, user.displayName || user.email || 'ครูที่ปรึกษา', reason);
+      createParentNotification({
+        parentUid: stu?.parentUid || null,
+        studentUid: entry.studentUid,
+        studentId: entry.studentId,
+        studentName: stu?.name || entry.studentId,
+        ...text,
+      }).catch(err => console.warn('[portfolio] notification failed:', err));
       flash(decision === 'APPROVED' ? 'อนุมัติแล้ว' : 'ทำรายการไม่อนุมัติแล้ว');
     } catch (err) {
       flash('ทำรายการไม่สำเร็จ: ' + (err instanceof Error ? err.message : String(err)));

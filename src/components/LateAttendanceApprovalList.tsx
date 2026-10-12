@@ -3,9 +3,11 @@ import { CheckCircle, X, Clock } from 'lucide-react';
 import { useStore } from '../store';
 import { cn } from '../lib/utils';
 import { LateAttendanceRequestRecord } from '../types';
+import { lateAttendanceDecisionNotice } from '../lib/staffNotifications';
 import {
   subscribeLateAttendanceRequests,
   decideLateAttendanceRequestFirestore,
+  sendStaffNotifications,
 } from '../services/firestoreService';
 
 /**
@@ -41,6 +43,9 @@ export function LateAttendanceApprovalList({ readOnly = false }: { readOnly?: bo
         { uid: user.uid, name: user.displayName || user.email || 'ผู้อนุมัติ' },
         rejectReason
       );
+      const approverName = user.displayName || user.email || 'ผู้อนุมัติ';
+      // แจ้งผลถึงครูผู้ยื่นคำขอ — ผลอนุมัติเสร็จแล้ว ข้อความพลาดต้องไม่ทำให้ดูเหมือนอนุมัติล้มเหลว
+      void sendStaffNotifications([lateAttendanceDecisionNotice(req, decision, approverName, rejectReason)], { uid: user.uid, name: approverName });
       flash(decision === 'APPROVED' ? 'อนุมัติคำขอแล้ว' : 'ปฏิเสธคำขอแล้ว');
     } catch (err) {
       flash('ดำเนินการไม่สำเร็จ: ' + (err instanceof Error ? err.message : String(err)));

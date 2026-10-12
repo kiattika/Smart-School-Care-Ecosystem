@@ -30,6 +30,8 @@ import {
 import { emptyShared, fillMissing, sharedFromAssessment, sharedFromInfo, sharedEqual, type SharedFields } from '../lib/homeVisitShared';
 import { emptyStudentInfo } from '../lib/homeVisitData';
 import { validateAppointmentForm, validateConfirmation, type AppointmentFormInput } from '../lib/appointmentFlow';
+import { normalizeEmail } from '../lib/normalizeEmail';
+import type { StaffNotificationKind, StaffNotificationDraft } from '../lib/staffNotifications';
 import { countLeaveDays, initialLeaveStatus, validateLeaveForm, type LeaveSubmitterRole, type LeaveType } from '../lib/leaveFlow';
 import { diffCourseAttendance, computeCourseStatsMap } from '../lib/courseAttendanceStats';
 import type { AttendanceRecordFull } from '../lib/attendanceHistory';
@@ -487,30 +489,30 @@ export async function updateBehaviorScoreAndTriggerAlert(
  * เดียวกับตอนที่เหตุการณ์เกิดขึ้น — ใช้ schema/pattern เดียวกับที่ updateBehaviorScoreAndTriggerAlert
  * ใช้อยู่แล้วข้างบน (parentUid/parentId/studentId/studentName/title/message/status/createdAt/type)
  */
-export type CreateParentNotificationInput = Pick<ParentNotification, 'parentUid' | 'studentId' | 'studentName' | 'title' | 'message'> &
+export type CreateParentNotificationInput = Omit<Pick<ParentNotification, 'parentUid' | 'studentId' | 'studentName' | 'title' | 'message'>, 'parentUid'> &
+  { parentUid?: string | null } &
   Partial<Pick<ParentNotification, 'type' | 'pointsDeducted' | 'remainingScore' | 'attendanceStatus' | 'date' | 'studentUid'>>;
 
-/** เขียนแจ้งเตือนผู้ปกครอง (และนักเรียนเจ้าของ ถ้ามี studentUid) 1 รายการ — ถ้าไม่มี parentUid จริง
- *  (นักเรียนยังไม่เชื่อมบัญชีผู้ปกครอง) ข้ามการเขียนไปเงียบๆ แทนการ fabricate ID ปลอมแบบ
- *  `parent_${studentId}` ที่เคยเป็นมา (เขียนไปก็ไม่มีผู้ปกครองคนไหนอ่านได้จริงอยู่ดี เพราะไม่มี Auth UID
- *  ไหนตรงกับ ID ปลอมนั้น) — เกตนี้ตั้งใจคงไว้เหมือนเดิม แม้จะมี studentUid มาด้วยก็ตาม เพราะทุกจุดที่
- *  เรียกฟังก์ชันนี้อยู่ปัจจุบันยังถือว่า "ไม่มีผู้ปกครองเชื่อมบัญชี" เป็นกรณีข้อมูลไม่สมบูรณ์ที่ควร skip
- *  ทั้งคู่ ไม่ใช่แค่ฝั่งผู้ปกครอง (ถ้าต้องการแยกกัน ต้องตัดสินใจ scope ใหม่แยกต่างหาก) */
+/** เขียนแจ้งเตือนถึงผู้ปกครอง และ/หรือนักเรียนเจ้าของเรื่อง 1 รายการ — ข้ามเงียบๆ เฉพาะเมื่อ "ไม่มีผู้รับจริงเลย"
+ *  (ไม่มีทั้ง parentUid และ studentUid) แทนการ fabricate ID ปลอมแบบ `parent_${studentId}`
+ *  นักเรียนที่ยังไม่มีผู้ปกครองเชื่อมบัญชียังได้รับแจ้งเตือนผ่าน studentUid (parentUid เก็บเป็น null) */
 export async function createParentNotification(
   data: CreateParentNotificationInput,
   firestoreDb: Firestore = db,
 ): Promise<void> {
-  if (!data.parentUid) {
-    console.warn('[createParentNotification] skipped: no real parentUid for studentId', data.studentId);
+  const parentUid = data.parentUid || null;
+  const studentUid = data.studentUid || null;
+  if (!parentUid && !studentUid) {
+    console.warn('[createParentNotification] skipped: no real recipient (parentUid/studentUid) for studentId', data.studentId);
     return;
   }
   const ref = doc(collection(firestoreDb, 'parent_notifications'));
   try {
     await setDoc(ref, {
       id: ref.id,
-      parentUid: data.parentUid,
-      parentId: data.parentUid,
-      studentUid: data.studentUid ?? null,
+      parentUid,
+      parentId: parentUid,
+      studentUid,
       studentId: data.studentId,
       studentName: data.studentName,
       title: data.title,
@@ -2992,5 +2994,89 @@ export async function commitReferenceChanges(
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, kind);
+  }
+}
+
+
+// ===== staff_notifications: ข้อความแจ้งผลการอนุมัติระหว่างบุคลากร (ผู้รับระบุด้วยอีเมล) =====
+export interface StaffNotificationRecord {
+  id: string;
+  recipientEmail: string;
+  kind: StaffNotificationKind;
+  title: string;
+  message: string;
+  refId: string;
+  senderUid: string;
+  senderName: string;
+  createdAt?: string;
+  readAt: string | null;
+}
+
+/** ส่งข้อความถึงบุคลากรหนึ่งคน (throw เมื่อเขียนไม่สำเร็จ — ผู้เรียกที่ผลหลักเสร็จแล้วควร .catch(warn) ไม่ให้ล้มงานหลัก) */
+export async function sendStaffNotification(
+  draft: StaffNotificationDraft,
+  sender: { uid: string; name: string },
+  firestoreDb: Firestore = db,
+): Promise<void> {
+  const ref = doc(collection(firestoreDb, 'staff_notifications'));
+  try {
+    await setDoc(ref, {
+      id: ref.id,
+      recipientEmail: draft.recipientEmail,
+      kind: draft.kind,
+      title: draft.title,
+      message: draft.message,
+      refId: draft.refId,
+      senderUid: sender.uid,
+      senderName: sender.name || 'บุคลากร',
+      createdAt: serverTimestamp(),
+      readAt: null,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `staff_notifications/${ref.id}`);
+  }
+}
+
+/** ส่งหลาย draft แบบเขียนทีละรายการ (ไม่ใช้ batch — กันชนเพดาน get() ของ rules) แล้วไม่ล้มงานหลักถ้าบางรายการพลาด */
+export async function sendStaffNotifications(
+  drafts: (StaffNotificationDraft | null | undefined)[],
+  sender: { uid: string; name: string },
+  firestoreDb: Firestore = db,
+): Promise<void> {
+  const list = drafts.filter((d): d is StaffNotificationDraft => !!d);
+  await Promise.all(list.map(d => sendStaffNotification(d, sender, firestoreDb).catch(err => console.warn('[sendStaffNotification] failed', err))));
+}
+
+/** ข้อความของฉัน (ตามอีเมล) เรียงใหม่→เก่า — rules อนุญาตเฉพาะ query ที่กรอง recipientEmail ตรง token.email */
+export function subscribeStaffNotifications(
+  email: string,
+  cb: (rows: StaffNotificationRecord[]) => void,
+  firestoreDb: Firestore = db,
+): () => void {
+  const e = normalizeEmail(email || '');
+  if (!e) { cb([]); return () => {}; }
+  return onSnapshot(
+    query(collection(firestoreDb, 'staff_notifications'), where('recipientEmail', '==', e)),
+    snap => {
+      const rows = snap.docs.map(d => {
+        const v = d.data() as Record<string, unknown>;
+        const ts = v.createdAt as { toDate?: () => Date } | string | undefined;
+        return {
+          ...(v as unknown as StaffNotificationRecord),
+          id: d.id,
+          createdAt: typeof ts === 'string' ? ts : ts?.toDate?.().toISOString(),
+        } as StaffNotificationRecord;
+      }).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      cb(rows);
+    },
+    err => { console.warn('[subscribeStaffNotifications]', err); cb([]); },
+  );
+}
+
+export async function markStaffNotificationRead(id: string, firestoreDb: Firestore = db): Promise<void> {
+  try {
+    await updateDoc(doc(firestoreDb, 'staff_notifications', id), { readAt: new Date().toISOString() });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `staff_notifications/${id}`);
   }
 }

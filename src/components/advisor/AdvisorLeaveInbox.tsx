@@ -27,7 +27,8 @@ export function AdvisorLeaveInbox({ leaves, students }: { leaves: DetailedLeaveR
       await decideLeaveRequest(leave.id, decision, { name: user.displayName, staffId: user.staffId }, remarks[leave.id] || '');
       const student = students.find(s => s.studentId === leave.studentId);
       // แจ้งผลให้ผู้ปกครอง/นักเรียนเป็นผลพลอยได้ — ไม่ทำให้การตัดสินล้มเหลวถ้าแจ้งไม่สำเร็จ
-      if (leave.parentUid) {
+      // ไม่มีผู้ปกครองเชื่อมบัญชียังแจ้งนักเรียนได้ (createParentNotification ข้ามเองเมื่อไม่มีผู้รับเลย)
+      {
         createParentNotification({
           parentUid: leave.parentUid,
           studentUid: leave.studentUid,
