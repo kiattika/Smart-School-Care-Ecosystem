@@ -891,7 +891,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               parentMobile: parsedData.parentMobile || '',
               homeLocation: {
                 address: '',
-                coordinates: [13.7563, 100.5018],
+                coordinates: null,
                 routeImage: ''
               },
               attendance: {

@@ -25,7 +25,6 @@ import {
   DigitalCertificate,
   VolunteerHourRecord,
   ReportCardTerm,
-  HomeworkAssignment,
   ExamScheduleItem,
   BillingInvoice,
   ParentTeacherMessage,
@@ -133,7 +132,6 @@ export const useStore = create<StoreState>((set, get) => ({
   digitalCertificates: [],
   volunteerRecords: [],
   reportCards: {},
-  homeworkAssignments: [],
   examSchedules: [],
   billingInvoices: [],
   parentTeacherMessages: [],
@@ -147,7 +145,6 @@ export const useStore = create<StoreState>((set, get) => ({
   substituteAssignments: [],
   postTeachingRecords: [],
   staffDirectory: [],
-  homeVisits: [],
 
   schoolDuties: [],
   administrativeTasks: [],
@@ -757,12 +754,6 @@ export const useStore = create<StoreState>((set, get) => ({
       ],
     }));
   },
-  submitHomeVisit: (visit) => set((state) => ({
-    homeVisits: [
-      ...state.homeVisits.filter(v => v.studentId !== visit.studentId),
-      visit
-    ]
-  })),
   updateSchoolDutyStatus: (dutyId, status) => set((state) => ({
     schoolDuties: state.schoolDuties.map(d => d.dutyId === dutyId ? { ...d, status } : d)
   })),
@@ -1054,21 +1045,6 @@ export const useStore = create<StoreState>((set, get) => ({
       status: 'APPROVED'
     };
     return { volunteerRecords: [newVol, ...state.volunteerRecords] };
-  }),
-
-  submitHomework: (assignmentId: string, fileName: string) => set((state) => {
-    const updated = state.homeworkAssignments.map(hw => {
-      if (hw.id === assignmentId) {
-        return {
-          ...hw,
-          status: 'SUBMITTED' as const,
-          submittedFile: fileName,
-          submittedAt: new Date().toLocaleDateString('th-TH') + ' ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.'
-        };
-      }
-      return hw;
-    });
-    return { homeworkAssignments: updated };
   }),
 
   sendParentTeacherMessage: (studentId: string, senderRole: ParentTeacherMessage['senderRole'], senderName: string, message: string) => {

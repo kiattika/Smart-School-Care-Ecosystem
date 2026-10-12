@@ -34,3 +34,19 @@ describe('guard: GPS modal', () => {
     expect(readSource('src/services/firestoreService.ts')).toMatch(/saveSchoolGeofenceConfigFirestore[\s\S]{0,400}throw error/);
   });
 });
+
+describe('guard: ไม่มีหน้าเยี่ยมบ้านจำลอง / ส่งการบ้านจำลอง / พิกัดบ้านสมมติ', () => {
+  it('ลบ HomeVisitPortal (หน้ามือถือจำลอง เก็บใน store แล้วหาย) และ store ไม่มี homeVisits/submitHomeVisit', () => {
+    expect(readSource('src/store.ts')).not.toMatch(/submitHomeVisit|homeVisits:/);
+    expect(readSource('src/types.ts')).not.toMatch(/interface HomeVisit \{|submitHomeVisit/);
+  });
+  it('ไม่มีส่งการบ้านใน store/โมดูล (ไม่มีฝั่งครูรับงาน) และไม่ fallback รหัสนักเรียนตัวอย่าง', () => {
+    expect(readSource('src/store.ts')).not.toMatch(/submitHomework|homeworkAssignments/);
+    expect(readSource('src/components/student-parent/AcademicHomeworkModule.tsx')).not.toMatch(/submitHomework|homeworkAssignments|6950801|รายงาน_ฟิสิกส์/);
+  });
+  it('นำเข้า/แก้ไข/อ่านนักเรียนไม่เติมพิกัดบ้านสมมติ (กรุงเทพ)', () => {
+    for (const f of ['src/components/BulkDataImportModal.tsx', 'src/components/StudentManagementPage.tsx', 'src/hooks/useRealStudents.ts']) {
+      expect(readSource(f)).not.toMatch(/13\.7563|100\.5018/);
+    }
+  });
+});
