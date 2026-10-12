@@ -1,7 +1,7 @@
 import { cn } from "./lib/utils";
 import React, { useState } from 'react';
 import { format } from 'date-fns';
-import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, ArrowRight, GraduationCap, ShieldCheck } from 'lucide-react';
+import { Upload, FileDown, CheckCircle2, AlertTriangle, Users, BookOpen, Clock, Loader2, Database, ArrowLeftRight, Trash2, UserCheck, Calendar, Settings, Bell, Layers, ArrowRight, GraduationCap, ShieldCheck, MapPin, School } from 'lucide-react';
 import clsx, { ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useStore } from './store';
@@ -19,6 +19,8 @@ import { HouseManagerPage } from './components/admin/HouseManagerPage';
 import { StudentIdRegistryPage } from './components/admin/StudentIdRegistryPage';
 import { BarChart3, Palette, History } from 'lucide-react';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
+import { AdminReferenceVillagesPage } from './components/admin/AdminReferenceVillagesPage';
+import { AdminReferenceSchoolsPage } from './components/admin/AdminReferenceSchoolsPage';
 import { motion, AnimatePresence } from 'motion/react';
 
 /** รายละเอียดการ์ดนำเข้า — ลำดับมาจาก IMPORT_ORDER (ลำดับพึ่งพาจริง ดู lib/importOrder.ts) */
@@ -89,7 +91,7 @@ export function AdminPortal() {
   };
 
   interface AdminNavItem {
-    id: 'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'id-registry' | 'settings' | 'periods' | 'electives' | 'houses';
+    id: 'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'id-registry' | 'settings' | 'periods' | 'electives' | 'houses' | 'ref-villages' | 'ref-schools';
     label: string;
     fullLabel: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -110,6 +112,8 @@ export function AdminPortal() {
     { id: 'periods', label: 'ตารางเวลา & กระดิ่ง', fullLabel: 'จัดการตารางเวลา & กระดิ่งคาบเรียน', icon: Bell, badge: null, color: 'text-indigo-400', activeStyle: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-[inset_4px_0_0_rgba(99,102,241,1)]' },
     { id: 'electives', label: 'จัดการชุมนุม', fullLabel: 'จัดการชุมนุม (Elective Activities)', icon: Users, badge: null, color: 'text-teal-400', activeStyle: 'bg-teal-500/10 text-teal-400 border-teal-500/20 shadow-[inset_4px_0_0_rgba(20,184,166,1)]' },
     { id: 'houses', label: 'จัดการคณะสี', fullLabel: 'จัดการคณะสี (House)', icon: Palette, badge: null, color: 'text-rose-400', activeStyle: 'bg-rose-500/10 text-rose-400 border-rose-500/20 shadow-[inset_4px_0_0_rgba(244,63,94,1)]' },
+    { id: 'ref-villages', label: 'รายชื่อหมู่บ้าน', fullLabel: 'จัดการรายชื่อหมู่บ้าน (ที่อยู่นักเรียน)', icon: MapPin, badge: null, color: 'text-emerald-400', activeStyle: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[inset_4px_0_0_rgba(16,185,129,1)]' },
+    { id: 'ref-schools', label: 'รายชื่อโรงเรียน', fullLabel: 'จัดการรายชื่อโรงเรียน (จบจากสถานศึกษา)', icon: School, badge: null, color: 'text-sky-400', activeStyle: 'bg-sky-500/10 text-sky-400 border-sky-500/20 shadow-[inset_4px_0_0_rgba(14,165,233,1)]' },
     { id: 'settings', label: 'ปีการศึกษา & ล็อกระบบ', fullLabel: 'ตั้งค่าปีการศึกษา & ล็อกระบบ (System Lock)', icon: Settings, badge: null, color: 'text-pink-400', activeStyle: 'bg-[#ec4899]/10 text-[#ec4899] border-[#ec4899]/20 shadow-[inset_4px_0_0_rgba(236,72,153,1)]' },
   ];
 
@@ -289,6 +293,18 @@ export function AdminPortal() {
           {activeTab === 'houses' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
               <HouseManagerPage />
+            </div>
+          )}
+
+          {activeTab === 'ref-villages' && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <AdminReferenceVillagesPage />
+            </div>
+          )}
+
+          {activeTab === 'ref-schools' && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <AdminReferenceSchoolsPage />
             </div>
           )}
 

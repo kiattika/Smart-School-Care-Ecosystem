@@ -2685,3 +2685,39 @@ export async function syncSharedToSelfAssessment(base: { studentId: string; stud
     updatedAt: new Date().toISOString(),
   }, { merge: true });
 }
+
+/* ───────── ข้อมูลอ้างอิงที่แอดมินแก้ไขได้ (รายชื่อโรงเรียน/หมู่บ้าน) ─────────
+ * เก็บเฉพาะส่วนที่ต่างจากชุดหลักในแอป (ดู src/types/reference.ts, src/lib/referenceData.ts)
+ * อ่าน: ผู้ใช้ที่ล็อกอิน (ไม่ใช่ข้อมูลอ่อนไหว) · เขียน/ลบ: SUPER_ADMIN เท่านั้น (บังคับที่ firestore.rules) */
+export function subscribeReferenceOverrides<T>(
+  kind: 'reference_schools' | 'reference_villages',
+  field: 'provinceCode' | 'tambonCode',
+  value: string,
+  onUpdate: (rows: T[]) => void,
+  onError?: (message: string) => void,
+): () => void {
+  if (!value) { onUpdate([]); return () => {}; }
+  return onSnapshot(query(collection(db, kind), where(field, '==', value)), (snap) => {
+    onUpdate(snap.docs.map(d => ({ ...d.data(), id: d.id } as T)));
+  }, (err) => {
+    console.warn(`[subscribeReferenceOverrides:${kind}] listener error:`, err.message);
+    onUpdate([]);
+    onError?.(err.message);
+  });
+}
+
+export async function saveReferenceOverride(kind: 'reference_schools' | 'reference_villages', id: string, data: object): Promise<void> {
+  try {
+    await setDoc(doc(db, kind, id), data);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${kind}/${id}`);
+  }
+}
+
+export async function deleteReferenceOverride(kind: 'reference_schools' | 'reference_villages', id: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, kind, id));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `${kind}/${id}`);
+  }
+}

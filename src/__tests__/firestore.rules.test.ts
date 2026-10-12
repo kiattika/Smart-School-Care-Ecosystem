@@ -2752,4 +2752,24 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(hr().firestore().doc('home_visit_records/10001_2569').delete());
     });
   });
+
+  describe('reference_schools / reference_villages (ข้อมูลอ้างอิงที่แอดมินจัดการ)', () => {
+    const school = { id: 'c_1', baseCode: null, disabled: false, provinceCode: '53', name: 'โรงเรียนทดสอบ' };
+    const village = { id: 'c_1', baseCode: null, disabled: false, tambonCode: '530101', name: 'บ้านทดสอบ' };
+    it('SUPER_ADMIN เขียน/ลบได้; ผู้ล็อกอินอื่นอ่านได้แต่เขียน/ลบไม่ได้; ไม่ล็อกอินอ่านไม่ได้', async () => {
+      for (const [col, doc] of [['reference_schools', school], ['reference_villages', village]] as const) {
+        const adm = asUser('adm', ['SUPER_ADMIN']).firestore();
+        await assertSucceeds(adm.doc(`${col}/c_1`).set(doc));
+        await assertSucceeds(asUser('stu', ['STUDENT'], { studentId: '10001' }).firestore().doc(`${col}/c_1`).get());
+        for (const role of ['STUDENT', 'PARENT', 'SUBJECT_TEACHER', 'HOMEROOM_TEACHER', 'EXECUTIVE'] as const) {
+          const db = asUser('u-' + role, [role]).firestore();
+          await assertFails(db.doc(`${col}/c_2`).set({ ...doc, id: 'c_2' }));
+          await assertFails(db.doc(`${col}/c_1`).delete());
+        }
+        await assertFails(asAnonymous().firestore().doc(`${col}/c_1`).get());
+        await assertFails(adm.doc(`${col}/c_bad`).set({ ...doc, name: '' }));
+        await assertSucceeds(adm.doc(`${col}/c_1`).delete());
+      }
+    });
+  });
 });

@@ -75,6 +75,7 @@ export interface StudentHomeVisitInfo {
   // ข้อ 2
   prevEducationLevel: string; prevGpa: string; prevSchool: string; prevAffiliation: string;
   prevSubdistrict: string; prevDistrict: string; prevProvince: string; prevPhone: string;
+  prevSchoolMoeCode?: string; // รหัสโรงเรียน (เมื่อเลือกจากรายชื่อ; ว่าง = พิมพ์เอง)
   // ข้อ 3
   weightKg: number | null; heightCm: number | null; bloodType: string;
   chronicDisease: string;     // '' = ไม่มีโรคประจำตัว
