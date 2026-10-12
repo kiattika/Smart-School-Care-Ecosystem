@@ -1284,7 +1284,6 @@ export interface StoreState {
   saveSelfAssessment: (assessment: StudentSelfAssessment) => Promise<void>;
 
   // Extended Student & Parent Module Actions
-  recordGateAttendance: (studentId: string, type: 'ENTRY' | 'EXIT', method: GateAttendanceRecord['method']) => void;
   // ทั้ง 3 action นี้คืน Promise ที่ resolve ก็ต่อเมื่อ Firestore เขียนสำเร็จจริง (reject ถ้า rules
   // ปฏิเสธ/offline ฯลฯ) — ผู้เรียกต้อง await แล้วค่อยแสดง "บันทึกสำเร็จ" ห้ามโชว์ optimistic ก่อนเช็คผล
   save2QScreening: (studentId: string, q1: boolean, q2: boolean) => Promise<void>;
@@ -1297,6 +1296,6 @@ export interface StoreState {
   sendParentTeacherMessage: (studentId: string, senderRole: ParentTeacherMessage['senderRole'], senderName: string, message: string) => void;
 
   // GPS Geofence Actions
-  addGPSCheckInLog: (log: Omit<GPSCheckInLog, 'id'>) => void;
+  addGPSCheckInLog: (log: Omit<GPSCheckInLog, 'id'>) => Promise<void>;
   updateSchoolGeofenceConfig: (config: Partial<StoreState['schoolGeofenceConfig']>) => void;
 }

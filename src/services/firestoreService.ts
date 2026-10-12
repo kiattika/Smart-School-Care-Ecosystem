@@ -931,7 +931,7 @@ export async function saveGateAttendanceRecordFirestore(record: GateAttendanceRe
       createdAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.warn('[saveGateAttendanceRecordFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${record.id}`);
   }
 }
 
@@ -1171,7 +1171,7 @@ export async function saveGPSCheckInLogFirestore(log: GPSCheckInLog): Promise<vo
       createdAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.warn('[saveGPSCheckInLogFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${log.id}`);
   }
 }
 

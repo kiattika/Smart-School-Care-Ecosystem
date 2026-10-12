@@ -66,6 +66,7 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
   const [checkinNote, setCheckinNote] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [lastCheckinSuccess, setLastCheckinSuccess] = useState<string | null>(null);
+  const [checkinError, setCheckinError] = useState<string | null>(null);
 
   // Settings state
   const [tempRadius, setTempRadius] = useState<number>(schoolGeofenceConfig.radiusMeters);
@@ -182,13 +183,14 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
   };
 
   // Perform Check-in or Check-out
-  const handlePerformCheckIn = (type: 'ENTRY' | 'EXIT') => {
+  const handlePerformCheckIn = async (type: 'ENTRY' | 'EXIT') => {
     if (!geofenceResult.isInside || !currentCoords) {
       alert('คุณอยู่นอกเขตรัศมีโรงเรียน หรือยังไม่ได้พิกัดจาก GPS ไม่สามารถบันทึกเวลาได้');
       return;
     }
 
     setIsSubmitting(true);
+    setCheckinError(null);
 
     const now = new Date();
     const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
@@ -214,8 +216,8 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
     
     const userRole = user?.activeRole || user?.role?.toUpperCase() || 'USER';
 
-    setTimeout(() => {
-      addGPSCheckInLog({
+    try {
+      await addGPSCheckInLog({
         userId: user?.profile?.id || user?.uid || 'user-unknown',
         userName,
         userRole,
@@ -232,16 +234,18 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
         selfieUrl: selfiePreview || undefined,
         notes: checkinNote || (isRealGPSActive ? 'พิกัดดาวเทียมจริง (High Precision GPS)' : 'พิกัด Geofence')
       });
-
-      setIsSubmitting(false);
       setLastCheckinSuccess(`บันทึก${type === 'ENTRY' ? 'ลงชื่อเข้าโรงเรียน' : 'ลงชื่อกลับบ้าน'}สำเร็จ (${timeStr})`);
       setSelfiePreview(null);
       setCheckinNote('');
-
       setTimeout(() => {
         setLastCheckinSuccess(null);
       }, 4000);
-    }, 600);
+    } catch (err) {
+      console.error('[GPSGeofenceCheckinModal] check-in failed:', err);
+      setCheckinError('บันทึกเวลาไม่สำเร็จ (ยังไม่มีการบันทึก) — ตรวจสอบสัญญาณอินเทอร์เน็ตแล้วลองอีกครั้ง');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSaveSettings = async () => {
@@ -361,6 +365,12 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
           {/* Body Content */}
           <div className="p-5 overflow-y-auto space-y-4 flex-1">
             
+            {checkinError && (
+              <div role="alert" className="p-3.5 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-semibold">
+                {checkinError}
+              </div>
+            )}
+
             {/* SUCCESS BANNER TOAST */}
             {lastCheckinSuccess && (
               <motion.div

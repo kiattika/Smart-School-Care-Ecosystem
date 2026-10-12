@@ -898,62 +898,6 @@ export const useStore = create<StoreState>((set, get) => ({
     }));
   },
 
-  // Extended Student & Parent Actions Implementation
-  recordGateAttendance: (studentId: string, type: 'ENTRY' | 'EXIT', method: GateAttendanceRecord['method']) => {
-    const now = new Date();
-    const hours = now.getHours().toString().padStart(2, '0');
-    const minutes = now.getMinutes().toString().padStart(2, '0');
-    const timeStr = `${hours}:${minutes} น.`;
-    // .toISOString() แปลงเป็น UTC เสมอ — ช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย (UTC+7) จะลากวันถอยหลัง
-    // ไป 1 วัน ใช้ format() จาก date-fns แทน (คำนวณจาก local time fields ตรงๆ)
-    const dateStr = format(now, 'yyyy-MM-dd');
-    const isLate = type === 'ENTRY' && (now.getHours() > 8 || (now.getHours() === 8 && now.getMinutes() > 0));
-
-    let studentName = '';
-    let parentUid = '';
-    let studentUid: string | undefined;
-
-    set((state) => {
-      const student = state.students.find(s => s.studentId === studentId);
-      studentName = student ? student.name : `นักเรียน (${studentId})`;
-      parentUid = (student as any)?.parentUid || (student as any)?.parentId || '';
-      studentUid = student?.studentUid;
-
-      const newGateRecord: GateAttendanceRecord = {
-        id: `gate-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        studentId,
-        studentName,
-        ...(studentUid ? { studentUid } : {}),
-        ...(parentUid ? { parentUid } : {}),
-        type,
-        timestamp: timeStr,
-        date: dateStr,
-        gateName: 'ประตู 1 (ประตูใหญ่หน้าโรงเรียน)',
-        method,
-        status: isLate ? 'LATE' : 'ON_TIME',
-        temperature: 36.4 + Number((Math.random() * 0.4).toFixed(1)),
-        parentNotified: true
-      };
-
-      saveGateAttendanceRecordFirestore(newGateRecord).catch(err => console.warn('Firestore gate attendance notice:', err));
-
-      return {
-        gateAttendanceLogs: [newGateRecord, ...state.gateAttendanceLogs]
-      };
-    });
-
-    createParentNotification({
-      parentUid,
-      studentUid,
-      studentId,
-      studentName,
-      title: type === 'ENTRY' ? `🔔 แจ้งเตือนการมาถึงโรงเรียน (${studentName})` : `👋 แจ้งเตือนการเดินทางออกจากโรงเรียน (${studentName})`,
-      message: type === 'ENTRY'
-        ? `นักเรียนได้สแกนเข้าโรงเรียนผ่านประตู 1 เมื่อเวลา ${timeStr} สถานะ: ${isLate ? 'สาย' : 'ตรงเวลา'} อุณหภูมิร่างกายปกติ`
-        : `นักเรียนได้สแกนแตะบัตรผ่านประตู 1 เดินทางออกจากโรงเรียนเมื่อเวลา ${timeStr}`,
-      type: 'info',
-    }).catch(err => console.warn('Firestore parent notification notice:', err));
-  },
 
   // ใบลานักเรียนย้ายไป Firestore จริงทั้งสาย (createLeaveRequest/acknowledgeLeaveRequest/decideLeaveRequest ใน
   // firestoreService + subscribeLeaveRequests) — ไม่มีสถานะใบลาใน store อีกต่อไป (เดิม session-local + ผู้อนุมัติฝังชื่อ)
@@ -1088,50 +1032,58 @@ export const useStore = create<StoreState>((set, get) => ({
     }));
   },
 
-  addGPSCheckInLog: (log) => {
+  // บันทึกเช็คอิน GPS — เขียน Firestore ก่อน (throw เมื่อไม่สำเร็จ) แล้วค่อยอัปเดต state; ห้ามแจ้งสำเร็จทั้งที่ยังไม่ได้บันทึก
+  addGPSCheckInLog: async (log) => {
     const newLog: GPSCheckInLog = {
       ...log,
       id: `gps-log-${Date.now()}`
     };
-    saveGPSCheckInLogFirestore(newLog).catch(err => console.warn('Firestore GPS check in notice:', err));
+    const isStudent = String(log.userRole || '').toUpperCase() === 'STUDENT';
+    const authUid = get().user?.uid;
+    const matchedStudent = isStudent
+      ? get().students.find(s => s.studentId === log.userId || s.id === log.userId)
+      : undefined;
 
-    return set((state) => {
-      // If it's a student, also synchronize with gate logs and morning attendance
+    let gateLog: GateAttendanceRecord | null = null;
+    if (isStudent) {
+      const parentUid = matchedStudent?.parentUid || matchedStudent?.parentId;
+      // studentUid ต้องเป็น auth uid ของนักเรียนที่เช็คอินจริง (rules เทียบกับ request.auth.uid)
+      const studentUid = matchedStudent?.studentUid || authUid;
+      gateLog = {
+        id: `gate-gps-${Date.now()}`,
+        studentId: log.userId,
+        studentName: log.userName,
+        ...(studentUid ? { studentUid } : {}),
+        ...(parentUid ? { parentUid: parentUid as string } : {}),
+        type: log.type,
+        timestamp: log.timestamp,
+        date: log.date,
+        gateName: log.nearestGate || 'พิกัดดาวเทียมโรงเรียน (GPS Geofence)',
+        method: 'GPS_GEOFENCE',
+        status: log.status === 'ON_TIME' ? 'ON_TIME' : 'LATE',
+        parentNotified: false, // ระบบยังไม่ส่งแจ้งเตือนผู้ปกครองจากการเช็คอินนี้
+        distanceMeters: log.distanceMeters,
+        coordinates: { latitude: log.latitude, longitude: log.longitude },
+        selfieUrl: log.selfieUrl
+      };
+    }
+
+    await saveGPSCheckInLogFirestore(newLog);
+    if (gateLog) await saveGateAttendanceRecordFirestore(gateLog);
+
+    set((state) => {
       let updatedGateLogs = state.gateAttendanceLogs;
       let updatedStudents = state.students;
       let updatedCheckInRecords = { ...state.schoolCheckInRecords };
 
-      if (log.userId && log.userId.startsWith('695')) {
-        const matchedStudent = state.students.find(s => s.studentId === log.userId || s.id === log.userId);
-        const gateLog: GateAttendanceRecord = {
-          id: `gate-gps-${Date.now()}`,
-          studentId: log.userId,
-          studentName: log.userName,
-          ...(matchedStudent?.studentUid ? { studentUid: matchedStudent.studentUid } : {}),
-          ...((matchedStudent?.parentUid || matchedStudent?.parentId)
-            ? { parentUid: (matchedStudent.parentUid || matchedStudent.parentId) as string }
-            : {}),
-          type: log.type,
-          timestamp: log.timestamp,
-          date: log.date,
-          gateName: log.nearestGate || 'พิกัดดาวเทียมโรงเรียน (GPS Geofence)',
-          method: 'GPS_GEOFENCE',
-          status: log.status === 'ON_TIME' ? 'ON_TIME' : 'LATE',
-          parentNotified: true,
-          distanceMeters: log.distanceMeters,
-          coordinates: { latitude: log.latitude, longitude: log.longitude },
-          selfieUrl: log.selfieUrl
-        };
-        saveGateAttendanceRecordFirestore(gateLog).catch(err => console.warn('Firestore gate attendance GPS notice:', err));
+      if (gateLog) {
         updatedGateLogs = [gateLog, ...state.gateAttendanceLogs];
-
         if (log.type === 'ENTRY') {
           const studentStatus = log.status === 'ON_TIME' ? 'PRESENT' : 'LATE';
           updatedCheckInRecords[log.userId] = {
             status: studentStatus,
             time: new Date()
           };
-
           updatedStudents = state.students.map(s => {
             if (s.id === log.userId || s.studentId === log.userId) {
               return {
