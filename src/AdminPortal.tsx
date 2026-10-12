@@ -19,6 +19,7 @@ import { HouseManagerPage } from './components/admin/HouseManagerPage';
 import { StudentIdRegistryPage } from './components/admin/StudentIdRegistryPage';
 import { BarChart3, Palette, History } from 'lucide-react';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
+import { ReferenceDataImportExport, type ReferenceImportKind } from './components/admin/ReferenceDataImportExport';
 import { AdminReferenceVillagesPage } from './components/admin/AdminReferenceVillagesPage';
 import { AdminReferenceSchoolsPage } from './components/admin/AdminReferenceSchoolsPage';
 import { motion, AnimatePresence } from 'motion/react';
@@ -53,6 +54,11 @@ const IMPORT_CARD_META: Record<ImportType, {
     icon: ShieldCheck, iconBox: 'bg-amber-500/10 border-amber-500/20 text-amber-400', openBorder: 'border-amber-500/40',
   },
 };
+/** ข้อมูลอ้างอิง (ไม่ผูกลำดับพึ่งพากับ 4 ข้อบน) — นำเข้า/ส่งออกไฟล์ CSV/Excel ในหน้านี้ที่เดียวเช่นกัน */
+const REFERENCE_CARDS: { kind: ReferenceImportKind; title: string; description: React.ReactNode; icon: React.ComponentType<{ className?: string }>; iconBox: string; openBorder: string }[] = [
+  { kind: 'schools', title: 'นำเข้า/ส่งออกรายชื่อโรงเรียน', description: <>รายชื่อโรงเรียนสำหรับช่อง "จบจากสถานศึกษา" ในแบบเยี่ยมบ้าน — Collection <code className="text-sky-400 font-mono">reference_schools</code> (ส่งออกใช้กับแอปอื่นได้)</>, icon: School, iconBox: 'bg-sky-500/10 border-sky-500/20 text-sky-400', openBorder: 'border-sky-500/40' },
+  { kind: 'villages', title: 'นำเข้า/ส่งออกรายชื่อหมู่บ้าน', description: <>รายชื่อหมู่บ้าน/ชุมชนตามตำบลสำหรับดรอปดาวน์ที่อยู่นักเรียน — Collection <code className="text-emerald-400 font-mono">reference_villages</code> (ส่งออกใช้กับแอปอื่นได้)</>, icon: MapPin, iconBox: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400', openBorder: 'border-emerald-500/40' },
+];
 const IMPORT_CARDS = IMPORT_ORDER.map((type) => ({ type, ...IMPORT_CARD_META[type] }));
 
 export function AdminPortal() {
@@ -65,6 +71,7 @@ export function AdminPortal() {
   };
   const [bulkImportType, setBulkImportType] = useState<ImportType>(IMPORT_ORDER[0]);
   const [importBusy, setImportBusy] = useState(false);
+  const [openReferenceCard, setOpenReferenceCard] = useState<ReferenceImportKind | null>(null);
     // การนำเข้าข้อมูลมีที่เดียว: BulkDataImportModal แบบ inline ในเมนู 'import' — หน้าอื่นพามาที่นี่พร้อมเลือกชนิดไว้ให้
   const goToImport = (type: ImportType) => {
     setBulkImportType(type);
@@ -241,6 +248,30 @@ export function AdminPortal() {
                               />
                             </div>
                           )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="border-t border-white/5 pt-4">
+                    <h3 className="text-sm font-bold text-slate-300">ข้อมูลอ้างอิง (ไม่ผูกลำดับกับข้อ 1-4)</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">รายชื่อโรงเรียนและหมู่บ้านที่ใช้ในแบบเยี่ยมบ้าน — นำเข้าจากไฟล์หรือส่งออกไปใช้กับแอปอื่น</p>
+                  </div>
+                  <div className="space-y-4">
+                    {REFERENCE_CARDS.map(card => {
+                      const isOpen = openReferenceCard === card.kind;
+                      const Icon = card.icon;
+                      return (
+                        <div key={card.kind} data-testid={`import-card-ref-${card.kind}`} className={cn("bg-[#0f1219] border rounded-2xl shadow-xl overflow-hidden transition-all", isOpen ? card.openBorder : "border-white/10 hover:border-white/20")}>
+                          <button type="button" onClick={() => setOpenReferenceCard(isOpen ? null : card.kind)} aria-expanded={isOpen} className="w-full p-5 flex items-start gap-4 text-left cursor-pointer">
+                            <div className={cn("w-12 h-12 shrink-0 rounded-xl border flex items-center justify-center", card.iconBox)}><Icon className="w-6 h-6" /></div>
+                            <div className="flex-1 min-w-0 space-y-1">
+                              <h3 className="text-base font-bold text-white">{card.title}</h3>
+                              <p className="text-xs text-slate-400 leading-relaxed">{card.description}</p>
+                            </div>
+                            <span className="text-[11px] font-bold text-slate-400 shrink-0 mt-1">{isOpen ? 'กำลังเปิด' : 'เปิดการ์ด'}</span>
+                          </button>
+                          {isOpen && <div className="border-t border-white/5 bg-[#11151d] p-5"><ReferenceDataImportExport kind={card.kind} /></div>}
                         </div>
                       );
                     })}

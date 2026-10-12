@@ -50,3 +50,11 @@ export function useVillageDirectory(tambonCode: string, opts: { includeDisabled?
   const villages: VillageRecord[] = useMemo(() => mergeVillages(base, overrides, { includeDisabled }), [base, overrides, includeDisabled]);
   return { villages };
 }
+
+/** โหลดชุดหลักโรงเรียนของจังหวัด (ใช้ตอนส่งออก/นำเข้า) — ไม่มีไฟล์ = [] */
+export async function loadSchoolBase(provinceCode: string): Promise<SchoolBase[]> {
+  const loader = schoolFiles[`../data/schools/${provinceCode}.json`];
+  return loader ? loader() : [];
+}
+/** ชุดหลักหมู่บ้านทั้งหมด (key = รหัสตำบล 6 หลัก) */
+export const loadVillageBase = villageFile;
