@@ -23,6 +23,9 @@ import { uploadBillingFile } from '../../services/storageService';
 import { validateBillingFile, buildSlipSubmissionPatch, canSubmitSlip } from '../../lib/billingPayment';
 import { BillingInvoice, ParentTeacherMessage, ParentAppointment, Student } from '../../types';
 import { DatePicker } from '../shared/DatePicker';
+import { PromptPayQr } from '../shared/PromptPayQr';
+import { useBillingPaymentInfo } from '../../hooks/useBillingPaymentInfo';
+import { hasPaymentChannel } from '../../lib/billingPaymentInfo';
 
 export function ParentEngagementServices({
   studentId,
@@ -88,6 +91,7 @@ export function ParentEngagementServices({
   // PromptPay Modal / Payment state
   const [selectedInvoice, setSelectedInvoice] = useState<BillingInvoice | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const { info: payInfo, loading: payInfoLoading } = useBillingPaymentInfo();
   const [slipFile, setSlipFile] = useState<File | null>(null);
   const [slipNote, setSlipNote] = useState('');
   const [slipError, setSlipError] = useState('');
@@ -389,10 +393,37 @@ export function ParentEngagementServices({
                   <p className="text-[11px] text-slate-400 font-mono">อ้างอิง: {selectedInvoice.invoiceNumber}</p>
                 </div>
 
-                <p className="text-[11px] text-slate-400 bg-slate-800/40 border border-slate-800 rounded-2xl p-3 leading-relaxed">
-                  โอนเงินตามช่องทางที่โรงเรียนแจ้ง ระบุเลขอ้างอิงด้านบน แล้วแนบสลิปที่นี่
-                  เจ้าหน้าที่การเงินจะตรวจสอบยอดและสลิป สถานะจะเปลี่ยนเป็น "ชำระแล้ว" เมื่อตรวจสอบเสร็จ
-                </p>
+                <div className="bg-slate-800/40 border border-slate-800 rounded-2xl p-3 space-y-3" data-testid="payment-channel">
+                  {payInfoLoading ? (
+                    <p className="text-[11px] text-slate-400 text-center">กำลังโหลดช่องทางโอนเงิน...</p>
+                  ) : !hasPaymentChannel(payInfo) ? (
+                    <p className="text-[11px] text-amber-300 leading-relaxed">
+                      โรงเรียนยังไม่ได้ตั้งค่าบัญชีรับโอนในระบบ กรุณาสอบถามเจ้าหน้าที่การเงินเพื่อขอช่องทางโอน แล้วกลับมาแนบสลิปที่นี่
+                    </p>
+                  ) : (
+                    <>
+                      {payInfo.promptPayType !== 'NONE' && (
+                        <div className="space-y-1">
+                          <PromptPayQr type={payInfo.promptPayType} id={payInfo.promptPayId} amount={selectedInvoice.totalAmount} size={200} />
+                          <p className="text-[10px] text-slate-400 text-center">สแกนด้วยแอปธนาคาร ยอดเงินถูกกรอกให้แล้ว</p>
+                        </div>
+                      )}
+                      <dl className="text-[11px] text-slate-300 space-y-1">
+                        {payInfo.accountName && <div className="flex justify-between gap-3"><dt className="text-slate-500">ชื่อบัญชี</dt><dd className="text-right font-bold">{payInfo.accountName}</dd></div>}
+                        {payInfo.bankName && <div className="flex justify-between gap-3"><dt className="text-slate-500">ธนาคาร</dt><dd className="text-right">{payInfo.bankName}</dd></div>}
+                        {payInfo.bankAccountNo && <div className="flex justify-between gap-3"><dt className="text-slate-500">เลขที่บัญชี</dt><dd className="text-right font-mono">{payInfo.bankAccountNo}</dd></div>}
+                      </dl>
+                      {payInfo.promptPayType !== 'NONE' && (
+                        <p className="text-[10px] text-amber-300 leading-relaxed">ก่อนยืนยันการโอน โปรดตรวจว่าชื่อผู้รับในแอปธนาคารตรงกับโรงเรียน</p>
+                      )}
+                      {payInfo.note && <p className="text-[11px] text-slate-400 leading-relaxed">{payInfo.note}</p>}
+                    </>
+                  )}
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    ระบุเลขอ้างอิง {selectedInvoice.invoiceNumber} แล้วแนบสลิปที่นี่
+                    เจ้าหน้าที่การเงินจะตรวจสอบยอดและสลิป สถานะจะเปลี่ยนเป็น "ชำระแล้ว" เมื่อตรวจสอบเสร็จ
+                  </p>
+                </div>
 
                 <div className="space-y-3">
                   <label className="block p-3 rounded-2xl border-2 border-dashed text-center cursor-pointer transition-all bg-slate-800/40 border-slate-700 text-slate-400 hover:border-emerald-500/50">

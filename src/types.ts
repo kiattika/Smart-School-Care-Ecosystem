@@ -1035,7 +1035,8 @@ export interface BillingInvoice {
   dueDate: string;
   // VERIFYING = ผู้ปกครอง/นักเรียนแนบสลิปแล้ว รอเจ้าหน้าที่การเงินตรวจยอด+สลิป (ดู src/lib/billingPayment.ts)
   status: 'PENDING' | 'VERIFYING' | 'PAID' | 'OVERDUE';   // เดิมใช้ 'UNPAID' — เปลี่ยนชื่อให้ตรงกับที่ยืนยันจากโรงเรียน
-  promptPayQr: string;
+  /** @deprecated ไม่เขียนแล้ว — QR สร้างฝั่ง client จาก school_settings/billing_payment; เหลือไว้อ่านใบเก่า */
+  promptPayQr?: string;
   createdBy: string;          // Firebase Auth UID ของเจ้าหน้าที่การเงินที่สร้างใบแจ้งหนี้
   createdAt: string;
   paidAt?: string;

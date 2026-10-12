@@ -708,6 +708,50 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         await assertFails(admin().set({ anything: 'goes' }));
       });
     });
+
+    // school_settings/billing_payment — บัญชี/พร้อมเพย์ที่โรงเรียนรับโอน (ผู้ปกครองสร้าง QR จากค่านี้)
+    describe('billing_payment', () => {
+      const PATH = 'school_settings/billing_payment';
+      const valid = { promptPayType: 'PHONE', promptPayId: '0812345678', accountName: 'โรงเรียนอุตรดิตถ์', bankName: 'กรุงไทย', bankAccountNo: '123-4-56789-0', note: '' };
+      const admin = () => asRole('SUPER_ADMIN').firestore().doc(PATH);
+
+      it('lets any signed-in user read, not anonymous', async () => {
+        await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(PATH).set(valid); });
+        for (const roles of [['PARENT'], ['STUDENT'], ['SUBJECT_TEACHER'], []]) {
+          await assertSucceeds(asUser('some-uid', roles).firestore().doc(PATH).get());
+        }
+        await assertFails(asAnonymous().firestore().doc(PATH).get());
+      });
+
+      it('lets only SUPER_ADMIN write', async () => {
+        await assertSucceeds(admin().set(valid));
+        await assertSucceeds(admin().set({ ...valid, promptPayType: 'NONE', promptPayId: '', updatedBy: 'uid-1' }));
+        for (const role of ['FINANCE_STAFF', 'EXECUTIVE', 'SUBJECT_TEACHER', 'STUDENT', 'PARENT']) {
+          await assertFails(asRole(role).firestore().doc(PATH).set(valid));
+        }
+        await assertFails(asAnonymous().firestore().doc(PATH).set(valid));
+      });
+
+      it('rejects malformed data even from SUPER_ADMIN', async () => {
+        for (const bad of [
+          { ...valid, promptPayId: '812345678' },                       // เบอร์ไม่ครบ/ไม่ขึ้นต้น 0
+          { ...valid, promptPayType: 'NATIONAL_ID', promptPayId: '123' },
+          { ...valid, promptPayType: 'EWALLET', promptPayId: '1'.repeat(14) },
+          { ...valid, promptPayType: 'NONE', promptPayId: '0812345678' }, // NONE ต้องไม่มี id
+          { ...valid, promptPayType: 'CARD' },
+          { ...valid, note: 'x'.repeat(301) },
+          { ...valid, accountName: 5 },
+          { ...valid, extra: 'x' },
+          { promptPayType: 'NONE', promptPayId: '' },                    // ขาด field
+        ]) {
+          await assertFails(admin().set(bad as Record<string, unknown>));
+        }
+      });
+
+      it('REGRESSION: the school_settings wildcard is not a way around validation', async () => {
+        await assertFails(admin().set({ anything: 'goes' }));
+      });
+    });
   });
 
   // 11. staff collection
