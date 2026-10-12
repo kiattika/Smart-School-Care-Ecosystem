@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { formatThaiAddress } from '../../lib/thaiAddress';
 import { X, Printer } from 'lucide-react';
 import type { Student, StudentHomeLocation, HomeVisitRecord, StudentHomeVisitInfo, FamilyHomeVisitInfo, ParentInfo } from '../../types';
 import { formatDistance } from '../../utils/geoUtils';
@@ -39,7 +40,8 @@ export function HomeVisitDocumentModal({ student, location, distanceFromSchoolM,
   const si = studentInfo, fi = familyInfo;
   const age = si?.birthDate ? ageFromBirthDate(si.birthDate, record.visitedDate || todayYmd) : null;
   const shape = si ? bodyShapeFromBmi(si.weightKg, si.heightCm) : null;
-  const address = student.homeLocation?.address || (student as any).address || '';
+  // ทะเบียนส่วนกลางก่อน; ไม่มี → ที่อยู่ที่นักเรียนกรอกแบบแยกช่อง
+  const address = student.homeLocation?.address || (student as any).address || formatThaiAddress(si?.currentAddress);
   const g = fi?.guardian;
   const photos = useMemo(() => [record.exteriorPhotoUrl, record.interiorPhotoUrl, ...record.extraPhotoUrls].filter(Boolean), [record]);
 

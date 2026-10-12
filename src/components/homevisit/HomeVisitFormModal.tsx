@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { formatThaiAddress } from '../../lib/thaiAddress';
 import { X, ClipboardList, MapPin, Camera, Loader2, CheckCircle2 } from 'lucide-react';
 import type { Student, StudentHomeLocation, HomeVisitRecord, StudentHomeVisitInfo, FamilyHomeVisitInfo } from '../../types';
 import { DatePicker } from '../shared/DatePicker';
@@ -52,7 +53,8 @@ export function HomeVisitFormModal({ student, location, distanceFromSchoolM, exi
   const [gpsError, setGpsError] = useState<string | null>(null);
   const fileRefs = { exterior: useRef<HTMLInputElement>(null), interior: useRef<HTMLInputElement>(null), extra: useRef<HTMLInputElement>(null) };
   const set = <K extends keyof HomeVisitFormState>(k: K, v: HomeVisitFormState[K]) => setForm(f => ({ ...f, [k]: v }));
-  const address = student.homeLocation?.address || (student as any).address || '';
+  // ทะเบียนส่วนกลางก่อน; ไม่มี → ที่อยู่ที่นักเรียนกรอกแบบแยกช่อง
+  const address = student.homeLocation?.address || (student as any).address || formatThaiAddress(studentInfo?.currentAddress);
   const distanceAuto = distanceBracketFromMeters(distanceFromSchoolM);
 
   const checkGps = () => {

@@ -1,3 +1,4 @@
+import { validateThaiAddress } from './thaiAddress';
 import type { FamilyHomeVisitInfo, StudentHomeVisitInfo, ParentInfo, GuardianInfo, FriendInfo,  } from '../types';
 
 /* ───────── ตัวเลือกตามแบบ สพฐ. ───────── */
@@ -54,7 +55,7 @@ export function emptyStudentInfo(base: { studentId: string; studentUid: string; 
     gender: '', birthDate: '', nationality: '', ethnicity: '', religion: '',
     prevEducationLevel: '', prevGpa: '', prevSchool: '', prevAffiliation: '', prevSubdistrict: '', prevDistrict: '', prevProvince: '', prevPhone: '',
     weightKg: null, heightCm: null, bloodType: '', chronicDisease: '',
-    registeredSameAsCurrent: true, registeredAddress: '',
+    registeredSameAsCurrent: true, registeredAddress: '', currentAddress: null,
     siblings: { onlyChild: false, birthOrder: null, totalSiblings: null, brothers: null, sisters: null, halfOlder: null, halfYounger: null, studying: null },
     closestInFamily: [], closestOther: '', consultWho: [], consultOther: '', consultHotline: '',
     livesWith: '', livesWithOther: '', commuteMode: '', commuteOther: '', commuteDuration: '',
@@ -105,8 +106,10 @@ export function distanceBracketFromMeters(m: number | null): string {
 /* ───────── ตรวจความครบถ้วน ───────── */
 const phoneOk = (p: string) => !p.trim() || /^0[0-9]{8,9}$/.test(p.replace(/[-\s]/g, ''));
 
-export function validateStudentInfo(s: StudentHomeVisitInfo): string[] {
+/** centralAddress = ที่อยู่ในทะเบียนส่วนกลาง; ถ้ามีแล้วไม่บังคับกรอกที่อยู่แบบแยกช่อง */
+export function validateStudentInfo(s: StudentHomeVisitInfo, opts: { centralAddress?: string } = {}): string[] {
   const e: string[] = [];
+  if (!opts.centralAddress?.trim()) e.push(...validateThaiAddress(s.currentAddress));
   if (!s.gender) e.push('เลือกเพศ');
   if (!s.birthDate) e.push('เลือกวัน/เดือน/ปีเกิด');
   if (!s.nationality.trim()) e.push('ระบุสัญชาติ (ไม่ทราบให้ใส่ -)');

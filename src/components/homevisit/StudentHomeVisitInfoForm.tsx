@@ -10,6 +10,8 @@ import {
   normalizeStudentInfo, validateStudentInfo, ageFromBirthDate, bodyShapeFromBmi,
   PREV_EDUCATION_LEVELS, BLOOD_TYPES, CLOSEST_FAMILY, CONSULT_OPTIONS, LIVES_WITH, COMMUTE_MODES, COMMUTE_DURATIONS,
 } from '../../lib/homeVisitData';
+import { AddressFields } from './AddressFields';
+import { formatThaiAddress } from '../../lib/thaiAddress';
 import { inputCls, Section, Label, SourceTag, Chips, Single, toNum, toggleIn, ErrorList } from './formParts';
 
 /**
@@ -71,10 +73,11 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
   const sib = (k: keyof StudentHomeVisitInfo['siblings'], v: any) => setForm(f => ({ ...f, siblings: { ...f.siblings, [k]: v } }));
   const age = form.birthDate ? ageFromBirthDate(form.birthDate, todayYmd) : null;
   const shape = bodyShapeFromBmi(form.weightKg, form.heightCm);
-  const address = student.homeLocation?.address || '';
+  const centralAddress = (student.homeLocation?.address || '').trim();
+  const address = centralAddress || formatThaiAddress(form.currentAddress);
 
   const save = async () => {
-    const errs = validateStudentInfo(form);
+    const errs = validateStudentInfo(form, { centralAddress });
     setErrors(errs); setMsg(null);
     if (errs.length) return;
     setSaving(true);
@@ -101,6 +104,13 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
           <div><span className="text-slate-500">ที่อยู่ปัจจุบัน:</span> {address || 'ยังไม่มีในทะเบียน'}</div>
         </div>
       </Section>
+
+      {/* ทะเบียนส่วนกลางยังไม่มีที่อยู่ → ให้นักเรียนกรอกเอง (มีแล้วไม่ต้องกรอก) */}
+      {!centralAddress && (
+        <Section title="ที่อยู่ปัจจุบัน" hint="ระบบส่วนกลางยังไม่มีที่อยู่ของนักเรียน กรุณากรอก — เลือกจังหวัด อำเภอ ตำบล แล้วรหัสไปรษณีย์จะเติมให้">
+          <AddressFields value={form.currentAddress} onChange={a => set('currentAddress', a)} />
+        </Section>
+      )}
 
       <Section title="ข้อ 1 ข้อมูลพื้นฐาน">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
