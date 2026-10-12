@@ -1,4 +1,3 @@
-import type { DetailedLeaveRequest } from '../types';
 import { canTeacherDecide } from './leaveFlow';
 
 /**
@@ -21,7 +20,7 @@ export interface StaffTask {
 export interface StaffTaskInput {
   activeRole: string;
   /** ใบลาของห้องที่ฉันเป็นครูที่ปรึกษา (ว่างได้ถ้าไม่ใช่ครูที่ปรึกษา) */
-  roomLeaves: Pick<DetailedLeaveRequest, 'status'>[];
+  roomLeaves: { status: string }[];
   /** คำขอเช็คชื่อย้อนหลังทั้งหมดที่ฉันมีสิทธิ์เห็น */
   lateRequests: { status: string }[];
 }

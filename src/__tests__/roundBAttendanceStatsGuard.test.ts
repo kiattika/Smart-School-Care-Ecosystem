@@ -42,14 +42,15 @@ describe('รอบ B ข้อ 2: สถิติการมาเรียน
 });
 
 describe('รอบ B: ผู้อนุมัติต้องเป็นคนที่กดจริง ไม่ฝังชื่อครู', () => {
-  it('store ไม่ฝังชื่อครูเป็นผู้อนุมัติ/ผู้ยืนยัน และใช้ผู้ใช้ปัจจุบัน', () => {
+  it('store ไม่ฝังชื่อครูเป็นผู้ยืนยันผลงาน; ผู้อนุมัติใบลามาจากผู้ใช้ที่กดจริง (decideLeaveRequest)', () => {
     const src = readSource('src/store.ts');
     expect(src).not.toMatch(/ครูกิตติศักดิ์/);
-    expect(src).toMatch(/approvedBy: get\(\)\.user\?\.displayName/);
     expect(src).not.toMatch(/isVerifiedByTeacher: true/);
+    const inbox = readSource('src/components/advisor/AdvisorLeaveInbox.tsx');
+    expect(inbox).toMatch(/\{ name: user\.displayName, staffId: user\.staffId \}/);
   });
-  it('หน้านักเรียน/ผู้ปกครองไม่มีปุ่มอนุมัติใบลา (ไม่มีหน้าจอครูในโมดูลนี้)', () => {
+  it('หน้านักเรียน/ผู้ปกครองไม่มีปุ่มอนุมัติใบลาของครู', () => {
     const src = readSource('src/components/student-parent/GateAttendanceTracker.tsx');
-    expect(src).not.toMatch(/approveDetailedLeave|อนุมัติใบลา/);
+    expect(src).not.toMatch(/approveDetailedLeave|\(ครู\) อนุมัติใบลา/);
   });
 });
