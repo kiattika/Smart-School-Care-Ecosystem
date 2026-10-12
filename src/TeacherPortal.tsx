@@ -57,6 +57,12 @@ const DAY_TH_NAMES: Record<string, string> = {
   friday: 'ศุกร์', saturday: 'เสาร์', sunday: 'อาทิตย์'
 };
 
+/** ห้องของนักเรียนที่เรียนวิชานี้ = ระดับชั้น/ห้อง (เช่น "ม.5/8") — Course.room เป็นห้องกายภาพ (เช่น "943") ใช้ค้นนักเรียนไม่ได้
+ *  ใช้ลำดับเดียวกับสมุดบันทึกคะแนน: level → room → className */
+function studentClassOf(c: { level?: string; room?: string; className?: string }): string {
+  return (c.level || '').trim() || (c.room || '').trim() || (c.className || '').trim();
+}
+
 export function TeacherPortal() {
   const {
     user,
@@ -869,7 +875,7 @@ export function TeacherPortal() {
   // ออกแบบไว้เดิม: วิกฤต < 60%, เฝ้าระวัง 60-80% (คนละเกณฑ์กับ DEFAULT_ATTENDANCE_THRESHOLD_PERCENT
   // ตัวเดียวที่ hook ใช้เป็นค่าเริ่มต้นทั่วไป)
   const myTaughtRooms = useMemo(
-    () => Array.from(new Set(myCourses.map(c => c.room).filter(Boolean))),
+    () => Array.from(new Set(myCourses.map(c => studentClassOf(c)).filter(Boolean))),
     [myCourses]
   );
   // ตัวเลือกดรอปดาวน์ "สถิติการเข้าเรียนรายบุคคล" — แสดงแบบเดียวกับสมุดบันทึกคะแนน:
@@ -886,7 +892,7 @@ export function TeacherPortal() {
       seen.add(value);
       const lv = (c.level || '').trim().replace(/^M\.\s*/i, 'ม.');
       const head = lv && !isSameRoom(c.room, lv) ? `${lv} (${c.room})` : (lv || c.room);
-      out.push({ value, room: c.room, courseCode: c.code, label: `${head} — ${`${c.code} ${c.name}`.trim()}` });
+      out.push({ value, room: studentClassOf(c), courseCode: c.code, label: `${head} — ${`${c.code} ${c.name}`.trim()}` });
     }
     return out.sort((a, b) => a.label.localeCompare(b.label, 'th'));
   }, [myCourses]);
@@ -895,7 +901,7 @@ export function TeacherPortal() {
   const myTaughtStudentIds = useMemo(() => {
     const ids = new Set<string>();
     myCourses.forEach(c => {
-      (students || []).forEach(s => { if (isSameRoom(s.room, c.room)) ids.add(s.studentId); });
+      (students || []).forEach(s => { if (isSameRoom(s.room, studentClassOf(c))) ids.add(s.studentId); });
     });
     return Array.from(ids);
   }, [myCourses, students]);

@@ -36,3 +36,12 @@ describe('guard: สมัครชุมนุมใหม่หลังถอ
     expect(block).toMatch(/hasOnly\(\['enrolledAt', 'removedAt', 'removedBy', 'removedReason'\]\)/);
   });
 });
+
+describe('guard: ห้องที่ใช้ค้นนักเรียน/บันทึกเช็คชื่อ = ระดับชั้น (ม.5/8) ไม่ใช่ห้องกายภาพ (943)', () => {
+  it('attendanceRoomOptions / myTaughtRooms ใช้ studentClassOf (level → room → className)', () => {
+    const src = readSource('src/TeacherPortal.tsx');
+    expect(src).toMatch(/function studentClassOf\(/);
+    expect(src).toMatch(/room: studentClassOf\(c\), courseCode: c\.code/);
+    expect(src).toMatch(/myCourses\.map\(c => studentClassOf\(c\)\)/);
+  });
+});
