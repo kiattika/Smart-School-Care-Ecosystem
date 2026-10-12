@@ -14,13 +14,15 @@ import { StudentAttendanceDetail } from './StudentAttendanceDetail';
  * สถิติการเข้าเรียนรายบุคคลสำหรับครูผู้สอน — เลือกห้องที่สอน + ช่วงวันที่ → ตารางนักเรียน (อัตราเข้าเรียน)
  * กดชื่อเพื่อดูละเอียดรายวิชา/รายวัน/รายคาบ ย้อนหลังได้ตามช่วงวันที่ — ข้อมูลจาก attendance_records จริง
  */
-export function TeacherAttendanceStatsPanel({ rooms, myCourseCodes, roomLabels }: { rooms: string[]; myCourseCodes: string[]; roomLabels?: Record<string, string> }) {
-  const [room, setRoom] = useState<string>('');
+export interface AttendanceStatsOption { value: string; room: string; courseCode: string; label: string }
+
+export function TeacherAttendanceStatsPanel({ options }: { options: AttendanceStatsOption[] }) {
+  const [picked, setPicked] = useState<string>('');
   const [range, setRange] = useState(() => defaultAttendanceDateRange(30));
-  const [onlyMine, setOnlyMine] = useState(true);
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const activeRoom = room || (rooms.length === 1 ? rooms[0] : '');
+  const active = options.find(o => o.value === picked) || (options.length === 1 ? options[0] : null);
+  const activeRoom = active?.room || '';
   const { students, loading: studentsLoading } = useRealStudents();
   const { schedules } = useTeacherFirestoreSchedule();
   const { records, loading, error } = useRoomAttendanceRecordsFull(activeRoom ? [activeRoom] : [], range);
@@ -30,8 +32,8 @@ export function TeacherAttendanceStatsPanel({ rooms, myCourseCodes, roomLabels }
       .slice().sort((a, b) => String(a.studentId).localeCompare(String(b.studentId))),
     [students, activeRoom],
   );
-  const mineKeys = useMemo(() => new Set(myCourseCodes.filter(Boolean).map(courseStatKey)), [myCourseCodes]);
-  const limit = onlyMine && mineKeys.size > 0 ? mineKeys : null;
+  // แยกสถิติรายวิชา: นับเฉพาะรายวิชาที่เลือก (ห้องเดียวกันเลือกวิชาอื่นได้จากดรอปดาวน์)
+  const limit = useMemo(() => (active ? new Set([courseStatKey(active.courseCode)]) : null), [active]);
 
   const rows = useMemo(() => roomStudents.map(s => {
     const log = buildStudentAttendanceLog(records, schedules as any[], s.studentId)
@@ -50,24 +52,20 @@ export function TeacherAttendanceStatsPanel({ rooms, myCourseCodes, roomLabels }
 
       <div className="flex flex-wrap items-center gap-4 text-xs">
         <label className="flex items-center gap-2 text-slate-300">
-          ห้อง
+          ห้อง / รายวิชา
           <select
-            value={activeRoom}
-            onChange={e => { setRoom(e.target.value); setOpenId(null); }}
+            value={active?.value || ''}
+            onChange={e => { setPicked(e.target.value); setOpenId(null); }}
             className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white max-w-full"
           >
-            {rooms.length !== 1 && <option value="">— เลือกห้อง —</option>}
-            {rooms.map(r => <option key={r} value={r}>{roomLabels?.[r] || r}</option>)}
+            {options.length !== 1 && <option value="">— เลือกห้อง/รายวิชา —</option>}
+            {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-        </label>
-        <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
-          <input type="checkbox" checked={onlyMine} onChange={e => setOnlyMine(e.target.checked)} />
-          เฉพาะวิชาที่ฉันสอน
         </label>
       </div>
 
-      {rooms.length === 0 && <div className="py-8 text-center text-sm text-slate-500">ยังไม่พบห้องที่ท่านสอนในตารางสอนภาคเรียนนี้</div>}
-      {rooms.length > 0 && !activeRoom && <div className="py-8 text-center text-sm text-slate-500">เลือกห้องเพื่อดูสถิติ</div>}
+      {options.length === 0 && <div className="py-8 text-center text-sm text-slate-500">ยังไม่พบห้องที่ท่านสอนในตารางสอนภาคเรียนนี้</div>}
+      {options.length > 0 && !activeRoom && <div className="py-8 text-center text-sm text-slate-500">เลือกห้อง/รายวิชาเพื่อดูสถิติ</div>}
       {error && <div className="text-xs text-rose-400">โหลดบันทึกการเช็คชื่อไม่สำเร็จ: {error}</div>}
       {activeRoom && (studentsLoading || loading) && (
         <div className="py-6 flex items-center justify-center gap-2 text-xs text-slate-500"><Loader2 className="w-4 h-4 animate-spin" /> กำลังโหลด...</div>

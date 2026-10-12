@@ -1481,6 +1481,26 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       );
     });
 
+    it('สมัครใหม่หลังถอน: นักเรียนเจ้าของ update กลับเป็น active ได้; คนอื่น/แก้ฟิลด์อื่น/ชุมนุมปิด ถูกปฏิเสธ', async () => {
+      await seedStudentAndClub();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('activity_enrollments/club-1_std-e1').set({
+          id: 'club-1_std-e1', activityId: 'club-1', studentId: 'std-e1', studentUid: 'stu-e1-uid',
+          removedAt: new Date().toISOString(), removedBy: null, removedReason: null,
+        });
+      });
+      const reenroll = { enrolledAt: new Date().toISOString(), removedAt: null, removedBy: null, removedReason: null };
+      await assertFails(asUser('stu-e2-uid', ['STUDENT']).firestore().doc('activity_enrollments/club-1_std-e1').update(reenroll));
+      await assertFails(asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/club-1_std-e1').update({ ...reenroll, studentUid: 'stu-e2-uid' }));
+      await assertFails(asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/club-1_std-e1').update({ ...reenroll, activityId: 'club-2' }));
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('elective_activities_config/club-1').update({ enrollmentStatus: 'CLOSED' }); });
+      await assertFails(asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/club-1_std-e1').update(reenroll));
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('elective_activities_config/club-1').update({ enrollmentStatus: 'OPEN' }); });
+      await assertSucceeds(asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/club-1_std-e1').update(reenroll));
+      // active แล้วสมัครซ้ำผ่าน update ไม่ได้ (ต้องเคยถอนเท่านั้น)
+      await assertFails(asUser('stu-e1-uid', ['STUDENT']).firestore().doc('activity_enrollments/club-1_std-e1').update(reenroll));
+    });
+
     it('ครูที่ไม่ใช่ผู้รับผิดชอบชุมนุมนั้นถอนชื่อนักเรียนไม่ได้', async () => {
       await seedStudentAndClub();
       await testEnv.withSecurityRulesDisabled(async (ctx) => {

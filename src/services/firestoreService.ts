@@ -2006,16 +2006,26 @@ export async function enrollInActivity(
         throw new Error('ENROLL_FULL: ที่นั่งเต็มแล้ว');
       }
 
-      transaction.set(enrollmentRef, {
-        id: enrollmentId,
-        activityId,
-        studentId,
-        studentUid,
-        enrolledAt: serverTimestamp(),
-        removedAt: null,
-        removedBy: null,
-        removedReason: null,
-      });
+      if (enrollmentSnap.exists()) {
+        // เคยสมัครแล้วถอน → สมัครใหม่ด้วย update เฉพาะฟิลด์สถานะ (rules ไม่อนุญาตให้ set ทับ doc เดิมทั้งก้อน)
+        transaction.update(enrollmentRef, {
+          enrolledAt: serverTimestamp(),
+          removedAt: null,
+          removedBy: null,
+          removedReason: null,
+        });
+      } else {
+        transaction.set(enrollmentRef, {
+          id: enrollmentId,
+          activityId,
+          studentId,
+          studentUid,
+          enrolledAt: serverTimestamp(),
+          removedAt: null,
+          removedBy: null,
+          removedReason: null,
+        });
+      }
       transaction.set(counterRef, {
         activityId,
         count: currentCount + 1,
