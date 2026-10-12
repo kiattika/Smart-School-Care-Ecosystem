@@ -624,7 +624,6 @@ export function TeacherPortal() {
   const unassignedStudents = courseStudents.filter(s => s.seatIndex === null);
   
   const [toast, setToast] = useState<string | null>(null);
-  const [syncingCourseId, setSyncingCourseId] = useState<string | null>(null);
 
   // Late Attendance Modal (ขอเช็คชื่อย้อนหลัง)
   const [showLateModal, setShowLateModal] = useState(false);
@@ -634,8 +633,6 @@ export function TeacherPortal() {
 
   // Admin Config Modal
   const [showConfigModal, setShowConfigModal] = useState(false);
-
-  const availableRooms = ['ม.1/1', 'ม.1/2', 'ม.1/3', 'ม.2/1', 'ม.2/2', 'ม.3/1'];
 
   // Parse Thai Schedule Notation e.g. "จ1", "อ3-4", "อ2, พ4, ฤ1, ศ3"
   const parseSchedule = parseThaiSchedule;
@@ -868,15 +865,6 @@ export function TeacherPortal() {
     } finally {
       setIsSavingAttendance(false);
     }
-  };
-
-  const handleSyncRoster = (courseId: string) => {
-    setSyncingCourseId(courseId);
-    setTimeout(() => {
-      setSyncingCourseId(null);
-      setToast('ซิงค์รายชื่อนักเรียน 40 คน สำเร็จ!');
-      setTimeout(() => setToast(null), 3000);
-    }, 1500);
   };
 
   // FIX (Task 1-2): เดิมอ่านจาก StudentAnalytics (session-local store, ว่างเปล่าเสมอ — analytics

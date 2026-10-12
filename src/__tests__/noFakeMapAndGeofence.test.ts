@@ -34,3 +34,16 @@ describe('guard: GPS modal', () => {
     expect(readSource('src/services/firestoreService.ts')).toMatch(/saveSchoolGeofenceConfigFirestore[\s\S]{0,400}throw error/);
   });
 });
+
+describe('guard: เยี่ยมบ้านเช็คอินพิกัดจริง / ไม่มีซิงค์รายชื่อปลอม', () => {
+  it('HomeVisitPortal ใช้ navigator.geolocation ไม่มีพิกัดกรุงเทพฝังตาย', () => {
+    const src = readSource('src/HomeVisitPortal.tsx');
+    expect(src).toMatch(/navigator\.geolocation\.getCurrentPosition/);
+    expect(src).not.toMatch(/13\.7563|100\.5018/);
+  });
+  it('TeacherPortal ไม่มีการซิงค์รายชื่อ "40 คน สำเร็จ" ปลอม และไม่ฝังรายการห้อง', () => {
+    const src = readSource('src/TeacherPortal.tsx');
+    expect(src).not.toMatch(/ซิงค์รายชื่อนักเรียน 40 คน|handleSyncRoster|syncingCourseId/);
+    expect(src).not.toMatch(/availableRooms/);
+  });
+});
