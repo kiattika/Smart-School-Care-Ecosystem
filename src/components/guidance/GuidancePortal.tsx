@@ -3,6 +3,7 @@ import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
 import { useGuidanceScreenings } from '../../hooks/useGuidanceScreenings';
 import { StudentPicker } from '../shared/StudentPicker';
+import { AppointmentInbox } from '../appointments/AppointmentInbox';
 import { SdqTrendSection } from './SdqTrendSection';
 import { isLegacySdqCriteria } from '../../lib/sdq';
 import { filterSdqByYear, buildSdqTrend } from '../../lib/sdqTrend';
@@ -15,6 +16,7 @@ import { NINE_Q_RISK_LABEL, NINE_Q_TOTAL_MAX } from '../../lib/depressionScreeni
 import {
   createGuidanceCounselingCase,
   subscribeGuidanceCounselingCases,
+  subscribeAppointments,
   updateGuidanceCounselingCaseStatus
 } from '../../services/firestoreService';
 import {
@@ -40,7 +42,13 @@ export function GuidancePortal() {
   // 9Q/8Q (คัดกรองซึมเศร้า/ฆ่าตัวตาย — แทน PHQ-9 สากลเดิม) สด real-time + สถานะ "มีครูแนะแนวที่ใช้งานอยู่"
   const { records: screeningRecords, loading: depressionLoading, error: depressionError } = useGuidanceScreeningRecords();
   const guidanceStatus = useGuidanceStatus();
-  const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'depression' | 'tcas'>('cases');
+  const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'depression' | 'appointments' | 'tcas'>('cases');
+  // คำขอนัดพบจากผู้ปกครองที่ขอพบ "ครูแนะแนว" — real-time (rules: GUIDANCE_COUNSELOR + recipient == GUIDANCE)
+  const [guidanceAppointments, setGuidanceAppointments] = useState<import('../../types').ParentAppointment[]>([]);
+  useEffect(() => {
+    if (!user?.uid) { setGuidanceAppointments([]); return; }
+    return subscribeAppointments(setGuidanceAppointments, { guidance: true });
+  }, [user?.uid]);
   const [searchTerm, setSearchTerm] = useState('');
 
   // ดูย้อนหลังรายปี (แท็บ SDQ): 'ALL' = ทุกปี (ค่าเริ่มต้น = พฤติกรรมเดิม), 'LEGACY' = ข้อมูลเก่าที่ไม่มีปีการศึกษา, หรือปี พ.ศ.
@@ -223,6 +231,7 @@ export function GuidancePortal() {
             { id: 'cases', label: `เคสให้คำปรึกษาและสุขภาพจิต (${cases.length})`, icon: Users },
             { id: 'sdq', label: 'ผลประเมิน SDQ และ EQ นักเรียน', icon: ShieldAlert },
             { id: 'depression', label: 'คัดกรองซึมเศร้า 2Q/9Q/8Q', icon: HeartHandshake },
+            { id: 'appointments', label: `นัดพบผู้ปกครอง (${guidanceAppointments.filter(a => a.status === 'REQUESTED').length})`, icon: Calendar },
             { id: 'tcas', label: 'ระบบแนะแนวอาชีพและ TCAS พอร์ตโฟลิโอ', icon: Award },
           ]}
         >
@@ -463,6 +472,10 @@ export function GuidancePortal() {
         )}
 
         {/* TAB 3: TCAS & PORTFOLIO */}
+        {activeTab === 'appointments' && (
+          <AppointmentInbox appointments={guidanceAppointments} students={students} />
+        )}
+
         {activeTab === 'tcas' && (
           <div className="space-y-4">
             <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">

@@ -2,17 +2,17 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bell, ClipboardList } from 'lucide-react';
 import { useStore } from '../../store';
-import { subscribeLeaveRequests, subscribeLateAttendanceRequests } from '../../services/firestoreService';
+import { subscribeLeaveRequests, subscribeLateAttendanceRequests, subscribeAppointments } from '../../services/firestoreService';
 import { useScreeningBellData, type ScreeningBellMode } from '../../hooks/useScreeningBellData';
 import { buildStaffTasks, staffTaskSources, totalStaffTasks } from '../../lib/staffTasks';
-import type { DetailedLeaveRequest, LateAttendanceRequestRecord } from '../../types';
+import type { DetailedLeaveRequest, LateAttendanceRequestRecord, ParentAppointment } from '../../types';
 
 /**
  * กระดิ่งงานค้างฝั่งบุคลากร — วางใน NavbarWithRoleSwitcher (ส่วนหัวที่ใช้ร่วมกันทุกพอร์ทัลของบุคลากร)
  * เปลี่ยนตามบทบาทที่ใช้งานอยู่ (activeRole) และ subscribe เฉพาะข้อมูลที่บทบาทนั้นมีสิทธิ์เห็นตาม firestore.rules:
  *  - HOMEROOM_TEACHER → ใบลานักเรียนห้องที่ตัวเองเป็นครูที่ปรึกษา (homeroomClass จาก user.profile.assignments)
  *  - DEPUTY_DIRECTOR_ACADEMIC / SUPER_ADMIN → คำขอเช็คชื่อย้อนหลังที่รออนุมัติ
- *  - GUIDANCE_COUNSELOR / HOMEROOM_TEACHER → คัดกรอง 2Q บวก (รอ 9Q) และ 9Q ธงแดง (รอแจ้งผู้ปกครอง/พบนักเรียน) — แสดงเฉพาะจำนวน
+ *  - GUIDANCE_COUNSELOR / HOMEROOM_TEACHER → คำขอนัดพบจากผู้ปกครอง + คัดกรอง 2Q บวก (รอ 9Q) และ 9Q ธงแดง (รอแจ้งผู้ปกครอง/พบนักเรียน) — แสดงเฉพาะจำนวน
  * คำนวณสดจากข้อมูลจริง (src/lib/staffTasks.ts) — จัดการงานแล้วจะหายจากกระดิ่งเอง ไม่มีรายการ "ยังไม่อ่าน" ค้าง
  * panel render ผ่าน React Portal เหมือน NotificationBell (กันถูก stacking context ของ motion.div ทับ)
  */
@@ -23,6 +23,7 @@ export function StaffTaskBell({ activeRole }: { activeRole: string }) {
 
   const [roomLeaves, setRoomLeaves] = useState<DetailedLeaveRequest[]>([]);
   const [lateRequests, setLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
+  const [appointments, setAppointments] = useState<ParentAppointment[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [openCount, setOpenCount] = useState(0);
   const screeningMode: ScreeningBellMode = !sources.screening ? null : activeRole === 'GUIDANCE_COUNSELOR' ? 'GUIDANCE' : 'HOMEROOM';
@@ -35,6 +36,13 @@ export function StaffTaskBell({ activeRole }: { activeRole: string }) {
     if (!sources.leaves || !myRoom || !user?.uid) { setRoomLeaves([]); return; }
     return subscribeLeaveRequests(setRoomLeaves, { homeroomClass: myRoom });
   }, [sources.leaves, myRoom, user?.uid]);
+
+  useEffect(() => {
+    if (!sources.appointments || !user?.uid) { setAppointments([]); return; }
+    if (activeRole === 'GUIDANCE_COUNSELOR') return subscribeAppointments(setAppointments, { guidance: true });
+    if (!myRoom) { setAppointments([]); return; }
+    return subscribeAppointments(setAppointments, { homeroomClass: myRoom });
+  }, [sources.appointments, activeRole, myRoom, user?.uid]);
 
   useEffect(() => {
     if (!sources.lateRequests || !user?.uid) { setLateRequests([]); return; }
@@ -59,9 +67,9 @@ export function StaffTaskBell({ activeRole }: { activeRole: string }) {
   }, [isOpen]);
 
   // บทบาทนี้ไม่มีงานค้างประเภทใดให้ติดตามเลย → ไม่แสดงกระดิ่ง (ไม่โชว์กระดิ่งว่างที่ไม่เคยมีวันแจ้งอะไร)
-  if (!sources.leaves && !sources.lateRequests && !sources.screening) return null;
+  if (!sources.leaves && !sources.lateRequests && !sources.screening && !sources.appointments) return null;
 
-  const tasks = buildStaffTasks({ activeRole, roomLeaves, lateRequests, screening });
+  const tasks = buildStaffTasks({ activeRole, roomLeaves, lateRequests, screening, appointments });
   const total = totalStaffTasks(tasks);
 
   const panel = isOpen && panelPos && createPortal(

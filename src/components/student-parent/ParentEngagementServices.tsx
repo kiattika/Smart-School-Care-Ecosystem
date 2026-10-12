@@ -19,7 +19,13 @@ import {
 } from 'lucide-react';
 import { useStore } from '../../store';
 import { NoStudentNotice } from './NoStudentNotice';
-import { subscribeBillingInvoices, submitPaymentSlip } from '../../services/firestoreService';
+import { format } from 'date-fns';
+import { subscribeBillingInvoices, submitPaymentSlip, subscribeAppointments, createAppointmentRequest, cancelAppointment } from '../../services/firestoreService';
+import {
+  APPOINTMENT_MEETING_LABEL, APPOINTMENT_RECIPIENT_LABEL, APPOINTMENT_TIME_SLOTS, APPOINTMENT_TOPIC_MAX,
+  appointmentStatusLabel, canCancelAppointment, safeMeetingLink,
+  type AppointmentMeetingType, type AppointmentRecipient,
+} from '../../lib/appointmentFlow';
 import { uploadBillingFile } from '../../services/storageService';
 import { validateBillingFile, buildSlipSubmissionPatch, canSubmitSlip } from '../../lib/billingPayment';
 import { BillingInvoice, ParentTeacherMessage, ParentAppointment, Student } from '../../types';
@@ -47,8 +53,6 @@ function ParentEngagementServicesInner({
   const {
     parentTeacherMessages,
     sendParentTeacherMessage,
-    parentAppointments,
-    bookParentAppointment,
     students
   } = useStore();
 
@@ -75,7 +79,13 @@ function ParentEngagementServicesInner({
   const unpaidInvoices = invoices.filter(i => i.status !== 'PAID'); // รวม VERIFYING (รอตรวจสอบ)
   const paidInvoices = invoices.filter(i => i.status === 'PAID');
   const messages = parentTeacherMessages.filter(m => m.studentId === student.studentId);
-  const appointments = parentAppointments.filter(a => a.studentId === student.studentId);
+  // นัดพบครูจริงจาก Firestore แบบ real-time (ผู้ปกครองกรองด้วย parentUid, นักเรียนด้วย studentUid) — ไม่ใช้ Zustand
+  const [allAppointments, setAllAppointments] = useState<ParentAppointment[]>([]);
+  useEffect(() => {
+    if (!user?.uid) { setAllAppointments([]); return; }
+    return subscribeAppointments(setAllAppointments, isParentView ? { parentUid: user.uid } : { studentUid: user.uid });
+  }, [user?.uid, isParentView]);
+  const appointments = allAppointments.filter(a => a.studentId === student.studentId);
 
   const [activeTab, setActiveTab] = useState<'billing' | 'messaging' | 'appointment'>('billing');
 
@@ -91,15 +101,15 @@ function ParentEngagementServicesInner({
   // Chat message state
   const [msgText, setMsgText] = useState('');
 
-  // Appointment booking form state
-  // ไม่ตั้งค่าเริ่มต้นปลอม (ชื่อครู/วันที่/หัวข้อ) — ผู้ใช้ต้องกรอกเอง
-  const [teacherName, setTeacherName] = useState('');
+  // Appointment request form state — ไม่ตั้งค่าเริ่มต้นแทนผู้ใช้ (ต้องเลือกเอง)
+  const [recipient, setRecipient] = useState<AppointmentRecipient | ''>('');
   const [appointmentDate, setAppointmentDate] = useState('');
-  const [timeSlot, setTimeSlot] = useState('15:30 - 16:00 น.');
-  const [meetingType, setMeetingType] = useState<'IN_PERSON' | 'ONLINE_MEET'>('IN_PERSON');
+  const [timeSlot, setTimeSlot] = useState('');
+  const [meetingType, setMeetingType] = useState<AppointmentMeetingType | ''>('');
   const [topic, setTopic] = useState('');
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [bookingError, setBookingError] = useState('');
+  const [bookingBusy, setBookingBusy] = useState(false);
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,33 +158,41 @@ function ParentEngagementServicesInner({
     }
   };
 
-  const handleBookAppointment = (e: React.FormEvent) => {
+  const handleBookAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
     setBookingError('');
+    setBookingSuccess(false);
     // ผูกกับ Auth UID จริงเท่านั้น ห้ามสร้าง placeholder เช่น parent_<studentId>
     const parentUid = user?.uid;
     if (!parentUid) {
-      setBookingError('ไม่พบข้อมูลผู้ใช้ที่ล็อกอิน — กรุณาเข้าสู่ระบบใหม่ก่อนจองนัดหมาย');
+      setBookingError('ไม่พบข้อมูลผู้ใช้ที่ล็อกอิน — กรุณาเข้าสู่ระบบใหม่ก่อนขอนัดหมาย');
       return;
     }
-    if (!teacherName.trim() || !appointmentDate) {
-      setBookingError('กรุณาระบุชื่อครูและวันที่นัดหมาย');
-      return;
+    setBookingBusy(true);
+    try {
+      await createAppointmentRequest({
+        student: { studentId: student.studentId, studentUid: student.studentUid || '', parentUid: student.parentUid, room: student.room },
+        parent: { uid: parentUid, name: user?.displayName || 'ผู้ปกครอง' },
+        form: { recipient, preferredDate: appointmentDate, timeSlot, meetingType, topic },
+      });
+      setRecipient(''); setAppointmentDate(''); setTimeSlot(''); setMeetingType(''); setTopic('');
+      setBookingSuccess(true);
+      setTimeout(() => setBookingSuccess(false), 4000);
+    } catch (err: any) {
+      // เขียนไม่สำเร็จ = แจ้งตามจริง (ห้ามขึ้น "ส่งแล้ว")
+      setBookingError(err?.message || 'ส่งคำขอไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setBookingBusy(false);
     }
-    bookParentAppointment({
-      studentId: student.studentId,
-      parentId: parentUid,
-      teacherName: teacherName.trim(),
-      date: appointmentDate,
-      timeSlot,
-      topic,
-      meetingType,
-      // ไม่สร้างลิงก์ประชุม/สถานที่ปลอม — ครูเป็นผู้แจ้งลิงก์หรือสถานที่เมื่อยืนยันนัดหมาย
-      locationOrLink: ''
-    });
+  };
 
-    setBookingSuccess(true);
-    setTimeout(() => setBookingSuccess(false), 3000);
+  const handleCancelAppointment = async (id: string) => {
+    setBookingError('');
+    try {
+      await cancelAppointment(id);
+    } catch (err: any) {
+      setBookingError(err?.message || 'ยกเลิกนัดไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    }
   };
 
   return (
@@ -524,112 +542,126 @@ function ParentEngagementServicesInner({
 
       {activeTab === 'appointment' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Booking Form */}
+          {/* Request Form (ผู้ปกครองเท่านั้น) */}
           <div className="lg:col-span-5 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-4">
             <div>
               <h3 className="text-sm font-bold text-white flex items-center gap-2 mb-1">
                 <Calendar className="w-4 h-4 text-purple-400" />
-                จองเวลานัดพบครูและฝ่ายแนะแนว (Conference Booking)
+                ขอนัดพบครู (Conference Request)
               </h3>
               <p className="text-[11px] text-slate-400">
-                สามารถเลือกนัดพบแบบ Onsite ที่โรงเรียน หรือปรึกษาผ่าน Google Meet
+                เลือกพบครูที่ปรึกษาหรือครูแนะแนว แบบพบที่โรงเรียนหรือผ่าน Google Meet — ครูจะยืนยันและแจ้งสถานที่/ลิงก์กลับมา
               </p>
             </div>
 
-            {bookingSuccess && (
-              <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>ส่งคำขอนัดหมายแล้ว รอครูยืนยันและแจ้งสถานที่/ลิงก์การประชุม</span>
-              </div>
-            )}
+            {!isParentView ? (
+              <p className="p-3 bg-slate-800/60 border border-slate-700 rounded-xl text-xs text-slate-300" data-testid="appointment-student-note">
+                การขอนัดพบครูทำโดยผู้ปกครอง — ที่นี่แสดงรายการนัดของคุณให้ดูได้อย่างเดียว
+              </p>
+            ) : (
+              <>
+                {bookingSuccess && (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>ส่งคำขอนัดหมายแล้ว รอครูยืนยันและแจ้งสถานที่/ลิงก์การประชุม</span>
+                  </div>
+                )}
 
-            {bookingError && (
-              <div role="alert" className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300">{bookingError}</div>
-            )}
+                {bookingError && (
+                  <div role="alert" className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300">{bookingError}</div>
+                )}
 
-            <form onSubmit={handleBookAppointment} className="space-y-3 text-xs">
-              <div>
-                <label className="text-slate-300 block mb-1">เลือกคุณครูที่ต้องการนัดหมาย:</label>
-                <input
-                  type="text"
-                  value={teacherName}
-                  onChange={(e) => setTeacherName(e.target.value)}
-                  placeholder="ระบุชื่อครูที่ต้องการนัดพบ"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                  required
-                />
-              </div>
+                <form onSubmit={handleBookAppointment} className="space-y-3 text-xs">
+                  <div>
+                    <label className="text-slate-300 block mb-1">ต้องการพบ:</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(Object.keys(APPOINTMENT_RECIPIENT_LABEL) as AppointmentRecipient[]).map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setRecipient(r)}
+                          aria-pressed={recipient === r}
+                          className={`py-2 px-2 rounded-xl font-bold border transition-all ${
+                            recipient === r ? 'bg-purple-500/20 border-purple-500 text-purple-300' : 'bg-slate-800 border-slate-700 text-slate-400'
+                          }`}
+                        >
+                          {APPOINTMENT_RECIPIENT_LABEL[r]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-              <div>
-                <label className="text-slate-300 block mb-1">รูปแบบการพบ:</label>
-                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-slate-300 block mb-1">รูปแบบการพบ:</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setMeetingType('ONLINE_MEET')}
+                        aria-pressed={meetingType === 'ONLINE_MEET'}
+                        className={`py-2 px-2 rounded-xl font-bold border transition-all flex items-center justify-center gap-1.5 ${
+                          meetingType === 'ONLINE_MEET' ? 'bg-purple-500/20 border-purple-500 text-purple-300' : 'bg-slate-800 border-slate-700 text-slate-400'
+                        }`}
+                      >
+                        <Video className="w-3.5 h-3.5" />
+                        <span>Google Meet</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMeetingType('IN_PERSON')}
+                        aria-pressed={meetingType === 'IN_PERSON'}
+                        className={`py-2 px-2 rounded-xl font-bold border transition-all flex items-center justify-center gap-1.5 ${
+                          meetingType === 'IN_PERSON' ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300' : 'bg-slate-800 border-slate-700 text-slate-400'
+                        }`}
+                      >
+                        <MapPin className="w-3.5 h-3.5" />
+                        <span>พบที่โรงเรียน</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-slate-300 block mb-1">วันที่ต้องการนัด:</label>
+                      <DatePicker value={appointmentDate} onChange={setAppointmentDate} min={format(new Date(), 'yyyy-MM-dd')} ariaLabel="วันที่นัดหมาย" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white flex items-center gap-2 text-left cursor-pointer" />
+                    </div>
+                    <div>
+                      <label className="text-slate-300 block mb-1">ช่วงเวลา:</label>
+                      <select
+                        value={timeSlot}
+                        onChange={(e) => setTimeSlot(e.target.value)}
+                        aria-label="ช่วงเวลานัดหมาย"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white"
+                      >
+                        <option value="">— เลือก —</option>
+                        {APPOINTMENT_TIME_SLOTS.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-slate-300 block mb-1">หัวข้อประเด็นที่ต้องการปรึกษา:</label>
+                    <textarea
+                      value={topic}
+                      onChange={(e) => setTopic(e.target.value)}
+                      rows={3}
+                      maxLength={APPOINTMENT_TOPIC_MAX}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white resize-none"
+                    ></textarea>
+                  </div>
+
                   <button
-                    type="button"
-                    onClick={() => setMeetingType('ONLINE_MEET')}
-                    className={`py-2 px-2 rounded-xl font-bold border transition-all flex items-center justify-center gap-1.5 ${
-                      meetingType === 'ONLINE_MEET'
-                        ? 'bg-purple-500/20 border-purple-500 text-purple-300'
-                        : 'bg-slate-800 border-slate-700 text-slate-400'
-                    }`}
+                    type="submit"
+                    disabled={bookingBusy}
+                    className="w-full py-3 bg-purple-600 hover:bg-purple-500 disabled:opacity-60 text-white font-bold rounded-xl shadow cursor-pointer transition-all"
                   >
-                    <Video className="w-3.5 h-3.5" />
-                    <span>Google Meet</span>
+                    {bookingBusy ? 'กำลังส่งคำขอ...' : 'ส่งคำขอนัดหมาย'}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setMeetingType('IN_PERSON')}
-                    className={`py-2 px-2 rounded-xl font-bold border transition-all flex items-center justify-center gap-1.5 ${
-                      meetingType === 'IN_PERSON'
-                        ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300'
-                        : 'bg-slate-800 border-slate-700 text-slate-400'
-                    }`}
-                  >
-                    <MapPin className="w-3.5 h-3.5" />
-                    <span>พบที่โรงเรียน</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-slate-300 block mb-1">วันที่นัดหมาย:</label>
-                  <DatePicker value={appointmentDate} onChange={setAppointmentDate} ariaLabel="วันที่นัดหมาย" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white flex items-center gap-2 text-left cursor-pointer" />
-                </div>
-                <div>
-                  <label className="text-slate-300 block mb-1">ช่วงเวลา:</label>
-                  <select
-                    value={timeSlot}
-                    onChange={(e) => setTimeSlot(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white"
-                  >
-                    <option value="15:30 - 16:00 น.">15:30 - 16:00 น.</option>
-                    <option value="16:00 - 16:30 น.">16:00 - 16:30 น.</option>
-                    <option value="16:30 - 17:00 น.">16:30 - 17:00 น.</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-slate-300 block mb-1">หัวข้อประเด็นที่ต้องการปรึกษา:</label>
-                <textarea
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  rows={3}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-3 text-white resize-none"
-                  required
-                ></textarea>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl shadow cursor-pointer transition-all"
-              >
-                ยืนยันการจองเวลานัดหมาย
-              </button>
-            </form>
+                </form>
+              </>
+            )}
           </div>
 
-          {/* Confirmed Appointments List */}
+          {/* Appointments List */}
           <div className="lg:col-span-7 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-4">
             <h4 className="text-sm font-bold text-white flex items-center gap-2">
               <Clock className="w-4 h-4 text-purple-400" />
@@ -637,57 +669,72 @@ function ParentEngagementServicesInner({
             </h4>
 
             <div className="space-y-3">
-              {appointments.map((apt) => (
-                <div
-                  key={apt.id}
-                  className="p-4 bg-slate-800/40 border border-slate-800 rounded-2xl space-y-2.5 hover:border-purple-500/30 transition-all"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white">{apt.teacherName}</span>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                      apt.status === 'CONFIRMED' || apt.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300'
-                        : apt.status === 'CANCELLED' ? 'bg-red-500/20 text-red-300'
-                        : 'bg-amber-500/20 text-amber-300'
-                    }`}>
-                      {apt.status === 'CONFIRMED' ? '✓ ยืนยันการนัดแล้ว'
-                        : apt.status === 'COMPLETED' ? '✓ พบกันแล้ว'
-                        : apt.status === 'CANCELLED' ? 'ยกเลิก'
-                        : '⏳ รอครูยืนยัน'}
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
-                    หัวข้อ: {apt.topic}
-                  </p>
-
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs pt-1">
-                    <span className="text-slate-400">
-                      📅 {apt.date} • ⏱️ {apt.timeSlot}
-                    </span>
-
-                    {apt.meetingType === 'ONLINE_MEET' && apt.meetLink ? (
-                      <a
-                        href={apt.meetLink}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center gap-1.5 shadow"
-                      >
-                        <Video className="w-3.5 h-3.5" />
-                        <span>เข้าห้อง Google Meet</span>
-                      </a>
-                    ) : apt.locationOrLink ? (
-                      <span className="text-slate-300 font-medium flex items-center gap-1">
-                        <MapPin className="w-3.5 h-3.5 text-indigo-400" />
-                        {apt.locationOrLink}
+              {appointments.length === 0 && <p className="text-xs text-slate-500" data-testid="appointment-empty">ยังไม่มีรายการนัดหมาย</p>}
+              {appointments.map((apt) => {
+                const link = apt.meetingType === 'ONLINE_MEET' ? safeMeetingLink(apt.locationOrLink) : null;
+                return (
+                  <div
+                    key={apt.id}
+                    className="p-4 bg-slate-800/40 border border-slate-800 rounded-2xl space-y-2.5 hover:border-purple-500/30 transition-all"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-white">{APPOINTMENT_RECIPIENT_LABEL[apt.recipient]}{apt.respondedBy ? ` · ${apt.respondedBy}` : ''}</span>
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                        apt.status === 'CONFIRMED' || apt.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300'
+                          : apt.status === 'CANCELLED' || apt.status === 'DECLINED' ? 'bg-red-500/20 text-red-300'
+                          : 'bg-amber-500/20 text-amber-300'
+                      }`}>
+                        {appointmentStatusLabel(apt.status)}
                       </span>
-                    ) : (
-                      <span className="text-slate-400 flex items-center gap-1">
-                        {apt.status === 'REQUESTED' ? 'รอครูยืนยันสถานที่/ลิงก์การประชุม' : 'ยังไม่ได้ระบุสถานที่/ลิงก์'}
+                    </div>
+
+                    <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">
+                      หัวข้อ: {apt.topic}
+                    </p>
+
+                    {apt.teacherNote && (
+                      <p className="text-xs text-slate-300 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800">ข้อความจากครู: {apt.teacherNote}</p>
+                    )}
+
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs pt-1">
+                      <span className="text-slate-400">
+                        📅 {apt.preferredDate} • ⏱️ {apt.timeSlot} • {APPOINTMENT_MEETING_LABEL[apt.meetingType]}
                       </span>
+
+                      {apt.status === 'CONFIRMED' && link ? (
+                        <a
+                          href={link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center gap-1.5 shadow"
+                        >
+                          <Video className="w-3.5 h-3.5" />
+                          <span>เข้าห้อง Google Meet</span>
+                        </a>
+                      ) : apt.status === 'CONFIRMED' && apt.locationOrLink ? (
+                        <span className="text-slate-300 font-medium flex items-center gap-1">
+                          <MapPin className="w-3.5 h-3.5 text-indigo-400" />
+                          {apt.locationOrLink}
+                        </span>
+                      ) : apt.status === 'REQUESTED' ? (
+                        <span className="text-slate-400">รอครูยืนยันสถานที่/ลิงก์การประชุม</span>
+                      ) : null}
+                    </div>
+
+                    {isParentView && canCancelAppointment(apt.status) && (
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleCancelAppointment(apt.id)}
+                          className="px-3 py-1.5 rounded-xl text-[11px] font-bold text-red-300 border border-red-500/30 hover:bg-red-500/10"
+                        >
+                          ยกเลิกนัด
+                        </button>
+                      </div>
                     )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

@@ -828,15 +828,67 @@ service cloud.firestore {
                       (isSignedIn() && (request.resource.data.parentUid == request.auth.uid || request.resource.data.parentId == request.auth.uid || request.resource.data.senderId == request.auth.uid || request.resource.data.studentId == request.auth.uid));
     }
 
+    // นัดพบครูของผู้ปกครอง — สายงาน (ตรงกับ src/lib/appointmentFlow.ts):
+    //   ผู้ปกครองขอนัด → REQUESTED → (ครูผู้รับ) CONFIRMED | DECLINED ; CONFIRMED → (ครูผู้รับ) COMPLETED ; REQUESTED|CONFIRMED → (ผู้ปกครอง) CANCELLED
+    // ผู้รับ: HOMEROOM = ครูที่ปรึกษาของ homeroomClass นั้น, GUIDANCE = ครูแนะแนว. ข้อความส่วนตัว → อ่านได้เฉพาะเจ้าของ (parentUid/studentUid) + ผู้รับ + SUPER_ADMIN
+    // query ต้องกรองด้วย parentUid / studentUid / (homeroomClass + recipient=='HOMEROOM') / (recipient=='GUIDANCE') ตามผู้ดู
+    function canHandleAppointment(d) {
+      return hasRole('SUPER_ADMIN')
+        || (d.recipient == 'HOMEROOM' && isHomeroomTeacherOf(d.homeroomClass))
+        || (d.recipient == 'GUIDANCE' && hasRole('GUIDANCE_COUNSELOR'));
+    }
+
     match /parent_appointments/{appointmentId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('HOMEROOM_TEACHER') || 
-                     hasRole('SUBJECT_TEACHER') || 
-                     (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid || resource.data.studentId == request.auth.uid || resource.data.teacherId == request.auth.uid || resource.data.teacherEmail == request.auth.token.email));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('HOMEROOM_TEACHER') || 
-                      hasRole('SUBJECT_TEACHER') || 
-                      (isSignedIn() && (request.resource.data.parentUid == request.auth.uid || request.resource.data.parentId == request.auth.uid || request.resource.data.studentId == request.auth.uid));
+      allow read: if canHandleAppointment(resource.data)
+                  || (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.studentUid == request.auth.uid));
+
+      // สร้าง: เฉพาะผู้ปกครองตัวจริงของนักเรียน (เทียบ students/{studentId}) เริ่มที่ REQUESTED เท่านั้น
+      allow create: if request.resource.data.keys().hasOnly([
+                         'id', 'studentId', 'studentUid', 'parentUid', 'homeroomClass', 'recipient', 'topic', 'preferredDate',
+                         'timeSlot', 'meetingType', 'status', 'requestedBy', 'requestedAt', 'updatedAt'])
+                    && request.resource.data.keys().hasAll([
+                         'id', 'studentId', 'studentUid', 'parentUid', 'homeroomClass', 'recipient', 'topic', 'preferredDate',
+                         'timeSlot', 'meetingType', 'status', 'requestedBy', 'requestedAt'])
+                    && request.resource.data.id == appointmentId
+                    && request.resource.data.parentUid is string
+                    && request.auth.uid == request.resource.data.parentUid
+                    && request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', null)
+                    && request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__')
+                    && request.resource.data.homeroomClass == studentField(request.resource.data.studentId, 'room', '__none__')
+                    && request.resource.data.recipient in ['HOMEROOM', 'GUIDANCE']
+                    && request.resource.data.topic is string && request.resource.data.topic.size() >= 1 && request.resource.data.topic.size() <= 500
+                    && request.resource.data.preferredDate is string && request.resource.data.preferredDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                    && request.resource.data.timeSlot in ['15:30 - 16:00 น.', '16:00 - 16:30 น.', '16:30 - 17:00 น.']
+                    && request.resource.data.meetingType in ['IN_PERSON', 'ONLINE_MEET']
+                    && request.resource.data.status == 'REQUESTED'
+                    && request.resource.data.requestedBy is string && request.resource.data.requestedBy.size() > 0;
+
+      allow update: if (
+                        // ครูผู้รับ ตอบรับ/ปฏิเสธ คำขอที่ยังรออยู่ (ยืนยันต้องระบุสถานที่/ลิงก์)
+                        canHandleAppointment(resource.data)
+                        && resource.data.status == 'REQUESTED'
+                        && request.resource.data.status in ['CONFIRMED', 'DECLINED']
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                             .hasOnly(['status', 'respondedBy', 'respondedByStaffId', 'respondedAt', 'teacherNote', 'locationOrLink', 'updatedAt'])
+                        && request.resource.data.respondedBy is string && request.resource.data.respondedBy.size() > 0
+                        && request.resource.data.teacherNote is string && request.resource.data.teacherNote.size() <= 500
+                        && request.resource.data.locationOrLink is string && request.resource.data.locationOrLink.size() <= 300
+                        && (request.resource.data.status == 'DECLINED' || request.resource.data.locationOrLink.size() >= 1)
+                      ) || (
+                        // ครูผู้รับ ปิดงาน "พบกันแล้ว" เฉพาะนัดที่ยืนยันแล้ว
+                        canHandleAppointment(resource.data)
+                        && resource.data.status == 'CONFIRMED'
+                        && request.resource.data.status == 'COMPLETED'
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'completedAt', 'updatedAt'])
+                      ) || (
+                        // ผู้ปกครองตัวจริงยกเลิกนัดที่ยังไม่จบ
+                        isSignedIn() && request.auth.uid == resource.data.parentUid
+                        && resource.data.status in ['REQUESTED', 'CONFIRMED']
+                        && request.resource.data.status == 'CANCELLED'
+                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt', 'updatedAt'])
+                      );
+      // ลบไม่ได้ (เป็นหลักฐานการนัด)
+      allow delete: if false;
     }
 
     // 21. Active Learning Records

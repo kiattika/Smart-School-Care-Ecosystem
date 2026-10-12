@@ -1456,6 +1456,147 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // 15d. parent_appointments — ผู้ปกครองขอนัด → ครูที่ปรึกษา/ครูแนะแนวตอบรับ
+  describe('parent_appointments collection', () => {
+    const STU_UID = 'stu-uid-a1';
+    const STU_ID = 'a-std-1';
+    const ROOM = 'ม.5/8';
+    const PARENT_UID = 'parent-a1';
+    const HR_UID = 'hr-a1';
+    const COL = 'parent_appointments';
+    const par = () => asUser(PARENT_UID, ['PARENT']).firestore();
+    const stu = () => asUser(STU_UID, ['STUDENT']).firestore();
+    const hr = () => asUser(HR_UID, ['HOMEROOM_TEACHER'], { staffId: HR_UID }).firestore();
+    const otherHr = () => asUser('other-hr-a', ['HOMEROOM_TEACHER'], { staffId: 'other-hr-a' }).firestore();
+    const gc = () => asUser('gc-a1', ['GUIDANCE_COUNSELOR'], { staffId: 'gc-a1' }).firestore();
+    const subj = () => asUser('subj-a1', ['SUBJECT_TEACHER'], { staffId: 'subj-a1' }).firestore();
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, room: ROOM, name: 'Appt Kid', parentUid: PARENT_UID });
+        await ctx.firestore().doc(`staff/${HR_UID}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+        await ctx.firestore().doc('staff/other-hr-a').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+      });
+    }
+    const appt = (id: string, over: Record<string, unknown> = {}) => ({
+      id, studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID, homeroomClass: ROOM, recipient: 'HOMEROOM',
+      topic: 'ปรึกษาการเรียน', preferredDate: '2026-10-20', timeSlot: '15:30 - 16:00 น.', meetingType: 'IN_PERSON',
+      status: 'REQUESTED', requestedBy: 'ผู้ปกครอง', requestedAt: '2026-10-12T00:00:00.000Z',
+      ...over,
+    });
+    async function put(id: string, over: Record<string, unknown> = {}) {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`${COL}/${id}`).set(appt(id, over)); });
+    }
+    const confirm = { status: 'CONFIRMED', respondedBy: 'ครู', respondedByStaffId: HR_UID, respondedAt: '2026-10-12T02:00:00.000Z', teacherNote: '', locationOrLink: 'ห้องแนะแนว' };
+
+    describe('create', () => {
+      it('the real parent can request, to either recipient', async () => {
+        await seed();
+        await assertSucceeds(par().doc(`${COL}/c1`).set(appt('c1')));
+        await assertSucceeds(par().doc(`${COL}/c2`).set(appt('c2', { recipient: 'GUIDANCE', meetingType: 'ONLINE_MEET' })));
+      });
+      it('denies students, strangers, other parents and teachers creating one', async () => {
+        await seed();
+        await assertFails(stu().doc(`${COL}/c3`).set(appt('c3')));
+        await assertFails(asUser('stranger-parent', ['PARENT']).firestore().doc(`${COL}/c4`).set(appt('c4', { parentUid: 'stranger-parent' })));
+        await assertFails(hr().doc(`${COL}/c5`).set(appt('c5')));
+      });
+      it('denies faked studentUid/room/parentUid, non-REQUESTED start, bad shape', async () => {
+        await seed();
+        await assertFails(par().doc(`${COL}/d1`).set(appt('d1', { homeroomClass: 'ม.6/1' })));
+        await assertFails(par().doc(`${COL}/d2`).set(appt('d2', { studentUid: 'someone' })));
+        await assertFails(par().doc(`${COL}/d3`).set(appt('d3', { status: 'CONFIRMED' })));
+        await assertFails(par().doc(`${COL}/d4`).set(appt('d4', { recipient: 'EXECUTIVE' })));
+        await assertFails(par().doc(`${COL}/d5`).set(appt('d5', { timeSlot: '03:00 - 04:00 น.' })));
+        await assertFails(par().doc(`${COL}/d6`).set(appt('d6', { topic: '' })));
+        await assertFails(par().doc(`${COL}/d7`).set({ ...appt('d7'), locationOrLink: 'https://x' }));
+        await assertFails(par().doc(`${COL}/other-id`).set(appt('d8')));
+      });
+    });
+
+    describe('read', () => {
+      it('owner parent/student, the homeroom teacher of that room (HOMEROOM) and SUPER_ADMIN can read; others cannot', async () => {
+        await seed();
+        await put('r1');
+        await assertSucceeds(par().doc(`${COL}/r1`).get());
+        await assertSucceeds(stu().doc(`${COL}/r1`).get());
+        await assertSucceeds(hr().doc(`${COL}/r1`).get());
+        await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc(`${COL}/r1`).get());
+        await assertFails(otherHr().doc(`${COL}/r1`).get());
+        await assertFails(gc().doc(`${COL}/r1`).get());
+        await assertFails(subj().doc(`${COL}/r1`).get());
+        await assertFails(asUser('stranger-parent', ['PARENT']).firestore().doc(`${COL}/r1`).get());
+      });
+      it('a GUIDANCE-bound request is read by guidance counselors, not by the homeroom teacher', async () => {
+        await seed();
+        await put('r2', { recipient: 'GUIDANCE' });
+        await assertSucceeds(gc().doc(`${COL}/r2`).get());
+        await assertFails(hr().doc(`${COL}/r2`).get());
+      });
+      it('list queries scoped like the app does (parentUid / homeroom+recipient / guidance)', async () => {
+        await seed();
+        await put('l1');
+        await put('l2', { recipient: 'GUIDANCE' });
+        await assertSucceeds(par().collection(COL).where('parentUid', '==', PARENT_UID).get());
+        await assertSucceeds(hr().collection(COL).where('homeroomClass', '==', ROOM).where('recipient', '==', 'HOMEROOM').get());
+        await assertSucceeds(gc().collection(COL).where('recipient', '==', 'GUIDANCE').get());
+        await assertFails(hr().collection(COL).where('homeroomClass', '==', ROOM).get());
+        await assertFails(gc().collection(COL).get());
+      });
+    });
+
+    describe('update', () => {
+      it('the receiving homeroom teacher confirms (location required) or declines', async () => {
+        await seed();
+        await put('u1'); await put('u2'); await put('u3');
+        await assertSucceeds(hr().doc(`${COL}/u1`).update(confirm));
+        await assertFails(hr().doc(`${COL}/u2`).update({ ...confirm, locationOrLink: '' }));
+        await assertSucceeds(hr().doc(`${COL}/u3`).update({ ...confirm, status: 'DECLINED', teacherNote: 'ติดประชุม', locationOrLink: '' }));
+      });
+      it('wrong teachers cannot respond: other room, guidance on a HOMEROOM request, subject teacher, student, parent', async () => {
+        await seed();
+        await put('u4');
+        await assertFails(otherHr().doc(`${COL}/u4`).update(confirm));
+        await assertFails(gc().doc(`${COL}/u4`).update(confirm));
+        await assertFails(subj().doc(`${COL}/u4`).update(confirm));
+        await assertFails(stu().doc(`${COL}/u4`).update(confirm));
+        await assertFails(par().doc(`${COL}/u4`).update(confirm));
+      });
+      it('a counselor responds to a GUIDANCE request; the response cannot change other fields', async () => {
+        await seed();
+        await put('u5', { recipient: 'GUIDANCE' });
+        await put('u6');
+        await assertSucceeds(gc().doc(`${COL}/u5`).update({ ...confirm, respondedByStaffId: 'gc-a1' }));
+        await assertFails(hr().doc(`${COL}/u6`).update({ ...confirm, topic: 'แก้หัวข้อ' }));
+        await assertFails(hr().doc(`${COL}/u6`).update({ ...confirm, parentUid: 'x' }));
+      });
+      it('completion only from CONFIRMED; cannot respond twice', async () => {
+        await seed();
+        await put('u7'); await put('u8', { status: 'CONFIRMED', locationOrLink: 'ห้องแนะแนว' });
+        await assertFails(hr().doc(`${COL}/u7`).update({ status: 'COMPLETED', completedAt: 'x' }));
+        await assertSucceeds(hr().doc(`${COL}/u8`).update({ status: 'COMPLETED', completedAt: '2026-10-20T10:00:00.000Z' }));
+        await assertFails(hr().doc(`${COL}/u8`).update({ ...confirm, status: 'DECLINED' }));
+      });
+      it('the real parent cancels an open request (and nothing else); others cannot', async () => {
+        await seed();
+        await put('u9'); await put('u10', { status: 'COMPLETED' });
+        await assertFails(par().doc(`${COL}/u9`).update({ status: 'CONFIRMED' }));
+        await assertFails(par().doc(`${COL}/u9`).update({ status: 'CANCELLED', cancelledAt: 'x', topic: 'แก้' }));
+        await assertSucceeds(par().doc(`${COL}/u9`).update({ status: 'CANCELLED', cancelledAt: '2026-10-13T00:00:00.000Z' }));
+        await assertFails(par().doc(`${COL}/u10`).update({ status: 'CANCELLED', cancelledAt: 'x' }));
+        await assertFails(stu().doc(`${COL}/u9`).update({ status: 'CANCELLED', cancelledAt: 'x' }));
+        await assertFails(asUser('stranger-parent', ['PARENT']).firestore().doc(`${COL}/u9`).update({ status: 'CANCELLED', cancelledAt: 'x' }));
+      });
+      it('nobody can delete one', async () => {
+        await seed();
+        await put('x1');
+        await assertFails(par().doc(`${COL}/x1`).delete());
+        await assertFails(hr().doc(`${COL}/x1`).delete());
+        await assertFails(asRole('SUPER_ADMIN').firestore().doc(`${COL}/x1`).delete());
+      });
+    });
+  });
+
   // 16. student_portfolio_entries — นักเรียนบันทึกผลงานเอง + ครูที่ปรึกษาอนุมัติ
   describe('student_portfolio_entries collection', () => {
     const STU_UID = 'stu-uid-p1';

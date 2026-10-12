@@ -29,7 +29,6 @@ import {
   ExamScheduleItem,
   BillingInvoice,
   ParentTeacherMessage,
-  ParentAppointment,
   GPSCheckInLog,
   SubstituteAssignment,
   SubstituteApprovalStep,
@@ -52,7 +51,6 @@ import {
   save2QScreeningFirestore,
   saveSDQAssessmentFirestore,
   sendParentTeacherMessageFirestore,
-  bookParentAppointmentFirestore,
   saveActiveLearningLogFirestore,
   updateBehaviorScoreAndTriggerAlert,
   createParentNotification
@@ -137,7 +135,6 @@ export const useStore = create<StoreState>((set, get) => ({
   examSchedules: [],
   billingInvoices: [],
   parentTeacherMessages: [],
-  parentAppointments: [],
 
   schoolGeofenceConfig: DEFAULT_SCHOOL_GEOFENCE,
   gpsCheckInLogs: [],
@@ -1067,20 +1064,6 @@ export const useStore = create<StoreState>((set, get) => ({
 
     return set((state) => ({
       parentTeacherMessages: [...state.parentTeacherMessages, newMsg]
-    }));
-  },
-
-  bookParentAppointment: (apt) => {
-    const newApt: ParentAppointment = {
-      ...apt,
-      id: `apt-${Date.now()}`,
-      // คำขอนัดหมายจากผู้ปกครอง = รอครูยืนยัน (ห้ามตั้ง CONFIRMED เอง และห้ามแนบลิงก์ประชุมปลอม)
-      status: 'REQUESTED',
-    };
-    bookParentAppointmentFirestore(newApt).catch(err => console.warn('Firestore parent appointment notice:', err));
-
-    return set((state) => ({
-      parentAppointments: [newApt, ...state.parentAppointments]
     }));
   },
 

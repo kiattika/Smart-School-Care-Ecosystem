@@ -44,7 +44,8 @@ import { AdvisorGateCheckInPanel } from './components/student-parent/AdvisorGate
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { AdvisorLeaveInbox, hasApprovedLeaveOn } from './components/advisor/AdvisorLeaveInbox';
-import { subscribeLeaveRequests } from './services/firestoreService';
+import { subscribeLeaveRequests, subscribeAppointments } from './services/firestoreService';
+import { AppointmentInbox } from './components/appointments/AppointmentInbox';
 
 
 export function AdvisorPortal() {
@@ -72,6 +73,13 @@ export function AdvisorPortal() {
   useEffect(() => {
     if (!myRoom) { setRoomLeaves([]); return; }
     return subscribeLeaveRequests(setRoomLeaves, { homeroomClass: myRoom });
+  }, [myRoom]);
+
+  // คำขอนัดพบจากผู้ปกครองที่ขอพบ "ครูที่ปรึกษา" ของห้องฉัน — real-time (rules: isHomeroomTeacherOf + recipient == HOMEROOM)
+  const [roomAppointments, setRoomAppointments] = useState<import('./types').ParentAppointment[]>([]);
+  useEffect(() => {
+    if (!myRoom) { setRoomAppointments([]); return; }
+    return subscribeAppointments(setRoomAppointments, { homeroomClass: myRoom });
   }, [myRoom]);
 
   // แบบประเมินตนเองของนักเรียนในห้อง — listener สดจาก Firestore (เดิมอ่านจาก store ที่ไม่มี listener จึงว่างเสมอ)
@@ -291,6 +299,9 @@ export function AdvisorPortal() {
                 
                 {/* Leave Requests Inbox */}
                 <AdvisorLeaveInbox leaves={roomLeaves} students={students} />
+
+                {/* Parent appointment requests */}
+                <AppointmentInbox appointments={roomAppointments} students={students} />
 
               </div>
 

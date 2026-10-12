@@ -1104,22 +1104,31 @@ export interface ParentTeacherMessage {
   read: boolean;
 }
 
+/** นัดพบครูของผู้ปกครอง (parent_appointments) — สายงานดู src/lib/appointmentFlow.ts */
 export interface ParentAppointment {
   id: string;
   studentId: string;
-  parentId?: string;
-  parentName?: string;
-  teacherName: string;
-  teacherRole?: string;
+  /** Firebase Auth UID ของนักเรียน/ผู้ปกครอง ประทับจาก students/{studentId} จริงตอนขอ */
+  studentUid: string;
+  parentUid: string;
+  /** ห้องของนักเรียนตอนขอ (students.room) — ใช้ให้ครูที่ปรึกษาห้องนั้นเห็น */
+  homeroomClass: string;
+  recipient: 'HOMEROOM' | 'GUIDANCE';
   topic: string;
-  preferredDate?: string;
-  date?: string;
+  preferredDate: string;
   timeSlot: string;
-  meetingType: 'ONSITE' | 'ONLINE_MEET';
-  status: 'REQUESTED' | 'CONFIRMED' | 'COMPLETED' | 'CANCELLED';
-  counselorNotes?: string;
-  meetLink?: string;
+  meetingType: 'IN_PERSON' | 'ONLINE_MEET';
+  status: 'REQUESTED' | 'CONFIRMED' | 'DECLINED' | 'COMPLETED' | 'CANCELLED';
+  requestedBy: string;
+  requestedAt: string;
+  respondedBy?: string;
+  respondedByStaffId?: string;
+  respondedAt?: string;
+  teacherNote?: string;
+  /** สถานที่นัดพบ หรือลิงก์ประชุม (https) ที่ครูระบุตอนยืนยัน */
   locationOrLink?: string;
+  completedAt?: string;
+  cancelledAt?: string;
 }
 
 export interface StoreState {
@@ -1183,7 +1192,6 @@ export interface StoreState {
   examSchedules: ExamScheduleItem[];
   billingInvoices: BillingInvoice[];
   parentTeacherMessages: ParentTeacherMessage[];
-  parentAppointments: ParentAppointment[];
 
   schoolGeofenceConfig: {
     schoolId: string;
@@ -1287,7 +1295,6 @@ export interface StoreState {
   submitVolunteerHours: (record: Omit<VolunteerHourRecord, 'id' | 'status'>) => void;
   submitHomework: (assignmentId: string, fileName: string) => void;
   sendParentTeacherMessage: (studentId: string, senderRole: ParentTeacherMessage['senderRole'], senderName: string, message: string) => void;
-  bookParentAppointment: (appointment: Omit<ParentAppointment, 'id' | 'status'>) => void;
 
   // GPS Geofence Actions
   addGPSCheckInLog: (log: Omit<GPSCheckInLog, 'id'>) => void;
