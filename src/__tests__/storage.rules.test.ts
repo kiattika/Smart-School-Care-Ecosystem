@@ -154,3 +154,33 @@ describe.skipIf(!EMULATOR_HOST)('Storage Security Rules — substitute_worksheet
     await assertFails(testEnv.authenticatedContext('teacher-1', { roles: ['SUBJECT_TEACHER'] }).storage().ref('substitute_worksheets/teacher-1/worksheet.pdf').delete());
   });
 });
+
+describe.skipIf(!EMULATOR_HOST)('Storage Security Rules — billing_slips / billing_receipts', () => {
+  it('lets the owner upload a slip image or PDF under their own uid prefix', async () => {
+    const p = testEnv.authenticatedContext('parent-1', { roles: ['PARENT'] }).storage();
+    await assertSucceeds(asPromise(p.ref('billing_slips/parent-1/inv-1-1.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
+    await assertSucceeds(asPromise(p.ref('billing_slips/parent-1/inv-1-2.pdf').put(new Uint8Array([1, 2]), { contentType: 'application/pdf' })));
+  });
+
+  it('denies a slip under another uid prefix, an unsupported type, an oversized file, and unauthenticated upload', async () => {
+    const p = testEnv.authenticatedContext('parent-1', { roles: ['PARENT'] }).storage();
+    await assertFails(asPromise(p.ref('billing_slips/parent-2/inv-1.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
+    await assertFails(asPromise(p.ref('billing_slips/parent-1/inv-1.txt').put(new Uint8Array([1]), { contentType: 'text/plain' })));
+    await assertFails(asPromise(p.ref('billing_slips/parent-1/big.jpg').put(new Uint8Array(5 * 1024 * 1024 + 1), { contentType: 'image/jpeg' })));
+    await assertFails(asPromise(testEnv.unauthenticatedContext().storage().ref('billing_slips/parent-1/inv-1.jpg').put(tinyPng, { contentType: 'image/jpeg' })));
+  });
+
+  it('lets finance staff upload a receipt under their own prefix only; other users cannot read it directly', async () => {
+    const f = testEnv.authenticatedContext('finance-1', { roles: ['FINANCE_STAFF'] }).storage();
+    await assertSucceeds(asPromise(f.ref('billing_receipts/finance-1/inv-1.pdf').put(new Uint8Array([1]), { contentType: 'application/pdf' })));
+    await assertFails(asPromise(f.ref('billing_receipts/finance-2/inv-1.pdf').put(new Uint8Array([1]), { contentType: 'application/pdf' })));
+    await assertFails(testEnv.authenticatedContext('parent-1', { roles: ['PARENT'] }).storage().ref('billing_receipts/finance-1/inv-1.pdf').getDownloadURL());
+  });
+
+  it('denies deleting slips/receipts via client (payment evidence is kept)', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.storage().ref('billing_slips/parent-1/inv-1.jpg').put(tinyPng, { contentType: 'image/jpeg' });
+    });
+    await assertFails(testEnv.authenticatedContext('parent-1', { roles: ['PARENT'] }).storage().ref('billing_slips/parent-1/inv-1.jpg').delete());
+  });
+});

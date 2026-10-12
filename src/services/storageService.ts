@@ -51,3 +51,23 @@ export async function uploadSubstituteWorksheet(
   const url = await getDownloadURL(objectRef);
   return { url, name: file.name };
 }
+
+/**
+ * สลิปโอนเงิน (ผู้ปกครอง/นักเรียน) และใบเสร็จรับเงิน (เจ้าหน้าที่การเงิน) ของใบแจ้งหนี้
+ * path: billing_slips|billing_receipts/{ownerUid}/{invoiceId}-{timestamp}.{ext} — ownerUid = Auth UID ผู้อัปโหลด
+ * storage.rules: เจ้าของ prefix เท่านั้น + รูปภาพ/PDF + < 5MB (ผู้ตรวจเปิดดูผ่าน download URL ที่เก็บในใบแจ้งหนี้)
+ */
+export async function uploadBillingFile(
+  kind: 'slip' | 'receipt',
+  ownerUid: string,
+  invoiceId: string,
+  file: File,
+): Promise<{ url: string; storagePath: string; name: string }> {
+  const { extensionForType } = await import('../lib/billingPayment');
+  const folder = kind === 'slip' ? 'billing_slips' : 'billing_receipts';
+  const storagePath = `${folder}/${ownerUid}/${invoiceId}-${Date.now()}.${extensionForType(file.type)}`;
+  const objectRef = ref(storage, storagePath);
+  await uploadBytes(objectRef, file, { contentType: file.type });
+  const url = await getDownloadURL(objectRef);
+  return { url, storagePath, name: file.name };
+}

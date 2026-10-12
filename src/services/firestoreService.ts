@@ -19,6 +19,7 @@ import {
 } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { db, auth } from '../lib/firebase';
+import type { buildSlipSubmissionPatch, buildVerifyPatch, buildRejectPatch } from '../lib/billingPayment';
 import {
   computeStudentAttendanceStats,
   diffAttendanceStatuses,
@@ -1484,19 +1485,30 @@ export function subscribeBillingInvoices(
   }
 }
 
-export async function payBillingInvoiceFirestore(invoiceId: string, receiptNo: string): Promise<void> {
-  const collectionPath = 'billing_invoices';
-  try {
-    const ref = doc(db, collectionPath, invoiceId);
-    await setDoc(ref, {
-      status: 'PAID',
-      receiptNo,
-      paidAt: new Date().toISOString(),
-      updatedAt: serverTimestamp()
-    }, { merge: true });
-  } catch (error) {
-    console.warn('[payBillingInvoiceFirestore] Firestore notice:', error);
-  }
+/**
+ * ขั้นตอนชำระเงิน (ดู src/lib/billingPayment.ts) — ทุกฟังก์ชัน "throw เมื่อเขียนไม่สำเร็จ"
+ * (เดิม payBillingInvoiceFirestore กลืน error แล้ว UI ขึ้นว่าจ่ายแล้วทั้งที่ rules ปฏิเสธ)
+ * ผู้เรียกต้องจับ error แล้วแจ้งผู้ใช้
+ */
+export async function submitPaymentSlip(
+  invoiceId: string,
+  patch: ReturnType<typeof buildSlipSubmissionPatch>,
+): Promise<void> {
+  await updateDoc(doc(db, BILLING_INVOICES_COL, invoiceId), { ...patch, updatedAt: serverTimestamp() });
+}
+
+export async function verifyInvoicePayment(
+  invoiceId: string,
+  patch: ReturnType<typeof buildVerifyPatch>,
+): Promise<void> {
+  await updateDoc(doc(db, BILLING_INVOICES_COL, invoiceId), { ...patch, updatedAt: serverTimestamp() });
+}
+
+export async function rejectPaymentSlip(
+  invoiceId: string,
+  patch: ReturnType<typeof buildRejectPatch>,
+): Promise<void> {
+  await updateDoc(doc(db, BILLING_INVOICES_COL, invoiceId), { ...patch, updatedAt: serverTimestamp() });
 }
 
 export async function sendParentTeacherMessageFirestore(msg: ParentTeacherMessage): Promise<void> {

@@ -53,7 +53,6 @@ import {
   savePostTeachingRecordFirestore,
   save2QScreeningFirestore,
   saveSDQAssessmentFirestore,
-  payBillingInvoiceFirestore,
   sendParentTeacherMessageFirestore,
   bookParentAppointmentFirestore,
   saveActiveLearningLogFirestore,
@@ -1166,26 +1165,6 @@ export const useStore = create<StoreState>((set, get) => ({
     });
     return { homeworkAssignments: updated };
   }),
-
-  payBillingInvoice: (invoiceId: string) => {
-    const receiptNo = `REC-2569-${Math.floor(10000 + Math.random() * 90000)}`;
-    payBillingInvoiceFirestore(invoiceId, receiptNo).catch(err => console.warn('Firestore invoice payment notice:', err));
-
-    return set((state) => {
-      const updated = state.billingInvoices.map(inv => {
-        if (inv.id === invoiceId) {
-          return {
-            ...inv,
-            status: 'PAID' as const,
-            paidAt: new Date().toLocaleDateString('th-TH') + ' ' + new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
-            receiptNo
-          };
-        }
-        return inv;
-      });
-      return { billingInvoices: updated };
-    });
-  },
 
   sendParentTeacherMessage: (studentId: string, senderRole: ParentTeacherMessage['senderRole'], senderName: string, message: string) => {
     const newMsg: ParentTeacherMessage = {

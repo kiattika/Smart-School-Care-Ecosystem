@@ -2237,6 +2237,71 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(asRole('FINANCE_STAFF').firestore().doc('billing_invoices/inv-9').delete());
     });
 
+    // ขั้นตอนชำระเงิน: ผู้ปกครอง/นักเรียนแนบสลิป → VERIFYING; เจ้าหน้าที่การเงินตรวจแล้วจึง PAID (ลงชื่อผู้ตรวจ)
+    describe('payment slip flow', () => {
+      const SLIP_URL = 'https://firebasestorage.googleapis.com/v0/b/x/o/billing_slips%2Fp%2Finv.jpg?alt=media&token=t';
+      const slipPatch = (uid: string, over: Record<string, unknown> = {}) => ({
+        status: 'VERIFYING', slipUrl: SLIP_URL, slipStoragePath: `billing_slips/${uid}/inv.jpg`, slipFileName: 'slip.jpg',
+        slipUploadedAt: '2026-10-12T10:00:00.000Z', slipUploadedByUid: uid, slipNote: '',
+        slipRejectedReason: null, slipRejectedAt: null,
+        ...over,
+      });
+      async function seedInvoice(id: string, over: Record<string, unknown> = {}) {
+        await seed();
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc(`billing_invoices/${id}`).set(invoiceDoc({ id, ...over }));
+        });
+      }
+
+      it('lets the owning parent or student submit a slip (PENDING/OVERDUE → VERIFYING)', async () => {
+        await seedInvoice('pay-1');
+        await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('billing_invoices/pay-1').update(slipPatch(PARENT_UID)));
+        await seedInvoice('pay-2', { status: 'OVERDUE' });
+        await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('billing_invoices/pay-2').update(slipPatch(STU_UID)));
+      });
+
+      it('denies a parent marking an invoice PAID, changing the amount, or pointing the slip at a non-Storage URL', async () => {
+        await seedInvoice('pay-3');
+        const db = asUser(PARENT_UID, ['PARENT']).firestore();
+        await assertFails(db.doc('billing_invoices/pay-3').update({ status: 'PAID', verifiedBy: PARENT_UID }));
+        await assertFails(db.doc('billing_invoices/pay-3').update({ ...slipPatch(PARENT_UID), totalAmount: 1 }));
+        await assertFails(db.doc('billing_invoices/pay-3').update(slipPatch(PARENT_UID, { slipUrl: 'https://evil.example.com/slip.jpg' })));
+        await assertFails(db.doc('billing_invoices/pay-3').update(slipPatch(PARENT_UID, { slipUploadedByUid: 'someone-else' })));
+        await assertFails(db.doc('billing_invoices/pay-3').update(slipPatch(PARENT_UID, { receiptNo: 'REC-FAKE' })));
+      });
+
+      it('denies a slip from a non-owner, and on invoices already VERIFYING or PAID', async () => {
+        await seedInvoice('pay-4');
+        await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('billing_invoices/pay-4').update(slipPatch('other-parent')));
+        await seedInvoice('pay-5', { status: 'VERIFYING' });
+        await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('billing_invoices/pay-5').update(slipPatch(PARENT_UID)));
+        await seedInvoice('pay-6', { status: 'PAID' });
+        await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc('billing_invoices/pay-6').update(slipPatch(PARENT_UID)));
+      });
+
+      it('lets FINANCE_STAFF confirm PAID only when verifiedBy is their own uid', async () => {
+        await seedInvoice('pay-7', { status: 'VERIFYING', ...slipPatch(PARENT_UID) });
+        const db = asUser(FINANCE_UID, ['FINANCE_STAFF']).firestore();
+        await assertFails(db.doc('billing_invoices/pay-7').update({ status: 'PAID', receiptNo: 'INV-2569-0001' }));
+        await assertFails(db.doc('billing_invoices/pay-7').update({ status: 'PAID', verifiedBy: 'someone-else' }));
+        await assertSucceeds(db.doc('billing_invoices/pay-7').update({
+          status: 'PAID', verifiedBy: FINANCE_UID, verifiedByName: 'การเงิน', verifiedAt: '2026-10-12T11:00:00.000Z',
+          paidAt: '2026-10-12T11:00:00.000Z', paymentMethod: 'SLIP_VERIFIED', receiptNo: 'INV-2569-0001',
+        }));
+      });
+
+      it('lets FINANCE_STAFF reject a slip back to PENDING with a reason, and the parent can then resubmit', async () => {
+        await seedInvoice('pay-8', { status: 'VERIFYING', ...slipPatch(PARENT_UID) });
+        await assertSucceeds(asUser(FINANCE_UID, ['FINANCE_STAFF']).firestore().doc('billing_invoices/pay-8').update({
+          status: 'PENDING', slipRejectedReason: 'ยอดไม่ตรง', slipRejectedAt: '2026-10-12T11:00:00.000Z', slipRejectedBy: FINANCE_UID,
+        }));
+        const parentDb = asUser(PARENT_UID, ['PARENT']).firestore();
+        // ส่งซ้ำแต่ยังเก็บเหตุผลเดิมไว้ → ไม่ได้ (ต้องล้างเป็น null)
+        await assertFails(parentDb.doc('billing_invoices/pay-8').update(slipPatch(PARENT_UID, { slipRejectedReason: 'ยอดไม่ตรง' })));
+        await assertSucceeds(parentDb.doc('billing_invoices/pay-8').update(slipPatch(PARENT_UID)));
+      });
+    });
+
     it('only SUPER_ADMIN/FINANCE_STAFF can read/write billing_counters directly', async () => {
       await assertSucceeds(asRole('FINANCE_STAFF').firestore().doc('billing_counters/2569').set({ academicYear: '2569', lastNumber: 5 }));
       await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('billing_counters/2569').get());

@@ -92,7 +92,7 @@ export function ParentPortal() {
   }
 
   // Unpaid invoices count
-  const pendingInvoices = billingInvoices.filter(i => i.studentId === student.studentId && i.status !== 'PAID');
+  const pendingInvoices = billingInvoices.filter(i => i.studentId === student.studentId && (i.status === 'PENDING' || i.status === 'OVERDUE'));
   const todayStr = new Date().toISOString().slice(0, 10);
   const studentGateLogs = gateAttendanceLogs.filter(g => g.studentId === student.studentId);
   const recentGateLog = studentGateLogs[0];
