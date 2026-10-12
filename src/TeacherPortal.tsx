@@ -834,6 +834,25 @@ export function TeacherPortal() {
     () => Array.from(new Set(myCourses.map(c => c.room).filter(Boolean))),
     [myCourses]
   );
+  // ตัวเลือกดรอปดาวน์ "สถิติการเข้าเรียนรายบุคคล" — แสดงแบบเดียวกับสมุดบันทึกคะแนน:
+  // ระดับชั้น + ห้อง (เช่น "ม.5/8 (943)") ตามด้วยรายวิชาที่ท่านสอนในห้องนั้น
+  // คาบกิจกรรมที่ไม่มีห้องนักเรียนจริง (room = "Non-Student") ไม่มีรายชื่อให้คำนวณ จึงไม่แสดง
+  const attendanceRoomOptions = useMemo(() => {
+    const byRoom = new Map<string, { level: string; courses: string[] }>();
+    for (const c of myCourses) {
+      if (!c.room || /^non-student$/i.test(c.room.trim())) continue;
+      const e = byRoom.get(c.room) || { level: '', courses: [] };
+      if (!e.level && c.level) e.level = c.level;
+      const label = `${c.code} ${c.name}`.trim();
+      if (label && !e.courses.includes(label)) e.courses.push(label);
+      byRoom.set(c.room, e);
+    }
+    return Array.from(byRoom.entries()).map(([room, e]) => {
+      const lv = (e.level || '').trim().replace(/^M\.\s*/i, 'ม.');
+      const head = lv && !isSameRoom(room, lv) ? `${lv} (${room})` : (lv || room);
+      return { value: room, label: e.courses.length ? `${head} — ${e.courses.join(', ')}` : head };
+    });
+  }, [myCourses]);
   const attendanceRange = useMemo(() => defaultAttendanceDateRange(30), []);
   const { records: myRoomsAttendanceRecords } = useRoomAttendanceRecords(myTaughtRooms, attendanceRange);
   const myTaughtStudentIds = useMemo(() => {
@@ -1461,7 +1480,8 @@ export function TeacherPortal() {
 
             {dashboardTab === 'attendance-stats' && (
               <TeacherAttendanceStatsPanel
-                rooms={myTaughtRooms}
+                rooms={attendanceRoomOptions.map(o => o.value)}
+                roomLabels={Object.fromEntries(attendanceRoomOptions.map(o => [o.value, o.label]))}
                 myCourseCodes={myCourses.map(c => c.code)}
               />
             )}
