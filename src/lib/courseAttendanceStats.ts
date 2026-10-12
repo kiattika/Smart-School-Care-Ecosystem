@@ -9,14 +9,12 @@
  */
 import { attendanceStatsFromCounts, StudentAttendanceStats, AttendanceStatusValue } from './studentAttendanceStats';
 import { isScheduleForRoom, RawScheduleDoc } from './studentDaySchedule';
+import { AttendanceRecordFull, buildStudentAttendanceLog, courseStatKey } from './attendanceHistory';
 
 export interface CourseAttendanceCounts { code: string; name: string; present: number; absent: number; late: number; leave: number }
 export type CourseAttendanceStatsMap = Record<string, Partial<CourseAttendanceCounts>>;
 
-/** key ของ field ใน Firestore map — ห้ามมี . / [ ] * ~ หรือช่องว่าง (ใช้ใน field path ของ update) */
-export function courseStatKey(code: string): string {
-  return String(code || '').trim().replace(/[.\/\[\]*~`\s]+/g, '_');
-}
+export { courseStatKey };
 
 export interface CourseRecordSide {
   courseCode?: string | null;
@@ -84,4 +82,23 @@ export function buildCourseAttendanceRows(input: {
     if (!seen.has(key)) mk(key, c.code || key, c.name || c.code || key, false);
   }
   return rows.sort((a, b) => a.code.localeCompare(b.code, 'th'));
+}
+
+/**
+ * คำนวณยอดสะสมรายวิชา "ใหม่ทั้งหมด" ของนักเรียนคนเดียวจาก attendance_records + ตารางสอน (ใช้ backfill การเช็คชื่อเก่า
+ * ที่ยังไม่มี courseCode — หาวิชาจากห้อง+วัน+คาบ; หาไม่เจอไม่นับ) ผลลัพธ์ = ค่าที่ควรอยู่ใน students/{id}.courseAttendanceStats
+ */
+export function computeCourseStatsMap(
+  records: AttendanceRecordFull[],
+  schedules: RawScheduleDoc[],
+  studentId: string,
+): CourseAttendanceStatsMap {
+  const out: CourseAttendanceStatsMap = {};
+  for (const row of buildStudentAttendanceLog(records, schedules, studentId)) {
+    if (!row.courseKey) continue;
+    const e = (out[row.courseKey] ||= { code: row.courseCode, name: row.courseName || row.courseCode, present: 0, absent: 0, late: 0, leave: 0 });
+    const f = row.status.toLowerCase() as 'present' | 'absent' | 'late' | 'leave';
+    e[f] = (e[f] || 0) + 1;
+  }
+  return out;
 }

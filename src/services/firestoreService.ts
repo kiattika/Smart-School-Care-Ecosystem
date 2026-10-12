@@ -27,7 +27,8 @@ import {
   AttendanceRecordLite,
   AttendanceStatusValue,
 } from '../lib/studentAttendanceStats';
-import { diffCourseAttendance } from '../lib/courseAttendanceStats';
+import { diffCourseAttendance, computeCourseStatsMap } from '../lib/courseAttendanceStats';
+import type { AttendanceRecordFull } from '../lib/attendanceHistory';
 import { 
   StudentSelfAssessment,
   GateAttendanceRecord,
@@ -216,7 +217,8 @@ export async function writeAttendanceRecordWithStatsSync(
       const oldData = existingSnap.exists() ? (existingSnap.data() as any) : null;
       const courseDeltas = diffCourseAttendance(
         oldData ? { courseCode: oldData.courseCode, courseName: oldData.courseName, students: oldStudents } : null,
-        { courseCode: cleanExtraCode(extraFields.courseCode), courseName: extraFields.courseName, students },
+        // set(..., {merge:true}) ทำให้ courseCode เดิมในเอกสารคงอยู่ถ้าครั้งนี้ไม่ได้ส่งมา → ใช้ค่าเดิมต่อ ไม่งั้นยอดรายวิชาเพี้ยน
+        { courseCode: cleanExtraCode(extraFields.courseCode) ?? cleanExtraCode(oldData?.courseCode), courseName: extraFields.courseName ?? oldData?.courseName, students },
       );
       for (const d of courseDeltas) {
         const u = updatesFor(d.studentId);
@@ -274,6 +276,51 @@ export async function recomputeStudentAttendanceStats(
     return { present, absent, late, leave };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `students/${studentId}.attendanceStats`);
+  }
+}
+
+/**
+ * คำนวณสถิติรายวิชา (students/{id}.courseAttendanceStats) ของนักเรียนทั้งห้อง "ใหม่ทั้งหมด" จาก attendance_records จริง —
+ * ใช้ backfill การเช็คชื่อก่อนมีรหัสวิชาในเอกสาร (หาวิชาจากตารางสอน: ห้อง+วัน+คาบ) หรือเมื่อสงสัยยอดเพี้ยน
+ * (derived cache เหมือน recomputeStudentAttendanceStats — ไม่ใช่ source of truth) คืนจำนวนนักเรียนที่อัปเดต
+ */
+export async function recomputeCourseAttendanceStatsForRoom(
+  room: string,
+  studentIds: string[],
+  schedules: Record<string, any>[],
+): Promise<number> {
+  const candidates = roomQueryCandidates(room).slice(0, 30);
+  if (candidates.length === 0) {
+    throw new Error('recomputeCourseAttendanceStatsForRoom: room ว่างเปล่า ไม่สามารถคำนวณได้');
+  }
+  try {
+    const snap = await getDocs(query(collection(db, 'attendance_records'), where('room', 'in', candidates)));
+    const records: AttendanceRecordFull[] = snap.docs.map(d => {
+      const data = d.data() as any;
+      return {
+        id: d.id,
+        date: String(data.date || ''),
+        room: data.room,
+        periodNumber: typeof data.periodNumber === 'number' ? data.periodNumber : undefined,
+        courseCode: data.courseCode,
+        courseName: data.courseName,
+        students: data.students || {},
+      };
+    });
+    // batch ละไม่เกิน 400 รายการ (ขีดจำกัด Firestore 500)
+    for (let i = 0; i < studentIds.length; i += 400) {
+      const batch = writeBatch(db);
+      for (const sid of studentIds.slice(i, i + 400)) {
+        batch.update(doc(db, 'students', sid), {
+          courseAttendanceStats: computeCourseStatsMap(records, schedules, sid),
+          attendanceStatsUpdatedAt: serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    }
+    return studentIds.length;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `students/*.courseAttendanceStats (room ${room})`);
   }
 }
 

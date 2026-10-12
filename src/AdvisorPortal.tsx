@@ -23,6 +23,11 @@ import { AdvisorPortfolioReview } from './components/portfolio/AdvisorPortfolioR
 import { AdvisorSdqPanel } from './components/advisor/AdvisorSdqPanel';
 import { DepressionScreeningPanel } from './components/shared/DepressionScreeningPanel';
 import { useGuidanceStatus, useRoomScreeningRecords } from './hooks/useDepressionScreening';
+import { AdvisorStudentDetailModal } from './components/advisor/AdvisorStudentDetailModal';
+import { recomputeCourseAttendanceStatsForRoom } from './services/firestoreService';
+import { useRoomAttendanceRecordsFull } from './hooks/useRoomAttendanceRecords';
+import { useTeacherFirestoreSchedule } from './hooks/useTeacherFirestoreSchedule';
+import { isScheduleForRoom } from './lib/studentDaySchedule';
 import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
 import { AdvisorGpsCheckInPanel } from './components/homevisit/AdvisorGpsCheckInPanel';
 import { AdvisorGateCheckInPanel } from './components/student-parent/AdvisorGateCheckInPanel';
@@ -93,13 +98,32 @@ export function AdvisorPortal() {
   const guidanceStatus = useGuidanceStatus();
   const roomScreening = useRoomScreeningRecords(myStudents.map(s => s.studentId), activeTab === 'screening');
 
+  const [recomputingStats, setRecomputingStats] = useState(false);
+  const handleRecomputeCourseStats = async () => {
+    if (!myRoom) return;
+    setRecomputingStats(true);
+    try {
+      const n = await recomputeCourseAttendanceStatsForRoom(myRoom, myStudents.map(s => s.studentId), fsSchedules as any[]);
+      setToastMessage(`คำนวณสถิติรายวิชาใหม่แล้ว ${n} คน`);
+    } catch (e) {
+      console.error(e);
+      setToastMessage('คำนวณสถิติรายวิชาไม่สำเร็จ — ตรวจสอบสิทธิ์/การเชื่อมต่อแล้วลองใหม่');
+    } finally {
+      setRecomputingStats(false);
+      setTimeout(() => setToastMessage(null), 4000);
+    }
+  };
+
   const handleSaveAll = async () => {
     try {
       const studentStatuses: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'> = {};
       myStudents.forEach(student => {
         studentStatuses[student.studentId] = (student.attendance.morningStatus || 'PRESENT') as any;
       });
-      await saveHomeroomAttendance(studentStatuses);
+      // โฮมรูม = คาบ 0 ของห้องในตารางสอนจริง — ผูกรหัสวิชา/กิจกรรมเพื่อนับสถิติรายวิชา (ไม่พบในตาราง = ไม่ผูก)
+      const hrSched = (fsSchedules as any[]).find(sc => Number(sc.periodNumber) === 0 && isScheduleForRoom(sc, myRoom));
+      const hrCode = hrSched ? String(hrSched.subjectCode || hrSched.courseCode || '') : '';
+      await saveHomeroomAttendance(studentStatuses, hrCode ? { code: hrCode, name: String(hrSched.subjectName || hrSched.courseName || hrCode) } : null);
       setAttendanceOverrides({}); // เคลียร์ optimistic overrides — ใช้ค่าจาก hrRecord (Firestore) แทน
       setToastMessage("บันทึกและโฮมรูมเรียบร้อยแล้ว ระบบทำการล็อกข้อมูลเรียบร้อย!");
       setTimeout(() => setToastMessage(null), 3000);
@@ -111,6 +135,13 @@ export function AdvisorPortal() {
   // Modals state
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [showWellnessModal, setShowWellnessModal] = useState(false);
+  // สถิติรายนักเรียน (โหลด attendance_records เต็มรูปแบบเฉพาะตอนเปิดรายละเอียด)
+  const [detailRange, setDetailRange] = useState(() => defaultAttendanceDateRange(30));
+  const { schedules: fsSchedules } = useTeacherFirestoreSchedule();
+  const { records: detailRecords, loading: detailLoading } = useRoomAttendanceRecordsFull(
+    showWellnessModal && myRoom ? [myRoom] : [],
+    detailRange,
+  );
   const [showLineModal, setShowLineModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [routeGenerated, setRouteGenerated] = useState(false);
@@ -333,7 +364,18 @@ export function AdvisorPortal() {
                     <Users className="w-5 h-5 text-emerald-400" />
                     <h2 className="font-bold text-emerald-400">ภาพรวมนักเรียน (Class Overview)</h2>
                   </div>
-                  <div className="text-xs text-slate-400">สมาชิกทั้งหมด {myStudents.length} คน</div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      disabled={recomputingStats || myStudents.length === 0 || !myRoom}
+                      onClick={handleRecomputeCourseStats}
+                      title="คำนวณสถิติการเข้าเรียนรายวิชาที่นักเรียน/ผู้ปกครองเห็น ใหม่จากบันทึกการเช็คชื่อทั้งหมด (รวมการเช็คชื่อเก่าก่อนมีรหัสวิชา)"
+                      className="text-[10px] font-bold px-2.5 py-1 rounded-lg border border-indigo-500/30 text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 disabled:opacity-40 transition-colors"
+                    >
+                      {recomputingStats ? 'กำลังคำนวณ...' : 'คำนวณสถิติรายวิชาใหม่'}
+                    </button>
+                    <div className="text-xs text-slate-400">สมาชิกทั้งหมด {myStudents.length} คน</div>
+                  </div>
                 </div>
                 <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto content-start">
                   {studentsLoading ? (
@@ -1119,79 +1161,17 @@ export function AdvisorPortal() {
        )}
 
 
-       {/* Wellness Profile Modal */}
+       {/* รายละเอียดนักเรียนรายคน (สถิติรายวิชา/รายวัน/รายคาบ จาก attendance_records จริง) */}
        {showWellnessModal && selectedStudent && (
-         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
-           <div className="bg-[#1c1f2b] border border-white/10 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col">
-             <div className="p-4 border-b border-white/10 flex justify-between items-center sticky top-0 bg-[#1c1f2b]/90 backdrop-blur z-10">
-               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                 <UserCheck className="w-5 h-5 text-indigo-400" /> Wellness Profile: {selectedStudent.name}
-               </h2>
-               <button onClick={() => setShowWellnessModal(false)} className="text-slate-400 hover:text-white transition-colors">
-                 <X className="w-5 h-5" />
-               </button>
-             </div>
-             
-             <div className="p-6 space-y-6">
-                {/* Header Info */}
-                <div className="flex gap-4 items-center">
-                  <img src={selectedStudent.avatar} className="w-20 h-20 rounded-xl bg-slate-800" alt="" />
-                  <div>
-                    <h3 className="text-xl font-bold">{selectedStudent.name}</h3>
-                    <p className="text-slate-400">ID: {selectedStudent.studentId} | ม.1/1</p>
-                    <div className="flex gap-2 mt-2">
-                      <span className="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-1 rounded border border-indigo-500/20">งานอดิเรก: เล่นฟุตบอล</span>
-                      <span className="text-xs bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded border border-emerald-500/20">เป้าหมาย: โปรแกรมเมอร์</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Health Data */}
-                  <div className="bg-black/20 rounded-xl p-4 border border-white/5">
-                    <h4 className="font-bold text-pink-400 flex items-center gap-2 mb-3">
-                      <Activity className="w-4 h-4" /> Health & Physical
-                    </h4>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between"><span className="text-slate-400">หมู่เลือด</span> <span>O+</span></div>
-                      <div className="flex justify-between"><span className="text-slate-400">โรคประจำตัว</span> <span className="text-emerald-400">ไม่มี</span></div>
-                      <div className="flex justify-between"><span className="text-slate-400">BMI ล่าสุด</span> <span className="text-emerald-400">19.1 (สมส่วน)</span></div>
-                    </div>
-                  </div>
-
-                  {/* Family Status */}
-                  <div className="bg-black/20 rounded-xl p-4 border border-white/5">
-                    <h4 className="font-bold text-amber-400 flex items-center gap-2 mb-3">
-                      <Home className="w-4 h-4" /> Family Status
-                    </h4>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between"><span className="text-slate-400">สถานภาพครอบครัว</span> <span>อยู่ด้วยกัน</span></div>
-                      <div className="flex justify-between"><span className="text-slate-400">รายได้เฉลี่ย</span> <span>ปานกลาง</span></div>
-                      <div className="flex justify-between"><span className="text-slate-400">การเดินทาง</span> <span>รถรับส่ง (2.5 km)</span></div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Home Photos */}
-                <div>
-                  <h4 className="font-bold text-slate-200 mb-3 flex items-center gap-2">
-                    <MapPin className="w-4 h-4 text-indigo-400" /> รูปภาพที่พักอาศัย (Pre-visit)
-                  </h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-800 rounded-xl aspect-video flex items-center justify-center border border-white/10 relative overflow-hidden group">
-                       <span className="text-slate-400 text-sm z-10 group-hover:opacity-0 transition-opacity">หน้าบ้าน</span>
-                       <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=800&q=80')] bg-cover bg-center opacity-40 group-hover:opacity-100 transition-opacity"></div>
-                    </div>
-                    <div className="bg-slate-800 rounded-xl aspect-video flex items-center justify-center border border-white/10 relative overflow-hidden group">
-                       <span className="text-slate-400 text-sm z-10 group-hover:opacity-0 transition-opacity">ภายในบ้าน</span>
-                       <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=800&q=80')] bg-cover bg-center opacity-40 group-hover:opacity-100 transition-opacity"></div>
-                    </div>
-                  </div>
-                </div>
-             </div>
-           </div>
-         </div>
-
+         <AdvisorStudentDetailModal
+           student={selectedStudent}
+           onClose={() => setShowWellnessModal(false)}
+           records={detailRecords}
+           schedules={fsSchedules as any[]}
+           range={detailRange}
+           onRangeChange={setDetailRange}
+           loading={detailLoading}
+         />
        )}
        {/* LINE Mock Modal */}
        {showLineModal && selectedStudent && (

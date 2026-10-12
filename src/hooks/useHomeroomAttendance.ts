@@ -109,7 +109,9 @@ export function useHomeroomAttendance(date: string, room: string) {
 
   // Save homeroom attendance & cascade status
   const saveHomeroomAttendance = async (
-    studentsAttendance: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>
+    studentsAttendance: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>,
+    // วิชา/กิจกรรมโฮมรูมของห้องนี้ (จากตารางสอนจริง คาบ 0) — ส่งมาเพื่อให้นับสถิติรายวิชา "HomeRoom"; ไม่ส่ง = ไม่ผูกวิชา
+    course?: { code?: string; name?: string } | null
   ) => {
     if (!date || !room) return;
 
@@ -135,6 +137,8 @@ export function useHomeroomAttendance(date: string, room: string) {
         isLocked: true,
         requestedEditBy: null,
         source: 'HOMEROOM_DEFAULT',
+        periodNumber: 0,
+        ...(course?.code ? { courseCode: course.code, courseName: course.name } : {}),
       });
 
       // 1. Sync to local state
