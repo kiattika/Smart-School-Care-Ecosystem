@@ -2,6 +2,7 @@ import { cn } from "./lib/utils";
 import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { useStore } from './store';
+import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { useRealStudents } from './hooks/useRealStudents';
 import { attendanceStatsFromCounts } from './lib/studentAttendanceStats';
 import { Loader2 } from 'lucide-react';
@@ -184,131 +185,23 @@ export function StudentPortal() {
         </div>
       </div>
 
-      {/* 7 Core Module Navigation Bar */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-2 backdrop-blur-xl shadow-xl overflow-x-auto hide-scrollbar">
-        <div className="flex items-center gap-1.5 min-w-max">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'overview'
-                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <User className="w-4 h-4" />
-            <span>ภาพรวม (Overview)</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('gate')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'gate'
-                ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-lg shadow-indigo-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Scan className="w-4 h-4" />
-            <span>1. การเข้าเรียน & Gate</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('health')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'health'
-                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Activity className="w-4 h-4" />
-            <span>2. สุขภาพกาย & จิต (2Q/SDQ)</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('socio')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'socio'
-                ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-lg shadow-cyan-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <MapPin className="w-4 h-4" />
-            <span>3. ที่อยู่บ้าน & เยี่ยมบ้าน</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('behavior')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'behavior'
-                ? 'bg-gradient-to-r from-amber-600 to-yellow-600 text-white shadow-lg shadow-amber-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4" />
-            <span>4. คะแนนความประพฤติ</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('electives')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'electives'
-                ? 'bg-gradient-to-r from-teal-600 to-cyan-600 text-white shadow-lg shadow-teal-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            <span>สมัครชุมนุม</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('portfolio')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'portfolio'
-                ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-lg shadow-pink-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <FolderGit2 className="w-4 h-4" />
-            <span>5. แฟ้มผลงาน</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('academic')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'academic'
-                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <BookOpen className="w-4 h-4" />
-            <span>6. ปพ.6 & การบ้าน & สอบ</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('parent')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'parent'
-                ? 'bg-gradient-to-r from-teal-600 to-emerald-600 text-white shadow-lg shadow-teal-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <CreditCard className="w-4 h-4" />
-            <span>7. ชำระเงิน & นัดพบครู</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('assessment')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'assessment'
-                ? 'bg-gradient-to-r from-rose-600 to-orange-600 text-white shadow-lg shadow-rose-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Brain className="w-4 h-4" />
-            <span>ประเมินตนเอง</span>
-          </button>
-        </div>
-      </div>
-
+      {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกับพอร์ทัลครู (PortalSidebarLayout) */}
+      <PortalSidebarLayout
+        title="เมนูนักเรียน"
+        activeId={activeTab}
+        onSelect={(id) => setActiveTab(id as typeof activeTab)}
+          items={[
+            { id: 'overview', label: 'ภาพรวม (Overview)', icon: User },
+            { id: 'gate', label: '1. การเข้าเรียน & Gate', icon: Scan },
+            { id: 'health', label: '2. สุขภาพกาย & จิต (2Q/SDQ)', icon: Activity },
+            { id: 'socio', label: '3. ที่อยู่บ้าน & เยี่ยมบ้าน', icon: MapPin },
+            { id: 'behavior', label: '4. คะแนนความประพฤติ', icon: ShieldCheck },
+            { id: 'electives', label: 'สมัครชุมนุม', icon: Users },
+            { id: 'portfolio', label: '5. แฟ้มผลงาน', icon: FolderGit2 },
+            { id: 'academic', label: '6. ปพ.6 & การบ้าน & สอบ', icon: BookOpen },
+            { id: 'parent', label: '7. ชำระเงิน & นัดพบครู', icon: CreditCard },
+            { id: 'assessment', label: 'ประเมินตนเอง', icon: Brain },
+          ]}>
       {/* Main Content Area */}
       <div className="transition-all duration-300">
         
@@ -503,6 +396,7 @@ export function StudentPortal() {
         )}
 
       </div>
+      </PortalSidebarLayout>
 
       {/* เปลี่ยนรูปโปรไฟล์ (นักเรียนเจ้าของบัญชีเท่านั้น) */}
       {showPhotoEditor && user?.uid && (

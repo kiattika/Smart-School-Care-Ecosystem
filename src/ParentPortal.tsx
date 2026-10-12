@@ -2,6 +2,7 @@ import { format } from 'date-fns';
 import { cn } from "./lib/utils";
 import React, { useEffect, useState } from 'react';
 import { useStore } from './store';
+import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { useRealStudents } from './hooks/useRealStudents';
 import { subscribeBillingInvoices, subscribeGateAttendanceLogs } from './services/firestoreService';
 import { BillingInvoice, GateAttendanceRecord } from './types';
@@ -157,95 +158,20 @@ export function ParentPortal() {
         </div>
       </div>
 
-      {/* 7 Core Module Navigation Bar */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-2 backdrop-blur-xl shadow-xl overflow-x-auto hide-scrollbar">
-        <div className="flex items-center gap-1.5 min-w-max">
-          <button
-            onClick={() => setActiveTab('timeline')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'timeline'
-                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-lg shadow-emerald-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Clock className="w-4 h-4" />
-            <span>ไทม์ไลน์ & แจ้งเตือนด่วน</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('gate')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'gate'
-                ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-lg shadow-indigo-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Scan className="w-4 h-4" />
-            <span>1. ประตูโรงเรียน & ยื่นใบลา</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('health')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'health'
-                ? 'bg-gradient-to-r from-pink-600 to-rose-600 text-white shadow-lg shadow-pink-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <Activity className="w-4 h-4" />
-            <span>2. สุขภาพ & ห้องพยาบาล</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('behavior')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'behavior'
-                ? 'bg-gradient-to-r from-amber-600 to-yellow-600 text-white shadow-lg shadow-amber-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4" />
-            <span>3. คะแนนความประพฤติ</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('portfolio')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'portfolio'
-                ? 'bg-gradient-to-r from-fuchsia-600 to-purple-600 text-white shadow-lg shadow-fuchsia-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <FolderGit2 className="w-4 h-4" />
-            <span>4. แฟ้มผลงาน</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('academic')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'academic'
-                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <BookOpen className="w-4 h-4" />
-            <span>5. ผลการเรียน & การบ้าน</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('services')}
-            className={`px-3.5 py-2.5 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 ${
-              activeTab === 'services'
-                ? 'bg-gradient-to-r from-teal-600 to-emerald-600 text-white shadow-lg shadow-teal-500/25'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-            }`}
-          >
-            <CreditCard className="w-4 h-4" />
-            <span>6. ชำระเงิน & นัดพบครู</span>
-          </button>
-        </div>
-      </div>
-
+      {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกับพอร์ทัลครู (PortalSidebarLayout) */}
+      <PortalSidebarLayout
+        title="เมนูผู้ปกครอง"
+        activeId={activeTab}
+        onSelect={(id) => setActiveTab(id as typeof activeTab)}
+        items={[
+          { id: 'timeline', label: 'ไทม์ไลน์ & แจ้งเตือนด่วน', icon: Clock },
+          { id: 'gate', label: '1. ประตูโรงเรียน & ยื่นใบลา', icon: Scan },
+          { id: 'health', label: '2. สุขภาพ & ห้องพยาบาล', icon: Activity },
+          { id: 'behavior', label: '3. คะแนนความประพฤติ', icon: ShieldCheck },
+          { id: 'portfolio', label: '4. แฟ้มผลงาน', icon: FolderGit2 },
+          { id: 'academic', label: '5. ผลการเรียน & การบ้าน', icon: BookOpen },
+          { id: 'services', label: '6. ชำระเงิน & นัดพบครู', icon: CreditCard },
+        ]}>
       {/* Main Content View */}
       <div className="transition-all duration-300">
         
@@ -457,6 +383,7 @@ export function ParentPortal() {
         )}
 
       </div>
+      </PortalSidebarLayout>
 
     </div>
   );

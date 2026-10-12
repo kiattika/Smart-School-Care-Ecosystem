@@ -125,9 +125,10 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 ### เมนูย่อยของหน้าบุคลากรใช้ `PortalSidebarLayout` กลาง (ห้ามทำแท็บแนวนอน/แถบเมนูเอง)
 
 - `src/components/shared/PortalSidebarLayout.tsx` — แถบด้านซ้ายแบบเดียวกันทุก portal: จอ lg+ แถบไอคอนแคบ (w-16) ขยายเป็น w-64 เมื่อ hover (หน่วงเวลา) / focus แล้วลอยทับเนื้อหา, ปักหมุดเปิดค้าง (localStorage `ssc.portalSidebar.pinned` แบบ try/catch) แล้วดันเนื้อหา; จอเล็กกว่า lg เป็นลิ้นชักจากซ้าย; `aria-current` + `title` ตอนแถบแคบ
-- ใช้แล้วใน AdminPortal, TeacherPortal (เฉพาะ view `dashboard` — view `class` / `active_learning` ไม่มีแถบนี้), AdvisorPortal, ExecutivePortal, ApprovalsPortal, InfirmaryPortal, GuidancePortal, SupervisionPortal — คง state/id ของแท็บเดิม
+- ใช้แล้วใน StudentPortal, ParentPortal, AdminPortal, TeacherPortal (เฉพาะ view `dashboard` — view `class` / `active_learning` ไม่มีแถบนี้), AdvisorPortal, ExecutivePortal, ApprovalsPortal, InfirmaryPortal, GuidancePortal, SupervisionPortal — คง state/id ของแท็บเดิม
 - เมนูที่ซ่อนตามบทบาทกรองด้วย `visibleSidebarItems()` (`hideForRoles`) และแท็บที่ถูกซ่อนกลับไปเมนูแรกด้วย `resolveActiveSidebarId()` (`src/components/shared/portalSidebarLogic.ts`) — guard test `portalSidebar.test.ts`
-- FinancePortal ไม่มีเมนูย่อย (หน้าเดียว); StudentPortal / ParentPortal ยังใช้แถบ pill แนวนอนแบบเดิม (มือถือเป็นหลัก — รอออกแบบแยก)
+- StudentPortal / ParentPortal ใช้ `PortalSidebarLayout` เช่นกัน (คง id แท็บเดิม; มือถือเป็นลิ้นชักจากซ้าย)
+- FinancePortal ไม่มีเมนูย่อย (หน้าเดียว)
 
 ### React: ห้ามใส่ `key` ให้ component ที่ประกาศ props เอง
 
