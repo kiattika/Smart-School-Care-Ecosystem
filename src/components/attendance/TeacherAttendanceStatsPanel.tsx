@@ -14,7 +14,7 @@ import { StudentAttendanceDetail } from './StudentAttendanceDetail';
  * สถิติการเข้าเรียนรายบุคคลสำหรับครูผู้สอน — เลือกห้องที่สอน + ช่วงวันที่ → ตารางนักเรียน (อัตราเข้าเรียน)
  * กดชื่อเพื่อดูละเอียดรายวิชา/รายวัน/รายคาบ ย้อนหลังได้ตามช่วงวันที่ — ข้อมูลจาก attendance_records จริง
  */
-export function TeacherAttendanceStatsPanel({ rooms, myCourseCodes }: { rooms: string[]; myCourseCodes: string[] }) {
+export function TeacherAttendanceStatsPanel({ rooms, myCourseCodes, roomLabels }: { rooms: string[]; myCourseCodes: string[]; roomLabels?: Record<string, string> }) {
   const [room, setRoom] = useState<string>('');
   const [range, setRange] = useState(() => defaultAttendanceDateRange(30));
   const [onlyMine, setOnlyMine] = useState(true);
@@ -54,10 +54,10 @@ export function TeacherAttendanceStatsPanel({ rooms, myCourseCodes }: { rooms: s
           <select
             value={activeRoom}
             onChange={e => { setRoom(e.target.value); setOpenId(null); }}
-            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white"
+            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white max-w-full"
           >
             {rooms.length !== 1 && <option value="">— เลือกห้อง —</option>}
-            {rooms.map(r => <option key={r} value={r}>{r}</option>)}
+            {rooms.map(r => <option key={r} value={r}>{roomLabels?.[r] || r}</option>)}
           </select>
         </label>
         <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
