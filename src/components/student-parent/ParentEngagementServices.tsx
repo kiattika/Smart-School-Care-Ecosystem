@@ -111,16 +111,24 @@ function ParentEngagementServicesInner({
   const [bookingError, setBookingError] = useState('');
   const [bookingBusy, setBookingBusy] = useState(false);
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const [msgError, setMsgError] = useState('');
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!msgText.trim()) return;
+    setMsgError('');
 
-    sendParentTeacherMessage(
-      student.studentId,
-      'PARENT',
-      'ผู้ปกครอง',
-      msgText
-    );
+    try {
+      await sendParentTeacherMessage(
+        student.studentId,
+        'PARENT',
+        'ผู้ปกครอง',
+        msgText
+      );
+    } catch (err) {
+      console.error('[parentTeacherMessage] send failed:', err);
+      setMsgError('ส่งข้อความไม่สำเร็จ (ยังไม่ได้ส่ง) กรุณาลองอีกครั้ง');
+      return;
+    }
     setMsgText('');
     // ห้ามสร้างข้อความตอบกลับของครูเอง — ข้อความของครูต้องมาจากครูที่ตอบจริงเท่านั้น
   };
@@ -537,6 +545,7 @@ function ParentEngagementServicesInner({
               <span>ส่ง</span>
             </button>
           </form>
+          {msgError && <p role="alert" className="text-xs text-rose-400 pt-1">{msgError}</p>}
         </div>
       )}
 

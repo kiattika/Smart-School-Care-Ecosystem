@@ -401,9 +401,10 @@ export const useStore = create<StoreState>((set, get) => ({
       return s;
     })
   })),
-  submitPostTeachingRecord: (record) => {
-    savePostTeachingRecordFirestore(record).catch(err => console.warn('Firestore post teaching notice:', err));
-    return set((state) => ({
+  // เขียน Firestore ก่อน (throw เมื่อไม่สำเร็จ) แล้วค่อยอัปเดต state — ห้ามแจ้งบันทึกสำเร็จทั้งที่ยังไม่ได้บันทึก
+  submitPostTeachingRecord: async (record) => {
+    await savePostTeachingRecordFirestore(record);
+    set((state) => ({
       postTeachingRecords: [
         ...state.postTeachingRecords.filter(r => !(r.courseId === record.courseId && r.date === record.date)),
         record
@@ -991,7 +992,7 @@ export const useStore = create<StoreState>((set, get) => ({
     return { volunteerRecords: [newVol, ...state.volunteerRecords] };
   }),
 
-  sendParentTeacherMessage: (studentId: string, senderRole: ParentTeacherMessage['senderRole'], senderName: string, message: string) => {
+  sendParentTeacherMessage: async (studentId: string, senderRole: ParentTeacherMessage['senderRole'], senderName: string, message: string) => {
     const newMsg: ParentTeacherMessage = {
       id: `msg-${Date.now()}`,
       studentId,
@@ -1001,9 +1002,9 @@ export const useStore = create<StoreState>((set, get) => ({
       timestamp: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.',
       read: true
     };
-    sendParentTeacherMessageFirestore(newMsg).catch(err => console.warn('Firestore parent teacher message notice:', err));
+    await sendParentTeacherMessageFirestore(newMsg);
 
-    return set((state) => ({
+    set((state) => ({
       parentTeacherMessages: [...state.parentTeacherMessages, newMsg]
     }));
   },
@@ -1085,8 +1086,9 @@ export const useStore = create<StoreState>((set, get) => ({
     });
   },
 
+  // อัปเดต state ในเครื่องเท่านั้น — การบันทึก Firestore ทำที่ผู้เรียก (GPSGeofenceCheckinModal await saveSchoolGeofenceConfigFirestore เอง)
+  // เดิมเขียนซ้ำที่นี่แบบ fire-and-forget (สองรอบ และกลืน error)
   updateSchoolGeofenceConfig: (config) => {
-    saveSchoolGeofenceConfigFirestore(config as any).catch(err => console.warn('Firestore geofence config notice:', err));
     return set((state) => ({
       schoolGeofenceConfig: {
         ...state.schoolGeofenceConfig,

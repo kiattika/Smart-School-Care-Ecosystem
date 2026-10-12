@@ -1464,7 +1464,7 @@ export async function savePostTeachingRecordFirestore(record: PostTeachingRecord
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.warn('[savePostTeachingRecordFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${docId}`);
   }
 }
 
@@ -1759,7 +1759,7 @@ export async function sendParentTeacherMessageFirestore(msg: ParentTeacherMessag
       createdAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
-    console.warn('[sendParentTeacherMessageFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${msg.id}`);
   }
 }
 
