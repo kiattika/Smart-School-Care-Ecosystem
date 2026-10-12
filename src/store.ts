@@ -1015,8 +1015,8 @@ export const useStore = create<StoreState>((set, get) => ({
     const newItem: PortfolioItem = {
       ...item,
       id: `port-${Date.now()}`,
-      isVerifiedByTeacher: true,
-      teacherVerifier: 'ครูกิตติศักดิ์'
+      // ผลงานที่นักเรียนเพิ่มเองต้องรอครูที่ปรึกษาอนุมัติ — ห้ามระบุว่าครูคนใดยืนยันโดยอัตโนมัติ
+      isVerifiedByTeacher: false
     };
     return { portfolioItems: [newItem, ...state.portfolioItems] };
   }),
