@@ -61,12 +61,28 @@ export function HomeVisitPortal() {
     return matchesTab && matchesQuery;
   });
 
+  // พิกัดจริงจากอุปกรณ์เท่านั้น — ห้ามเติมพิกัดสมมติ (เดิมใช้พิกัดกรุงเทพฝังตายตัวหลัง setTimeout จำลองการค้นหา)
+  const [locationError, setLocationError] = useState<string | null>(null);
   const handleCheckIn = () => {
+    setLocationError(null);
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLocationError('อุปกรณ์นี้ไม่รองรับการระบุตำแหน่ง');
+      return;
+    }
     setIsLocating(true);
-    setTimeout(() => {
-      setLocation({ lat: 13.7563, lng: 100.5018 });
-      setIsLocating(false);
-    }, 1500);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setIsLocating(false);
+      },
+      (err) => {
+        setLocationError(err.code === err.PERMISSION_DENIED
+          ? 'ไม่ได้รับอนุญาตให้ใช้ตำแหน่ง — เปิดสิทธิ์ตำแหน่งของเบราว์เซอร์แล้วลองอีกครั้ง'
+          : 'ระบุตำแหน่งไม่สำเร็จ ลองอีกครั้งในที่โล่ง');
+        setIsLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
   };
 
   const toggleRisk = (risk: string) => {
@@ -138,7 +154,8 @@ export function HomeVisitPortal() {
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-emerald-400" /> พิกัดสถานที่ (Google Maps Platform)
               </h3>
-              
+              {!location && locationError && <p role="alert" className="text-xs text-rose-400">{locationError}</p>}
+
               {!location ? (
                 <button 
                   onClick={handleCheckIn}
