@@ -222,6 +222,8 @@ service cloud.firestore {
                        hasRole('HOMEROOM_TEACHER') ||
                        hasRole('SUBJECT_TEACHER') ||
                        hasRole('INFIRMARY_STAFF') ||
+                       hasRole('FINANCE_STAFF') ||
+                       hasRole('GUIDANCE_COUNSELOR') ||
                        (
                          request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', '__none__') &&
                          (
@@ -888,6 +890,33 @@ service cloud.firestore {
                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt', 'updatedAt'])
                       );
       // ลบไม่ได้ (เป็นหลักฐานการนัด)
+      allow delete: if false;
+    }
+
+    // ข้อความแจ้งผลการอนุมัติระหว่างบุคลากร (เช่น คำขอเช็คชื่อย้อนหลังของฉันได้รับอนุมัติ / การจัดครูสอนแทนถูกส่งกลับ)
+    // ผู้รับระบุด้วยอีเมล (lowercase ตรงกับ token.email) — อ่านได้เฉพาะผู้รับ; บุคลากรคนใดก็ส่งได้แต่ต้องลงชื่อผู้ส่งเป็นตัวเอง
+    // (นักเรียน/ผู้ปกครองส่งไม่ได้); ผู้รับแก้ได้เฉพาะ readAt (ทำเครื่องหมายอ่านแล้ว); ลบไม่ได้ (เป็นหลักฐาน)
+    // ข้อความ "ผลลัพธ์" เท่านั้น — งานที่รอให้ทำอยู่ในกระดิ่งงานค้างที่คำนวณสด (src/lib/staffTasks.ts)
+    match /staff_notifications/{notifId} {
+      allow read: if isSignedIn() && request.auth.token.get('email', '') is string
+                  && resource.data.recipientEmail == request.auth.token.get('email', '').lower();
+      allow create: if hasAnyRole() && !hasRole('STUDENT') && !hasRole('PARENT')
+                    && request.resource.data.keys().hasOnly(['id', 'recipientEmail', 'kind', 'title', 'message', 'refId', 'senderUid', 'senderName', 'createdAt', 'readAt'])
+                    && request.resource.data.keys().hasAll(['id', 'recipientEmail', 'kind', 'title', 'message', 'refId', 'senderUid', 'senderName', 'createdAt', 'readAt'])
+                    && request.resource.data.id == notifId
+                    && request.resource.data.recipientEmail is string && request.resource.data.recipientEmail.matches('^[^@\\s]+@[^@\\s]+$')
+                    && request.resource.data.recipientEmail == request.resource.data.recipientEmail.lower()
+                    && request.resource.data.kind in ['LATE_ATTENDANCE_DECISION', 'SUBSTITUTE_UPDATE']
+                    && request.resource.data.title is string && request.resource.data.title.size() >= 1 && request.resource.data.title.size() <= 120
+                    && request.resource.data.message is string && request.resource.data.message.size() >= 1 && request.resource.data.message.size() <= 500
+                    && request.resource.data.refId is string && request.resource.data.refId.size() <= 200
+                    && request.resource.data.senderUid == request.auth.uid
+                    && request.resource.data.senderName is string && request.resource.data.senderName.size() >= 1
+                    && request.resource.data.readAt == null;
+      allow update: if isSignedIn() && request.auth.token.get('email', '') is string
+                    && resource.data.recipientEmail == request.auth.token.get('email', '').lower()
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt'])
+                    && request.resource.data.readAt is string;
       allow delete: if false;
     }
 

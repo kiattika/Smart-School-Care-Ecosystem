@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bell, ClipboardList } from 'lucide-react';
+import { Bell, ClipboardList, MailOpen } from 'lucide-react';
 import { useStore } from '../../store';
-import { subscribeLeaveRequests, subscribeLateAttendanceRequests, subscribeAppointments } from '../../services/firestoreService';
+import { subscribeLeaveRequests, subscribeLateAttendanceRequests, subscribeAppointments, subscribeStaffNotifications, markStaffNotificationRead, type StaffNotificationRecord } from '../../services/firestoreService';
 import { useScreeningBellData, type ScreeningBellMode } from '../../hooks/useScreeningBellData';
 import { buildStaffTasks, staffTaskSources, totalStaffTasks } from '../../lib/staffTasks';
 import type { DetailedLeaveRequest, LateAttendanceRequestRecord, ParentAppointment } from '../../types';
@@ -24,6 +24,8 @@ export function StaffTaskBell({ activeRole }: { activeRole: string }) {
   const [roomLeaves, setRoomLeaves] = useState<DetailedLeaveRequest[]>([]);
   const [lateRequests, setLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
   const [appointments, setAppointments] = useState<ParentAppointment[]>([]);
+  const substitutes = useStore(s => s.substituteAssignments);
+  const [messages, setMessages] = useState<StaffNotificationRecord[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [openCount, setOpenCount] = useState(0);
   const screeningMode: ScreeningBellMode = !sources.screening ? null : activeRole === 'GUIDANCE_COUNSELOR' ? 'GUIDANCE' : 'HOMEROOM';
@@ -49,6 +51,12 @@ export function StaffTaskBell({ activeRole }: { activeRole: string }) {
     return subscribeLateAttendanceRequests(setLateRequests);
   }, [sources.lateRequests, user?.uid]);
 
+  // ข้อความแจ้งผลถึงฉัน (ตามอีเมล) — ทุกบทบาทของบุคลากร
+  useEffect(() => {
+    if (!user?.uid || !user.email) { setMessages([]); return; }
+    return subscribeStaffNotifications(user.email, setMessages);
+  }, [user?.uid, user?.email]);
+
   useEffect(() => {
     if (!isOpen || !buttonWrapRef.current) return;
     setOpenCount((c) => c + 1);
@@ -66,11 +74,9 @@ export function StaffTaskBell({ activeRole }: { activeRole: string }) {
     return () => document.removeEventListener('mousedown', onDown);
   }, [isOpen]);
 
-  // บทบาทนี้ไม่มีงานค้างประเภทใดให้ติดตามเลย → ไม่แสดงกระดิ่ง (ไม่โชว์กระดิ่งว่างที่ไม่เคยมีวันแจ้งอะไร)
-  if (!sources.leaves && !sources.lateRequests && !sources.screening && !sources.appointments) return null;
-
-  const tasks = buildStaffTasks({ activeRole, roomLeaves, lateRequests, screening, appointments });
-  const total = totalStaffTasks(tasks);
+  const tasks = buildStaffTasks({ activeRole, roomLeaves, lateRequests, screening, appointments, substitutes, myEmail: user?.email || '' });
+  const unread = messages.filter(m => !m.readAt);
+  const total = totalStaffTasks(tasks) + unread.length;
 
   const panel = isOpen && panelPos && createPortal(
     <div
@@ -83,7 +89,25 @@ export function StaffTaskBell({ activeRole }: { activeRole: string }) {
         <h3 className="text-sm font-bold text-white">งานของฉัน {total > 0 && `(${total} รายการ)`}</h3>
       </div>
       <div className="overflow-y-auto">
-        {tasks.length === 0 ? (
+        {unread.length > 0 && (
+          <div data-testid="staff-message-section">
+            <div className="px-4 pt-3 pb-1 text-[11px] font-bold text-slate-400">ข้อความ ({unread.length})</div>
+            {unread.slice(0, 20).map(m => (
+              <div key={m.id} className="px-4 py-3 border-b border-slate-800/60 flex items-start gap-3">
+                <MailOpen className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-semibold text-slate-100">{m.title}</div>
+                  <div className="text-[11px] text-slate-300 mt-0.5 break-words">{m.message}</div>
+                </div>
+                <button
+                  onClick={() => { void markStaffNotificationRead(m.id).catch(err => console.warn('[markStaffNotificationRead]', err)); }}
+                  className="text-[11px] text-indigo-300 hover:text-indigo-200 shrink-0 cursor-pointer"
+                >อ่านแล้ว</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {tasks.length === 0 && unread.length === 0 ? (
           <div className="px-4 py-8 text-center text-xs text-slate-500">ไม่มีงานค้าง</div>
         ) : tasks.map(t => (
           <div key={t.kind} className="px-4 py-3 border-b border-slate-800/60 last:border-b-0 flex items-start gap-3">

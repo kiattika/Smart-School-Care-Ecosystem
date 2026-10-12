@@ -1456,6 +1456,81 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // 15c2. staff_notifications — ข้อความแจ้งผลการอนุมัติระหว่างบุคลากร (ผู้รับตามอีเมล) + parent_notifications สำหรับแนะแนว/การเงิน
+  describe('staff_notifications collection', () => {
+    const COL = 'staff_notifications';
+    const ME = 'me@school.ac.th';
+    const sender = () => asUser('dep-1', ['DEPUTY_DIRECTOR_ACADEMIC'], { email: 'dep@school.ac.th' }).firestore();
+    const me = () => asUser('t-1', ['SUBJECT_TEACHER'], { email: 'Me@School.ac.th' }).firestore();
+    const other = () => asUser('t-2', ['SUBJECT_TEACHER'], { email: 'other@school.ac.th' }).firestore();
+    const stu = () => asUser('stu-x', ['STUDENT'], { email: 'stu@school.ac.th' }).firestore();
+    const note = (id: string, over: Record<string, unknown> = {}) => ({
+      id, recipientEmail: ME, kind: 'LATE_ATTENDANCE_DECISION', title: 'อนุมัติแล้ว', message: 'ข้อความ', refId: 'req-1',
+      senderUid: 'dep-1', senderName: 'รองผอ.', createdAt: new Date(), readAt: null, ...over,
+    });
+    async function put(id: string) {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`${COL}/${id}`).set(note(id)); });
+    }
+
+    it('staff can send to a recipient email as themselves', async () => {
+      await assertSucceeds(sender().doc(`${COL}/n1`).set(note('n1')));
+    });
+    it('denies spoofed sender uid, bad kind, uppercase/invalid email, oversized text, pre-read, extra keys', async () => {
+      await assertFails(sender().doc(`${COL}/n2`).set(note('n2', { senderUid: 'someone-else' })));
+      await assertFails(sender().doc(`${COL}/n3`).set(note('n3', { kind: 'ANYTHING' })));
+      await assertFails(sender().doc(`${COL}/n4`).set(note('n4', { recipientEmail: 'Me@School.ac.th' })));
+      await assertFails(sender().doc(`${COL}/n5`).set(note('n5', { recipientEmail: 'not-an-email' })));
+      await assertFails(sender().doc(`${COL}/n6`).set(note('n6', { message: 'ก'.repeat(501) })));
+      await assertFails(sender().doc(`${COL}/n7`).set(note('n7', { readAt: new Date().toISOString() })));
+      await assertFails(sender().doc(`${COL}/n8`).set(note('n8', { extra: 1 })));
+    });
+    it('denies students and anonymous from sending', async () => {
+      await assertFails(stu().doc(`${COL}/n9`).set(note('n9', { senderUid: 'stu-x' })));
+      await assertFails(asAnonymous().firestore().doc(`${COL}/n10`).set(note('n10')));
+    });
+    it('only the recipient (by token email, case-insensitive) can read; others and the sender cannot', async () => {
+      await put('r1');
+      await assertSucceeds(me().doc(`${COL}/r1`).get());
+      await assertFails(other().doc(`${COL}/r1`).get());
+      await assertFails(sender().doc(`${COL}/r1`).get());
+      await assertSucceeds(me().collection(COL).where('recipientEmail', '==', ME).get());
+      await assertFails(other().collection(COL).where('recipientEmail', '==', ME).get());
+    });
+    it('recipient can only set readAt; no delete by anyone', async () => {
+      await put('u1');
+      await assertSucceeds(me().doc(`${COL}/u1`).update({ readAt: new Date().toISOString() }));
+      await put('u2');
+      await assertFails(me().doc(`${COL}/u2`).update({ title: 'แก้ข้อความ' }));
+      await assertFails(other().doc(`${COL}/u2`).update({ readAt: new Date().toISOString() }));
+      await assertFails(me().doc(`${COL}/u2`).delete());
+    });
+
+    describe('parent_notifications: GUIDANCE_COUNSELOR / FINANCE_STAFF can notify a student', () => {
+      const STU_ID = 'n-std-1';
+      const STU_UID = 'n-stu-uid';
+      const base = (id: string, over: Record<string, unknown> = {}) => ({
+        id, parentUid: null, parentId: null, studentUid: STU_UID, studentId: STU_ID, studentName: 'เด็ก', title: 't', message: 'm',
+        status: 'unread', createdAt: new Date(), type: 'info', ...over,
+      });
+      async function seed() {
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, room: 'ม.4/1', name: 'เด็ก' });
+        });
+      }
+      it('allows counselor and finance, reads by the student only', async () => {
+        await seed();
+        await assertSucceeds(asUser('gc', ['GUIDANCE_COUNSELOR']).firestore().doc('parent_notifications/g1').set(base('g1')));
+        await assertSucceeds(asUser('fin', ['FINANCE_STAFF']).firestore().doc('parent_notifications/f1').set(base('f1')));
+        await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('parent_notifications/g1').get());
+        await assertFails(asUser('stranger', ['STUDENT']).firestore().doc('parent_notifications/g1').get());
+      });
+      it('still denies a wrong studentUid even from finance', async () => {
+        await seed();
+        await assertFails(asUser('fin', ['FINANCE_STAFF']).firestore().doc('parent_notifications/f2').set(base('f2', { studentUid: 'someone-else' })));
+      });
+    });
+  });
+
   // 15d. parent_appointments — ผู้ปกครองขอนัด → ครูที่ปรึกษา/ครูแนะแนวตอบรับ
   describe('parent_appointments collection', () => {
     const STU_UID = 'stu-uid-a1';

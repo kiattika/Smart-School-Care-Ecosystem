@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store';
 import { useRealStudents } from '../../hooks/useRealStudents';
-import { createBillingInvoice, createBillingInvoicesBulk, subscribeBillingInvoices, verifyInvoicePayment, rejectPaymentSlip } from '../../services/firestoreService';
+import { createBillingInvoice, createBillingInvoicesBulk, subscribeBillingInvoices, verifyInvoicePayment, rejectPaymentSlip, createParentNotification } from '../../services/firestoreService';
 import { uploadBillingFile } from '../../services/storageService';
 import {
   validateBillingFile, validateRejectReason, buildVerifyPatch, buildRejectPatch, canVerifySlip, canRecordPaymentDirectly,
 } from '../../lib/billingPayment';
+import { invoiceIssuedNotice, slipVerifiedNotice, slipRejectedNotice, type StudentNoticeText } from '../../lib/studentNotices';
 import { StudentPicker } from '../shared/StudentPicker';
 import {
   Wallet,
@@ -70,6 +71,17 @@ export function FinancePortal() {
     if (!user?.uid) return null;
     return { uid: user.uid, name: user.displayName || user.email || '' };
   };
+  // แจ้งนักเรียน/ผู้ปกครองเจ้าของบิล — ผลพลอยได้ ไม่ทำให้งานการเงินล้มเหลว (เขียนทีละรายการ ไม่ใช้ batch กันเพดาน get() ของ rules)
+  const notifyInvoiceOwner = (target: { studentId: string; studentUid?: string | null; parentUid?: string | null }, text: StudentNoticeText) => {
+    const st = students.find(x => x.studentId === target.studentId);
+    return createParentNotification({
+      parentUid: target.parentUid || st?.parentUid || null,
+      studentUid: target.studentUid || st?.studentUid || null,
+      studentId: target.studentId,
+      studentName: st?.name || target.studentId,
+      ...text,
+    }).catch(err => console.warn('[finance] notification failed:', err));
+  };
   const confirmPayment = async (method: 'SLIP_VERIFIED' | 'STAFF_RECORDED') => {
     if (!reviewInvoice) return;
     const verifier = verifierOf();
@@ -80,6 +92,7 @@ export function FinancePortal() {
       await verifyInvoicePayment(reviewInvoice.id, buildVerifyPatch({
         invoiceNumber: reviewInvoice.invoiceNumber, verifier, receipt, method, nowIso: new Date().toISOString(),
       }));
+      void notifyInvoiceOwner(reviewInvoice, slipVerifiedNotice(reviewInvoice));
       setReviewInvoice(null);
     } catch (e) {
       console.error('[FinancePortal] confirm payment failed:', e);
@@ -97,6 +110,7 @@ export function FinancePortal() {
     setReviewBusy(true); setReviewError('');
     try {
       await rejectPaymentSlip(reviewInvoice.id, buildRejectPatch({ reason: rejectReason, rejecterUid: verifier.uid, nowIso: new Date().toISOString() }));
+      void notifyInvoiceOwner(reviewInvoice, slipRejectedNotice(reviewInvoice, rejectReason));
       setReviewInvoice(null);
     } catch (e) {
       console.error('[FinancePortal] reject slip failed:', e);
@@ -170,6 +184,14 @@ export function FinancePortal() {
         });
         await createBillingInvoicesBulk(targets, { title: newTitle, items, totalAmount: amount, dueDate: newDueDate }, user.uid);
       }
+      // แจ้งผู้รับบิลทุกคน (เขียนทีละรายการ ทยอยเบื้องหลัง — ไม่รอ/ไม่ล้มการสร้างบิล)
+      const issued = invoiceIssuedNotice({ title: newTitle, totalAmount: amount, dueDate: newDueDate });
+      void (async () => {
+        for (const studentId of selectedStudentIds) {
+          const st = students.find(x => x.studentId === studentId);
+          await notifyInvoiceOwner({ studentId, studentUid: st?.studentUid, parentUid: st?.parentUid }, issued);
+        }
+      })();
       setShowCreateModal(false);
       resetCreateForm();
     } catch (err) {

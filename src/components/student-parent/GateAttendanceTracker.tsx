@@ -141,6 +141,16 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
     setLeaveSubmitError(null);
     try {
       await acknowledgeLeaveRequest(leave.id, user.uid);
+      // แจ้งนักเรียน (เจ้าของใบลา) ว่าผู้ปกครองรับทราบแล้วและส่งต่อครูที่ปรึกษา — ผลพลอยได้ ไม่ทำให้การรับทราบล้มเหลว
+      createParentNotification({
+        parentUid: leave.parentUid || user.uid,
+        studentUid: leave.studentUid || student.studentUid,
+        studentId: leave.studentId,
+        studentName: student.name,
+        title: '👍 ผู้ปกครองรับทราบใบลาแล้ว',
+        message: `ผู้ปกครองรับทราบใบลาวันที่ ${leave.startDate}${leave.startDate !== leave.endDate ? ` ถึง ${leave.endDate}` : ''} แล้ว — ส่งต่อให้ครูที่ปรึกษาพิจารณา`,
+        type: 'info',
+      }).catch(err => console.warn('[leave] ack notification failed:', err));
     } catch (err: any) {
       setLeaveSubmitError(err?.message || 'รับทราบไม่สำเร็จ ลองอีกครั้ง');
     } finally {

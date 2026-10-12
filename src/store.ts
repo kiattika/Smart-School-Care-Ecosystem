@@ -35,6 +35,7 @@ import {
   SubstituteApprovalStage,
   PostTeachingRecord
 } from './types';
+import { substituteUpdateNotices, SUBSTITUTE_STAGE_LABEL } from './lib/staffNotifications';
 import { SUBSTITUTE_STAGE_ROLE, SUBSTITUTE_STAGE_ORDER, SUBSTITUTE_TEACHER_DECLINED_ROLE } from './types';
 import { DEFAULT_SCHOOL_GEOFENCE } from './utils/geoUtils';
 import { 
@@ -53,7 +54,8 @@ import {
   sendParentTeacherMessageFirestore,
   saveActiveLearningLogFirestore,
   updateBehaviorScoreAndTriggerAlert,
-  createParentNotification
+  createParentNotification,
+  sendStaffNotifications
 } from './services/firestoreService';
 
 const STATUS_CYCLE: AttendanceStatus[] = ['PRESENT', 'ABSENT', 'LATE', 'LEAVE'];
@@ -585,6 +587,12 @@ export const useStore = create<StoreState>((set, get) => ({
         return found ? { ...a, ...found.patch } : a;
       }),
     }));
+
+    // แจ้งผู้เสนอ (ไม่ใช่ผู้กด) — non-fatal: ผลบันทึกแล้ว
+    void sendStaffNotifications(
+      substituteUpdateNotices(target, decision === 'DECLINE' ? { type: 'TEACHER_DECLINED', reason: reason?.trim() || '' } : { type: 'TEACHER_CONFIRMED' }, responder.name, responder.email),
+      { uid: get().user?.uid || '', name: responder.name },
+    );
   },
 
   // อนุมัติ/ปฏิเสธ ตามลำดับขั้น — sequential, ห้ามบุคคลเดียวข้ามหลายขั้น
@@ -690,6 +698,19 @@ export const useStore = create<StoreState>((set, get) => ({
         return found ? { ...a, ...found.patch } : a;
       }),
     }));
+
+    // แจ้งผู้เกี่ยวข้อง (ผู้เสนอ/ครูสอนแทน/ครูเจ้าของคาบ) — non-fatal: ผลอนุมัติบันทึกแล้ว
+    const stageLabel = SUBSTITUTE_STAGE_LABEL[stage] || String(stage);
+    void sendStaffNotifications(
+      substituteUpdateNotices(
+        target,
+        decision === 'REJECT'
+          ? { type: 'REJECTED', stageLabel, reason: comment || '' }
+          : { type: 'STAGE_APPROVED', stageLabel, completed: patch.status === 'APPROVED' },
+        approver.name, approver.email,
+      ),
+      { uid: get().user?.uid || '', name: approver.name },
+    );
   },
 
   // บันทึกหลังสอนแทน — flag overdue ถ้าเลย 24:00 น. ของวันที่สอน + เขียน post_teaching_records จริง
