@@ -1,36 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Clock, Calendar, Zap, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useAdminPeriods } from '../hooks/useAdminPeriods';
+import { findCurrentPeriod } from '../lib/currentPeriod';
 
 interface HeaderRealTimeClockProps {
   showPeriodBadge?: boolean;
   className?: string;
   onPeriodChange?: (periodName: string) => void;
 }
-
-interface PeriodDefinition {
-  name: string;
-  startHour: number;
-  startMinute: number;
-  endHour: number;
-  endMinute: number;
-  isLunch?: boolean;
-  isHomeroom?: boolean;
-}
-
-// School timetable periods definition (08:00 - 16:00)
-const SCHOOL_PERIODS: PeriodDefinition[] = [
-  { name: 'กิจกรรมหน้าเสาธง & โฮมรูม', startHour: 8, startMinute: 0, endHour: 8, endMinute: 30, isHomeroom: true },
-  { name: 'คาบ 1', startHour: 8, startMinute: 30, endHour: 9, endMinute: 20 },
-  { name: 'คาบ 2', startHour: 9, startMinute: 20, endHour: 10, endMinute: 10 },
-  { name: 'คาบ 3', startHour: 10, startMinute: 10, endHour: 11, endMinute: 0 },
-  { name: 'คาบ 4', startHour: 11, startMinute: 0, endHour: 11, endMinute: 50 },
-  { name: 'พักกลางวัน', startHour: 11, startMinute: 50, endHour: 12, endMinute: 40, isLunch: true },
-  { name: 'คาบ 5', startHour: 12, startMinute: 40, endHour: 13, endMinute: 30 },
-  { name: 'คาบ 6', startHour: 13, startMinute: 30, endHour: 14, endMinute: 20 },
-  { name: 'คาบ 7', startHour: 14, startMinute: 20, endHour: 15, endMinute: 10 },
-  { name: 'คาบ 8 (กิจกรรม/แนะแนว)', startHour: 15, startMinute: 10, endHour: 16, endMinute: 0 },
-];
 
 export const HeaderRealTimeClock: React.FC<HeaderRealTimeClockProps> = ({
   showPeriodBadge = true,
@@ -70,48 +48,21 @@ export const HeaderRealTimeClock: React.FC<HeaderRealTimeClockProps> = ({
     return `${day} ${month} ${year}`;
   }, [time]);
 
-  // Determine current active period
-  const activePeriod = useMemo(() => {
-    const nowMinutes = time.getHours() * 60 + time.getMinutes();
-
-    for (const p of SCHOOL_PERIODS) {
-      const startMinutes = p.startHour * 60 + p.startMinute;
-      const endMinutes = p.endHour * 60 + p.endMinute;
-      if (nowMinutes >= startMinutes && nowMinutes < endMinutes) {
-        return {
-          ...p,
-          isActive: true,
-          timeRange: `${String(p.startHour).padStart(2, '0')}:${String(p.startMinute).padStart(2, '0')} - ${String(p.endHour).padStart(2, '0')}:${String(p.endMinute).padStart(2, '0')}`
-        };
-      }
-    }
-
-    if (nowMinutes < 8 * 60) {
-      return {
-        name: 'ก่อนเวลาเข้าแถว',
-        isActive: false,
-        timeRange: 'ก่อน 08:00 น.'
-      };
-    }
-
-    return {
-      name: 'หลังเวลาเรียน (เลิกเรียน)',
-      isActive: false,
-      timeRange: 'หลัง 16:00 น.'
-    };
-  }, [time]);
+  // คาบปัจจุบันจากตารางเวลาจริง (admin_periods_config) — ไม่มีการตั้งเวลา = ไม่แสดงแถบคาบ
+  const { periods } = useAdminPeriods();
+  const activePeriod = useMemo(() => findCurrentPeriod(periods, time), [periods, time]);
 
   // Trigger optional callback when active period changes
   useEffect(() => {
-    if (onPeriodChange && activePeriod.name) {
+    if (onPeriodChange && activePeriod?.name) {
       onPeriodChange(activePeriod.name);
     }
-  }, [activePeriod.name, onPeriodChange]);
+  }, [activePeriod?.name, onPeriodChange]);
 
   return (
     <div className={cn("flex items-center gap-3", className)}>
       {/* Active Period Highlight Pill */}
-      {showPeriodBadge && (
+      {showPeriodBadge && activePeriod && (
         <div className={cn(
           "hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all shadow-sm",
           activePeriod.isActive 
@@ -137,7 +88,7 @@ export const HeaderRealTimeClock: React.FC<HeaderRealTimeClockProps> = ({
             )} />
           </span>
           <span className="font-medium">{activePeriod.name}</span>
-          <span className="text-[10px] opacity-70 font-mono">({activePeriod.timeRange})</span>
+          {activePeriod.timeRange && <span className="text-[10px] opacity-70 font-mono">({activePeriod.timeRange})</span>}
         </div>
       )}
 
