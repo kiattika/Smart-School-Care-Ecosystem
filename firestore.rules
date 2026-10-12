@@ -897,6 +897,24 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 25.4 ข้อมูลอ้างอิงที่แอดมินแก้ไขได้: รายชื่อโรงเรียน (reference_schools) / หมู่บ้าน (reference_villages)
+    //      เก็บเฉพาะส่วนที่ต่างจากข้อมูลชุดหลักในแอป (เพิ่มใหม่/แก้/ซ่อน) — ไม่ใช่ข้อมูลอ่อนไหว: ผู้ที่ล็อกอินอ่านได้ (ฟอร์มนักเรียนใช้เลือก)
+    //      เขียน/ลบ: SUPER_ADMIN เท่านั้น (ห้าม bare isSignedIn() ที่ write)
+    match /reference_schools/{refId} {
+      allow read: if isSignedIn();
+      allow create, update: if hasRole('SUPER_ADMIN')
+                       && request.resource.data.provinceCode is string && request.resource.data.provinceCode.size() == 2
+                       && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 200;
+      allow delete: if hasRole('SUPER_ADMIN');
+    }
+    match /reference_villages/{refId} {
+      allow read: if isSignedIn();
+      allow create, update: if hasRole('SUPER_ADMIN')
+                       && request.resource.data.tambonCode is string && request.resource.data.tambonCode.size() == 6
+                       && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 200;
+      allow delete: if hasRole('SUPER_ADMIN');
+    }
+
     // 26. Department config — กลุ่มสาระฯ/กลุ่มงาน (แอดมินจัดการ)
     match /department_config/{deptId} {
       allow read: if isSignedIn();

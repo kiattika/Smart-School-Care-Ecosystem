@@ -11,7 +11,8 @@ import {
   PREV_EDUCATION_LEVELS, BLOOD_TYPES, CLOSEST_FAMILY, CONSULT_OPTIONS, LIVES_WITH, COMMUTE_MODES, COMMUTE_DURATIONS,
 } from '../../lib/homeVisitData';
 import { AddressFields } from './AddressFields';
-import { formatThaiAddress } from '../../lib/thaiAddress';
+import { SchoolPicker } from './SchoolPicker';
+import { formatThaiAddress, loadThaiAddressData, type ProvinceRef } from '../../lib/thaiAddress';
 import { inputCls, Section, Label, SourceTag, Chips, Single, toNum, toggleIn, ErrorList } from './formParts';
 
 /**
@@ -46,6 +47,8 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
   const [form, setForm] = useState<StudentHomeVisitInfo>(() => normalizeStudentInfo(null, base));
   const [fromAssessment, setFromAssessment] = useState<{ shared: SharedFields; hints: LegacyHints } | null>(null);
   const [initialised, setInitialised] = useState(false);
+  const [provinces, setProvinces] = useState<ProvinceRef[]>([]);
+  useEffect(() => { let c = false; loadThaiAddressData().then(d => { if (!c) setProvinces(d.areas); }).catch(() => {}); return () => { c = true; }; }, []);
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -124,10 +127,11 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
       </Section>
 
       <Section title="ข้อ 2 ประวัติการเรียน">
+        <SchoolPicker provinces={provinces} current={form} onPick={patch => setForm(f => ({ ...f, ...patch }))} />
         <div><Label required>จบการศึกษาระดับ</Label><Single options={PREV_EDUCATION_LEVELS} value={form.prevEducationLevel} onPick={o => set('prevEducationLevel', o)} /></div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div><Label>ผลการเรียนรวมเฉลี่ย</Label><input className={inputCls} inputMode="decimal" value={form.prevGpa} onChange={e => set('prevGpa', e.target.value)} placeholder="เช่น 3.25" /></div>
-          <div><Label required>จากโรงเรียน</Label><input className={inputCls} value={form.prevSchool} onChange={e => set('prevSchool', e.target.value)} /></div>
+          <div><Label required>จากโรงเรียน</Label><input className={inputCls} value={form.prevSchool} onChange={e => setForm(f => ({ ...f, prevSchool: e.target.value, prevSchoolMoeCode: '' }))} /></div>
           <div><Label>สังกัด</Label><input className={inputCls} value={form.prevAffiliation} onChange={e => set('prevAffiliation', e.target.value)} placeholder="เช่น สพม., เอกชน" /></div>
           <div><Label>โทรศัพท์โรงเรียน</Label><input className={inputCls} inputMode="tel" value={form.prevPhone} onChange={e => set('prevPhone', e.target.value)} /></div>
           <div><Label>ตำบล/แขวง</Label><input className={inputCls} value={form.prevSubdistrict} onChange={e => set('prevSubdistrict', e.target.value)} /></div>

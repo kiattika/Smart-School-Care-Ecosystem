@@ -3,8 +3,9 @@ import { Loader2 } from 'lucide-react';
 import type { ThaiAddress } from '../../types/homeVisit';
 import {
   emptyThaiAddress, loadThaiAddressData, withProvince, withAmphoe, withTambon, withVillage, villageLabel,
-  type ProvinceRef, type VillageMap,
+  type ProvinceRef, type VillageMap, type VillageRef,
 } from '../../lib/thaiAddress';
+import { useVillageDirectory } from '../../hooks/useReferenceData';
 import { inputCls, Label } from './formParts';
 
 /**
@@ -26,7 +27,9 @@ export function AddressFields({ value, onChange }: { value: ThaiAddress | null |
   const province = useMemo(() => data?.areas.find(p => p[0] === a.provinceCode) ?? null, [data, a.provinceCode]);
   const amphoe = useMemo(() => province?.[2].find(x => x[0] === a.amphoeCode) ?? null, [province, a.amphoeCode]);
   const tambon = useMemo(() => amphoe?.[2].find(x => x[0] === a.tambonCode) ?? null, [amphoe, a.tambonCode]);
-  const villages = (data && a.tambonCode && data.villages[a.tambonCode]) || [];
+  // หมู่บ้าน = ชุดหลัก DOPA + ที่แอดมินเพิ่ม/แก้/ซ่อน (เมนู "รายชื่อหมู่บ้าน" ฝั่งแอดมิน)
+  const { villages: villageRecords } = useVillageDirectory(a.tambonCode);
+  const villages: VillageRef[] = useMemo(() => villageRecords.map(v => [v.moo, v.name, v.code] as VillageRef), [villageRecords]);
   const hasVillageList = villages.length > 0;
   const set = (patch: Partial<ThaiAddress>) => onChange({ ...a, ...patch });
 

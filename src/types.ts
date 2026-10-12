@@ -5,6 +5,7 @@ import { UserProfile, UserRole } from './types/auth';
 export * from './types/auth';
 export * from './types/seating';
 export * from './types/homeVisit';
+export * from './types/reference';
 
 export type Role = 'teacher' | 'parent' | 'advisor' | 'executive' | 'student' | 'admin';
 
