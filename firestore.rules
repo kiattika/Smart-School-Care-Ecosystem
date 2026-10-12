@@ -122,6 +122,13 @@ service cloud.firestore {
       // photoUpdatedAt (ตรวจ "ตัวเอง" ผ่าน isSelfStudent() เดียวกับที่ใช้ที่อื่น: students/{id}.studentUid
       // == auth.uid) ห้ามแก้ field อื่นของทะเบียนนักเรียน
       allow update: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') ||
+                       // ครูผู้สอนเช็คชื่อแล้ว sync ยอดสรุป (derived cache) ในทรานแซกชันเดียวกับ attendance_records —
+                       // แตะได้แค่ field สถิติเหล่านี้เท่านั้น (ห้ามแก้ทะเบียนนักเรียนอื่น)
+                       (
+                         hasRole('SUBJECT_TEACHER') &&
+                         request.resource.data.diff(resource.data).affectedKeys()
+                           .hasOnly(['attendanceStats', 'attendanceStatsUpdatedAt', 'courseAttendanceStats'])
+                       ) ||
                        (
                          isSelfStudent(studentId) &&
                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['photoUrl', 'photoUpdatedAt'])

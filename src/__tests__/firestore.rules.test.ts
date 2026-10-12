@@ -115,6 +115,22 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       );
     });
 
+    // ครูผู้สอน sync ยอดสถิติเข้าเรียน (รวม + รายวิชา) ได้ แต่แตะ field อื่นของนักเรียนไม่ได้
+    it('SUBJECT_TEACHER อัปเดตได้เฉพาะ attendanceStats / courseAttendanceStats ของนักเรียน', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-att').set({ studentId: 'std-att', name: 'สถิติ', parentUid: 'p-att', studentUid: 's-att' });
+      });
+      const ref = () => asRole('SUBJECT_TEACHER').firestore().doc('students/std-att');
+      await assertSucceeds(ref().update({ 'attendanceStats.present': 1, attendanceStatsUpdatedAt: new Date() }));
+      await assertSucceeds(ref().update({ 'courseAttendanceStats.ค32102.present': 1, 'courseAttendanceStats.ค32102.code': 'ค32102' }));
+      await assertFails(ref().update({ name: 'แก้ชื่อ' }));
+      await assertFails(ref().update({ behaviorScore: 0 }));
+      await assertFails(ref().update({ 'attendanceStats.present': 1, parentUid: 'evil' }));
+      // นักเรียน/ผู้ปกครองแก้สถิติตัวเองไม่ได้
+      await assertFails(asUser('s-att', ['STUDENT']).firestore().doc('students/std-att').update({ 'courseAttendanceStats.x.present': 99 }));
+      await assertFails(asUser('p-att', ['PARENT']).firestore().doc('students/std-att').update({ 'attendanceStats.present': 99 }));
+    });
+
     // นักเรียนห้ามลบถาวร — เปลี่ยนสถานะแทน (students: allow delete: if false)
     it('DELETE students: ปฏิเสธทุกบทบาท แม้ SUPER_ADMIN / HOMEROOM_TEACHER และเอกสารยังอยู่', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {

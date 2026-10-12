@@ -27,6 +27,7 @@ import {
   AttendanceRecordLite,
   AttendanceStatusValue,
 } from '../lib/studentAttendanceStats';
+import { diffCourseAttendance } from '../lib/courseAttendanceStats';
 import { 
   StudentSelfAssessment,
   GateAttendanceRecord,
@@ -127,6 +128,9 @@ export interface FirestoreAttendanceRecord {
   // HOMEROOM_DEFAULT = เช็คชื่อโดยครูประจำชั้นตอนเช้า (ใช้เป็นค่าเริ่มต้นของทุกคาบวันนั้น)
   // PERIOD_OVERRIDE  = ครูผู้สอนเช็ค/แก้เฉพาะคาบตัวเอง
   source?: 'HOMEROOM_DEFAULT' | 'PERIOD_OVERRIDE';
+  // รายวิชาของคาบนี้ (ว่าง = คาบโฮมรูมที่ไม่ผูกวิชา) — ใช้ sync สถิติรายวิชาที่ students/{id}.courseAttendanceStats
+  courseCode?: string;
+  courseName?: string;
   students: {
     [studentId: string]: 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE';
   };
@@ -174,6 +178,8 @@ export async function getTodayScheduleByTeacher(teacherId: string, dayOfWeek: st
  * สะสมเพี้ยนไปจากของจริง ถ้าตัวเลขเคยเพี้ยนไปแล้วจากบั๊ก/ข้อมูลเก่าก่อนมีฟังก์ชันนี้ ใช้
  * recomputeStudentAttendanceStats() คำนวณใหม่ทั้งหมดจาก attendance_records จริงได้เสมอ
  */
+const cleanExtraCode = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
+
 export async function writeAttendanceRecordWithStatsSync(
   recordId: string,
   students: Record<string, AttendanceStatusValue>,
@@ -187,17 +193,40 @@ export async function writeAttendanceRecordWithStatsSync(
       const oldStudents: Record<string, AttendanceStatusValue> =
         existingSnap.exists() ? ((existingSnap.data() as any).students || {}) : {};
 
+      // Firestore ปฏิเสธค่า undefined (เช่น courseCode ของคาบที่ไม่มีรหัสวิชา) — ตัดทิ้งก่อนเขียน
+      const cleanExtra = Object.fromEntries(Object.entries(extraFields).filter(([, v]) => v !== undefined));
       transaction.set(recordRef, {
         id: recordId,
-        ...extraFields,
+        ...cleanExtra,
         students,
       }, { merge: true });
 
+      // ยอดรวม (ทุกคาบ) + ยอดแยกรายวิชา (เฉพาะ record ที่ระบุ courseCode) — รวมเป็น update เดียวต่อนักเรียน
+      const perStudent = new Map<string, Record<string, any>>();
+      const updatesFor = (studentId: string) => {
+        let u = perStudent.get(studentId);
+        if (!u) { u = { attendanceStatsUpdatedAt: serverTimestamp() }; perStudent.set(studentId, u); }
+        return u;
+      };
       for (const delta of diffAttendanceStatuses(oldStudents, students)) {
-        const updates: Record<string, any> = { attendanceStatsUpdatedAt: serverTimestamp() };
-        if (delta.oldStatus) updates[`attendanceStats.${delta.oldStatus.toLowerCase()}`] = increment(-1);
-        if (delta.newStatus) updates[`attendanceStats.${delta.newStatus.toLowerCase()}`] = increment(1);
-        transaction.update(doc(db, 'students', delta.studentId), updates);
+        const u = updatesFor(delta.studentId);
+        if (delta.oldStatus) u[`attendanceStats.${delta.oldStatus.toLowerCase()}`] = increment(-1);
+        if (delta.newStatus) u[`attendanceStats.${delta.newStatus.toLowerCase()}`] = increment(1);
+      }
+      const oldData = existingSnap.exists() ? (existingSnap.data() as any) : null;
+      const courseDeltas = diffCourseAttendance(
+        oldData ? { courseCode: oldData.courseCode, courseName: oldData.courseName, students: oldStudents } : null,
+        { courseCode: cleanExtraCode(extraFields.courseCode), courseName: extraFields.courseName, students },
+      );
+      for (const d of courseDeltas) {
+        const u = updatesFor(d.studentId);
+        const base = `courseAttendanceStats.${d.key}`;
+        u[`${base}.code`] = d.code;
+        u[`${base}.name`] = d.name;
+        u[`${base}.${d.status.toLowerCase()}`] = increment(d.by);
+      }
+      for (const [studentId, updates] of perStudent) {
+        transaction.update(doc(db, 'students', studentId), updates);
       }
     });
   } catch (error) {

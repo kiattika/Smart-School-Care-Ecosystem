@@ -778,6 +778,8 @@ export function TeacherPortal() {
         checkedAt: format(new Date(), 'HH:mm'),
         isLocked: true,
         source: isHrActive ? 'HOMEROOM_DEFAULT' : 'PERIOD_OVERRIDE',
+        // คาบโฮมรูมไม่ผูกรายวิชา — คาบอื่นส่งรหัสวิชาเพื่อ sync สถิติรายวิชาของนักเรียน
+        ...(isHrActive ? {} : { courseCode: activeCourse?.code, courseName: activeCourse?.name }),
         students: studentStatuses
       });
 

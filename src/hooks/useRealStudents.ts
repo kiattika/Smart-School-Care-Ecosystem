@@ -87,6 +87,10 @@ function mapDocToStudent(id: string, data: any): Student {
           leave: Number(data.attendanceStats.leave) || 0,
         }
       : undefined,
+    // ยอดสะสมแยกรายวิชา (derived cache) — ดู lib/courseAttendanceStats.ts
+    courseAttendanceStats: data.courseAttendanceStats && typeof data.courseAttendanceStats === 'object'
+      ? data.courseAttendanceStats
+      : undefined,
     homeLocation: {
       address: data.homeLocation?.address || data.address || '',
       coordinates: data.homeLocation?.coordinates || [13.7563, 100.5018],
