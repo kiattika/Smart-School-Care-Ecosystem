@@ -9,7 +9,7 @@ import { storage } from '../lib/firebase';
  * คืน download URL (มี token) — เก็บลง Firestore. ผู้ที่อ่าน Firestore doc ได้ (gate ด้วย
  * firestore.rules) จึงจะได้ URL นี้ไปเปิดดู
  */
-export type StudentPhotoFolder = 'student_home_photos' | 'student_portfolio_photos' | 'student_profile_photos';
+export type StudentPhotoFolder = 'student_home_photos' | 'home_visit_photos' | 'student_portfolio_photos' | 'student_profile_photos';
 
 export async function uploadStudentPhoto(
   folder: StudentPhotoFolder,
@@ -25,6 +25,10 @@ export async function uploadStudentPhoto(
 /** ภาพถ่ายบ้านนักเรียน (ประกอบการเยี่ยมบ้าน) */
 export const uploadHomePhoto = (ownerUid: string, blob: Blob) =>
   uploadStudentPhoto('student_home_photos', ownerUid, blob);
+
+/** ภาพถ่ายการเยี่ยมบ้านที่ครูที่ปรึกษาอัปโหลด — ownerUid = Auth UID ของครู */
+export const uploadHomeVisitPhoto = (ownerUid: string, blob: Blob) =>
+  uploadStudentPhoto('home_visit_photos', ownerUid, blob);
 
 /** ภาพประกอบแฟ้มสะสมผลงาน */
 export const uploadPortfolioPhoto = (ownerUid: string, blob: Blob) =>

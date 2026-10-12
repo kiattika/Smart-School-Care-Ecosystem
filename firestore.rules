@@ -829,6 +829,25 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 25.1 บันทึกการเยี่ยมบ้าน (แบบ สพฐ. 5 ตอน): home_visit_records/{studentId}_{ปีการศึกษา}
+    //      ข้อมูลอ่อนไหวเรื่องครอบครัว/ที่อยู่อาศัย — อ่านได้เฉพาะ SUPER_ADMIN, EXECUTIVE และครูที่ปรึกษาห้องนั้น
+    //      เขียนได้เฉพาะครูที่ปรึกษาห้องนั้น (หรือ SUPER_ADMIN); homeroomClass ต้องตรง students/{id}.room จริง
+    //      ผู้ปกครอง/นักเรียน/ครูวิชาอื่นเข้าถึงไม่ได้; ห้ามลบ (เก็บเป็นหลักฐาน)
+    match /home_visit_records/{recordId} {
+      allow read: if hasRole('SUPER_ADMIN')
+                     || hasRole('EXECUTIVE')
+                     || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass));
+      allow create: if (hasRole('SUPER_ADMIN') || isHomeroomTeacherOf(request.resource.data.homeroomClass))
+                       && request.resource.data.studentId is string
+                       && recordId.matches(request.resource.data.studentId + '_[0-9]{4}')
+                       && request.resource.data.homeroomClass == studentField(request.resource.data.studentId, 'room', '__none__')
+                       && request.resource.data.advisorUid == request.auth.uid;
+      allow update: if (hasRole('SUPER_ADMIN') || isHomeroomTeacherOf(resource.data.homeroomClass))
+                       && request.resource.data.studentId == resource.data.studentId
+                       && request.resource.data.homeroomClass == resource.data.homeroomClass;
+      allow delete: if false;
+    }
+
     // 26. Department config — กลุ่มสาระฯ/กลุ่มงาน (แอดมินจัดการ)
     match /department_config/{deptId} {
       allow read: if isSignedIn();

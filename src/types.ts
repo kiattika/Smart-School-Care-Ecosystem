@@ -59,6 +59,7 @@ export interface Student {
   parentUid?: string;     // Firebase Auth UID ของผู้ปกครอง (เชื่อมโยงตาม Security Rules)
   parentId?: string;      // Alias/Legacy ID
   parentEmail?: string;   // อีเมลผู้ปกครอง
+  parentMobile?: string;  // เบอร์โทรผู้ปกครอง (students/{id}.parentMobile)
   email?: string;         // อีเมลนักเรียนเอง — รูปแบบ it{รหัสประจำตัว}@utd.ac.th (ต่างจาก parentEmail)
   studentUid?: string;    // Firebase Auth UID ของนักเรียน
   // คะแนนพฤติกรรมสะสมจริง — เก็บที่ students/{id}.behaviorScore ใน Firestore โดยตรง
@@ -399,6 +400,65 @@ export type ProposeSubstitutePayload = { id?: string } & Omit<
   SubstituteAssignment,
   'id' | 'status' | 'currentApprovalStage' | 'approvalChain' | 'createdAt' | 'updatedAt' | 'postTeachingDueAt'
 >;
+
+/**
+ * บันทึกการเยี่ยมบ้านนักเรียน ตามแนวทางแบบบันทึกการเยี่ยมบ้านของ สพฐ. (5 ตอน)
+ * Firestore: home_visit_records/{studentId}_{ปีการศึกษา พ.ศ.} — 1 นักเรียน 1 ฉบับต่อปีการศึกษา (เยี่ยมซ้ำ = แก้ฉบับเดิม)
+ * ข้อมูลอ่อนไหว (ครอบครัว/ที่อยู่อาศัย): อ่านได้เฉพาะครูที่ปรึกษาห้องนั้น + SUPER_ADMIN + EXECUTIVE
+ * ตอนที่ 1 (ข้อมูลพื้นฐานนักเรียน) ดึงจากทะเบียน students ตอนแสดงผล ไม่ซ้ำเก็บในฟอร์ม ยกเว้นความด้อยโอกาส/ความพิการที่ครูบันทึก
+ */
+export interface HomeVisitPerson {
+  name: string;
+  relation: string;     // ความสัมพันธ์ (บิดา/มารดา/ผู้ปกครอง/ญาติ...)
+  occupation: string;
+  phone: string;
+  status: string;       // อยู่ร่วมกัน/แยกกันอยู่/หย่าร้าง/เสียชีวิต/ไม่ทราบ — ข้อความอิสระจากตัวเลือก
+}
+export interface HomeVisitRecord {
+  id: string;                       // `${studentId}_${visitYear}`
+  studentId: string;
+  studentUid?: string | null;
+  homeroomClass: string;            // denormalize ใช้เช็คสิทธิ์ครูที่ปรึกษา (ต้องตรง students/{id}.room)
+  visitYear: string;                // ปีการศึกษา พ.ศ. 4 หลัก
+  visitedDate: string;              // YYYY-MM-DD
+  advisorUid: string;
+  advisorName: string;
+  // ตอน 1
+  disadvantage: string[];           // ความด้อยโอกาส (ตัวเลือก)
+  disability: string;               // ความพิการ ('' = ไม่มี)
+  // ตอน 2
+  father: HomeVisitPerson;
+  mother: HomeVisitPerson;
+  guardian: HomeVisitPerson;
+  siblingsCount: number | null;
+  closeAdults: string;              // บุคคลใกล้ชิด/ที่ปรึกษาของนักเรียน
+  photoUrls: string[];              // ภาพถ่ายการเยี่ยมบ้าน (Storage download URL)
+  // ตอน 3
+  householdStatus: string;
+  housingType: string;              // ถาวร/ชั่วคราว/เช่า/อาศัยผู้อื่น
+  householdMembers: number | null;
+  dependents: number | null;
+  commuteMode: string;
+  commuteMinutes: number | null;
+  commuteDistanceKm: number | null; // ครูกรอก/ยืนยัน (ระบบแสดงระยะเส้นตรงให้อ้างอิง)
+  hasElectricity: boolean;
+  hasWater: boolean;
+  disasterRisks: string[];          // น้ำท่วม/ดินถล่ม/ไฟไหม้/ไม่มี
+  environmentRating: number;        // 1-5
+  // ตอน 4
+  closeFriends: string;
+  socialBehaviors: string[];
+  socialNotes: string;
+  // ตอน 5
+  teacherOpinion: string;
+  recommendations: string;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  urgentReferral: boolean;
+  // ยืนยันตำแหน่งตอนเยี่ยม (อ่านจากอุปกรณ์จริง; null = ไม่ได้ยืนยัน)
+  visitGps: { latitude: number; longitude: number; accuracy: number | null; distanceFromHomeM: number | null } | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface HomeVisit {
   studentId: string;
