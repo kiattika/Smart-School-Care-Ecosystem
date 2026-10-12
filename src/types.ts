@@ -600,6 +600,15 @@ export interface GPSCheckInLog {
   notes?: string;
 }
 
+/** วันลาที่อนุมัติแล้วแบบไม่มีเหตุผล (student_leave_days) — ให้ครูผู้สอนเห็นสถานะ "ลา" ตอนเช็คชื่อ */
+export interface StudentLeaveDay {
+  leaveId: string;
+  studentId: string;
+  homeroomClass: string;
+  startDate: string;
+  endDate: string;
+}
+
 export interface DetailedLeaveRequest {
   id: string;
   studentId: string;

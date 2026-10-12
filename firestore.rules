@@ -472,6 +472,22 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 16b. วันที่นักเรียนลาที่อนุมัติแล้ว — สำเนา "ไม่มีเหตุผลการลา" ให้ครูผู้สอนเห็นสถานะ "ลา" ตอนเช็คชื่อ
+    // เหตุผล/ประเภทการลา (อาจเป็นข้อมูลสุขภาพ) อยู่ใน detailed_leave_requests ซึ่งครูประจำวิชาอ่านไม่ได้
+    // สร้างได้เฉพาะพร้อมกับการอนุมัติใบลาจริง (batch เดียวกัน — ตรวจด้วย getAfter) และข้อมูลต้องตรงใบลา; แก้/ลบไม่ได้
+    match /student_leave_days/{leaveId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('EXECUTIVE') || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER');
+      allow create: if request.resource.data.keys().hasOnly(['leaveId', 'studentId', 'homeroomClass', 'startDate', 'endDate', 'createdAt'])
+                    && request.resource.data.leaveId == leaveId
+                    && getAfter(/databases/$(database)/documents/detailed_leave_requests/$(leaveId)).data.status == 'APPROVED'
+                    && get(/databases/$(database)/documents/detailed_leave_requests/$(leaveId)).data.status == 'PENDING_TEACHER'
+                    && request.resource.data.studentId == getAfter(/databases/$(database)/documents/detailed_leave_requests/$(leaveId)).data.studentId
+                    && request.resource.data.homeroomClass == getAfter(/databases/$(database)/documents/detailed_leave_requests/$(leaveId)).data.homeroomClass
+                    && request.resource.data.startDate == getAfter(/databases/$(database)/documents/detailed_leave_requests/$(leaveId)).data.startDate
+                    && request.resource.data.endDate == getAfter(/databases/$(database)/documents/detailed_leave_requests/$(leaveId)).data.endDate;
+      allow update, delete: if false;
+    }
+
     // 17. GPS Check-in Logs
     match /gps_check_in_logs/{logId} {
       allow read: if hasRole('SUPER_ADMIN') || 
