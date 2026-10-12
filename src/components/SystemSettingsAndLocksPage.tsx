@@ -53,80 +53,24 @@ interface ExceptionRequest {
 
 export function SystemSettingsAndLocksPage() {
   // 1. Academic Year & Semester Config
-  const [academicYear, setAcademicYear] = useState('2569');
-  const [semester, setSemester] = useState('1');
+  // ว่างจนกว่าจะอ่านจาก school_settings/academic_year ได้ — ไม่เดาปี/ภาคเรียนให้
+  const [academicYear, setAcademicYear] = useState('');
+  const [semester, setSemester] = useState('');
+  const [yearLoaded, setYearLoaded] = useState(false);
+  const thisBuddhistYear = new Date().getFullYear() + 543;
+  const yearOptions = [-2, -1, 0, 1].map(d => String(thisBuddhistYear + d));
 
   // 2. Grade Entry Time-Window Settings
+  // โครงช่วงเวลาเท่านั้น — วัน/เวลาว่างและล็อกไว้จนกว่าแอดมินจะตั้งเอง (ไม่ฝังวันที่สมมติ)
   const [lockConfigs, setLockConfigs] = useState<GradeLockConfig[]>([
-    {
-      id: 'midterm',
-      title: 'คะแนนเก็บกลางภาค (Midterm Assessment)',
-      description: 'ระบบลงคะแนนและเกณฑ์วัดผลย่อย กลางภาคเรียนที่ 1',
-      isOpen: true,
-      startDate: '2026-07-01',
-      startTime: '08:30',
-      endDate: '2026-08-15',
-      endTime: '16:30'
-    },
-    {
-      id: 'final',
-      title: 'คะแนนสอบปลายภาค (Final Assessment)',
-      description: 'ระบบลงคะแนนสอบรวบยอด และเกรดสรุปปลายภาคเรียน',
-      isOpen: false,
-      startDate: '2026-09-10',
-      startTime: '08:30',
-      endDate: '2026-09-30',
-      endTime: '18:00'
-    },
-    {
-      id: 'desirable',
-      title: 'การประเมินคุณลักษณะอันพึงประสงค์ & อ่านคิดวิเคราะห์',
-      description: 'ระบบประเมินคุณลักษณะ 8 ประการ และการอ่าน คิด วิเคราะห์ เขียน',
-      isOpen: true,
-      startDate: '2026-07-15',
-      startTime: '09:00',
-      endDate: '2026-10-05',
-      endTime: '16:30'
-    }
+    { id: 'midterm', title: 'คะแนนเก็บกลางภาค (Midterm Assessment)', description: 'ระบบลงคะแนนและเกณฑ์วัดผลย่อย กลางภาคเรียน', isOpen: false, startDate: '', startTime: '', endDate: '', endTime: '' },
+    { id: 'final', title: 'คะแนนสอบปลายภาค (Final Assessment)', description: 'ระบบลงคะแนนสอบรวบยอด และเกรดสรุปปลายภาคเรียน', isOpen: false, startDate: '', startTime: '', endDate: '', endTime: '' },
+    { id: 'desirable', title: 'การประเมินคุณลักษณะอันพึงประสงค์ & อ่านคิดวิเคราะห์', description: 'ระบบประเมินคุณลักษณะ 8 ประการ และการอ่าน คิด วิเคราะห์ เขียน', isOpen: false, startDate: '', startTime: '', endDate: '', endTime: '' },
   ]);
 
   // 3. Exception Request System (คำร้องขอแก้ไขเกรดย้อนหลังรายกรณี)
-  const [requests, setRequests] = useState<ExceptionRequest[]>([
-    {
-      id: 'req-01',
-      teacherId: 'teacher-somchai',
-      teacherName: 'นายสมชาย ใจดี',
-      subjectCode: 'TH32101',
-      subjectName: 'ภาษาไทย 3',
-      className: 'ม.5/8',
-      reason: 'นักเรียนส่งงานค้างส่งล่าช้าเนื่องจากลากิจเจ็บป่วย และได้รับอนุมัติใบลาเพิ่ม',
-      requestedAt: '2026-07-20 14:32',
-      status: 'PENDING'
-    },
-    {
-      id: 'req-02',
-      teacherId: 'teacher-somjai',
-      teacherName: 'นางสาวสมใจ รักสอน',
-      subjectCode: 'ว30101',
-      subjectName: 'วิทยาศาสตร์กายภาพ',
-      className: 'ม.4/1',
-      reason: 'กรอกคะแนนผิดพลาดจากการสลับแถวเลขที่นักเรียน และได้ส่งบันทึกข้อความชี้แจงหัวหน้าสาระฯ แล้ว',
-      requestedAt: '2026-07-21 09:15',
-      status: 'PENDING'
-    },
-    {
-      id: 'req-03',
-      teacherId: 'teacher-mana',
-      teacherName: 'นายมานะ บากบั่น',
-      subjectCode: 'ค31101',
-      subjectName: 'คณิตศาสตร์พื้นฐาน',
-      className: 'ม.1/1',
-      reason: 'ขอแก้ไขคะแนนเก็บกลางภาคย้อนหลัง',
-      requestedAt: '2026-07-18 10:00',
-      status: 'APPROVED',
-      approvedUntil: '2026-07-19 10:00'
-    }
-  ]);
+  // อ่านจาก school_settings/grade_exceptions เท่านั้น (ไม่มีรายการตัวอย่าง)
+  const [requests, setRequests] = useState<ExceptionRequest[]>([]);
 
   // Toast states
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -154,8 +98,9 @@ export function SystemSettingsAndLocksPage() {
     const unsubscribeYear = onSnapshot(doc(db, 'school_settings', 'academic_year'), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
-        if (data?.academicYear) setAcademicYear(data.academicYear);
-        if (data?.semester) setSemester(data.semester);
+        if (data?.academicYear) setAcademicYear(String(data.academicYear));
+        if (data?.semester) setSemester(String(data.semester));
+        setYearLoaded(true);
       }
     }, (err) => console.warn('Firestore academic_year subscription notice:', err));
 
@@ -185,17 +130,17 @@ export function SystemSettingsAndLocksPage() {
       return config;
     });
 
-    setLockConfigs(updatedConfigs);
     const target = updatedConfigs.find(c => c.id === id);
-    triggerToast(`🔓 ปรับปรุงเป็น "${target?.isOpen ? 'เปิดระบบชั่วคราว' : 'ล็อกระบบเรียบร้อย'}" ทันที`);
-
     try {
       await setDoc(doc(db, 'school_settings', 'system_locks'), {
         lockConfigs: updatedConfigs,
         updatedAt: serverTimestamp()
       }, { merge: true });
+      setLockConfigs(updatedConfigs);
+      triggerToast(`ปรับปรุงเป็น "${target?.isOpen ? 'เปิดระบบ' : 'ล็อกระบบ'}" เรียบร้อย`);
     } catch (err) {
-      console.warn('Notice: Firestore save handled locally/optimistically:', err);
+      console.error('[system_locks] save failed:', err);
+      triggerToast('⚠️ บันทึกไม่สำเร็จ — ตรวจสอบสิทธิ์ผู้ดูแลระบบและการเชื่อมต่อ แล้วลองใหม่');
     }
   };
 
@@ -209,12 +154,12 @@ export function SystemSettingsAndLocksPage() {
     });
     setLockConfigs(updated);
 
-    // Save debounced/on change to firestore
     setDoc(doc(db, 'school_settings', 'system_locks'), {
       lockConfigs: updated,
       updatedAt: serverTimestamp()
     }, { merge: true }).catch(err => {
-      console.warn('Notice: Firestore save handled:', err);
+      console.error('[system_locks] save failed:', err);
+      triggerToast('⚠️ บันทึกวัน-เวลาไม่สำเร็จ — ตรวจสอบสิทธิ์และการเชื่อมต่อ แล้วลองใหม่');
     });
   };
 
@@ -235,16 +180,16 @@ export function SystemSettingsAndLocksPage() {
       return req;
     });
 
-    setRequests(updatedRequests);
-    triggerToast(`✅ อนุมัติสิทธิ์ให้ครู ${teacherName} แก้ไขเกรดชั่วคราว (หมดอายุ: ${dateString})`);
-
     try {
       await setDoc(doc(db, 'school_settings', 'grade_exceptions'), {
         requests: updatedRequests,
         updatedAt: serverTimestamp()
       }, { merge: true });
+      setRequests(updatedRequests);
+      triggerToast(`อนุมัติสิทธิ์ให้ครู ${teacherName} แก้ไขเกรดชั่วคราว (หมดอายุ: ${dateString})`);
     } catch (err) {
-      console.warn('Notice: Firestore save handled:', err);
+      console.error('[grade_exceptions] approve failed:', err);
+      triggerToast('⚠️ อนุมัติไม่สำเร็จ — ตรวจสอบสิทธิ์และการเชื่อมต่อ แล้วลองใหม่');
     }
   };
 
@@ -260,30 +205,36 @@ export function SystemSettingsAndLocksPage() {
       return req;
     });
 
-    setRequests(updatedRequests);
-    triggerToast(`❌ ปฏิเสธคำขอของครู ${teacherName} เรียบร้อย`);
-
     try {
       await setDoc(doc(db, 'school_settings', 'grade_exceptions'), {
         requests: updatedRequests,
         updatedAt: serverTimestamp()
       }, { merge: true });
+      setRequests(updatedRequests);
+      triggerToast(`ปฏิเสธคำขอของครู ${teacherName} เรียบร้อย`);
     } catch (err) {
-      console.warn('Notice: Firestore save handled:', err);
+      console.error('[grade_exceptions] reject failed:', err);
+      triggerToast('⚠️ ปฏิเสธไม่สำเร็จ — ตรวจสอบสิทธิ์และการเชื่อมต่อ แล้วลองใหม่');
     }
   };
 
   // บันทึกการตั้งค่าปีการศึกษา
   const handleSaveAcademicYear = async () => {
-    triggerToast(`💾 บันทึกปีการศึกษาปัจจุบันเป็น ${academicYear} ภาคเรียนที่ ${semester} สำเร็จ`);
+    if (!academicYear || !semester) {
+      triggerToast('⚠️ เลือกปีการศึกษาและภาคเรียนก่อนบันทึก');
+      return;
+    }
     try {
       await setDoc(doc(db, 'school_settings', 'academic_year'), {
         academicYear,
         semester,
         updatedAt: serverTimestamp()
       }, { merge: true });
+      setYearLoaded(true);
+      triggerToast(`บันทึกปีการศึกษาปัจจุบันเป็น ${academicYear} ภาคเรียนที่ ${semester} สำเร็จ`);
     } catch (err) {
-      console.warn('Notice: Firestore save handled:', err);
+      console.error('[academic_year] save failed:', err);
+      triggerToast('⚠️ บันทึกปีการศึกษาไม่สำเร็จ — ตรวจสอบสิทธิ์ผู้ดูแลระบบและการเชื่อมต่อ แล้วลองใหม่');
     }
   };
 
@@ -340,10 +291,8 @@ export function SystemSettingsAndLocksPage() {
                   onChange={(e) => setAcademicYear(e.target.value)}
                   className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-indigo-500"
                 >
-                  <option value="2567">2567</option>
-                  <option value="2568">2568</option>
-                  <option value="2569">2569 (ปัจจุบัน)</option>
-                  <option value="2570">2570</option>
+                  <option value="">— ยังไม่ได้ตั้งค่า —</option>
+                  {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
               </div>
 
@@ -354,6 +303,7 @@ export function SystemSettingsAndLocksPage() {
                   onChange={(e) => setSemester(e.target.value)}
                   className="w-full bg-slate-950 border border-white/10 rounded-xl p-2.5 text-xs text-slate-200 outline-none focus:border-indigo-500"
                 >
+                  <option value="">— ยังไม่ได้ตั้งค่า —</option>
                   <option value="1">ภาคเรียนที่ 1</option>
                   <option value="2">ภาคเรียนที่ 2</option>
                   <option value="3">ภาคเรียนพิเศษ (ฤดูร้อน)</option>
@@ -361,6 +311,9 @@ export function SystemSettingsAndLocksPage() {
               </div>
             </div>
 
+            {!yearLoaded && (
+              <p className="text-[11px] text-amber-300">ยังไม่ได้ตั้งค่าปีการศึกษาปัจจุบันในระบบ — เลือกแล้วกดบันทึก</p>
+            )}
             <div className="flex justify-end pt-2">
               <button
                 type="button"
@@ -393,6 +346,9 @@ export function SystemSettingsAndLocksPage() {
               </h3>
               <span className="text-[10px] text-slate-500">ควบคุมความสมบูรณ์ในการปิดรับผลคะแนน</span>
             </div>
+            <p className="text-[11px] text-amber-300/90 bg-amber-500/5 border border-amber-500/20 rounded-xl px-3 py-2">
+              หมายเหตุ: ค่าในส่วนนี้ถูกบันทึกไว้แล้ว แต่ขณะนี้หน้ากรอกคะแนนของครูยังไม่ได้อ่านไปบังคับล็อกอัตโนมัติ
+            </p>
 
             <div className="space-y-4">
               {lockConfigs.map((config) => (
@@ -561,7 +517,7 @@ export function SystemSettingsAndLocksPage() {
             ))}
 
             {requests.length === 0 && (
-              <p className="text-xs text-slate-500 italic text-center py-8">ไม่มีคำร้องขอปลดล็อกสิทธิ์ย้อนหลัง</p>
+              <p className="text-xs text-slate-500 italic text-center py-8">ยังไม่มีคำร้องขอปลดล็อกสิทธิ์ย้อนหลัง (ฝั่งครูยังไม่มีหน้ายื่นคำร้องนี้)</p>
             )}
           </div>
         </div>
