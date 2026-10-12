@@ -156,7 +156,14 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
 
       <Section title="ข้อ 4 ที่อยู่ตามทะเบียนบ้าน" hint="ที่อยู่ปัจจุบันใช้ตามทะเบียนนักเรียนด้านบน">
         <label className="flex items-center gap-2 text-xs text-slate-200"><input type="checkbox" checked={form.registeredSameAsCurrent} onChange={e => set('registeredSameAsCurrent', e.target.checked)} /> ที่อยู่ตามทะเบียนบ้านเหมือนที่อยู่ปัจจุบัน</label>
-        {!form.registeredSameAsCurrent && <textarea className={cn2(inputCls, 'h-16 resize-none')} placeholder="เลขที่ หมู่ ตำบล อำเภอ จังหวัด รหัสไปรษณีย์" value={form.registeredAddress} onChange={e => set('registeredAddress', e.target.value)} />}
+        {!form.registeredSameAsCurrent && (
+          <div className="space-y-2" data-testid="registered-address">
+            {!form.registeredAddressStructured && form.registeredAddress.trim() && (
+              <div className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">ข้อมูลเดิม (พิมพ์เอง): {form.registeredAddress} — เลือกที่อยู่จากช่องด้านล่างเพื่อแทนที่ (ไม่บังคับ)</div>
+            )}
+            <AddressFields value={form.registeredAddressStructured} onChange={a => setForm(f => ({ ...f, registeredAddressStructured: a, registeredAddress: formatThaiAddress(a) }))} />
+          </div>
+        )}
       </Section>
 
       <Section title="ข้อ 9 พี่น้องที่อาศัยอยู่ในครัวเรือนเดียวกัน">

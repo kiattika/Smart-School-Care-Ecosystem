@@ -86,3 +86,27 @@ describe('guard: ฟอร์มนักเรียนใช้ AddressFields 
     expect(src).toMatch(/validateStudentInfo\(form, \{ centralAddress \}\)/);
   });
 });
+
+describe('ที่อยู่ตามทะเบียนบ้าน (ข้อ 4) แบบแยกช่อง', () => {
+  const full = (over: object = {}) => ({ ...emptyThaiAddress(), houseNo: '9', provinceCode: '53', province: 'อุตรดิตถ์', amphoeCode: '5301', amphoe: 'เมืองอุตรดิตถ์', tambonCode: '530101', tambon: 'ท่าอิฐ', postalCode: '53000', ...over });
+  const base = () => ({ ...emptyStudentInfo({ studentId: '10001', studentUid: 'u1', homeroomClass: 'ม.5/8' }), gender: 'ชาย', birthDate: '2010-01-01', nationality: 'ไทย', ethnicity: 'ไทย', religion: 'พุทธ', prevEducationLevel: 'มัธยมศึกษาตอนต้น', prevSchool: 'โรงเรียนทดสอบ' } as any);
+  const regErrors = (s: any) => validateStudentInfo(s, { centralAddress: '99 ม.1' }).filter(m => m.startsWith('ที่อยู่ตามทะเบียนบ้าน'));
+
+  it('เหมือนที่อยู่ปัจจุบัน → ไม่บังคับ', () => {
+    expect(regErrors({ ...base(), registeredSameAsCurrent: true })).toEqual([]);
+  });
+  it('ไม่เหมือน + ยังไม่กรอก → ต้องกรอกแยกช่อง; กรอกครบ → ผ่าน', () => {
+    expect(regErrors({ ...base(), registeredSameAsCurrent: false }).length).toBeGreaterThan(0);
+    expect(regErrors({ ...base(), registeredSameAsCurrent: false, registeredAddressStructured: full() })).toEqual([]);
+    expect(regErrors({ ...base(), registeredSameAsCurrent: false, registeredAddressStructured: full({ postalCode: '' }) }).length).toBeGreaterThan(0);
+  });
+  it('ข้อมูลเก่าที่พิมพ์เองไว้ (ไม่มี structured) ผ่านโดยไม่บังคับกรอกใหม่', () => {
+    expect(regErrors({ ...base(), registeredSameAsCurrent: false, registeredAddress: '12 ม.3 ต.ท่าอิฐ' })).toEqual([]);
+  });
+  it('ฟอร์มใช้ AddressFields และสร้างข้อความรวมใน registeredAddress ให้เสมอ', () => {
+    const src = readSource('src/components/homevisit/StudentHomeVisitInfoForm.tsx');
+    expect(src).toContain('data-testid="registered-address"');
+    expect(src).toMatch(/registeredAddressStructured: a, registeredAddress: formatThaiAddress\(a\)/);
+    expect(src).not.toMatch(/<textarea[^>]*registeredAddress/);
+  });
+});

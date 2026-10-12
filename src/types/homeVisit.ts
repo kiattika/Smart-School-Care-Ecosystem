@@ -83,6 +83,8 @@ export interface StudentHomeVisitInfo {
   registeredSameAsCurrent: boolean; registeredAddress: string;
   // ที่อยู่ปัจจุบันแบบแยกช่อง — นักเรียนกรอกเมื่อทะเบียนส่วนกลาง (students.homeLocation.address) ยังไม่มีที่อยู่; null = ยังไม่กรอก
   currentAddress?: ThaiAddress | null;
+  /** ที่อยู่ตามทะเบียนบ้านแบบแยกช่อง (ใช้เมื่อ registeredSameAsCurrent = false); registeredAddress เป็นข้อความรวมที่ระบบสร้างให้เสมอ — ข้อมูลเก่าที่พิมพ์เองมีแต่ registeredAddress */
+  registeredAddressStructured?: ThaiAddress | null;
   // ข้อ 9
   siblings: {
     onlyChild: boolean; birthOrder: number | null; totalSiblings: number | null;
