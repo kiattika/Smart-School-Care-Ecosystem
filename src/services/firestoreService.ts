@@ -29,6 +29,7 @@ import {
 } from '../lib/studentAttendanceStats';
 import { emptyShared, fillMissing, sharedFromAssessment, sharedFromInfo, sharedEqual, type SharedFields } from '../lib/homeVisitShared';
 import { emptyStudentInfo } from '../lib/homeVisitData';
+import { validateAppointmentForm, validateConfirmation, type AppointmentFormInput } from '../lib/appointmentFlow';
 import { countLeaveDays, initialLeaveStatus, validateLeaveForm, type LeaveSubmitterRole, type LeaveType } from '../lib/leaveFlow';
 import { diffCourseAttendance, computeCourseStatsMap } from '../lib/courseAttendanceStats';
 import type { AttendanceRecordFull } from '../lib/attendanceHistory';
@@ -1760,16 +1761,127 @@ export async function sendParentTeacherMessageFirestore(msg: ParentTeacherMessag
   }
 }
 
-export async function bookParentAppointmentFirestore(appointment: ParentAppointment): Promise<void> {
-  const collectionPath = 'parent_appointments';
+const APPOINTMENT_COL = 'parent_appointments';
+
+export interface CreateAppointmentInput {
+  student: { studentId: string; studentUid: string; parentUid?: string | null; room: string };
+  parent: { uid: string; name: string };
+  form: AppointmentFormInput;
+}
+
+/** ผู้ปกครองขอนัดพบครู — ตรวจฟอร์ม + ประทับ uid/ห้องจากข้อมูลนักเรียนจริง แล้วเขียน Firestore; throw ถ้าไม่สำเร็จ */
+export async function createAppointmentRequest(input: CreateAppointmentInput): Promise<ParentAppointment> {
+  const errs = validateAppointmentForm(input.form, format(new Date(), 'yyyy-MM-dd'));
+  if (errs.length > 0) throw new Error(errs.join(' / '));
+  const { student, parent, form } = input;
+  if (!student.studentUid) throw new Error('ยังไม่มีบัญชีนักเรียนที่เชื่อมกับรหัสนี้ — ติดต่อโรงเรียน');
+  if (!student.room) throw new Error('ไม่พบห้องเรียนของนักเรียน — ติดต่อโรงเรียน');
+  if (!student.parentUid || student.parentUid !== parent.uid) throw new Error('บัญชีผู้ปกครองยังไม่ได้เชื่อมกับนักเรียนคนนี้');
+  const ref = doc(collection(db, APPOINTMENT_COL));
+  const record: ParentAppointment = {
+    id: ref.id,
+    studentId: student.studentId,
+    studentUid: student.studentUid,
+    parentUid: parent.uid,
+    homeroomClass: student.room,
+    recipient: form.recipient as ParentAppointment['recipient'],
+    topic: form.topic.trim(),
+    preferredDate: form.preferredDate,
+    timeSlot: form.timeSlot,
+    meetingType: form.meetingType as ParentAppointment['meetingType'],
+    status: 'REQUESTED',
+    requestedBy: parent.name,
+    requestedAt: new Date().toISOString(),
+  };
   try {
-    const ref = doc(db, collectionPath, appointment.id);
-    await setDoc(ref, {
-      ...appointment,
-      createdAt: serverTimestamp()
-    }, { merge: true });
+    await setDoc(ref, { ...record, updatedAt: serverTimestamp() });
   } catch (error) {
-    console.warn('[bookParentAppointmentFirestore] Firestore notice:', error);
+    handleFirestoreError(error, OperationType.CREATE, `${APPOINTMENT_COL}/${ref.id}`);
+  }
+  return record;
+}
+
+/** ครูผู้รับ ตอบรับ (ต้องมีสถานที่/ลิงก์) หรือปฏิเสธ (ต้องมีเหตุผล) คำขอนัด */
+export async function respondAppointment(
+  appointmentId: string,
+  decision: 'CONFIRMED' | 'DECLINED',
+  responder: { name: string; staffId?: string },
+  detail: { meetingType: string; locationOrLink: string; teacherNote: string },
+): Promise<void> {
+  if (!responder.name) throw new Error('ไม่พบข้อมูลผู้ใช้ — เข้าสู่ระบบใหม่แล้วลองอีกครั้ง');
+  if (decision === 'CONFIRMED') {
+    const errs = validateConfirmation(detail.meetingType, detail.locationOrLink);
+    if (errs.length > 0) throw new Error(errs.join(' / '));
+  } else if (!detail.teacherNote.trim()) {
+    throw new Error('ระบุเหตุผลที่ไม่สะดวก เพื่อให้ผู้ปกครองขอนัดใหม่ได้ตรงเวลา');
+  }
+  try {
+    await updateDoc(doc(db, APPOINTMENT_COL, appointmentId), {
+      status: decision,
+      respondedBy: responder.name,
+      respondedByStaffId: responder.staffId || '',
+      respondedAt: new Date().toISOString(),
+      teacherNote: detail.teacherNote.trim(),
+      locationOrLink: decision === 'CONFIRMED' ? detail.locationOrLink.trim() : '',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${APPOINTMENT_COL}/${appointmentId}`);
+  }
+}
+
+/** ครูผู้รับปิดงาน "พบกันแล้ว" */
+export async function completeAppointment(appointmentId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, APPOINTMENT_COL, appointmentId), {
+      status: 'COMPLETED',
+      completedAt: new Date().toISOString(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${APPOINTMENT_COL}/${appointmentId}`);
+  }
+}
+
+/** ผู้ปกครองยกเลิกนัดที่ยังไม่จบ */
+export async function cancelAppointment(appointmentId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, APPOINTMENT_COL, appointmentId), {
+      status: 'CANCELLED',
+      cancelledAt: new Date().toISOString(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${APPOINTMENT_COL}/${appointmentId}`);
+  }
+}
+
+/**
+ * real-time นัดพบตามผู้ดู — ต้องส่งเงื่อนไขให้ตรง rules:
+ * ผู้ปกครอง (parentUid) / นักเรียน (studentUid) / ครูที่ปรึกษา (homeroomClass → กรอง recipient=HOMEROOM เอง) / ครูแนะแนว (recipient=GUIDANCE)
+ */
+export function subscribeAppointments(
+  onUpdate: (list: ParentAppointment[]) => void,
+  filter: { parentUid?: string; studentUid?: string; homeroomClass?: string; guidance?: boolean },
+): () => void {
+  let q;
+  if (filter.parentUid) q = query(collection(db, APPOINTMENT_COL), where('parentUid', '==', filter.parentUid));
+  else if (filter.studentUid) q = query(collection(db, APPOINTMENT_COL), where('studentUid', '==', filter.studentUid));
+  else if (filter.homeroomClass) q = query(collection(db, APPOINTMENT_COL), where('homeroomClass', '==', filter.homeroomClass), where('recipient', '==', 'HOMEROOM'));
+  else if (filter.guidance) q = query(collection(db, APPOINTMENT_COL), where('recipient', '==', 'GUIDANCE'));
+  else { onUpdate([]); return () => {}; }
+  try {
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ParentAppointment));
+      list.sort((a, b) => (b.requestedAt || '').localeCompare(a.requestedAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeAppointments] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeAppointments] setup error:', error);
+    return () => {};
   }
 }
 

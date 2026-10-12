@@ -34,13 +34,23 @@ describe('ParentEngagementServices ไม่สร้างการตอบก
   });
 });
 
-describe('store.bookParentAppointment', () => {
-  const src = readSource('src/store.ts');
-  const start = src.indexOf('bookParentAppointment: (apt) => {');
-  const body = src.slice(start, src.indexOf('addGPSCheckInLog', start));
-  it("สถานะเริ่มต้น = REQUESTED และไม่แนบลิงก์ประชุมปลอม", () => {
+describe('นัดพบครู (parent_appointments) เขียนจริงผ่านบริการ ไม่เก็บใน Zustand', () => {
+  it('store ไม่มีสถานะ/ฟังก์ชันนัดหมายแล้ว (ห้ามกลับไปเก็บใน store)', () => {
+    const src = readSource('src/store.ts');
+    expect(src).not.toMatch(/parentAppointments|bookParentAppointment/);
+  });
+  it('createAppointmentRequest เริ่มที่ REQUESTED, throw เมื่อเขียนไม่สำเร็จ, ไม่แนบลิงก์ประชุมปลอม', () => {
+    const src = readSource('src/services/firestoreService.ts');
+    const start = src.indexOf('export async function createAppointmentRequest');
+    const body = src.slice(start, src.indexOf('export async function respondAppointment', start));
     expect(body).toContain("status: 'REQUESTED'");
-    expect(body).not.toContain("'CONFIRMED'");
+    expect(body).toContain('handleFirestoreError(');
     expect(body).not.toContain('meet.google.com');
+    expect(body).not.toContain("'CONFIRMED'");
+  });
+  it('ฟอร์มผู้ปกครองรอผลเขียนจริงก่อนขึ้น "ส่งแล้ว"', () => {
+    const src = readSource('src/components/student-parent/ParentEngagementServices.tsx');
+    expect(src).toMatch(/await createAppointmentRequest\(/);
+    expect(src).not.toMatch(/bookParentAppointment/);
   });
 });
