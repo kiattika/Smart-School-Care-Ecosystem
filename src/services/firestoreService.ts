@@ -1123,7 +1123,9 @@ export async function saveSchoolGeofenceConfigFirestore(config: SchoolGeofenceCo
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch (error) {
+    // โยนต่อให้ UI แจ้งผู้ใช้ — เดิมกลืน error แล้วโชว์ "บันทึกสำเร็จ" ทั้งที่ไม่ได้บันทึก
     console.warn('[saveSchoolGeofenceConfigFirestore] Firestore notice:', error);
+    throw error;
   }
 }
 

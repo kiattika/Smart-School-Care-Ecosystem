@@ -1,6 +1,5 @@
 import { cn, isSameRoom } from "./lib/utils";
 import { Student } from "./types";
-import { MOCK_VISIT_DATA } from "./data/mockData";
 import React, { useState, useMemo } from 'react';
 import { useStore } from './store';
 import { useRealStudents } from "./hooks/useRealStudents";
@@ -28,14 +27,15 @@ import { recomputeCourseAttendanceStatsForRoom } from './services/firestoreServi
 import { useRoomAttendanceRecordsFull } from './hooks/useRoomAttendanceRecords';
 import { useTeacherFirestoreSchedule } from './hooks/useTeacherFirestoreSchedule';
 import { isScheduleForRoom } from './lib/studentDaySchedule';
+import { useStudentHomeLocations } from './hooks/useStudentHomeLocations';
+import { useSchoolGeofence } from './hooks/useSchoolGeofence';
+import { calculateHaversineDistance, formatDistance } from './utils/geoUtils';
 import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
 import { AdvisorGpsCheckInPanel } from './components/homevisit/AdvisorGpsCheckInPanel';
 import { AdvisorGateCheckInPanel } from './components/student-parent/AdvisorGateCheckInPanel';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 import { motion, AnimatePresence } from 'motion/react';
 
-
-// Mock Data for Home Visits
 
 export function AdvisorPortal() {
   const {
@@ -138,13 +138,14 @@ export function AdvisorPortal() {
   // สถิติรายนักเรียน (โหลด attendance_records เต็มรูปแบบเฉพาะตอนเปิดรายละเอียด)
   const [detailRange, setDetailRange] = useState(() => defaultAttendanceDateRange(30));
   const { schedules: fsSchedules } = useTeacherFirestoreSchedule();
+  const { byStudent: homeLocByStudent } = useStudentHomeLocations(myRoom || undefined);
+  const { config: geofenceConfig, configured: geofenceConfigured } = useSchoolGeofence();
   const { records: detailRecords, loading: detailLoading } = useRoomAttendanceRecordsFull(
     showWellnessModal && myRoom ? [myRoom] : [],
     detailRange,
   );
   const [showLineModal, setShowLineModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
-  const [routeGenerated, setRouteGenerated] = useState(false);
   
   type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
   const [reportForm, setReportForm] = useState({ condition: 3, notes: '', urgent: false, geoVerified: false, riskLevel: 'LOW' as RiskLevel, photoUploaded: false, checkingGPS: false });
@@ -161,11 +162,6 @@ export function AdvisorPortal() {
   
   const pendingLeaves = leaveRequests.filter(r => r.status === 'PENDING');
   
-  // Mock Class-Skipping Radar Data
-  const skippedStudents = [
-    { studentId: '54004', period: 'คาบ 3', subject: 'วิทยาศาสตร์', time: '10:30 น.' }
-  ];
-
   const handleStudentClick = (id: string) => {
     setSelectedStudentId(id);
     setShowWellnessModal(true);
@@ -264,52 +260,6 @@ export function AdvisorPortal() {
               {/* Column 1: Leave Requests & Radar */}
               <div className="lg:col-span-1 flex flex-col gap-6">
                 
-                {/* Radar */}
-                <div className="bg-[#1c1f2b] border border-white/10 rounded-xl overflow-hidden flex flex-col shadow-lg">
-                  <div className="p-4 border-b border-white/10 bg-rose-500/10 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <ShieldAlert className="w-5 h-5 text-rose-500" />
-                      <h2 className="font-bold text-rose-400">เรดาร์ตรวจจับการหนีเรียน</h2>
-                    </div>
-                    {skippedStudents.length > 0 && (
-                      <span className="relative flex h-3 w-3">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
-                      </span>
-                    )}
-                  </div>
-                  <div className="p-4 flex-1">
-                    {skippedStudents.length > 0 ? (
-                      <div className="space-y-3">
-                        {skippedStudents.map((skip, idx) => {
-                          const student = students.find(s => s.studentId === skip.studentId);
-                          return (
-                            <div key={idx} className="bg-rose-950/40 border border-rose-500/30 rounded-lg p-3 relative overflow-hidden">
-                              <div className="absolute top-0 right-0 w-1 h-full bg-rose-500"></div>
-                              <div className="flex justify-between items-start mb-2">
-                                <span className="font-bold text-slate-200">{student?.name}</span>
-                                <span className="text-[10px] bg-rose-500 text-white px-2 py-0.5 rounded font-medium">หนีเรียน</span>
-                              </div>
-                              <div className="text-xs text-slate-400 space-y-1.5">
-                                <div className="flex justify-between">
-                                  <span className="text-slate-500">สแกนเข้าโรงเรียน:</span> 
-                                  <span className="text-emerald-400 font-mono">07:30 น.</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-slate-500">เช็คขาด:</span> 
-                                  <span className="text-rose-400">{skip.period} ({skip.subject})</span>
-                                </div>
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8 text-slate-500 text-sm">ไม่มีความผิดปกติ</div>
-                    )}
-                  </div>
-                </div>
-
                 {/* Leave Requests Inbox */}
                 <div className="bg-[#1c1f2b] border border-white/10 rounded-xl overflow-hidden flex flex-col flex-1 shadow-lg">
                    <div className="p-4 border-b border-white/10 bg-slate-900/50 flex items-center justify-between">
@@ -483,116 +433,70 @@ export function AdvisorPortal() {
             <div className="bg-[#1c1f2b] border border-white/10 rounded-xl p-4">
               <AdvisorHomeLocationMap homeroomClass={myRoom} students={myStudents} />
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
-              {/* Left Column: Visit List */}
-              <div className="lg:col-span-1 flex flex-col gap-4 bg-[#1c1f2b] border border-white/10 rounded-xl p-4 overflow-y-auto">
-                <div className="flex justify-between items-center mb-2">
-                  <h2 className="font-bold text-emerald-400 flex items-center gap-2">
-                    <MapPin className="w-5 h-5" /> นัดหมายเยี่ยมบ้าน
-                  </h2>
-                  <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded font-bold">รอเยี่ยม 3 คน</span>
-                </div>
-                
-                {MOCK_VISIT_DATA.map((visit) => {
-                  const student = students.find(s => s.studentId === visit.studentId);
-                  if (!student) return null;
-                  
-                  const storeVisit = homeVisits.find(v => v.studentId === student.studentId);
-                  const isCompleted = storeVisit ? true : visit.visitStatus === 'COMPLETED';
-                  
-                  return (
-                    <div key={visit.studentId} className="bg-black/20 border border-white/5 rounded-xl p-4 hover:border-emerald-500/30 transition-all cursor-pointer" onClick={() => handleStudentClick(student.studentId)}>
-                      <div className="flex gap-3 mb-3">
-                        <img src={student.avatar} alt="" className="w-10 h-10 rounded-full" />
-                        <div>
-                          <h3 className="font-bold text-sm">{student.name}</h3>
-                          <p className="text-[10px] text-slate-400 flex items-center gap-1">
-                            <MapPin className="w-3 h-3" /> {visit.address} ({visit.distance})
-                          </p>
+            <div className="bg-[#1c1f2b] border border-white/10 rounded-xl p-4 flex flex-col gap-4">
+              <div className="flex justify-between items-center">
+                <h2 className="font-bold text-emerald-400 flex items-center gap-2">
+                  <MapPin className="w-5 h-5" /> เยี่ยมบ้านนักเรียนห้อง {myRoom || '-'}
+                </h2>
+                <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded font-bold">
+                  ยังไม่ได้บันทึกเยี่ยม {myStudents.filter(st => !homeVisits.some(v => v.studentId === st.studentId)).length} คน
+                </span>
+              </div>
+              {myStudents.length === 0 ? (
+                <div className="text-center py-8 text-slate-500 text-sm">ไม่พบนักเรียนในห้องที่ปรึกษา</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {myStudents.map((student) => {
+                    const hl = homeLocByStudent.get(student.studentId);
+                    const isCompleted = homeVisits.some(v => v.studentId === student.studentId);
+                    const distM = hl && geofenceConfigured ? calculateHaversineDistance(geofenceConfig.centerCoordinates, { latitude: hl.latitude, longitude: hl.longitude }) : null;
+                    return (
+                      <div key={student.studentId} className="bg-black/20 border border-white/5 rounded-xl p-4 hover:border-emerald-500/30 transition-all cursor-pointer" onClick={() => handleStudentClick(student.studentId)}>
+                        <div className="flex gap-3 mb-3">
+                          <img src={student.photoUrl || student.avatar} alt="" className="w-10 h-10 rounded-full object-cover" />
+                          <div className="min-w-0">
+                            <h3 className="font-bold text-sm truncate">{student.name}</h3>
+                            <p className="text-[10px] text-slate-400 flex items-center gap-1">
+                              <MapPin className="w-3 h-3 shrink-0" />
+                              {hl ? (distM !== null ? `ห่างโรงเรียน ${formatDistance(distM)} (เส้นตรง)` : 'บันทึกพิกัดบ้านแล้ว') : 'ยังไม่บันทึกพิกัดบ้าน'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <button
+                            onClick={(e) => handleLineClick(student.studentId, e)}
+                            className="col-span-1 bg-[#00B900]/10 hover:bg-[#00B900]/20 text-[#00B900] border border-[#00B900]/30 rounded-lg py-1.5 flex items-center justify-center gap-1 text-[10px] font-bold transition-colors"
+                          >
+                            <MessageCircle className="w-3 h-3" /> นัดหมาย
+                          </button>
+                          {hl ? (
+                            <a
+                              href={`https://www.google.com/maps/dir/?api=1&destination=${hl.latitude},${hl.longitude}`}
+                              target="_blank" rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="col-span-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-lg py-1.5 flex items-center justify-center gap-1 text-[10px] font-bold transition-colors"
+                            >
+                              <Navigation className="w-3 h-3" /> นำทาง
+                            </a>
+                          ) : (
+                            <button disabled title="นักเรียนยังไม่บันทึกพิกัดบ้าน" className="col-span-1 bg-white/5 text-slate-600 border border-white/5 rounded-lg py-1.5 flex items-center justify-center gap-1 text-[10px] font-bold cursor-not-allowed">
+                              <Navigation className="w-3 h-3" /> นำทาง
+                            </button>
+                          )}
+                          <button
+                            onClick={(e) => handleReportClick(student.studentId, e)}
+                            className={cn(
+                              "col-span-1 rounded-lg py-1.5 flex items-center justify-center gap-1 text-[10px] font-bold transition-colors border",
+                              isCompleted ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10"
+                            )}>
+                            <ClipboardList className="w-3 h-3" /> {isCompleted ? 'ดูบันทึก' : 'บันทึก'}
+                          </button>
                         </div>
                       </div>
-                      
-                      <div className="grid grid-cols-3 gap-2">
-                        <button 
-                          onClick={(e) => handleLineClick(student.studentId, e)}
-                          className="col-span-1 bg-[#00B900]/10 hover:bg-[#00B900]/20 text-[#00B900] border border-[#00B900]/30 rounded-lg py-1.5 flex items-center justify-center gap-1 text-[10px] font-bold transition-colors"
-                        >
-                          <MessageCircle className="w-3 h-3" /> นัดหมาย
-                        </button>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); /* Mock open maps */ }}
-                          className="col-span-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-lg py-1.5 flex items-center justify-center gap-1 text-[10px] font-bold transition-colors"
-                        >
-                          <Navigation className="w-3 h-3" /> นำทาง
-                        </button>
-                        <button 
-                          onClick={(e) => handleReportClick(student.studentId, e)}
-                          className={cn(
-                            "col-span-1 rounded-lg py-1.5 flex items-center justify-center gap-1 text-[10px] font-bold transition-colors border",
-                            isCompleted ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30" : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10"
-                   
-                         )}>
-                          <ClipboardList className="w-3 h-3" /> {isCompleted ? 'ดูบันทึก' : 'บันทึก'}
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* Right Column: Map Mockup & Routing */}
-              <div className="lg:col-span-2 flex flex-col gap-4">
-                <div className="bg-[#1c1f2b] border border-white/10 rounded-xl p-4 flex flex-col flex-1 relative overflow-hidden">
-                  <div className="flex justify-between items-center mb-4 relative z-10">
-                    <h2 className="font-bold text-white flex items-center gap-2">
-                      <MapIcon className="w-5 h-5 text-indigo-400" /> Map Clustering View
-                    </h2>
-                    <button 
-                      onClick={() => setRouteGenerated(true)}
-                      className={cn(
-                        "px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all shadow-lg",
-                        routeGenerated ? "bg-emerald-500 text-white shadow-emerald-500/20" : "bg-indigo-600 text-white hover:bg-indigo-500 shadow-indigo-600/20"
-               
-                      )}>
-                      <Route className="w-4 h-4" /> 
-                      {routeGenerated ? "สร้างเส้นทางแล้ว" : "Generate Best Route"}
-                    </button>
-                  </div>
-                  
-                  {/* Mock Map Area */}
-                  <div className="flex-1 bg-[#0f111a] border border-white/5 rounded-xl relative overflow-hidden flex items-center justify-center group">
-                    {/* Grid Pattern Background */}
-                    <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]"></div>
-                    
-                    {/* Route Line Mockup */}
-                    {routeGenerated && (
-                      <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                        <path d="M 200 150 Q 350 100 450 250 T 600 350" fill="none" stroke="#6366f1" strokeWidth="4" strokeDasharray="8 8" className="animate-pulse" />
-                      </svg>
-                    )}
-
-                    {/* Mock Map Pins */}
-                    <div className="absolute top-[30%] left-[25%] flex flex-col items-center">
-                      <div className="w-10 h-10 bg-indigo-500/20 border-2 border-indigo-500 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-[0_0_15px_rgba(99,102,241,0.5)]">
-                        2
-                      </div>
-                      <span className="text-[10px] text-slate-400 mt-1 font-bold bg-black/50 px-2 py-0.5 rounded">Area A</span>
-                    </div>
-
-                    <div className="absolute top-[60%] right-[30%] flex flex-col items-center">
-                      <div className="w-10 h-10 bg-emerald-500/20 border-2 border-emerald-500 rounded-full flex items-center justify-center text-white font-bold text-xs shadow-[0_0_15px_rgba(16,185,129,0.5)]">
-                        1
-                      </div>
-                      <span className="text-[10px] text-slate-400 mt-1 font-bold bg-black/50 px-2 py-0.5 rounded">Area B</span>
-                    </div>
-
-                    <div className="text-slate-500 font-medium z-10 flex flex-col items-center gap-2 opacity-50 group-hover:opacity-100 transition-opacity">
-                      <MapIcon className="w-8 h-8" />
-                      <span>Interactive map requires integration</span>
-                    </div>
-                  </div>
+                    );
+                  })}
                 </div>
-              </div>
+              )}
             </div>
             </div>
 
@@ -1400,47 +1304,31 @@ export function AdvisorPortal() {
                  </div>
                </div>
 
-               {/* Simulated Interactive Map Display */}
-               <div className="bg-[#0f111a] border border-white/10 rounded-xl h-48 sm:h-56 relative overflow-hidden flex items-center justify-center">
-                 <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808015_1px,transparent_1px),linear-gradient(to_bottom,#80808015_1px,transparent_1px)] bg-[size:20px_20px]"></div>
-                 
-                 {/* Commute route line */}
-                 <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                   <path d="M 60 140 Q 150 50 250 110 T 380 60" fill="none" stroke="#6366f1" strokeWidth="3" strokeDasharray="6 6" className="animate-pulse" />
-                 </svg>
-
-                 {/* School Marker */}
-                 <div className="absolute top-[30%] right-[15%] flex flex-col items-center">
-                   <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg shadow-indigo-500/50">
-                     รร
+               {/* ระยะทางจริงจากพิกัดโรงเรียน (ตั้งค่าโดยผู้ดูแล) ถึงพิกัดบ้านที่นักเรียนบันทึก */}
+               {(() => {
+                 const hl = homeLocByStudent.get(routeModalStudent.studentId);
+                 if (!hl) {
+                   return <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">นักเรียนคนนี้ยังไม่ได้บันทึกพิกัดบ้าน จึงยังแสดงตำแหน่ง/ระยะทางไม่ได้</div>;
+                 }
+                 const dist = geofenceConfigured ? calculateHaversineDistance(geofenceConfig.centerCoordinates, { latitude: hl.latitude, longitude: hl.longitude }) : null;
+                 return (
+                   <div className="grid grid-cols-2 gap-3 text-xs">
+                     <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+                       <span className="text-slate-400 block mb-1">ระยะทางเส้นตรงจากโรงเรียน</span>
+                       <span className="text-sm font-bold text-white">{dist !== null ? formatDistance(dist) : 'ยังไม่ได้ตั้งพิกัดโรงเรียน'}</span>
+                     </div>
+                     <div className="bg-white/5 border border-white/10 rounded-xl p-3">
+                       <span className="text-slate-400 block mb-1">พิกัดบ้าน</span>
+                       <span className="text-[11px] font-mono text-indigo-300">{hl.latitude.toFixed(5)}, {hl.longitude.toFixed(5)}</span>
+                       <span className="text-[10px] text-slate-500 block mt-0.5">บันทึกเมื่อ {new Date(hl.capturedAt).toLocaleDateString('th-TH')}</span>
+                     </div>
                    </div>
-                   <span className="text-[10px] bg-black/70 text-indigo-300 font-bold px-1.5 py-0.5 rounded mt-1">โรงเรียน</span>
-                 </div>
-
-                 {/* Home Marker */}
-                 <div className="absolute bottom-[20%] left-[15%] flex flex-col items-center">
-                   <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-lg shadow-emerald-500/50">
-                     <Home className="w-4 h-4" />
-                   </div>
-                   <span className="text-[10px] bg-black/70 text-emerald-300 font-bold px-1.5 py-0.5 rounded mt-1">บ้านนักเรียน</span>
-                 </div>
-               </div>
-
-               {/* Route Details */}
-               <div className="grid grid-cols-2 gap-3 text-xs">
-                 <div className="bg-white/5 border border-white/10 rounded-xl p-3">
-                   <span className="text-slate-400 block mb-1">ระยะทางโดยประมาณ</span>
-                   <span className="text-sm font-bold text-white">~ 3.2 กิโลเมตร</span>
-                 </div>
-                 <div className="bg-white/5 border border-white/10 rounded-xl p-3">
-                   <span className="text-slate-400 block mb-1">พาหนะหลัก</span>
-                   <span className="text-sm font-bold text-indigo-400">รถรับส่งนักเรียน / มอเตอร์ไซค์</span>
-                 </div>
-               </div>
+                 );
+               })()}
 
                <div className="pt-2 flex gap-2">
                  <a
-                   href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(routeModalStudent.homeLocation?.address || 'โรงเรียน')}`}
+                   href={(() => { const hl = homeLocByStudent.get(routeModalStudent.studentId); return hl ? `https://www.google.com/maps/dir/?api=1&destination=${hl.latitude},${hl.longitude}` : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(routeModalStudent.homeLocation?.address || '')}`; })()}
                    target="_blank"
                    rel="noreferrer"
                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all text-center flex items-center justify-center gap-1.5 shadow-md"

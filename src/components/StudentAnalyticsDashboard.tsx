@@ -35,6 +35,8 @@ import {
   Info
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { attendanceStatsFromCounts, defaultAttendanceDateRange } from '../lib/studentAttendanceStats';
+import { useRoomAttendanceRecordsFull } from '../hooks/useRoomAttendanceRecords';
 
 interface StudentAnalyticsDashboardProps {
   roomName: string;
@@ -45,87 +47,48 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
   const { studentScores } = useStore();
   const [selectedInsightTab, setSelectedInsightTab] = useState<'all' | 'risk' | 'outstanding'>('all');
 
-  // 1. Process Grade & Performance Data
+  // 1. ข้อมูลจริงเท่านั้น: การเข้าเรียน = ยอดสะสม students/{id}.attendanceStats, ความประพฤติ = behaviorScore,
+  //    เกรด = studentScores ที่มีจริง (ไม่มี = null ไม่สร้างเกรดสุ่ม/ปลอม)
   const processedStudentsData = useMemo(() => {
-    return students.map((student, idx) => {
-      // FIX (Task 0): behaviorScore เดิมอ่านจาก StudentAnalytics (session-local store, ว่างเปล่าเสมอ
-      // เสมอ — analytics.find() ที่นี่ไม่เคยเจอจริง) ตอนนี้อ่านจาก student.behaviorScore ของจริง
-      // (มาจาก students/{id} ผ่าน useRealStudents() ที่ผู้เรียกส่ง prop `students` เข้ามา)
-      // subjectAttendanceRate ยังเป็นค่าจำลอง 90 คงที่ (ไม่ได้แก้ในรอบนี้ — อยู่นอกขอบเขต Task 0
-      // ซึ่งจำกัดเฉพาะ behaviorScore, สถิติการเข้าเรียนจริงอยู่ใน Task 1-2)
-      const studentAnalytic = {
-        studentId: student.studentId,
-        subjectAttendanceRate: 90,
-        behaviorScore: student.behaviorScore ?? 100
-      };
-
-      // Retrieve or compute grades
+    return students.map((student) => {
       const storeScores = studentScores.filter(s => s.studentId === student.studentId);
-      let totalScore = 0;
-      let grade = '3.0';
-      
+      let totalScore: number | null = null;
+      let rawGrade: number | null = null;
       if (storeScores.length > 0) {
         totalScore = storeScores.reduce((sum, s) => sum + s.total, 0) / storeScores.length;
-        const avgGradeNum = storeScores.reduce((sum, s) => sum + parseFloat(s.grade || '0'), 0) / storeScores.length;
-        grade = avgGradeNum.toFixed(1);
-      } else {
-        // Deterministic beautiful fallback grade distribution based on studentId/No
-        const seed = parseInt(student.studentId) || student.studentNo || (idx + 1);
-        const hash = (seed * 16807) % 2147483647;
-        const scoreBase = 55 + (hash % 41); // 55 - 95
-        totalScore = scoreBase;
-        
-        if (scoreBase >= 80) grade = '4.0';
-        else if (scoreBase >= 75) grade = '3.5';
-        else if (scoreBase >= 70) grade = '3.0';
-        else if (scoreBase >= 65) grade = '2.5';
-        else if (scoreBase >= 60) grade = '2.0';
-        else if (scoreBase >= 55) grade = '1.5';
-        else if (scoreBase >= 50) grade = '1.0';
-        else grade = '0.0';
+        rawGrade = storeScores.reduce((sum, s) => sum + parseFloat(s.grade || '0'), 0) / storeScores.length;
       }
 
-      const behavior = studentAnalytic.behaviorScore;
-      
-      // Calculate dynamic current daily attendance impact
-      let currentDayRate = 100;
-      if (student.attendance.morningStatus === 'ABSENT') {
-        currentDayRate = 0;
-      } else if (student.attendance.morningStatus === 'LATE') {
-        currentDayRate = 80;
-      } else if (student.attendance.morningStatus === 'LEAVE') {
-        currentDayRate = 90;
-      }
-
-      const overallAttendance = Math.round((studentAnalytic.subjectAttendanceRate * 0.9) + (currentDayRate * 0.1));
+      const behavior = student.behaviorScore ?? null;
+      const st = attendanceStatsFromCounts(student.studentId, student.attendanceStats);
+      // ยังไม่เคยเช็คชื่อเลย = ไม่มีข้อมูล (ไม่ใช่ 0% และไม่ใช่ 100%)
+      const overallAttendance: number | null = st.attendanceRate !== null ? Math.round(st.attendanceRate) : null;
 
       return {
         ...student,
         behaviorScore: behavior,
         overallAttendance,
-        rawGrade: parseFloat(grade),
-        gradeLabel: grade,
+        rawGrade,
+        gradeLabel: rawGrade !== null ? rawGrade.toFixed(1) : '-',
         totalScore,
-        isAtRisk: overallAttendance < 80 || behavior < 75 || parseFloat(grade) < 2.0
+        isAtRisk: (overallAttendance !== null && overallAttendance < 80) || (behavior !== null && behavior < 75) || (rawGrade !== null && rawGrade < 2.0)
       };
     });
   }, [students, studentScores]);
 
-  // 2. Class KPIs
+  // 2. Class KPIs (เฉลี่ยเฉพาะคนที่มีข้อมูลจริง)
   const classKPIs = useMemo(() => {
-    const totalCount = processedStudentsData.length;
-    if (totalCount === 0) return { avgGPA: '0.00', avgAttendance: 0, avgBehavior: 0, atRiskCount: 0 };
-
-    const sumGPA = processedStudentsData.reduce((sum, s) => sum + s.rawGrade, 0);
-    const sumAttendance = processedStudentsData.reduce((sum, s) => sum + s.overallAttendance, 0);
-    const sumBehavior = processedStudentsData.reduce((sum, s) => sum + s.behaviorScore, 0);
-    const atRiskCount = processedStudentsData.filter(s => s.isAtRisk).length;
-
+    const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+    const gpas = processedStudentsData.map(s => s.rawGrade).filter((x): x is number => x !== null);
+    const atts = processedStudentsData.map(s => s.overallAttendance).filter((x): x is number => x !== null);
+    const behs = processedStudentsData.map(s => s.behaviorScore).filter((x): x is number => x !== null);
+    const g = avg(gpas), a = avg(atts), b = avg(behs);
     return {
-      avgGPA: (sumGPA / totalCount).toFixed(2),
-      avgAttendance: Math.round(sumAttendance / totalCount),
-      avgBehavior: Math.round(sumBehavior / totalCount),
-      atRiskCount
+      avgGPA: g !== null ? g.toFixed(2) : '-',
+      avgAttendance: a !== null ? Math.round(a) : null,
+      avgBehavior: b !== null ? Math.round(b) : null,
+      atRiskCount: processedStudentsData.filter(s => s.isAtRisk).length,
+      hasGrades: gpas.length > 0,
     };
   }, [processedStudentsData]);
 
@@ -136,6 +99,7 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
 
     processedStudentsData.forEach(s => {
       // Find closest grade bracket
+      if (s.rawGrade === null) return;
       const val = s.rawGrade;
       let bracket = '3.0';
       if (val >= 4.0) bracket = '4.0';
@@ -157,31 +121,32 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
     }));
   }, [processedStudentsData]);
 
-  // 4. Dynamic Real-time Attendance Trends (Week 1 - Week 8 + Current Day dynamic info)
+  // 4. เทรนด์รายสัปดาห์จาก attendance_records จริง 8 สัปดาห์ล่าสุด (สัปดาห์ที่ไม่มีการเช็คชื่อ = ไม่มีจุดข้อมูล)
+  const trendRange = useMemo(() => defaultAttendanceDateRange(56), []);
+  const { records: trendRecords } = useRoomAttendanceRecordsFull(roomName && roomName !== 'No Room' ? [roomName] : [], trendRange);
   const attendanceTrendData = useMemo(() => {
-    // Current live status percentages
-    const totalCount = students.length || 1;
-    const presentCount = students.filter(s => s.attendance.morningStatus === 'PRESENT').length;
-    const lateCount = students.filter(s => s.attendance.morningStatus === 'LATE').length;
-    const leaveCount = students.filter(s => s.attendance.morningStatus === 'LEAVE').length;
-    const absentCount = students.filter(s => s.attendance.morningStatus === 'ABSENT').length;
+    const ids = new Set(students.map(s => s.studentId));
+    const endMs = new Date(trendRange.end + 'T00:00:00').getTime();
+    const weeks = Array.from({ length: 8 }, () => ({ present: 0, late: 0, off: 0 }));
+    for (const rec of trendRecords) {
+      const wk = Math.floor((endMs - new Date(rec.date + 'T00:00:00').getTime()) / (7 * 86400000));
+      if (wk < 0 || wk > 7) continue;
+      const bucket = weeks[7 - wk];
+      for (const [sid, st] of Object.entries(rec.students || {})) {
+        if (!ids.has(sid)) continue;
+        if (st === 'PRESENT') bucket.present++;
+        else if (st === 'LATE') bucket.late++;
+        else if (st === 'ABSENT' || st === 'LEAVE') bucket.off++;
+      }
+    }
+    return weeks.map((w, i) => {
+      const t = w.present + w.late + w.off;
+      const pct = (n: number) => (t ? Math.round((n / t) * 100) : null);
+      return { name: `สัปดาห์ ${i + 1}`, 'มาเรียนปกติ': pct(w.present), 'มาสาย': pct(w.late), 'ขาด/ลา': pct(w.off) };
+    });
+  }, [trendRecords, students, trendRange]);
 
-    const livePresentPct = Math.round((presentCount / totalCount) * 100);
-    const liveLatePct = Math.round((lateCount / totalCount) * 100);
-    const liveAbsentPct = Math.round(((absentCount + leaveCount) / totalCount) * 100);
-
-    // Baseline historical trends
-    return [
-      { name: 'สัปดาห์ 1', 'มาเรียนปกติ': 95, 'มาสาย': 3, 'ขาด/ลา': 2 },
-      { name: 'สัปดาห์ 2', 'มาเรียนปกติ': 94, 'มาสาย': 4, 'ขาด/ลา': 2 },
-      { name: 'สัปดาห์ 3', 'มาเรียนปกติ': 92, 'มาสาย': 5, 'ขาด/ลา': 3 },
-      { name: 'สัปดาห์ 4', 'มาเรียนปกติ': 96, 'มาสาย': 2, 'ขาด/ลา': 2 },
-      { name: 'สัปดาห์ 5', 'มาเรียนปกติ': 95, 'มาสาย': 3, 'ขาด/ลา': 2 },
-      { name: 'สัปดาห์ 6', 'มาเรียนปกติ': 93, 'มาสาย': 4, 'ขาด/ลา': 3 },
-      { name: 'สัปดาห์ 7', 'มาเรียนปกติ': 96, 'มาสาย': 2, 'ขาด/ลา': 2 },
-      { name: 'สัปดาห์ 8', 'มาเรียนปกติ': livePresentPct, 'มาสาย': liveLatePct, 'ขาด/ลา': liveAbsentPct },
-    ];
-  }, [students]);
+  const scatterData = useMemo(() => processedStudentsData.filter(s => s.behaviorScore !== null && s.overallAttendance !== null), [processedStudentsData]);
 
   // Grade category colors
   const getGradeBarColor = (gradeLabel: string) => {
@@ -198,9 +163,9 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
     if (selectedInsightTab === 'risk') {
       list = list.filter(s => s.isAtRisk);
     } else if (selectedInsightTab === 'outstanding') {
-      list = list.filter(s => s.rawGrade >= 3.5);
+      list = list.filter(s => s.rawGrade !== null && s.rawGrade >= 3.5);
     }
-    return list.sort((a, b) => b.totalScore - a.totalScore);
+    return list.sort((a, b) => (b.totalScore ?? -1) - (a.totalScore ?? -1));
   }, [processedStudentsData, selectedInsightTab]);
 
   const containerVariants = {
@@ -274,9 +239,9 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
             <span className="text-xl md:text-2xl font-bold text-white leading-none block mt-1">
               {classKPIs.avgGPA}
             </span>
-            <span className="text-[10px] text-indigo-400 font-bold flex items-center gap-0.5 mt-1">
-              <TrendingUp className="w-3 h-3" /> เพิ่มขึ้น 0.12 จากเทอมก่อน
-            </span>
+            {!classKPIs.hasGrades && (
+              <span className="text-[10px] text-slate-500 flex items-center gap-0.5 mt-1">ยังไม่มีข้อมูลผลการเรียนในระบบ</span>
+            )}
           </div>
         </motion.div>
 
@@ -288,11 +253,9 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
           <div className="min-w-0">
             <span className="text-[11px] text-slate-400 block font-medium">อัตราการเข้าเรียนเฉลี่ย</span>
             <span className="text-xl md:text-2xl font-bold text-white leading-none block mt-1">
-              {classKPIs.avgAttendance}%
+              {classKPIs.avgAttendance !== null ? `${classKPIs.avgAttendance}%` : '-'}
             </span>
-            <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-0.5 mt-1">
-              <Activity className="w-3 h-3" /> รักษาระดับเกณฑ์ดีเยี่ยม
-            </span>
+            <span className="text-[10px] text-slate-500 flex items-center gap-0.5 mt-1">ยอดสะสมจากการเช็คชื่อจริง</span>
           </div>
         </motion.div>
 
@@ -304,11 +267,9 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
           <div className="min-w-0">
             <span className="text-[11px] text-slate-400 block font-medium">คะแนนความประพฤติเฉลี่ย</span>
             <span className="text-xl md:text-2xl font-bold text-white leading-none block mt-1">
-              {classKPIs.avgBehavior} <span className="text-xs font-normal text-slate-400">/ 100</span>
+              {classKPIs.avgBehavior ?? '-'} <span className="text-xs font-normal text-slate-400">/ 100</span>
             </span>
-            <span className="text-[10px] text-purple-400 font-bold flex items-center gap-0.5 mt-1">
-              <Info className="w-3 h-3" /> หักคะแนนเฉลี่ยต่ำสุดในระดับชั้น
-            </span>
+            <span className="text-[10px] text-slate-500 flex items-center gap-0.5 mt-1">จากคะแนนความประพฤติของนักเรียน</span>
           </div>
         </motion.div>
 
@@ -322,9 +283,7 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
             <span className="text-xl md:text-2xl font-bold text-rose-400 leading-none block mt-1">
               {classKPIs.atRiskCount} <span className="text-xs font-normal text-slate-400">คน</span>
             </span>
-            <span className="text-[10px] text-rose-400 font-bold flex items-center gap-0.5 mt-1">
-              <ShieldAlert className="w-3 h-3" /> แนะนำลงพื้นที่เยี่ยมบ้านด่วน
-            </span>
+            <span className="text-[10px] text-slate-500 flex items-center gap-0.5 mt-1">เข้าเรียน &lt;80% หรือความประพฤติ &lt;75 หรือเกรด &lt;2.0</span>
           </div>
         </motion.div>
       </motion.div>
@@ -342,14 +301,14 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
           <div className="flex justify-between items-center mb-4">
             <div>
               <h3 className="font-bold text-white text-base">เทรนด์การเช็คชื่อเข้าชั้นเรียนและโฮมรูม</h3>
-              <p className="text-slate-400 text-xs mt-0.5">ข้อมูลสะสมรายสัปดาห์ (สัปดาห์ที่ 8 คำนวณเรียลไทม์ตามสถานะล่าสุดวันนี้)</p>
+              <p className="text-slate-400 text-xs mt-0.5">สัดส่วนจากบันทึกการเช็คชื่อจริง 8 สัปดาห์ล่าสุด (สัปดาห์ที่ไม่มีการเช็คชื่อจะไม่มีข้อมูล)</p>
             </div>
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
           </div>
           
           <div className="h-[300px] w-full flex-1 min-h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={attendanceTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <AreaChart data={attendanceTrendData as any[]} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorPresent" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
@@ -386,12 +345,15 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
           <div className="flex justify-between items-center mb-4">
             <div>
               <h3 className="font-bold text-white text-base">สัดส่วนผลสัมฤทธิ์ทางการเรียนห้อง {roomName}</h3>
-              <p className="text-slate-400 text-xs mt-0.5">การกระจายตัวของเกรดวิชาการเทอมปัจจุบัน (อิงตามข้อมูลประมวลผลปลายภาคเรียน)</p>
+              <p className="text-slate-400 text-xs mt-0.5">การกระจายตัวของเกรดเฉลี่ยจากผลการเรียนที่บันทึกในระบบ</p>
             </div>
             <BookOpen className="w-5 h-5 text-indigo-400" />
           </div>
 
           <div className="h-[300px] w-full flex-1 min-h-[300px]">
+            {!classKPIs.hasGrades ? (
+              <div className="h-full flex items-center justify-center text-slate-500 text-sm text-center px-6">ยังไม่มีข้อมูลผลการเรียนของนักเรียนห้องนี้ในระบบ</div>
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={gradeDistributionData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2a2e3f" vertical={false} />
@@ -411,6 +373,7 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         </motion.div>
       </div>
@@ -461,13 +424,13 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
                 />
                 <Scatter 
                   name="นักเรียนในห้อง" 
-                  data={processedStudentsData} 
+                  data={scatterData} 
                   fill="#6366f1"
                 >
-                  {processedStudentsData.map((entry, index) => (
+                  {scatterData.map((entry, index) => (
                     <Cell 
                       key={`cell-${index}`} 
-                      fill={entry.isAtRisk ? '#f43f5e' : entry.rawGrade >= 3.5 ? '#10b981' : '#6366f1'} 
+                      fill={entry.isAtRisk ? '#f43f5e' : entry.rawGrade !== null && entry.rawGrade >= 3.5 ? '#10b981' : '#6366f1'} 
                       r={entry.isAtRisk ? 8 : 6}
                     />
                   ))}
@@ -521,7 +484,7 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
                 onClick={() => setSelectedInsightTab('outstanding')}
                 className={cn("px-3 py-1.5 rounded-md transition-all relative", selectedInsightTab === 'outstanding' ? "bg-emerald-500/20 text-emerald-400" : "text-slate-400 hover:text-slate-200")}
               >
-                ผลงานเด่น ({processedStudentsData.filter(s => s.rawGrade >= 3.5).length})
+                ผลงานเด่น ({processedStudentsData.filter(s => s.rawGrade !== null && s.rawGrade >= 3.5).length})
               </button>
             </div>
           </div>
@@ -549,8 +512,8 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
                             <span>ID: {student.studentId}</span>
                             <span>•</span>
                             <span className={cn(
-                              student.behaviorScore >= 80 ? "text-slate-400" : "text-amber-400 font-semibold"
-                            )}>พฤติกรรม: {student.behaviorScore}</span>
+                              (student.behaviorScore ?? 100) >= 80 ? "text-slate-400" : "text-amber-400 font-semibold"
+                            )}>พฤติกรรม: {student.behaviorScore ?? '-'}</span>
                           </div>
                         </div>
                       </div>
@@ -560,9 +523,9 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
                           <div className="text-[10px] text-slate-400">อัตราเข้าเรียน</div>
                           <div className={cn(
                             "font-mono font-bold text-xs",
-                            student.overallAttendance >= 90 ? "text-emerald-400" : student.overallAttendance >= 80 ? "text-amber-400" : "text-rose-400"
+                            student.overallAttendance === null ? "text-slate-500" : student.overallAttendance >= 90 ? "text-emerald-400" : student.overallAttendance >= 80 ? "text-amber-400" : "text-rose-400"
                           )}>
-                            {student.overallAttendance}%
+                            {student.overallAttendance !== null ? `${student.overallAttendance}%` : '-'}
                           </div>
                         </div>
 
@@ -570,7 +533,7 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
                           <div className="text-[10px] text-slate-400">เกรดเฉลี่ย</div>
                           <div className={cn(
                             "font-bold text-sm",
-                            student.rawGrade >= 3.5 ? "text-emerald-400" : student.rawGrade >= 2.0 ? "text-slate-200" : "text-rose-400"
+                            student.rawGrade === null ? "text-slate-500" : student.rawGrade >= 3.5 ? "text-emerald-400" : student.rawGrade >= 2.0 ? "text-slate-200" : "text-rose-400"
                           )}>
                             {student.gradeLabel}
                           </div>
@@ -581,7 +544,7 @@ export function StudentAnalyticsDashboard({ roomName, students }: StudentAnalyti
                             <span className="text-[10px] bg-rose-500/15 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded font-bold">
                               ควรช่วยเหลือ
                             </span>
-                          ) : student.rawGrade >= 3.5 ? (
+                          ) : student.rawGrade !== null && student.rawGrade >= 3.5 ? (
                             <span className="text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-bold">
                               เกียรติคุณ
                             </span>
