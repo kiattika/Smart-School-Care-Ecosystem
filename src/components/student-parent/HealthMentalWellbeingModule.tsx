@@ -131,7 +131,9 @@ function HealthMentalWellbeingModuleInner({
   const [saved2QSuccess, setSaved2QSuccess] = useState(false);
 
   // SDQ Interactive Form State
-  const [sdqEvaluator, setSdqEvaluator] = useState<'STUDENT' | 'PARENT' | 'TEACHER'>(isParentView ? 'PARENT' : 'STUDENT');
+  // ผู้กรอกกรอกได้เฉพาะมุมมองของตัวเอง: หน้านักเรียน = STUDENT, หน้าผู้ปกครอง = PARENT เท่านั้น
+  // (ครูที่ปรึกษากรอกมุมมอง TEACHER ที่ AdvisorSdqPanel) — rules บังคับซ้ำที่ฝั่งเซิร์ฟเวอร์
+  const sdqEvaluator: 'STUDENT' | 'PARENT' = isParentView ? 'PARENT' : 'STUDENT';
   // ช่องกรอกคะแนนรายด้านเริ่มว่าง (เดิมตั้งค่าคงที่ 2/1/2/1/9 แล้วบันทึกลง Firestore ทันทีที่กดปุ่ม = ข้อมูลปลอม)
   const [sdqAnswers, setSdqAnswers] = useState<SdqAnswers>(EMPTY_SDQ_ANSWERS);
   const [sdqImpact, setSdqImpact] = useState<ImpactFormValues>(EMPTY_IMPACT_FORM);
@@ -658,31 +660,13 @@ function HealthMentalWellbeingModuleInner({
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setSdqEvaluator('STUDENT')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                    sdqEvaluator === 'STUDENT' ? 'bg-purple-500/20 border-purple-500 text-purple-300' : 'bg-slate-800 text-slate-400'
-                  }`}
-                >
-                  นักเรียน
-                </button>
-                <button
-                  onClick={() => setSdqEvaluator('TEACHER')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                    sdqEvaluator === 'TEACHER' ? 'bg-purple-500/20 border-purple-500 text-purple-300' : 'bg-slate-800 text-slate-400'
-                  }`}
-                >
-                  ครูประจำชั้น
-                </button>
-                <button
-                  onClick={() => setSdqEvaluator('PARENT')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-                    sdqEvaluator === 'PARENT' ? 'bg-purple-500/20 border-purple-500 text-purple-300' : 'bg-slate-800 text-slate-400'
-                  }`}
-                >
-                  ผู้ปกครอง
-                </button>
+              <div className="flex items-center gap-2" data-testid="sdq-own-role">
+                <span className="px-3 py-1.5 rounded-xl text-xs font-semibold border bg-purple-500/20 border-purple-500 text-purple-300">
+                  {isParentView ? 'ผู้ปกครอง (กรอกโดยท่าน)' : 'นักเรียน (ประเมินตนเอง)'}
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  {isParentView ? 'มุมมองนักเรียนและครูประจำชั้นกรอกโดยบุคคลนั้นๆ' : 'มุมมองครูประจำชั้นและผู้ปกครองกรอกโดยบุคคลนั้นๆ'}
+                </span>
               </div>
             </div>
 

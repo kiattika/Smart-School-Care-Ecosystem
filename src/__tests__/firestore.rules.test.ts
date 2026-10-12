@@ -1873,6 +1873,22 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         ));
       });
 
+      it('ROLE-BOUND: ผู้กรอกกรอกได้เฉพาะมุมมองของตัวเอง (นักเรียน→STUDENT, ผู้ปกครอง→PARENT, ครูที่ปรึกษา→TEACHER)', async () => {
+        await seed();
+        const stu = () => asUser(STU_UID, ['STUDENT']).firestore();
+        const par = () => asUser(PARENT_UID, ['PARENT']).firestore();
+        const hr = () => asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore();
+        // นักเรียนกรอกแทนครู/ผู้ปกครองไม่ได้
+        await assertFails(stu().doc(sdqPath('TEACHER')).set(sdqDoc({ respondentUid: STU_UID, evaluatorType: 'TEACHER' })));
+        await assertFails(stu().doc(sdqPath('PARENT')).set(sdqDoc({ respondentUid: STU_UID, evaluatorType: 'PARENT' })));
+        // ผู้ปกครองกรอกแทนนักเรียน/ครูไม่ได้
+        await assertFails(par().doc(sdqPath('STUDENT')).set(sdqDoc({ respondentUid: PARENT_UID, evaluatorType: 'STUDENT' })));
+        await assertFails(par().doc(sdqPath('TEACHER')).set(sdqDoc({ respondentUid: PARENT_UID, evaluatorType: 'TEACHER' })));
+        // ครูที่ปรึกษากรอกแทนนักเรียน/ผู้ปกครองไม่ได้
+        await assertFails(hr().doc(sdqPath('STUDENT')).set(sdqDoc({ respondentUid: HR_TEACHER_UID, evaluatorType: 'STUDENT' })));
+        await assertFails(hr().doc(sdqPath('PARENT')).set(sdqDoc({ respondentUid: HR_TEACHER_UID, evaluatorType: 'PARENT' })));
+      });
+
       it('denies a SUBJECT_TEACHER (not a homeroom teacher at all) from creating', async () => {
         await seed();
         await assertFails(asRole('SUBJECT_TEACHER').firestore().doc(sdqPath('TEACHER')).set(

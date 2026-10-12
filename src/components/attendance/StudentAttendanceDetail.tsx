@@ -115,7 +115,12 @@ export function StudentAttendanceDetail({ studentId, records, schedules, range, 
               <div key={r.key} className="flex items-center gap-3 px-3 py-2 text-xs">
                 <span className="w-20 text-slate-400 shrink-0">{thaiDate(r.date)}</span>
                 <span className="w-12 text-slate-300 shrink-0">{r.periodNumber === null ? '—' : r.periodNumber === 0 ? 'คาบ 0' : `คาบ ${r.periodNumber}`}</span>
-                <span className="flex-1 min-w-0 truncate text-slate-200">{r.courseName || <span className="text-slate-500">ไม่ทราบวิชา</span>}</span>
+                <span className="flex-1 min-w-0 truncate text-slate-200">{r.courseName || (
+                  <span className="text-slate-500" title="บันทึกนี้ไม่มีรหัสวิชา/เลขคาบ และหาจากตารางสอนไม่เจอ">
+                    {r.source === 'HOMEROOM_DEFAULT' ? 'เช็คชื่อโฮมรูม (ไม่ระบุวิชา)' : 'ไม่ทราบวิชา'}
+                    {r.checkedByName ? ` · เช็คโดย ${r.checkedByName}` : ''}
+                  </span>
+                )}</span>
                 <span className={cn('px-2 py-0.5 rounded-md border text-[10px] font-bold shrink-0', STATUS_CLASS[r.status])}>{STATUS_TH[r.status]}</span>
               </div>
             ))}
