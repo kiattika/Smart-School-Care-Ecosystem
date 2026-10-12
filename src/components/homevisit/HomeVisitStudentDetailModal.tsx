@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatThaiAddress } from '../../lib/thaiAddress';
 import { X, MapPin, Phone, Mail, Navigation, ClipboardList, Home, Camera, StickyNote, FileText } from 'lucide-react';
 import type { Student, StudentHomeLocation, HomeVisitRecord, StudentHomeVisitInfo, FamilyHomeVisitInfo } from '../../types';
 import { HomeVisitInfoPanel } from './HomeVisitInfoPanel';
@@ -33,7 +34,8 @@ const Row = ({ icon, label, children }: { icon: React.ReactNode; label: string; 
 const None = () => <span className="text-slate-500">ยังไม่มีข้อมูล</span>;
 
 export function HomeVisitStudentDetailModal({ student, location, distanceFromSchoolM, record, studentInfo, familyInfo, todayYmd, onOpenDocument, onClose, onOpenForm }: Props) {
-  const address = student.homeLocation?.address || (student as any).address || '';
+  // ทะเบียนส่วนกลางก่อน; ไม่มี → ที่อยู่ที่นักเรียนกรอกแบบแยกช่อง
+  const address = student.homeLocation?.address || (student as any).address || formatThaiAddress(studentInfo?.currentAddress);
   const riskLabel = record ? (record.riskLevel === 'HIGH' ? 'เสี่ยงสูง' : record.riskLevel === 'MEDIUM' ? 'เฝ้าระวัง' : 'ปกติ') : '';
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-6">

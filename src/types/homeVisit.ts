@@ -80,6 +80,8 @@ export interface StudentHomeVisitInfo {
   chronicDisease: string;     // '' = ไม่มีโรคประจำตัว
   // ข้อ 4 (ที่อยู่ปัจจุบันมาจากทะเบียนระบบ)
   registeredSameAsCurrent: boolean; registeredAddress: string;
+  // ที่อยู่ปัจจุบันแบบแยกช่อง — นักเรียนกรอกเมื่อทะเบียนส่วนกลาง (students.homeLocation.address) ยังไม่มีที่อยู่; null = ยังไม่กรอก
+  currentAddress?: ThaiAddress | null;
   // ข้อ 9
   siblings: {
     onlyChild: boolean; birthOrder: number | null; totalSiblings: number | null;
@@ -131,4 +133,18 @@ export interface HomeVisitRecord {
   visitGps: { latitude: number; longitude: number; accuracy: number | null; distanceFromHomeM: number | null } | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** ที่อยู่แบบแยกช่อง (ตำบล/อำเภอ/จังหวัด/รหัสไปรษณีย์เลือกจากข้อมูลอ้างอิง — เก็บทั้งรหัสและชื่อ) */
+export interface ThaiAddress {
+  houseNo: string;       // บ้านเลขที่
+  moo: string;           // หมู่ที่ (ว่างได้)
+  village: string;       // ชื่อหมู่บ้าน/ชุมชน/อาคาร (ว่างได้)
+  villageCode: string;   // mcode ของ DOPA เมื่อเลือกจากรายการ ('' = พิมพ์เอง/ไม่มีข้อมูล)
+  soi: string;
+  road: string;
+  provinceCode: string; province: string;
+  amphoeCode: string; amphoe: string;
+  tambonCode: string; tambon: string;   // tambonCode = รหัสตำบล 6 หลัก
+  postalCode: string;    // 5 หลัก
 }

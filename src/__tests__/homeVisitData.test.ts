@@ -67,7 +67,9 @@ describe('validate', () => {
     const s = emptyStudentInfo(base);
     expect(validateStudentInfo(s).length).toBeGreaterThan(5);
     Object.assign(s, { gender: 'M', birthDate: '2010-01-01', nationality: 'ไทย', ethnicity: 'ไทย', religion: 'พุทธ', prevEducationLevel: 'มัธยมศึกษาตอนต้น', prevSchool: 'ร.ร.ก', closestInFamily: ['มารดา'], consultWho: ['เพื่อน'], livesWith: 'บิดาและมารดา' });
-    expect(validateStudentInfo(s)).toEqual([]);
+    // ทะเบียนส่วนกลางมีที่อยู่แล้ว → ไม่บังคับที่อยู่แบบแยกช่อง; ถ้าไม่มี ต้องกรอกที่อยู่ก่อนจึงผ่าน
+    expect(validateStudentInfo(s, { centralAddress: '99 ม.1' })).toEqual([]);
+    expect(validateStudentInfo(s).some(m => m.includes('ที่อยู่'))).toBe(true);
   });
   it('ผู้ปกครอง: ค่าเช่าต้องระบุเมื่อบ้านเช่า, เบอร์ผิดไม่ผ่าน', () => {
     const f = emptyFamilyInfo({ ...base, parentUid: 'p' }, '0812345678');
