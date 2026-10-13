@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { QUICK_POINT_CHOICES } from '../components/QuickPointAwardModal';
 import {
   courseActivityKey, countStudentsWithPoints, coursesInLogs, pointsByStudentForCourse,
   DEFAULT_RANK_LEVELS, rankForPoints, rankLabel, resolveRankLevels, summarizeCoursePoints, termOfDate, validateRankLevels,
@@ -144,7 +145,17 @@ describe('คะแนนแยกอิสระรายวิชา (ไม�
   it('guard: ทุกจุดที่เรียก addActiveLearningPoints ต้องส่ง courseId + courseKey (ห้ามให้คะแนนโดยไม่ระบุวิชา)', () => {
     const seat = readSource('src/components/ClassroomSeatingManager.tsx');
     expect(seat).not.toMatch(/addActiveLearningPoints\(student\.studentId, 1\)/);
-    expect(seat).toMatch(/addActiveLearningPoints\(student\.studentId, 1, 'GENERAL', undefined, course\?\.id/);
+    expect(seat).toMatch(/addActiveLearningPoints\(quickAwardStudent\.studentId, points, 'GENERAL', [^,]+, course\?\.id/);
+    expect(seat).toContain('<QuickPointAwardModal');
+    // ปุ่มบนที่นั่งต้องเปิด modal ยืนยันก่อน ไม่บันทึกทันที
+    expect(seat).toContain('setQuickAwardStudent(student)');
+  });
+  it('QuickPointAwardModal: เลือก +1/+2/+5 และต้องกดยืนยัน (ไม่ให้คะแนนทันทีที่เลือก)', () => {
+    const m = readSource('src/components/QuickPointAwardModal.tsx');
+    expect(QUICK_POINT_CHOICES).toEqual([1, 2, 5]);
+    expect(m).toContain('disabled={!choice || saving}');
+    expect(m).not.toMatch(/adjustBehaviorScore/);
+    expect(m).toMatch(/onClick=\{\(\) => setChoice\(p\)\}/);
   });
   it('countStudentsWithPoints: นับนักเรียนที่มีคะแนน >0 อย่างน้อยหนึ่งวิชา (ไม่รวมซ้ำข้ามวิชา)', () => {
     const l = [

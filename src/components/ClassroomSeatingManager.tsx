@@ -39,6 +39,7 @@ import { SeatingLayout, SeatingGroup, SeatingSeat, SeatingAssignment } from '../
 import { useCurrentSemester } from '../hooks/useCurrentSemester';
 import { cn, isSameRoom, formatRoomName, formatCourseTitle } from '../lib/utils';
 import { useStore } from '../store';
+import { QuickPointAwardModal } from './QuickPointAwardModal';
 import { RandomStudentPickerModal, ClassroomDeskGroup } from './RandomStudentPickerModal';
 import { buildDeskGroupsForPicker } from '../lib/seatingPicker';
 import { SeatHistoryModal } from './seating/SeatHistoryModal';
@@ -161,6 +162,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [quickAwardStudent, setQuickAwardStudent] = useState<(typeof students)[number] | null>(null);
 
   // ตัวตนจริงของผู้บันทึก (assignedBy / teacherId) — ไม่มี user = ยกเลิกการเขียนและแจ้ง error
   // ห้ามเติม id/อีเมลครูปลอมแทน (ดู CLAUDE.md กฎ no-fake-data)
@@ -1345,24 +1347,14 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
                                 {/* Quick Point Increment */}
                                 {!isLayoutLocked && !isAbsent && !attendanceOnly && (
                                   <button
-                                    onClick={async e => {
+                                    onClick={e => {
                                       e.stopPropagation();
-                                      try {
-                                        await addActiveLearningPoints(student.studentId, 1, 'GENERAL', undefined, course?.id, {
-                                          courseName: formatCourseTitle(course.name, course.level, course.room),
-                                          courseKey,
-                                          ...(alConfigured ? { academicYear: alYear, term: alTerm } : {}),
-                                        });
-                                        setSaveToast(`+1 คะแนนจิตพิสัย: ${student.name}`);
-                                      } catch {
-                                        setSaveToast(`บันทึกคะแนนของ ${student.name} ไม่สำเร็จ — ลองใหม่`);
-                                      }
-                                      setTimeout(() => setSaveToast(null), 2500);
+                                      setQuickAwardStudent(student);
                                     }}
-                                    title="+1 แต้มการมีส่วนร่วม"
+                                    title="ให้คะแนนกิจกรรม (+1 / +2 / +5)"
                                     className="px-1.5 py-0.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded font-bold transition-all text-[9px]"
                                   >
-                                    +1
+                                    +
                                   </button>
                                 )}
                               </div>
@@ -1412,6 +1404,24 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
       />
 
       {/* Random Student Picker Modal (Adapted to dynamic classroom groups) */}
+      {quickAwardStudent && (
+        <QuickPointAwardModal
+          student={quickAwardStudent}
+          courseTitle={formatCourseTitle(course.name, course.level, course.room)}
+          currentPoints={coursePoints[quickAwardStudent.studentId] || 0}
+          onClose={() => setQuickAwardStudent(null)}
+          onAward={async points => {
+            // ผูกวิชา/ภาคเรียนเหมือนตัวสุ่มตอบ — ไม่งั้น log ไม่มี courseId จะไปรวมเป็น "ไม่ระบุวิชา"
+            await addActiveLearningPoints(quickAwardStudent.studentId, points, 'GENERAL', `ครูให้คะแนนรายบุคคล (+${points} คะแนน)`, course?.id, {
+              courseName: formatCourseTitle(course.name, course.level, course.room),
+              courseKey,
+              ...(alConfigured ? { academicYear: alYear, term: alTerm } : {}),
+            });
+            setSaveToast(`+${points} คะแนนกิจกรรม: ${quickAwardStudent.name}`);
+            setTimeout(() => setSaveToast(null), 2500);
+          }}
+        />
+      )}
       <RandomStudentPickerModal
         isOpen={showRandomPicker}
         onClose={() => setShowRandomPicker(false)}
