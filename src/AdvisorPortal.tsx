@@ -39,12 +39,13 @@ import { summarizeHomeVisit } from './lib/homeVisitAnalytics';
 import { HomeVisitDocumentModal } from './components/homevisit/HomeVisitDocumentModal';
 import { useRoomStudentHomeVisitInfo, useRoomFamilyHomeVisitInfo } from './hooks/useHomeVisitData';
 import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
+import { gateMorningByStudent, resolveMorningStatus } from './lib/gateMorningStatus';
 import { AdvisorGpsCheckInPanel } from './components/homevisit/AdvisorGpsCheckInPanel';
 import { AdvisorGateCheckInPanel } from './components/student-parent/AdvisorGateCheckInPanel';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { AdvisorLeaveInbox, hasApprovedLeaveOn } from './components/advisor/AdvisorLeaveInbox';
-import { subscribeLeaveRequests, subscribeAppointments } from './services/firestoreService';
+import { subscribeLeaveRequests, subscribeAppointments, subscribeGateAttendanceLogs } from './services/firestoreService';
 import { AppointmentInbox } from './components/appointments/AppointmentInbox';
 
 
@@ -100,19 +101,36 @@ export function AdvisorPortal() {
     requestUnlock: hrRequestUnlock
   } = useHomeroomAttendance(todayStr, targetRoom);
 
+  // ผลเช็คอินเข้าโรงเรียนวันนี้ (ประตู/GPS) — real-time; ครูที่ปรึกษาอ่าน gate_attendance_logs ได้ตาม rules
+  const [gateLogsToday, setGateLogsToday] = useState<import('./types').GateAttendanceRecord[]>([]);
+  useEffect(() => subscribeGateAttendanceLogs(setGateLogsToday, { date: todayStr }), [todayStr]);
+  const gateMorning = useMemo(() => gateMorningByStudent(gateLogsToday, todayStr), [gateLogsToday, todayStr]);
+
   const myStudents = useMemo(() => {
     if (!myRoom) return [];
     return (students || [])
       .filter(s => isSameRoom(s.room, myRoom) || isSameRoom((s as any).className, myRoom))
       .map(s => {
-        // ลำดับความสำคัญของสถานะเช้า: override ในหน้าจอ > ค่าที่บันทึกใน Firestore (hrRecord) > ค่าใน student doc
-        const merged = attendanceOverrides[s.studentId]
-          ?? hrRecord?.students?.[s.studentId]
-          ?? s.attendance.morningStatus;
-        if (merged === s.attendance.morningStatus && !attendanceOverrides[s.studentId]) return s;
-        return { ...s, attendance: { ...s.attendance, morningStatus: merged } };
+        // ลำดับ: override ในหน้าจอ > ที่ครูบันทึกและล็อกแล้ว > ผลเช็คอินผ่านประตู/GPS วันนี้ (สาย = สาย) > ที่บันทึกไว้ยังไม่ล็อก > student doc
+        const gate = gateMorning.get(s.studentId);
+        const merged = resolveMorningStatus({
+          override: attendanceOverrides[s.studentId],
+          hrStatus: hrRecord?.students?.[s.studentId],
+          hrLocked: !!hrRecord?.isLocked,
+          gate,
+          docStatus: s.attendance.morningStatus,
+        });
+        // เวลา/วิธีเช็คอินแสดงตามผลประตูเมื่อสถานะมาจากประตู
+        const fromGate = !!gate && !attendanceOverrides[s.studentId] && merged === gate.status;
+        const attendance = fromGate
+          ? { ...s.attendance, morningStatus: merged, checkInMethod: gate!.method, checkInTime: gate!.time }
+          : { ...s.attendance, morningStatus: merged };
+        if (attendance.morningStatus === s.attendance.morningStatus
+          && attendance.checkInMethod === s.attendance.checkInMethod
+          && attendance.checkInTime === s.attendance.checkInTime) return s;
+        return { ...s, attendance };
       });
-  }, [myRoom, students, attendanceOverrides, hrRecord]);
+  }, [myRoom, students, attendanceOverrides, hrRecord, gateMorning]);
 
   // สถิติการเข้าเรียนทั้งห้อง (ขาด/ลา/มาสาย + % อัตราเข้าเรียน) — real-time จาก attendance_records
   // จริง ย้อนหลัง 30 วัน (ค่าเริ่มต้น ยังไม่ยืนยันจากโรงเรียน) ครูที่ปรึกษามีสิทธิ์อ่านตรงอยู่แล้ว
