@@ -28,6 +28,8 @@ import { ActiveLearningRecord } from '../types';
 import { useRealStudents } from '../hooks/useRealStudents';
 import { subscribeActiveLearningLogsForTeacher } from '../services/firestoreService';
 import { useStore } from '../store';
+import { useCurrentSemester } from '../hooks/useCurrentSemester';
+import { coursesInLogs, pointsByStudentForCourse } from '../lib/courseRank';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 
@@ -50,15 +52,17 @@ export const ClassroomLeaderboard: React.FC = () => {
   const myStaffId = useStore(s => s.user?.staffId) ?? '';
   useEffect(() => subscribeActiveLearningLogsForTeacher(myStaffId, setAlLogs), [myStaffId]);
 
-  // รวมคะแนนต่อคนจาก log ทั้งหมด (ไม่ต่ำกว่า 0)
-  const activeLearningPoints = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const log of alLogs) {
-      map[log.studentId] = (map[log.studentId] || 0) + Number(log.points || 0);
-    }
-    for (const k of Object.keys(map)) map[k] = Math.max(0, map[k]);
-    return map;
-  }, [alLogs]);
+  // คะแนนเป็นรายวิชา ไม่รวมข้ามวิชา: เลือกวิชาที่ต้องการดู (วิชาที่ครูเคยให้คะแนนในภาคเรียนปัจจุบัน)
+  const { academicYear, term } = useCurrentSemester();
+  const courseOptions = useMemo(() => coursesInLogs(alLogs, { academicYear, term }), [alLogs, academicYear, term]);
+  const [selectedCourseKey, setSelectedCourseKey] = useState<string>('');
+  const effectiveCourseKey = courseOptions.some(c => c.courseId === selectedCourseKey)
+    ? selectedCourseKey
+    : (courseOptions[0]?.courseId ?? '');
+  const activeLearningPoints = useMemo(
+    () => (effectiveCourseKey ? pointsByStudentForCourse(alLogs, effectiveCourseKey, { academicYear, term }) : {}),
+    [alLogs, effectiveCourseKey, academicYear, term],
+  );
 
   const [selectedRoom, setSelectedRoom] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -203,6 +207,18 @@ export const ClassroomLeaderboard: React.FC = () => {
           <div className="flex items-center gap-2 flex-wrap">
             <div className="bg-slate-900 border border-white/10 rounded-xl px-3 py-1.5 flex items-center gap-2 text-xs">
               <Filter className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                id="select-leaderboard-course"
+                value={effectiveCourseKey}
+                onChange={(e) => setSelectedCourseKey(e.target.value)}
+                disabled={courseOptions.length === 0}
+                className="bg-transparent text-slate-200 font-medium focus:outline-none cursor-pointer mr-3"
+              >
+                {courseOptions.length === 0 && <option value="" className="bg-slate-900 text-white">ยังไม่มีคะแนนรายวิชา</option>}
+                {courseOptions.map(c => (
+                  <option key={c.courseId} value={c.courseId} className="bg-slate-900 text-white">{c.courseName}</option>
+                ))}
+              </select>
               <select
                 id="select-leaderboard-room"
                 value={selectedRoom}

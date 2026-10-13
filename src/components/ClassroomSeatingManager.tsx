@@ -47,6 +47,8 @@ import { TakeAttendanceModal } from './seating/TakeAttendanceModal';
 import { getAttendanceRecord } from '../services/firestoreService';
 import { format } from 'date-fns';
 import { useLeaveStudentIds } from '../hooks/useApprovedLeaveDays';
+import { useCourseActivityPoints } from '../hooks/useCourseActivityPoints';
+import { courseActivityKey } from '../lib/courseRank';
 import { withLeavePrefill } from '../lib/leaveAttendance';
 import { 
   getSeatingLayoutFromFirestore, 
@@ -107,10 +109,12 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
     attendanceRecords, 
     setAttendanceStatus, 
     addActiveLearningPoints,
-    activeLearningPoints
   } = useStore();
 
   const courseSubjectId = course?.code || course?.id || 'default-subject';
+    // คะแนนกิจกรรมของ "วิชานี้" เท่านั้น (ภาคเรียนปัจจุบัน) — ไม่ใช้ยอดรวมทุกวิชาใน store
+  const courseKey = courseActivityKey({ id: course?.id, code: course?.code, level: course?.level });
+  const coursePoints = useCourseActivityPoints(courseKey, course?.id);
   const courseClassId = course.room; // wrapper รับประกันว่ามีห้อง — ไม่มี = empty state ไม่ query/เขียน
   const layoutId = `layout_${courseSubjectId}_${courseClassId.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
@@ -1331,7 +1335,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
                                 ) : (
                                   <span className="text-emerald-400 font-mono font-bold flex items-center gap-0.5">
                                     <Award className="w-3 h-3" />
-                                    {activeLearningPoints[student.studentId] || 0} pt
+                                    {coursePoints[student.studentId] || 0} pt
                                   </span>
                                 )}
 
@@ -1408,6 +1412,8 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
         classroomGroups={classroomGroupsForPicker}
         attendanceRecords={currentAttendance}
         courseId={courseId}
+        courseKey={courseKey}
+        coursePoints={coursePoints}
         courseName={formatCourseTitle(course.name, course.level, course.room)}
         onSelectHighlight={(ids) => setHighlightedStudentIds(ids)}
       />

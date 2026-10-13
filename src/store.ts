@@ -861,6 +861,7 @@ export const useStore = create<StoreState>((set, get) => ({
       note,
       awardedAt: new Date().toISOString(),
       ...(extra?.courseName ? { courseName: extra.courseName } : {}),
+      ...(extra?.courseKey ? { courseKey: extra.courseKey } : {}),
       ...(teacherStaffId ? { teacherStaffId } : {}),
       ...(extra?.academicYear && extra?.term ? { academicYear: extra.academicYear, term: extra.term } : {}),
     };

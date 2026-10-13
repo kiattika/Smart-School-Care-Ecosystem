@@ -175,6 +175,7 @@ export type ActiveLearningCategory =
 /** ข้อมูลประกอบตอนให้คะแนนกิจกรรมรายวิชา (ชื่อวิชา + ภาคเรียนที่ให้) */
 export interface ActiveLearningExtra {
   courseName?: string;
+  courseKey?: string;
   academicYear?: string;
   term?: '1' | '2';
 }
@@ -189,6 +190,8 @@ export interface ActiveLearningRecord {
   awardedAt: string; // ISO string
   /** ชื่อวิชา ณ ตอนให้คะแนน (denormalize — หน้านักเรียนไม่มี catalog วิชาให้ค้น) */
   courseName?: string;
+  /** กุญแจวิชาสำหรับรวมคะแนนข้ามคาบ (รหัสวิชา+ชั้น; ชุมนุม=id ชุมนุม) — ดู courseActivityKey() */
+  courseKey?: string;
   /** staff doc id ของครูผู้ให้คะแนน (= claim staffId) — rules ให้ครูอ่านเฉพาะที่ตนให้ */
   teacherStaffId?: string;
   academicYear?: string;

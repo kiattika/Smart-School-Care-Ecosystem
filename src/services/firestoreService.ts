@@ -2007,6 +2007,7 @@ function activeLearningFromDoc(d: { id: string; data: () => Record<string, any> 
     note: data.note || undefined,
     awardedAt: data.awardedAt || '',
     courseName: data.courseName || undefined,
+    courseKey: data.courseKey || undefined,
     teacherStaffId: data.teacherStaffId || undefined,
     academicYear: data.academicYear || undefined,
     term: data.term === '1' || data.term === '2' ? data.term : undefined,

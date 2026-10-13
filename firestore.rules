@@ -961,7 +961,7 @@ service cloud.firestore {
                            && request.resource.data.studentId is string
                            && request.resource.data.points is number
                            && request.resource.data.keys().hasOnly(['id', 'studentId', 'courseId', 'points', 'category', 'note', 'awardedAt',
-                                                                    'createdAt', 'courseName', 'teacherStaffId', 'academicYear', 'term']));
+                                                                    'createdAt', 'courseName', 'courseKey', 'teacherStaffId', 'academicYear', 'term']));
       allow update, delete: if hasRole('SUPER_ADMIN');
     }
 

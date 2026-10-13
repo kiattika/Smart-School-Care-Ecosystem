@@ -157,10 +157,10 @@ export function summarizeCoursePoints(
 ): CoursePointsSummary[] {
   const byCourse = new Map<string, { name: string; points: number }>();
   for (const log of logs) {
-    const t = log.academicYear && log.term ? { academicYear: log.academicYear, term: log.term } : termOfDate(log.awardedAt);
+    const t = logTerm(log);
     if (!t || t.academicYear !== term.academicYear || t.term !== term.term) continue;
-    const id = log.courseId || '__none__';
-    const cur = byCourse.get(id) ?? { name: log.courseName || (log.courseId ? log.courseId : 'ไม่ระบุวิชา'), points: 0 };
+    const id = logCourseKey(log) || '__none__';
+    const cur = byCourse.get(id) ?? { name: log.courseName || (id !== '__none__' ? id : 'ไม่ระบุวิชา'), points: 0 };
     if (log.courseName) cur.name = log.courseName;
     cur.points += Number(log.points || 0);
     byCourse.set(id, cur);
@@ -171,4 +171,63 @@ export function summarizeCoursePoints(
       return { courseId, courseName: v.name, points, rank: rankForPoints(points, levels) };
     })
     .sort((a, b) => b.points - a.points || a.courseName.localeCompare(b.courseName, 'th'));
+}
+
+/**
+ * กุญแจ "วิชา" สำหรับรวมคะแนน — courseId ของคาบเป็นรหัสต่อ "ช่องตารางสอน" (course_<scheduleId>) วิชาเดียวกันที่สอนหลายคาบ/สัปดาห์
+ * จึงมีหลาย id; ใช้ รหัสวิชา+ชั้น/ห้อง รวมให้เป็นวิชาเดียว. ชุมนุม (elective_*) ใช้ id ของชุมนุมเอง (รหัส/ชั้นเป็นคำว่า "ชุมนุม" เหมือนกันทุกชุมนุม)
+ */
+export function courseActivityKey(c: { id?: string; code?: string; level?: string }): string {
+  const id = c.id || '';
+  if (id.startsWith('elective_')) return id;
+  const code = (c.code || '').trim();
+  const level = (c.level || '').trim();
+  return code && level ? `${code}|${level}` : id || 'default-course';
+}
+
+export function logCourseKey(log: Pick<ActiveLearningRecord, 'courseKey' | 'courseId'>): string | undefined {
+  return log.courseKey || log.courseId || undefined;
+}
+
+export function logTerm(log: ActiveLearningRecord): { academicYear: string; term: '1' | '2' } | null {
+  return log.academicYear && log.term ? { academicYear: log.academicYear, term: log.term } : termOfDate(log.awardedAt);
+}
+
+/** คะแนนสะสมต่อนักเรียน "เฉพาะวิชาเดียว" ในภาคเรียนที่ระบุ (ไม่รวมวิชาอื่น; ไม่ต่ำกว่า 0) */
+export function pointsByStudentForCourse(
+  logs: ActiveLearningRecord[],
+  courseKey: string,
+  term: { academicYear: string; term: '1' | '2' },
+  /** id คาบปัจจุบัน — log รุ่นเก่า (ยังไม่มี courseKey) ที่ให้ไว้ที่ id นี้นับรวมด้วย */
+  legacyCourseId?: string,
+): Record<string, number> {
+  const map: Record<string, number> = {};
+  for (const log of logs) {
+    const matches = log.courseKey
+      ? log.courseKey === courseKey
+      : !!log.courseId && (log.courseId === courseKey || log.courseId === legacyCourseId);
+    if (!matches) continue;
+    const t = logTerm(log);
+    if (!t || t.academicYear !== term.academicYear || t.term !== term.term) continue;
+    map[log.studentId] = (map[log.studentId] || 0) + Number(log.points || 0);
+  }
+  for (const k of Object.keys(map)) map[k] = Math.max(0, map[k]);
+  return map;
+}
+
+/** รายวิชาที่ครูเคยให้คะแนนในภาคเรียนนี้ (สำหรับตัวเลือกกรองกระดานคะแนน) */
+export function coursesInLogs(
+  logs: ActiveLearningRecord[],
+  term: { academicYear: string; term: '1' | '2' },
+): { courseId: string; courseName: string }[] {
+  const m = new Map<string, string>();
+  for (const log of logs) {
+    const key = logCourseKey(log);
+    if (!key) continue;
+    const t = logTerm(log);
+    if (!t || t.academicYear !== term.academicYear || t.term !== term.term) continue;
+    m.set(key, log.courseName || m.get(key) || key);
+  }
+  return Array.from(m, ([courseId, courseName]) => ({ courseId, courseName }))
+    .sort((a, b) => a.courseName.localeCompare(b.courseName, 'th'));
 }
