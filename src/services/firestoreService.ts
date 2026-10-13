@@ -3192,6 +3192,16 @@ export function subscribeInfirmaryVisits(
  * doc id ผูกภาคเรียน → กรอกซ้ำภาคเรียนเดิมชนกับ doc เดิม (firestore.rules บังคับ 1 ครั้ง/ภาคเรียน)
  * ──────────────────────────────────────────────────────────────────────────── */
 
+/**
+ * รหัสผูกบัญชีตามทะเบียนจริง students/{id} (studentUid/parentUid ตรงตัว ไม่ใช้ alias parentId ของ useRealStudents)
+ * rules เทียบฟิลด์เหล่านี้กับ students/{id} ตรง ๆ — ถ้าฝั่ง client ส่ง parentUid จาก parentId (legacy) จะไม่ตรงแล้วถูกปฏิเสธ
+ */
+export async function getStudentLinkIds(studentId: string): Promise<{ studentUid: string; parentUid: string | null }> {
+  const snap = await getDoc(doc(db, 'students', studentId));
+  const d = snap.exists() ? (snap.data() as Record<string, unknown>) : {};
+  return { studentUid: typeof d.studentUid === 'string' ? d.studentUid : '', parentUid: typeof d.parentUid === 'string' && d.parentUid ? d.parentUid : null };
+}
+
 const SEMESTER_HEALTH_COL = 'student_semester_health';
 
 export function semesterHealthDocId(studentId: string, academicYear: string, term: '1' | '2'): string {
@@ -3214,11 +3224,13 @@ export async function saveSemesterHealthLog(
   isNurseOverride = false,
 ): Promise<string> {
   const id = semesterHealthDocId(input.studentId, input.academicYear, input.term);
+  // ใช้ studentUid/parentUid ตามทะเบียนจริง (rules เทียบกับ students/{id}) — ไม่เชื่อค่าจาก state ที่อาจมาจาก alias parentId
+  const links = await getStudentLinkIds(input.studentId);
   const payload: SemesterHealthLog = {
     id,
     studentId: input.studentId,
-    studentUid: input.studentUid,
-    parentUid: input.parentUid ?? null,
+    studentUid: links.studentUid || input.studentUid,
+    parentUid: links.parentUid,
     academicYear: input.academicYear,
     term: input.term,
     semester: input.semester,
@@ -3623,10 +3635,12 @@ export async function saveStudentHealthProfile(input: {
 }): Promise<void> {
   const path = `student_health_profiles/${input.studentId}`;
   try {
+    // ใช้ studentUid/parentUid ตามทะเบียนจริง (rules เทียบกับ students/{id}; กัน alias parentId ทำให้ถูกปฏิเสธ)
+    const links = await getStudentLinkIds(input.studentId);
     await setDoc(doc(db, 'student_health_profiles', input.studentId), {
       studentId: input.studentId,
-      studentUid: input.studentUid,
-      parentUid: input.parentUid ?? null,
+      studentUid: links.studentUid || input.studentUid,
+      parentUid: links.parentUid,
       chronicIllnesses: input.lists.chronicIllnesses,
       allergies: input.lists.allergies,
       specialCare: input.lists.specialCare,
@@ -3636,6 +3650,46 @@ export async function saveStudentHealthProfile(input: {
       verifiedAt: null,
       verifiedByUid: null,
       verifiedByName: null,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/* ── หมู่เลือด student_blood_type/{studentId} — เลือกได้ครั้งเดียว (นักเรียน/ผู้ปกครอง) แก้ได้เฉพาะพยาบาล/แอดมิน ── */
+const BLOOD_TYPE_COL = 'student_blood_type';
+export interface StudentBloodTypeDoc {
+  studentId: string; studentUid: string; parentUid: string | null;
+  bloodType: import('../lib/bloodType').BloodGroup;
+  setByUid: string; setByRole: 'STUDENT' | 'PARENT' | 'NURSE' | 'ADMIN'; setAt?: Timestamp | null;
+}
+export function subscribeStudentBloodType(
+  studentId: string,
+  onUpdate: (d: StudentBloodTypeDoc | null) => void,
+  onError?: (err: Error) => void,
+): () => void {
+  return onSnapshot(
+    doc(db, BLOOD_TYPE_COL, studentId),
+    (snap) => onUpdate(snap.exists() ? ({ ...(snap.data() as StudentBloodTypeDoc), studentId }) : null),
+    (err) => { console.warn('[subscribeStudentBloodType] listener error:', err.message); onError?.(err); },
+  );
+}
+/** ตั้งหมู่เลือด — นักเรียน/ผู้ปกครองตั้งได้เฉพาะตอนยังไม่มีเอกสาร (create); พยาบาล/แอดมินแก้ทับได้ (update). throw เมื่อไม่สำเร็จ */
+export async function setStudentBloodType(input: {
+  studentId: string; bloodType: import('../lib/bloodType').BloodGroup;
+  actorUid: string; actorRole: 'STUDENT' | 'PARENT' | 'NURSE' | 'ADMIN';
+}): Promise<void> {
+  const path = `${BLOOD_TYPE_COL}/${input.studentId}`;
+  try {
+    const links = await getStudentLinkIds(input.studentId);
+    await setDoc(doc(db, BLOOD_TYPE_COL, input.studentId), {
+      studentId: input.studentId,
+      studentUid: links.studentUid,
+      parentUid: links.parentUid,
+      bloodType: input.bloodType,
+      setByUid: input.actorUid,
+      setByRole: input.actorRole,
+      setAt: serverTimestamp(),
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);

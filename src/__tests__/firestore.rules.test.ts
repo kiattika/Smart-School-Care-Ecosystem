@@ -1748,6 +1748,78 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  describe('student_blood_type (หมู่เลือด เลือกครั้งเดียว)', () => {
+    const SID = 'bt-std-1';
+    const STU = 'bt-stu';
+    const PAR = 'bt-par';
+    const stu = () => asUser(STU, ['STUDENT']).firestore() as any;
+    const par = () => asUser(PAR, ['PARENT']).firestore() as any;
+    const otherPar = () => asUser('bt-par-2', ['PARENT']).firestore() as any;
+    const nurse = () => asUser('bt-nurse', ['INFIRMARY_STAFF']).firestore() as any;
+    const hr = () => asUser('bt-hr', ['HOMEROOM_TEACHER'], { staffId: 'bt-hr' }).firestore() as any;
+    const ref = (db: any) => mDoc(db, `student_blood_type/${SID}`);
+    const doc = (uid: string, role: string, over: Record<string, unknown> = {}) => ({
+      studentId: SID, studentUid: STU, parentUid: PAR, bloodType: 'O', setByUid: uid, setByRole: role, setAt: mServerTimestamp(), ...over,
+    });
+    async function seed(withParent = true) {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${SID}`).set({ studentId: SID, studentUid: STU, ...(withParent ? { parentUid: PAR } : {}), room: 'ม.2/2' });
+        await ctx.firestore().doc('staff/bt-hr').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.2/2' } });
+      });
+    }
+    async function put() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`student_blood_type/${SID}`).set({ ...doc(STU, 'STUDENT'), setAt: new Date() }); });
+    }
+
+    it('นักเรียนเจ้าของ/ผู้ปกครองตัวจริง/พยาบาล สร้างได้; คนอื่น/ครูสร้างไม่ได้', async () => {
+      await seed();
+      await assertSucceeds(mSetDoc(ref(stu()), doc(STU, 'STUDENT')));
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`student_blood_type/${SID}`).delete(); });
+      await assertSucceeds(mSetDoc(ref(par()), doc(PAR, 'PARENT')));
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`student_blood_type/${SID}`).delete(); });
+      await assertSucceeds(mSetDoc(ref(nurse()), doc('bt-nurse', 'NURSE')));
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`student_blood_type/${SID}`).delete(); });
+      await assertFails(mSetDoc(ref(otherPar()), doc('bt-par-2', 'PARENT')));
+      await assertFails(mSetDoc(ref(hr()), doc('bt-hr', 'NURSE')));
+    });
+    it('เลือกแล้วนักเรียน/ผู้ปกครองเปลี่ยนเองไม่ได้ แต่พยาบาลแก้ได้; ลบไม่ได้', async () => {
+      await seed(); await put();
+      await assertFails(mSetDoc(ref(stu()), doc(STU, 'STUDENT', { bloodType: 'A' })));
+      await assertFails(mSetDoc(ref(par()), doc(PAR, 'PARENT', { bloodType: 'A' })));
+      await assertSucceeds(mSetDoc(ref(nurse()), doc('bt-nurse', 'NURSE', { bloodType: 'A' })));
+      await assertFails((nurse() as any).doc(`student_blood_type/${SID}`).delete());
+    });
+    it('ค่าต้องเป็น A/B/AB/O, ฟิลด์เกินไม่ได้, parentUid ต้องตรงทะเบียน (นักเรียนที่ไม่มี parentUid ส่งเป็น null)', async () => {
+      await seed();
+      await assertFails(mSetDoc(ref(stu()), doc(STU, 'STUDENT', { bloodType: 'ไม่ทราบ' })));
+      await assertFails(mSetDoc(ref(stu()), doc(STU, 'STUDENT', { extra: 1 })));
+      await assertFails(mSetDoc(ref(stu()), doc(STU, 'STUDENT', { parentUid: 'someone-else' })));
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`students/${SID}`).set({ studentId: SID, studentUid: STU, parentId: 'legacy-only', room: 'ม.2/2' }); });
+      await assertSucceeds(mSetDoc(ref(stu()), doc(STU, 'STUDENT', { parentUid: null })));
+      await assertFails(mSetDoc(ref(nurse()), doc('bt-nurse', 'NURSE', { parentUid: 'legacy-only' })));
+    });
+    it('อ่าน: นักเรียน/ผู้ปกครอง/พยาบาล/ครูที่ปรึกษา; ผู้ปกครองคนอื่นอ่านไม่ได้', async () => {
+      await seed(); await put();
+      await assertSucceeds(mGetDoc(ref(stu())));
+      await assertSucceeds(mGetDoc(ref(par())));
+      await assertSucceeds(mGetDoc(ref(nurse())));
+      await assertSucceeds(mGetDoc(ref(hr())));
+      await assertFails(mGetDoc(ref(otherPar())));
+    });
+  });
+
+  // student_semester_health: นักเรียนที่ทะเบียนมีแค่ parentId (legacy) ต้องบันทึกได้เมื่อส่ง parentUid = null ตามทะเบียนจริง
+  describe('student_semester_health — ทะเบียนมี parentId อย่างเดียว', () => {
+    it('ส่ง parentUid ตามทะเบียนจริง (null) ผ่าน; ส่งค่า parentId (alias) ถูกปฏิเสธ', async () => {
+      const SID = 'sem-legacy-1'; const U = 'sem-legacy-stu';
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`students/${SID}`).set({ studentId: SID, studentUid: U, parentId: 'legacy-par', room: 'ม.5/8' }); });
+      const d = asUser(U, ['STUDENT']).firestore() as any;
+      const docBody = (parentUid: string | null) => ({ studentId: SID, studentUid: U, parentUid, academicYear: '2569', term: '2', semester: '2/2569', height: 165, weight: 65, bmi: 23.9, bmiCategory: 'NORMAL', bloodType: '', recordedByUid: U, recordedByRole: 'STUDENT', recordedAt: '2026-10-13T00:00:00Z' });
+      await assertFails(d.doc(`student_semester_health/${SID}_2569_2`).set(docBody('legacy-par')));
+      await assertSucceeds(d.doc(`student_semester_health/${SID}_2569_2`).set(docBody(null)));
+    });
+  });
+
   describe('student_emergency_contacts (ผู้ติดต่อฉุกเฉินจากแบบเยี่ยมบ้าน)', () => {
     const SID = 'ec-std-1';
     const PAR = 'ec-par';

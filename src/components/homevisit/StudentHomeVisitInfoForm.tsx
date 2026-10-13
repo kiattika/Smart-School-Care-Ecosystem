@@ -4,7 +4,9 @@ import { format } from 'date-fns';
 import type { Student, StudentHomeVisitInfo, FriendInfo } from '../../types';
 import { DatePicker } from '../shared/DatePicker';
 import { useStudentHomeVisitInfo } from '../../hooks/useHomeVisitData';
-import { saveStudentHomeVisitInfo, getSelfAssessmentRecord, syncSharedToSelfAssessment } from '../../services/firestoreService';
+import { saveStudentHomeVisitInfo, getSelfAssessmentRecord, syncSharedToSelfAssessment, subscribeSemesterHealthLogs } from '../../services/firestoreService';
+import { useStudentBloodType } from '../../hooks/useStudentBloodType';
+import { pickHealthPrefill } from '../../lib/homeVisitHealthPrefill';
 import { sharedFromAssessment, sharedFromInfo, fillMissing, emptyShared, type SharedFields, type LegacyHints } from '../../lib/homeVisitShared';
 import {
   normalizeStudentInfo, validateStudentInfo, ageFromBirthDate, bodyShapeFromBmi,
@@ -71,6 +73,22 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
     norm.livesWith = merged.livesWith; norm.commuteMode = merged.commuteMode; norm.commuteDuration = merged.commuteDuration; norm.consultWho = merged.consultWho;
     setForm(norm); setInitialised(true);
   }, [loading, saved, fromAssessment, base, initialised]);
+
+  // ข้อ 3: ดึงจากข้อมูลสุขภาพที่บันทึกไว้แล้ว — หมู่เลือด (ล็อก ไม่ให้แก้ในแบบนี้) และน้ำหนัก/ส่วนสูงล่าสุดของภาคเรียน (เติมเฉพาะช่องที่ยังว่าง)
+  const { doc: bloodDoc } = useStudentBloodType(student.studentId);
+  const [latestLog, setLatestLog] = useState<{ weight: number; height: number; recordedAt: string } | null>(null);
+  useEffect(() => subscribeSemesterHealthLogs((logs) => {
+    const last = [...logs].sort((a, b) => (a.recordedAt || '').localeCompare(b.recordedAt || '')).pop();
+    setLatestLog(last ? { weight: last.weight, height: last.height, recordedAt: last.recordedAt } : null);
+  }, { studentUid }), [studentUid]);
+  const bloodLocked = !!bloodDoc;
+  useEffect(() => {
+    if (!initialised) return;
+    setForm(f => {
+      const next = pickHealthPrefill(f, { bloodType: bloodDoc?.bloodType ?? null, latest: latestLog });
+      return next === f ? f : next;
+    });
+  }, [initialised, bloodDoc, latestLog]);
 
   const set = <K extends keyof StudentHomeVisitInfo>(k: K, v: StudentHomeVisitInfo[K]) => setForm(f => ({ ...f, [k]: v }));
   const sib = (k: keyof StudentHomeVisitInfo['siblings'], v: any) => setForm(f => ({ ...f, siblings: { ...f.siblings, [k]: v } }));
@@ -145,7 +163,9 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
           <Num label="น้ำหนัก (กก.)" v={form.weightKg} on={n => set('weightKg', n)} />
           <Num label="ส่วนสูง (ซม.)" v={form.heightCm} on={n => set('heightCm', n)} />
           <div><Label>รูปร่าง (ระบบคำนวณจาก BMI)</Label><div className="text-sm text-slate-200 py-2">{shape ? `${shape.label} (BMI ${shape.bmi})` : '-'}</div></div>
-          <div><Label>หมู่โลหิต</Label><Single options={BLOOD_TYPES} value={form.bloodType} onPick={o => set('bloodType', o)} /></div>
+          <div><Label>หมู่โลหิต</Label>{bloodLocked
+            ? <div className="text-sm text-slate-200 py-2" data-testid="home-visit-blood-locked">{bloodDoc!.bloodType} <span className="text-[10px] text-slate-500">(ดึงจากข้อมูลสุขภาพ แก้ผ่านพยาบาล)</span></div>
+            : <Single options={BLOOD_TYPES} value={form.bloodType} onPick={o => set('bloodType', o)} />}</div>
         </div>
         <div>
           <Label required>โรคประจำตัว</Label>

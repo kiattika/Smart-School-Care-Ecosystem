@@ -1503,6 +1503,37 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 35. หมู่เลือด student_blood_type/{studentId} — หมู่เลือดไม่เปลี่ยนตลอดชีวิต
+    //     นักเรียนเจ้าของ/ผู้ปกครองตัวจริง "เลือกได้ครั้งเดียว" (create ตอนยังไม่มีเอกสารเท่านั้น — update ไม่ได้)
+    //     แก้ภายหลังได้เฉพาะพยาบาล (INFIRMARY_STAFF)/SUPER_ADMIN; ลบไม่ได้; ค่าต้องเป็น A/B/AB/O
+    //     studentUid/parentUid ต้องตรงทะเบียน students/{id} จริง; อ่าน: แอดมิน/พยาบาล/ครูที่ปรึกษา/นักเรียน/ผู้ปกครอง
+    match /student_blood_type/{sid} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') ||
+                     isSelfStudent(sid) || isParentOfStudent(sid) || isHomeroomOfStudent(sid);
+
+      allow create: if (isSelfStudent(sid) || isParentOfStudent(sid) || hasRole('INFIRMARY_STAFF') || hasRole('SUPER_ADMIN'))
+                       && request.resource.data.keys().hasOnly(['studentId', 'studentUid', 'parentUid', 'bloodType', 'setByUid', 'setByRole', 'setAt'])
+                       && request.resource.data.studentId == sid
+                       && request.resource.data.studentUid == studentField(sid, 'studentUid', '__none__')
+                       && request.resource.data.parentUid == studentField(sid, 'parentUid', null)
+                       && request.resource.data.bloodType in ['A', 'B', 'AB', 'O']
+                       && request.resource.data.setByUid == request.auth.uid
+                       && request.resource.data.setByRole in ['STUDENT', 'PARENT', 'NURSE', 'ADMIN']
+                       && request.resource.data.setAt == request.time;
+
+      allow update: if (hasRole('INFIRMARY_STAFF') || hasRole('SUPER_ADMIN'))
+                       && request.resource.data.keys().hasOnly(['studentId', 'studentUid', 'parentUid', 'bloodType', 'setByUid', 'setByRole', 'setAt'])
+                       && request.resource.data.studentId == resource.data.studentId
+                       && request.resource.data.studentUid == resource.data.studentUid
+                       && request.resource.data.parentUid == studentField(sid, 'parentUid', null)
+                       && request.resource.data.bloodType in ['A', 'B', 'AB', 'O']
+                       && request.resource.data.setByUid == request.auth.uid
+                       && request.resource.data.setByRole in ['NURSE', 'ADMIN']
+                       && request.resource.data.setAt == request.time;
+
+      allow delete: if false;
+    }
+
     // 34. ผู้ติดต่อฉุกเฉิน student_emergency_contacts/{studentId}
     //     สำเนาเฉพาะ ชื่อ/ความสัมพันธ์/เบอร์ ที่สกัดจากแบบเยี่ยมบ้านฝั่งผู้ปกครอง (บิดา/มารดา/ผู้ปกครอง) ให้พยาบาลใช้ติดต่อตอนฉุกเฉิน
     //     เพราะ home_visit_family_info มีรายได้/ครัวเรือน (พยาบาลอ่านไม่ได้ — ห้ามเปิดสิทธิ์นั้น)
