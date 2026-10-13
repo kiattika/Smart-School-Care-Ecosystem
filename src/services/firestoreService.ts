@@ -1,4 +1,5 @@
 import { omitUndefined } from '../lib/firestorePayload';
+import { infirmaryVisitNotice } from '../lib/studentNotices';
 import { applyStockChange, type DispenseLine, type StockMovementType } from '../lib/infirmaryStock';
 import { deriveEmergencyContacts } from '../lib/emergencyContacts';
 import { chatThreadId, normalizeChatText, senderRoleFor } from '../lib/classChat';
@@ -2940,6 +2941,7 @@ export async function recordInfirmaryVisit(
     nurseName: data.nurseName,
     isUrgentAlert: data.isUrgentAlert,
     parentAcknowledged: false,
+    ...((data.parentUid || data.studentUid) ? { parentNotifiedAt: now.toISOString(), parentNotifiedByName: data.nurseName } : {}),
     createdAt: now.toISOString(),
   };
   const dispensed = (data.dispensed || []).filter(l => l.qty > 0);
@@ -2969,20 +2971,21 @@ export async function recordInfirmaryVisit(
         tx.update(m.ref, { stock: r.balanceAfter, lastMovementId: mvRef.id, updatedAt: now.toISOString() });
       }
       tx.set(doc(firestoreDb, INFIRMARY_COL, id), payload);
-      if (data.parentUid) {
+      if (data.parentUid || data.studentUid) {
+        const notice = infirmaryVisitNotice(payload, data.studentName);
         const notifRef = doc(collection(firestoreDb, 'parent_notifications'));
         tx.set(notifRef, {
           id: notifRef.id,
-          parentUid: data.parentUid,
-          parentId: data.parentUid,
+          parentUid: data.parentUid || null,
+          parentId: data.parentUid || null,
           studentUid: data.studentUid ?? null,
           studentId: data.studentId,
           studentName: data.studentName,
-          title: data.isUrgentAlert ? '🚨 แจ้งเตือนด่วน: นักเรียนเข้าห้องพยาบาล' : '🏥 แจ้งเตือน: นักเรียนเข้าห้องพยาบาล',
-          message: `น้อง${data.studentName} เข้ารับบริการห้องพยาบาลด้วยอาการ "${data.symptoms}" เมื่อเวลา ${payload.visitTime} กรุณากดรับทราบในระบบ`,
+          title: notice.title,
+          message: notice.message,
           status: 'unread',
           createdAt: serverTimestamp(),
-          type: data.isUrgentAlert ? 'critical' : 'warning',
+          type: notice.type,
         });
       }
     });
@@ -3150,6 +3153,30 @@ export async function acknowledgeInfirmaryVisit(visitId: string): Promise<void> 
     }, { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `${INFIRMARY_COL}/${visitId}`);
+  }
+}
+
+/** พยาบาลกด "ส่งผ่านแอปงานพยาบาล" — เพิ่มรายการในลิสต์แจ้งเตือน (parent_notifications) ของผู้ปกครอง/นักเรียนจริง
+ *  แล้วบันทึก parentNotifiedAt ที่เคส; ไม่มีบัญชีผู้รับที่เชื่อมไว้ = throw (ไม่แสดงว่าแจ้งแล้วทั้งที่ไม่ได้แจ้ง) */
+export async function notifyParentOfInfirmaryVisit(
+  visit: InfirmaryVisit,
+  ctx: { studentName: string; studentUid: string | null; parentUid: string | null; nurseName: string },
+): Promise<void> {
+  const parentUid = ctx.parentUid || null;
+  const studentUid = ctx.studentUid || null;
+  if (!parentUid && !studentUid) throw new Error('NO_RECIPIENT');
+  const notice = infirmaryVisitNotice(visit, ctx.studentName);
+  await createParentNotification({
+    parentUid, studentUid, studentId: visit.studentId, studentName: ctx.studentName,
+    title: notice.title, message: notice.message, type: notice.type, date: visit.visitDate,
+  });
+  try {
+    await setDoc(doc(db, INFIRMARY_COL, visit.id), {
+      parentNotifiedAt: new Date().toISOString(),
+      parentNotifiedByName: ctx.nurseName,
+    }, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${INFIRMARY_COL}/${visit.id}`);
   }
 }
 
@@ -3711,4 +3738,140 @@ export async function verifyStudentHealthProfile(studentId: string, actor: { uid
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * บันทึกสุขภาพที่พยาบาลกรอก: ตรวจสายตา/การได้ยิน (student_checkups), วัคซีน (student_vaccinations),
+ * บริจาคโลหิต (blood_donations) — ดู src/lib/healthRecords.ts + firestore.rules บล็อก 36-38
+ * ทุกฟังก์ชันเขียน throw เมื่อไม่สำเร็จ (ห้ามกลืน error แล้วแจ้งว่าสำเร็จ)
+ * ──────────────────────────────────────────────────────────────────────────── */
+const CHECKUP_COL = 'student_checkups';
+const VACCINATION_COL = 'student_vaccinations';
+const DONATION_COL = 'blood_donations';
+
+export async function saveStudentCheckup(input: Omit<import('../lib/healthRecords').StudentCheckup, 'recordedAt'>): Promise<void> {
+  const err = (await import('../lib/healthRecords')).validateCheckup(input);
+  if (err) throw new Error(err);
+  const { checkupDocId } = await import('../lib/healthRecords');
+  const id = checkupDocId(input.studentId, input.academicYear);
+  try {
+    await setDoc(doc(db, CHECKUP_COL, id), omitUndefined({
+      studentId: input.studentId,
+      academicYear: input.academicYear,
+      examDate: input.examDate,
+      visionLeft: input.visionLeft?.trim() || undefined,
+      visionRight: input.visionRight?.trim() || undefined,
+      visionResult: input.visionResult,
+      hearingResult: input.hearingResult,
+      note: input.note?.trim() || undefined,
+      recordedByUid: input.recordedByUid,
+      recordedByName: input.recordedByName,
+      recordedAt: serverTimestamp(),
+    }));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${CHECKUP_COL}/${id}`);
+  }
+}
+
+export function subscribeStudentCheckups(
+  studentId: string,
+  onUpdate: (list: import('../lib/healthRecords').StudentCheckup[]) => void,
+  onError?: (e: Error) => void,
+): () => void {
+  return onSnapshot(
+    query(collection(db, CHECKUP_COL), where('studentId', '==', studentId)),
+    (snap) => onUpdate(snap.docs.map(d => d.data() as import('../lib/healthRecords').StudentCheckup)),
+    (e) => { console.warn('[subscribeStudentCheckups]', e.message); onError?.(e); },
+  );
+}
+
+export async function addStudentVaccination(input: Omit<import('../lib/healthRecords').StudentVaccination, 'id' | 'recordedAt'>): Promise<void> {
+  const err = (await import('../lib/healthRecords')).validateVaccination(input);
+  if (err) throw new Error(err);
+  const ref = doc(collection(db, VACCINATION_COL));
+  try {
+    await setDoc(ref, omitUndefined({
+      studentId: input.studentId,
+      vaccine: input.vaccine.trim(),
+      doseDate: input.doseDate,
+      place: input.place?.trim() || undefined,
+      note: input.note?.trim() || undefined,
+      recordedByUid: input.recordedByUid,
+      recordedByName: input.recordedByName,
+      recordedAt: serverTimestamp(),
+    }));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${VACCINATION_COL}/${ref.id}`);
+  }
+}
+
+export function subscribeStudentVaccinations(
+  studentId: string,
+  onUpdate: (list: import('../lib/healthRecords').StudentVaccination[]) => void,
+  onError?: (e: Error) => void,
+): () => void {
+  return onSnapshot(
+    query(collection(db, VACCINATION_COL), where('studentId', '==', studentId)),
+    (snap) => onUpdate(snap.docs.map(d => ({ ...(d.data() as any), id: d.id }))),
+    (e) => { console.warn('[subscribeStudentVaccinations]', e.message); onError?.(e); },
+  );
+}
+
+export async function addBloodDonation(input: Omit<import('../lib/healthRecords').BloodDonation, 'id' | 'recordedAt'>): Promise<void> {
+  const err = (await import('../lib/healthRecords')).validateDonation(input);
+  if (err) throw new Error(err);
+  const ref = doc(collection(db, DONATION_COL));
+  try {
+    await setDoc(ref, omitUndefined({
+      subjectType: input.subjectType,
+      studentId: input.subjectType === 'STUDENT' ? input.studentId : undefined,
+      staffId: input.subjectType === 'STAFF' ? input.staffId : undefined,
+      donorName: input.donorName.trim(),
+      donatedAt: input.donatedAt,
+      place: input.place?.trim() || undefined,
+      note: input.note?.trim() || undefined,
+      recordedByUid: input.recordedByUid,
+      recordedByName: input.recordedByName,
+      recordedAt: serverTimestamp(),
+    }));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${DONATION_COL}/${ref.id}`);
+  }
+}
+
+/** ไม่ส่ง filter = ทั้งโรงเรียน (พยาบาล/แอดมิน/ผู้บริหารเท่านั้น); { studentId } = นักเรียน/ผู้ปกครอง; { staffId } = บุคลากรเจ้าของ */
+export function subscribeBloodDonations(
+  onUpdate: (list: import('../lib/healthRecords').BloodDonation[]) => void,
+  filter: { studentId?: string; staffId?: string } = {},
+  onError?: (e: Error) => void,
+): () => void {
+  const base = collection(db, DONATION_COL);
+  const q = filter.studentId
+    ? query(base, where('subjectType', '==', 'STUDENT'), where('studentId', '==', filter.studentId))
+    : filter.staffId
+      ? query(base, where('subjectType', '==', 'STAFF'), where('staffId', '==', filter.staffId))
+      : base;
+  return onSnapshot(
+    q,
+    (snap) => onUpdate(snap.docs.map(d => ({ ...(d.data() as any), id: d.id }))),
+    (e) => { console.warn('[subscribeBloodDonations]', e.message); onError?.(e); },
+  );
+}
+
+/** ข้อมูลทั้งโรงเรียนสำหรับแดชบอร์ดสถิติงานพยาบาล (อ่านครั้งเดียว กดรีเฟรชได้) — เฉพาะพยาบาล/แอดมิน */
+export async function fetchInfirmaryDashboardData(academicYear: string) {
+  const [health, bloodTypes, checkups, vaccinations, movements] = await Promise.all([
+    getDocs(query(collection(db, 'student_semester_health'), where('academicYear', '==', academicYear))),
+    getDocs(collection(db, BLOOD_TYPE_COL)),
+    getDocs(query(collection(db, CHECKUP_COL), where('academicYear', '==', academicYear))),
+    getDocs(collection(db, VACCINATION_COL)),
+    getDocs(query(collection(db, MOVEMENT_COL), where('type', '==', 'DISPENSE'))),
+  ]);
+  return {
+    semesterHealth: health.docs.map(d => d.data() as any),
+    bloodTypes: bloodTypes.docs.map(d => ({ studentId: d.id, bloodType: (d.data() as any).bloodType as string })),
+    checkups: checkups.docs.map(d => d.data() as import('../lib/healthRecords').StudentCheckup),
+    vaccinations: vaccinations.docs.map(d => ({ ...(d.data() as any), id: d.id }) as import('../lib/healthRecords').StudentVaccination),
+    dispenseMovements: movements.docs.map(d => d.data() as InfirmaryStockMovement),
+  };
 }

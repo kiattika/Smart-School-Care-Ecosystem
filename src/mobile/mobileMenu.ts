@@ -4,7 +4,7 @@ import type { MobileDueStatus } from '../lib/mobileDue';
 export type MobileMenuId =
   | 'checkin' | 'schedule' | 'homeroom' | 'homeLocation' | 'chat'
   | 'club' | 'health' | 'sdq' | 'twoQ'                       // นักเรียน
-  | 'childGate' | 'leave' | 'homeVisit' | 'appointment';     // ผู้ปกครอง
+  | 'childGate' | 'leave' | 'homeVisit' | 'appointment' | 'infirmary';     // ผู้ปกครอง
 
 export interface MobileMenuItem { id: MobileMenuId; label: string }
 
@@ -35,6 +35,7 @@ export function mobileMenuFor(input: { appRole: string; roles: string[]; due?: M
       { id: 'schedule', label: 'ตารางเรียนวันนี้ของบุตรหลาน' },
       { id: 'leave', label: 'ใบลา' },
       { id: 'appointment', label: 'นัดพบครู' },
+      { id: 'infirmary', label: 'ห้องพยาบาลของบุตรหลาน' },
       { id: 'homeVisit', label: 'ข้อมูลเยี่ยมบ้าน' },
       ...(due.sdqDone === false ? [{ id: 'sdq' as const, label: 'ประเมิน SDQ' }] : []),
       { id: 'chat', label: 'สนทนากับครูประจำชั้น' },

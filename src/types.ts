@@ -732,6 +732,9 @@ export interface InfirmaryVisit {
   isUrgentAlert: boolean;
   parentAcknowledged: boolean;
   acknowledgedAt?: string;
+  /** พยาบาลส่งแจ้งเตือนเข้าแอป (parent_notifications) แล้วเมื่อไร — ไม่ใช่การรับทราบของผู้ปกครอง */
+  parentNotifiedAt?: string;
+  parentNotifiedByName?: string;
   createdAt?: string;
 }
 

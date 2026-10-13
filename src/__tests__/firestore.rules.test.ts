@@ -3253,6 +3253,24 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(asRole('INFIRMARY_STAFF').firestore().doc('infirmary_visits/inf-7').delete());
     });
 
+    it('พยาบาลกด "ส่งผ่านแอปงานพยาบาล": สร้างแจ้งเตือน (ผู้รับเป็น studentUid ได้เมื่อยังไม่มีผู้ปกครอง) และบันทึก parentNotifiedAt ที่เคสได้; ผู้ปกครองรับทราบต่อได้', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('infirmary_visits/inf-8').set(baseVisit({ id: 'inf-8' }));
+      });
+      const nurseDb = asRole('INFIRMARY_STAFF').firestore();
+      await assertSucceeds(nurseDb.doc('parent_notifications/inf-n1').set({
+        id: 'inf-n1', parentUid: null, parentId: null, studentUid: STU_UID, studentId: STU_ID, studentName: 'นักเรียนทดสอบ',
+        title: '🏥 แจ้งเตือน', message: 'ทดสอบ', status: 'unread', type: 'warning',
+      }));
+      await assertSucceeds(nurseDb.doc('infirmary_visits/inf-8').set(
+        { parentNotifiedAt: '2026-10-14T01:00:00.000Z', parentNotifiedByName: 'พยาบาลทดสอบ' }, { merge: true } as any,
+      ));
+      await assertSucceeds(asUser(PARENT_UID, ['PARENT']).firestore().doc('infirmary_visits/inf-8').set(
+        { parentAcknowledged: true, acknowledgedAt: '2026-10-14T02:00:00.000Z' }, { merge: true } as any,
+      ));
+    });
+
     // ระบบแจ้งเตือนรวมศูนย์ — TASK 1: บันทึกอาการต้องเขียนแจ้งเตือนผู้ปกครองคู่กันไปเสมอในธุรกรรมเดียวกัน
     it('บันทึกเข้าห้องพยาบาลจริงต้องสร้าง parent_notifications คู่กันไปด้วยในธุรกรรมเดียวกัน', async () => {
       await seed();
@@ -4026,4 +4044,105 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       }
     });
   });
+  describe('student_checkups / student_vaccinations / blood_donations (บันทึกสุขภาพโดยพยาบาล)', () => {
+    const SID = 'hr-std-1';
+    const STU = 'hr-stu';
+    const PAR = 'hr-par';
+    const stu = () => asUser(STU, ['STUDENT']).firestore() as any;
+    const par = () => asUser(PAR, ['PARENT']).firestore() as any;
+    const otherPar = () => asUser('hr-par-2', ['PARENT']).firestore() as any;
+    const nurse = () => asUser('hr-nurse', ['INFIRMARY_STAFF']).firestore() as any;
+    const admin = () => asUser('hr-admin', ['SUPER_ADMIN']).firestore() as any;
+    const hr = () => asUser('hr-hr', ['HOMEROOM_TEACHER'], { staffId: 'hr-hr' }).firestore() as any;
+    const staffUser = () => asUser('hr-staff-uid', ['SUBJECT_TEACHER'], { staffId: 'hr-t1' }).firestore() as any;
+    const otherStaff = () => asUser('hr-staff-uid2', ['SUBJECT_TEACHER'], { staffId: 'hr-t2' }).firestore() as any;
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${SID}`).set({ studentId: SID, studentUid: STU, parentUid: PAR, room: 'ม.2/2' });
+        await ctx.firestore().doc('staff/hr-hr').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.2/2' } });
+        await ctx.firestore().doc('staff/hr-t1').set({ roles: ['SUBJECT_TEACHER'] });
+      });
+    }
+    const checkup = (uid: string, over: Record<string, unknown> = {}) => ({
+      studentId: SID, academicYear: '2569', examDate: '2026-10-01', visionLeft: '20/20', visionRight: '20/25',
+      visionResult: 'NORMAL', hearingResult: 'NORMAL', recordedByUid: uid, recordedByName: 'พยาบาล', recordedAt: mServerTimestamp(), ...over,
+    });
+    const vacc = (uid: string, over: Record<string, unknown> = {}) => ({
+      studentId: SID, vaccine: 'HPV', doseDate: '2026-09-01', recordedByUid: uid, recordedByName: 'พยาบาล', recordedAt: mServerTimestamp(), ...over,
+    });
+    const donation = (uid: string, over: Record<string, unknown> = {}) => ({
+      subjectType: 'STUDENT', studentId: SID, donorName: 'เด็กชายทดสอบ', donatedAt: '2026-09-10', recordedByUid: uid, recordedByName: 'พยาบาล', recordedAt: mServerTimestamp(), ...over,
+    });
+
+    it('student_checkups: พยาบาล/แอดมินสร้าง-แก้ได้; นักเรียน/ผู้ปกครอง/ครูสร้างไม่ได้; docId ต้อง {studentId}_{ปี}', async () => {
+      await seed();
+      await assertSucceeds(mSetDoc(mDoc(nurse(), `student_checkups/${SID}_2569`), checkup('hr-nurse')));
+      await assertSucceeds(mSetDoc(mDoc(nurse(), `student_checkups/${SID}_2569`), checkup('hr-nurse', { hearingResult: 'ABNORMAL' })));
+      await assertSucceeds(mSetDoc(mDoc(admin(), `student_checkups/${SID}_2568`), checkup('hr-admin', { academicYear: '2568' })));
+      await assertFails(mSetDoc(mDoc(stu(), `student_checkups/${SID}_2570`), checkup(STU, { academicYear: '2570' })));
+      await assertFails(mSetDoc(mDoc(par(), `student_checkups/${SID}_2570`), checkup(PAR, { academicYear: '2570' })));
+      await assertFails(mSetDoc(mDoc(hr(), `student_checkups/${SID}_2570`), checkup('hr-hr', { academicYear: '2570' })));
+      await assertFails(mSetDoc(mDoc(nurse(), `student_checkups/wrong-id`), checkup('hr-nurse', { academicYear: '2571' })));
+      await assertFails(mSetDoc(mDoc(nurse(), `student_checkups/${SID}_2572`), checkup('hr-nurse', { academicYear: '2572', visionResult: 'GOOD' })));
+      await assertFails(mSetDoc(mDoc(nurse(), `student_checkups/${SID}_2573`), checkup('hr-nurse', { academicYear: '2573', extra: 1 })));
+      await assertFails(mSetDoc(mDoc(nurse(), `student_checkups/${SID}_2574`), checkup('someone-else', { academicYear: '2574' })));
+      await assertFails((nurse() as any).doc(`student_checkups/${SID}_2569`).delete());
+    });
+    it('student_checkups: อ่านได้ นักเรียนเจ้าของ/ผู้ปกครองตัวจริง/ครูที่ปรึกษา/พยาบาล; ผู้ปกครองคนอื่นไม่ได้', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`student_checkups/${SID}_2569`).set({ ...checkup('hr-nurse'), recordedAt: new Date() }); });
+      const q = (db: any) => getDocs(query(collection(db, 'student_checkups'), where('studentId', '==', SID)));
+      await assertSucceeds(q(stu())); await assertSucceeds(q(par())); await assertSucceeds(q(hr())); await assertSucceeds(q(nurse()));
+      await assertFails(q(otherPar()));
+    });
+
+    it('student_vaccinations: พยาบาลเพิ่ม/แก้ได้; ผู้ปกครองเพิ่มไม่ได้; ลบได้เฉพาะ SUPER_ADMIN', async () => {
+      await seed();
+      const ref = mDoc(nurse(), 'student_vaccinations/v1');
+      await assertSucceeds(mSetDoc(ref, vacc('hr-nurse')));
+      await assertSucceeds(mSetDoc(ref, vacc('hr-nurse', { note: 'เข็มที่ 2' })));
+      await assertFails(mSetDoc(mDoc(par(), 'student_vaccinations/v2'), vacc(PAR)));
+      await assertFails(mSetDoc(mDoc(nurse(), 'student_vaccinations/v3'), vacc('hr-nurse', { vaccine: '' })));
+      await assertFails(mSetDoc(mDoc(nurse(), 'student_vaccinations/v4'), vacc('hr-nurse', { studentId: 'no-such-student' })));
+      await assertFails((nurse() as any).doc('student_vaccinations/v1').delete());
+      await assertSucceeds((admin() as any).doc('student_vaccinations/v1').delete());
+    });
+    it('student_vaccinations: อ่าน นักเรียน/ผู้ปกครอง/ครูที่ปรึกษา ผ่าน; ผู้ปกครองคนอื่นไม่ผ่าน', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('student_vaccinations/v1').set({ ...vacc('hr-nurse'), recordedAt: new Date() }); });
+      await assertSucceeds(mGetDoc(mDoc(stu(), 'student_vaccinations/v1')));
+      await assertSucceeds(mGetDoc(mDoc(par(), 'student_vaccinations/v1')));
+      await assertSucceeds(mGetDoc(mDoc(hr(), 'student_vaccinations/v1')));
+      await assertFails(mGetDoc(mDoc(otherPar(), 'student_vaccinations/v1')));
+    });
+
+    it('blood_donations: พยาบาลบันทึกนักเรียน/บุคลากรได้; ต้องมีนักเรียน/บุคลากรจริง; ฟิลด์ไม่ตรงชนิดไม่ได้', async () => {
+      await seed();
+      await assertSucceeds(mSetDoc(mDoc(nurse(), 'blood_donations/d1'), donation('hr-nurse')));
+      await assertSucceeds(mSetDoc(mDoc(nurse(), 'blood_donations/d2'), { subjectType: 'STAFF', staffId: 'hr-t1', donorName: 'ครูทดสอบ', donatedAt: '2026-09-10', recordedByUid: 'hr-nurse', recordedByName: 'พยาบาล', recordedAt: mServerTimestamp() }));
+      await assertFails(mSetDoc(mDoc(nurse(), 'blood_donations/d3'), donation('hr-nurse', { studentId: 'no-such-student' })));
+      await assertFails(mSetDoc(mDoc(nurse(), 'blood_donations/d4'), { subjectType: 'STAFF', staffId: 'no-such-staff', donorName: 'x', donatedAt: '2026-09-10', recordedByUid: 'hr-nurse', recordedByName: 'พยาบาล', recordedAt: mServerTimestamp() }));
+      await assertFails(mSetDoc(mDoc(nurse(), 'blood_donations/d5'), donation('hr-nurse', { staffId: 'hr-t1' })));
+      await assertFails(mSetDoc(mDoc(nurse(), 'blood_donations/d6'), donation('hr-nurse', { donatedAt: '' })));
+      await assertFails(mSetDoc(mDoc(stu(), 'blood_donations/d7'), donation(STU)));
+      await assertFails(mSetDoc(mDoc(par(), 'blood_donations/d8'), donation(PAR)));
+      await assertFails(mSetDoc(mDoc(staffUser(), 'blood_donations/d9'), { subjectType: 'STAFF', staffId: 'hr-t1', donorName: 'ครูทดสอบ', donatedAt: '2026-09-10', recordedByUid: 'hr-staff-uid', recordedByName: 'ครู', recordedAt: mServerTimestamp() }));
+      await assertFails((nurse() as any).doc('blood_donations/d1').delete());
+      await assertSucceeds((admin() as any).doc('blood_donations/d1').delete());
+    });
+    it('blood_donations: อ่าน — นักเรียน/ผู้ปกครองเห็นของบุตรหลาน, บุคลากรเห็นของตัวเอง, คนอื่นไม่เห็น', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('blood_donations/d1').set({ ...donation('hr-nurse'), recordedAt: new Date() });
+        await ctx.firestore().doc('blood_donations/d2').set({ subjectType: 'STAFF', staffId: 'hr-t1', donorName: 'ครูทดสอบ', donatedAt: '2026-09-10', recordedByUid: 'hr-nurse', recordedByName: 'พยาบาล', recordedAt: new Date() });
+      });
+      const qs = (db: any) => getDocs(query(collection(db, 'blood_donations'), where('subjectType', '==', 'STUDENT'), where('studentId', '==', SID)));
+      const qt = (db: any) => getDocs(query(collection(db, 'blood_donations'), where('subjectType', '==', 'STAFF'), where('staffId', '==', 'hr-t1')));
+      await assertSucceeds(qs(stu())); await assertSucceeds(qs(par())); await assertSucceeds(qs(nurse()));
+      await assertFails(qs(otherPar())); await assertFails(qs(hr()));
+      await assertSucceeds(qt(staffUser())); await assertSucceeds(qt(nurse()));
+      await assertFails(qt(otherStaff())); await assertFails(qt(stu()));
+    });
+  });
+
 });

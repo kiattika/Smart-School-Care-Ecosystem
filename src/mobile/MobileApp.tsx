@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Brain, CalendarClock, CalendarHeart, ClipboardCheck, Download, FileText, Home, HeartPulse, LogOut, MapPin, MessageCircle, Monitor, Puzzle, RefreshCw, Satellite, ScanLine, UsersRound, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Brain, CalendarClock, CalendarHeart, ClipboardCheck, Download, FileText, Home, HeartPulse, LogOut, MapPin, MessageCircle, Monitor, Puzzle, RefreshCw, Satellite, ScanLine, UsersRound, BarChart3, Stethoscope } from 'lucide-react';
 import { useStore } from '../store';
 import { useRealStudents } from '../hooks/useRealStudents';
 import { useTeacherFirestoreSchedule } from '../hooks/useTeacherFirestoreSchedule';
@@ -42,6 +42,7 @@ const ICONS: Record<MobileMenuId, React.ComponentType<{ className?: string }>> =
   leave: FileText,
   homeVisit: UsersRound,
   appointment: CalendarHeart,
+  infirmary: Stethoscope,
 };
 const TONES: Record<MobileMenuId, string> = {
   checkin: 'from-emerald-500/25 to-teal-500/10 text-emerald-300 border-emerald-500/30',
@@ -57,6 +58,7 @@ const TONES: Record<MobileMenuId, string> = {
   leave: 'from-cyan-500/25 to-sky-500/10 text-cyan-300 border-cyan-500/30',
   homeVisit: 'from-amber-500/25 to-orange-500/10 text-amber-300 border-amber-500/30',
   appointment: 'from-lime-500/25 to-green-500/10 text-lime-300 border-lime-500/30',
+  infirmary: 'from-rose-500/25 to-pink-500/10 text-rose-300 border-rose-500/30',
 };
 
 /** หน้ามือถือ (PWA) /m — แสดงเฉพาะเมนูที่ใช้บ่อยตามบทบาท; งานอื่นเปิดเว็บเต็มได้ */
@@ -179,6 +181,7 @@ export function MobileApp({ onLogout }: Props) {
         {view === 'health' && (child && isStudent ? <MobileHealthForm student={child} studentUid={user.uid} /> : needChild)}
         {view === 'sdq' && (child ? <HealthMentalWellbeingModule studentId={child.studentId} student={child} isParentView={isParent} onlyTab="sdq" /> : needChild)}
         {view === 'twoQ' && (child ? <HealthMentalWellbeingModule studentId={child.studentId} student={child} isParentView={false} onlyTab="screening" /> : needChild)}
+        {view === 'infirmary' && (child ? <HealthMentalWellbeingModule studentId={child.studentId} student={child} isParentView onlyTab="infirmary" /> : needChild)}
         {view === 'childGate' && (child ? <GateAttendanceTracker studentId={child.studentId} student={child} isParentView onlyTab="gate" /> : needChild)}
         {view === 'leave' && (child ? <GateAttendanceTracker studentId={child.studentId} student={child} isParentView onlyTab="leave" /> : needChild)}
         {view === 'appointment' && (child ? <ParentEngagementServices studentId={child.studentId} student={child} isParentView section="appointment" /> : needChild)}

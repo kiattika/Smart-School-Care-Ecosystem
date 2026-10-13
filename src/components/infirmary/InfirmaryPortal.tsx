@@ -5,7 +5,7 @@ import { StudentPicker } from '../shared/StudentPicker';
 import { PortalSidebarLayout } from '../shared/PortalSidebarLayout';
 import {
   recordInfirmaryVisit as recordInfirmaryVisitFirestore,
-  acknowledgeInfirmaryVisit,
+  notifyParentOfInfirmaryVisit,
   subscribeInfirmaryVisits,
   subscribeInfirmaryMedicines,
   type InfirmaryMedicine,
@@ -28,9 +28,14 @@ import {
   Calendar,
   ShieldAlert,
   Thermometer,
-  Stethoscope
+  Stethoscope,
+  BarChart3,
+  Droplets
 } from 'lucide-react';
 import { InfirmaryVisit, SemesterHealthRecord } from '../../types';
+import { InfirmaryOverview } from './InfirmaryOverview';
+import { InfirmaryHealthRecordsPanel } from './InfirmaryHealthRecordsPanel';
+import { InfirmaryBloodDonationPanel } from './InfirmaryBloodDonationPanel';
 
 export function InfirmaryPortal() {
   const user = useStore(s => s.user);
@@ -52,15 +57,29 @@ export function InfirmaryPortal() {
   const [isSavingVisit, setIsSavingVisit] = useState(false);
   const [recordVisitError, setRecordVisitError] = useState<string | null>(null);
 
-  const acknowledgeInfirmaryAlert = async (id: string) => {
+  // ส่งแจ้งเตือนเข้าแอปผู้ปกครอง/นักเรียนจริง (parent_notifications) — ไม่มีบัญชีที่เชื่อมไว้จะแจ้ง error ตามจริง
+  const [noticeBusyId, setNoticeBusyId] = useState<string | null>(null);
+  const [noticeError, setNoticeError] = useState<{ id: string; msg: string } | null>(null);
+  const sendInAppNotice = async (v: InfirmaryVisit) => {
+    setNoticeBusyId(v.id);
+    setNoticeError(null);
     try {
-      await acknowledgeInfirmaryVisit(id);
-    } catch (err) {
-      console.error('[InfirmaryPortal] acknowledgeInfirmaryVisit failed:', err);
+      const st = students.find(s => s.studentId === v.studentId);
+      await notifyParentOfInfirmaryVisit(v, {
+        studentName: st?.fullName || v.studentId,
+        studentUid: v.studentUid ?? null,
+        parentUid: v.parentUid ?? null,
+        nurseName: user?.displayName || user?.email || 'เจ้าหน้าที่พยาบาล',
+      });
+    } catch (err: any) {
+      console.error('[InfirmaryPortal] notifyParentOfInfirmaryVisit failed:', err);
+      setNoticeError({ id: v.id, msg: err?.message === 'NO_RECIPIENT' ? 'นักเรียนคนนี้ยังไม่มีบัญชีผู้ปกครอง/นักเรียนที่เชื่อมไว้ จึงส่งแจ้งเตือนไม่ได้' : 'ส่งแจ้งเตือนไม่สำเร็จ ลองใหม่อีกครั้ง' });
+    } finally {
+      setNoticeBusyId(null);
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'visits' | 'inventory' | 'screening' | 'profiles'>('visits');
+  const [activeTab, setActiveTab] = useState<'overview' | 'visits' | 'inventory' | 'screening' | 'donation' | 'profiles'>('overview');
   const [searchTerm, setSearchTerm] = useState('');
   // เฟส 2 shared components — TASK 2: เปลี่ยนไปใช้ StudentPicker กลาง ซึ่งไม่ auto-select นักเรียน
   // คนแรกให้ (ต้องพิมพ์ค้นหา/เลือกเองเสมอ) ตั้งใจเปลี่ยนพฤติกรรมเดิม — เดิม default เป็น students[0]
@@ -144,7 +163,6 @@ export function InfirmaryPortal() {
     }
   };
 
-  const activeStudent = students.find(s => s.studentId === selectedStudentId) || students[0];
 
   return (
     <div className="flex-1 min-h-0 bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
@@ -187,14 +205,19 @@ export function InfirmaryPortal() {
           activeId={activeTab}
           onSelect={(id) => setActiveTab(id as typeof activeTab)}
           items={[
+            { id: 'overview', label: 'ภาพรวมและสถิติงานพยาบาล', icon: BarChart3 },
             { id: 'visits', label: `สถิติการมารับบริการและจ่ายยา (${infirmaryVisits.length})`, icon: Activity },
             { id: 'inventory', label: `คลังเวชภัณฑ์และยา (${medicines.filter(isLowStock).length > 0 ? medicines.filter(isLowStock).length + ' ใกล้หมด' : medicines.length})`, icon: Pill },
             { id: 'screening', label: 'ผลตรวจสุขภาพและวัคซีนประจำปี', icon: FileSpreadsheet },
+            { id: 'donation', label: 'ประวัติบริจาคโลหิต', icon: Droplets },
             { id: 'profiles', label: 'ข้อมูลโรคประจำตัวและประวัติแพ้ยา', icon: User },
           ]}
         >
         <div className="space-y-6">
         
+        {/* TAB 0: OVERVIEW */}
+        {activeTab === 'overview' && <InfirmaryOverview visits={infirmaryVisits} medicines={medicines} students={students} />}
+
         {/* TAB 1: VISITS & TREATMENTS */}
         {activeTab === 'visits' && (
           <div className="space-y-4">
@@ -211,7 +234,7 @@ export function InfirmaryPortal() {
               </div>
               <div className="flex items-center gap-2 text-xs text-slate-400">
                 <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
-                <span>ระบบเชื่อมโยงแจ้งเตือน Line ผู้ปกครองอัตโนมัติ</span>
+                <span>แจ้งเตือนผู้ปกครองผ่านแอป (เข้าลิสต์แจ้งเตือนอัตโนมัติเมื่อบันทึกเคส)</span>
               </div>
             </div>
 
@@ -270,16 +293,31 @@ export function InfirmaryPortal() {
                           <td className="p-3.5 text-center">
                             {v.parentAcknowledged ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full text-[10px] font-bold">
-                                <CheckCircle className="w-3 h-3" /> แจ้งแล้ว
+                                <CheckCircle className="w-3 h-3" /> ผู้ปกครองรับทราบแล้ว
                               </span>
+                            ) : v.parentNotifiedAt ? (
+                              <div className="space-y-1">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-sky-500/10 text-sky-300 border border-sky-500/20 rounded-full text-[10px] font-bold">
+                                  <CheckCircle className="w-3 h-3" /> ส่งแจ้งเตือนแล้ว · รอรับทราบ
+                                </span>
+                                <button
+                                  onClick={() => sendInAppNotice(v)}
+                                  disabled={noticeBusyId === v.id}
+                                  className="block mx-auto text-[10px] text-slate-400 hover:text-slate-200 underline disabled:opacity-50"
+                                >
+                                  ส่งซ้ำ
+                                </button>
+                              </div>
                             ) : (
                               <button
-                                onClick={() => acknowledgeInfirmaryAlert(v.id)}
-                                className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 rounded-lg text-[10px] font-bold transition-all cursor-pointer"
+                                onClick={() => sendInAppNotice(v)}
+                                disabled={noticeBusyId === v.id}
+                                className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 rounded-lg text-[10px] font-bold transition-all cursor-pointer disabled:opacity-50"
                               >
-                                กดส่งแจ้ง Line ผู้ปกครอง
+                                {noticeBusyId === v.id ? 'กำลังส่ง…' : 'กดส่งผ่านแอปงานพยาบาล'}
                               </button>
                             )}
+                            {noticeError?.id === v.id && <p className="text-[10px] text-rose-400 mt-1">{noticeError.msg}</p>}
                           </td>
                           <td className="p-3.5 text-right font-mono text-slate-400 text-xs">
                             {v.nurseName}
@@ -299,46 +337,27 @@ export function InfirmaryPortal() {
           <InfirmaryStockPanel medicines={medicines} actor={{ uid: user.uid, name: user.displayName || user.email || 'เจ้าหน้าที่พยาบาล' }} />
         )}
 
-        {/* TAB 3: HEALTH SCREENING & VACCINES */}
+        {/* TAB 3: HEALTH SCREENING & VACCINES — บันทึกจริง ไม่มีค่าตัวอย่าง */}
         {activeTab === 'screening' && (
           <div className="space-y-4">
             <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
-                  <h3 className="text-base font-bold text-white">บันทึกตรวจสุขภาพและวัคซีนประจำปี 2569</h3>
-                  <p className="text-xs text-slate-400">ข้อมูลน้ำหนัก ส่วนสูง ดัชนีมวลกาย (BMI) และการได้รับวัคซีนป้องกันโรค</p>
+                  <h3 className="text-base font-bold text-white">ผลตรวจสุขภาพและวัคซีน</h3>
+                  <p className="text-xs text-slate-400">BMI มาจากที่นักเรียนบันทึกรายภาคเรียน · พยาบาลบันทึกผลตรวจสายตา/การได้ยินประจำปีและประวัติวัคซีน</p>
                 </div>
                 <div className="w-64">
                   <StudentPicker mode="single" students={students} value={selectedStudentId} onSelect={setSelectedStudentId} />
                 </div>
               </div>
-
-              {activeStudent && (
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-2">
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                    <span className="text-slate-400 text-xs block">นักเรียนที่เลือก</span>
-                    <p className="text-sm font-bold text-white mt-1">{activeStudent.fullName}</p>
-                    <p className="text-xs text-indigo-400 font-mono">รหัส: {activeStudent.studentId}</p>
-                  </div>
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                    <span className="text-slate-400 text-xs block">ดัชนีมวลกาย (BMI)</span>
-                    <p className="text-2xl font-black text-emerald-400 font-mono mt-0.5">21.4</p>
-                    <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">สมส่วน (Normal)</span>
-                  </div>
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                    <span className="text-slate-400 text-xs block">สมรรถภาพสายตาและการได้ยิน</span>
-                    <p className="text-sm font-bold text-white mt-1">ปกติ 20/20 (ทั้งสองข้าง)</p>
-                    <span className="text-[10px] text-indigo-400 font-mono">ตรวจเมื่อ: 15 พ.ค. 2569</span>
-                  </div>
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                    <span className="text-slate-400 text-xs block">ประวัติวัคซีน (HPV / DPT)</span>
-                    <p className="text-sm font-bold text-emerald-400 mt-1">✅ ครบตามเกณฑ์กระทรวงฯ</p>
-                    <span className="text-[10px] text-slate-400 font-mono">บันทึกโดย รพ.สต. เมืองอุตรดิตถ์</span>
-                  </div>
-                </div>
-              )}
+              {user?.uid && <InfirmaryHealthRecordsPanel studentId={selectedStudentId} actor={{ uid: user.uid, name: user.displayName || user.email || 'เจ้าหน้าที่พยาบาล' }} />}
             </div>
           </div>
+        )}
+
+        {/* TAB 3b: BLOOD DONATION */}
+        {activeTab === 'donation' && user?.uid && (
+          <InfirmaryBloodDonationPanel students={students} actor={{ uid: user.uid, name: user.displayName || user.email || 'เจ้าหน้าที่พยาบาล' }} />
         )}
 
         {/* TAB 4: PROFILES & CHRONIC */}
