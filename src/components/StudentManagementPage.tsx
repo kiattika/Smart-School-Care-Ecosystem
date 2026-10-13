@@ -89,15 +89,6 @@ export interface StudentRecord {
   };
 }
 
-const COMMON_ROOMS = [
-  'ม.1/1', 'ม.1/2', 'ม.1/3',
-  'ม.2/1', 'ม.2/2', 'ม.2/3',
-  'ม.3/1', 'ม.3/2', 'ม.3/3',
-  'ม.4/1', 'ม.4/2', 'ม.4/3',
-  'ม.5/1', 'ม.5/2', 'ม.5/8', 'ม.5/9',
-  'ม.6/1', 'ม.6/2', 'ม.6/8'
-];
-
 /**
  * onGoToImport: พาไปเมนู "ระบบนำเข้าข้อมูลขนาดใหญ่" ของ AdminPortal (ชนิด STUDENT) — การนำเข้าข้อมูล
  * มีที่เดียว (BulkDataImportModal แบบ inline ในเมนู 'import') ไม่เปิด modal ซ้ำในหน้านี้
@@ -270,7 +261,6 @@ export function StudentManagementPage({ onGoToImport, onOpenIdRegistry }: { onGo
   // หาห้องเรียนทั้งหมดที่มีข้อมูลในระบบ
   const availableRooms = useMemo(() => {
     const roomsSet = new Set<string>();
-    COMMON_ROOMS.forEach(r => roomsSet.add(r));
     scopedStudents.forEach(s => {
       if (s.room) roomsSet.add(s.room);
       if (s.className) roomsSet.add(s.className);
@@ -1044,7 +1034,7 @@ export function StudentManagementPage({ onGoToImport, onOpenIdRegistry }: { onGo
                       value={formFirstName}
                       onChange={(e) => setFormFirstName(e.target.value)}
                       className="w-full bg-slate-950 border border-white/10 rounded-lg px-3 py-2 text-xs text-slate-200 focus:border-purple-500 outline-none"
-                      placeholder="เช่น กิตติศักดิ์"
+                      placeholder="ชื่อเล่น (ถ้ามี)"
                       required
                     />
                   </div>

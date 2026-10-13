@@ -123,13 +123,11 @@ describe('no-fake-data guard — removed simulate buttons / seeders / debug outp
     ])).toEqual([]);
   });
 
-  it('deleted mock data files stay deleted; mockData.ts only keeps MOCK_VISIT_DATA (round B)', () => {
-    for (const f of ['mockStudentParentData.ts', 'mockSelfAssessments.ts', 'mockStudents.ts', 'mockStudentsData.ts', 'realStudents.ts', 'teachingLoadData.ts']) {
+  it('deleted mock data files stay deleted (รวม mockData.ts)', () => {
+    for (const f of ['mockData.ts', 'mockStudentParentData.ts', 'mockSelfAssessments.ts', 'mockStudents.ts', 'mockStudentsData.ts', 'realStudents.ts', 'teachingLoadData.ts']) {
       expect(fs.existsSync(path.join(srcDir, 'data', f)), f).toBe(false);
     }
     expect(fs.existsSync(path.join(srcDir, 'LandingPortal.tsx'))).toBe(false);
-    const exports = readSource(path.join(srcDir, 'data/mockData.ts')).match(/^export .*/gm) || [];
-    expect(exports).toEqual(['export const MOCK_VISIT_DATA = [']);
   });
 });
 

@@ -37,6 +37,8 @@ import { signOutUser } from '../lib/auth';
 import { useStore } from '../store';
 import { UserProfile, UserRole } from '../types';
 import { useDepartments } from '../hooks/useDepartments';
+import { useRealStudents } from '../hooks/useRealStudents';
+import { roomOptionsFromStudents } from '../lib/roomOptions';
 import { normalizeEmail } from '../lib/normalizeEmail';
 import { isStaffActive } from '../lib/staffStatus';
 import {
@@ -96,10 +98,6 @@ import { DEFAULT_DEPARTMENTS as _DEFAULT_DEPARTMENTS } from '../lib/departments'
 /** @deprecated ใช้ hook `useDepartments()` แทน — เหลือไว้ชั่วคราวกัน import เดิมพัง */
 export const DEPARTMENTS = _DEFAULT_DEPARTMENTS;
 
-const ROOM_OPTIONS = [
-  'ม.1/1', 'ม.1/2', 'ม.2/3', 'ม.4/1', 'ม.4/2', 'ม.5/1', 'ม.5/2', 'ม.5/8', 'ม.5/9', 'ม.5/11'
-];
-
 /**
  * onGoToImport: พาไปเมนู "ระบบนำเข้าข้อมูลขนาดใหญ่" ของ AdminPortal (ชนิด TEACHER) — การนำเข้าข้อมูล
  * มีที่เดียว (BulkDataImportModal แบบ inline ในเมนู 'import') ไม่เปิด modal ซ้ำในหน้านี้
@@ -115,6 +113,7 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
 
   // กลุ่มสาระฯ/กลุ่มงาน จาก Firestore (แอดมินแก้ไขได้) — ไม่ใช่ hardcoded array แล้ว
   const { departments, isFallback: deptIsFallback } = useDepartments();
+
 
   useEffect(() => {
     setIsLoading(true);
@@ -177,6 +176,12 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
   const [formRoles, setFormRoles] = useState<UserRole[]>([]);
   const [formDept, setFormDept] = useState('');
   const [formHomeroom, setFormHomeroom] = useState('');
+  // ห้องเรียนที่เลือกได้ = ห้องที่มีนักเรียนอยู่จริงในระบบ (+ ห้องที่เลือกไว้เดิม)
+  const { students: realStudentsForRooms } = useRealStudents();
+  const roomOptions = useMemo(
+    () => roomOptionsFromStudents(realStudentsForRooms, [formHomeroom]),
+    [realStudentsForRooms, formHomeroom],
+  );
   const [formSubjects, setFormSubjects] = useState<{ subjectCode: string; className: string }[]>([]);
   const [formMentees, setFormMentees] = useState<string[]>([]);
 
@@ -984,7 +989,7 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                         required={formRoles.includes('HOMEROOM_TEACHER')}
                       >
                         <option value="">-- กรุณาเลือกห้องเรียน --</option>
-                        {ROOM_OPTIONS.map(room => (
+                        {roomOptions.map(room => (
                           <option key={room} value={room}>{room}</option>
                         ))}
                       </select>
@@ -1049,7 +1054,7 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                           className="w-full bg-slate-950 border border-white/10 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:border-blue-500 outline-none"
                         >
                           <option value="">-- เลือกห้อง --</option>
-                          {ROOM_OPTIONS.map(room => (
+                          {roomOptions.map(room => (
                             <option key={room} value={room}>{room}</option>
                           ))}
                         </select>
