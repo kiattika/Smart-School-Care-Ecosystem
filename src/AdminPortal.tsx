@@ -49,7 +49,7 @@ const IMPORT_CARD_META: Record<ImportType, {
   },
   PARENT: {
     title: 'นำเข้าข้อมูลยืนยันตัวตนผู้ปกครอง',
-    description: <>Student ID, ชื่อผู้ปกครอง, เลขบัตร ปชช. (hash SHA-256), เบอร์, ความสัมพันธ์ ลง <code className="text-amber-400 font-mono">parent_verification_records</code> สำหรับเชื่อมบัญชี LINE</>,
+    description: <>Student ID, ชื่อผู้ปกครอง, เลขบัตร ปชช. (เซิร์ฟเวอร์เก็บเป็น HMAC), เบอร์, ความสัมพันธ์ ลง <code className="text-amber-400 font-mono">parent_verification_records</code> สำหรับเชื่อมบัญชี LINE</>,
     prerequisite: 'ต้องนำเข้านักเรียน (ข้อ 2) ก่อน — รหัสนักเรียนที่ไม่มีในระบบจะถูกปฏิเสธ',
     icon: ShieldCheck, iconBox: 'bg-amber-500/10 border-amber-500/20 text-amber-400', openBorder: 'border-amber-500/40',
   },

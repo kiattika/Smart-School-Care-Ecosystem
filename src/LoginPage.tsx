@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from './store';
 import { LogIn, AlertCircle, Loader2, KeyRound, Sparkles } from 'lucide-react';
-import { signInWithGoogle, signInWithEmailPassword } from './lib/auth';
+import { signInWithGoogle, signInWithEmailPassword, signInWithParentToken } from './lib/auth';
+import { isLineConfigured, isLinePending, markLinePending, getLineIdToken, requestParentSignIn, requestParentLink } from './lib/lineParent';
 import { describeAuthError } from './lib/authErrors';
 
 const EMULATOR_TEST_USERS = [
@@ -17,7 +18,7 @@ const EMULATOR_TEST_USERS = [
   { email: 'guidance.test@utd.ac.th', label: 'ครูแนะแนว / จิตวิทยา', roleTag: 'GUIDANCE_COUNSELOR', desc: 'ดร.สุดา (สิทธิ์เข้าถึง PHQ-9)' },
   { email: 'finance.test@utd.ac.th', label: 'ฝ่ายการเงิน', roleTag: 'FINANCE_STAFF', desc: 'นางศิริพร การเงินพัสดุ' },
   { email: 'infirmary.test@utd.ac.th', label: 'ห้องพยาบาล', roleTag: 'INFIRMARY_STAFF', desc: 'น.ส.กนกวรรณ พยาบาล' },
-  { email: 'parent.test@gmail.com', label: 'ผู้ปกครอง (ของ นายยศกร)', roleTag: 'PARENT', desc: 'ถูกปฏิเสธโดยเซิร์ฟเวอร์ (ไม่ใช่ @utd.ac.th) จนกว่าจะมีระบบ LINE' },
+  { email: 'parent.test@gmail.com', label: 'ผู้ปกครอง (ของ นายยศกร)', roleTag: 'PARENT', desc: 'ใช้ email/password ไม่ได้ (ถูกปฏิเสธ) — ผู้ปกครองต้องเข้าผ่าน LINE เท่านั้น' },
   { email: 'student.test@utd.ac.th', label: 'นักเรียน (ม.5/8)', roleTag: 'STUDENT', desc: 'นายยศกร รักเรียน (38501)' },
 ];
 
@@ -70,9 +71,61 @@ export function LoginPage({ initialError = null }: { initialError?: string | nul
     }
   };
 
-  const handleLineParentLogin = () => {
-    setErrorMessage('ระบบเข้าสู่ระบบสำหรับผู้ปกครองผ่าน LINE Official Account กำลังเชื่อมต่อ API Gateway (LINE LIFF & Cloud Functions)');
+  // ผู้ปกครอง (LINE): idToken ค้างไว้เมื่อยังไม่เคยเชื่อมบัญชี → แสดงฟอร์มกรอกรหัสนักเรียน + เลขบัตร
+  const [lineIdToken, setLineIdToken] = useState<string | null>(null);
+  const [linkStudentId, setLinkStudentId] = useState('');
+  const [linkNationalId, setLinkNationalId] = useState('');
+
+  const continueLineLogin = async () => {
+    try {
+      setLoading(true);
+      setErrorMessage(null);
+      const idToken = await getLineIdToken();
+      if (!idToken) return; // กำลัง redirect ไปล็อกอิน LINE
+      markLinePending(false);
+      const result = await requestParentSignIn(idToken);
+      if ('notLinked' in result) {
+        setLineIdToken(idToken);
+        return;
+      }
+      setUser(await signInWithParentToken(result.customToken));
+    } catch (err: any) {
+      markLinePending(false);
+      console.error('LINE Sign-In Error:', err);
+      setErrorMessage(describeAuthError(err));
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const handleLineParentLogin = () => {
+    if (!isLineConfigured()) {
+      setErrorMessage('ระบบเข้าสู่ระบบผู้ปกครองผ่าน LINE ยังไม่ได้ตั้งค่า (ผู้ดูแลระบบต้องตั้งค่า LINE Login ก่อน)');
+      return;
+    }
+    void continueLineLogin();
+  };
+
+  const handleLineLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!lineIdToken) return;
+    try {
+      setLoading(true);
+      setErrorMessage(null);
+      const customToken = await requestParentLink(lineIdToken, linkStudentId.trim(), linkNationalId);
+      setUser(await signInWithParentToken(customToken));
+    } catch (err: any) {
+      setErrorMessage(describeAuthError(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // กลับมาจากหน้าล็อกอิน LINE → ทำต่ออัตโนมัติ
+  useEffect(() => {
+    if (isLineConfigured() && isLinePending()) void continueLineLogin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="min-h-[100dvh] w-full bg-slate-900 flex flex-col items-center justify-center p-3 sm:p-6 overflow-y-auto touch-scroll">
@@ -120,6 +173,19 @@ export function LoginPage({ initialError = null }: { initialError?: string | nul
             </div>
             <span className="truncate">เข้าสู่ระบบสำหรับผู้ปกครอง (LINE)</span>
           </button>
+          {lineIdToken && (
+            <form onSubmit={handleLineLink} className="w-full space-y-2.5 text-left bg-white/5 border border-white/10 rounded-xl p-3">
+              <p className="text-xs text-slate-300">ยืนยันตัวตนผู้ปกครองครั้งแรก — กรอกรหัสนักเรียนและเลขบัตรประชาชนของผู้ปกครองตามที่โรงเรียนบันทึกไว้</p>
+              <input value={linkStudentId} onChange={(e) => setLinkStudentId(e.target.value)} placeholder="รหัสนักเรียน" inputMode="numeric" required
+                className="w-full min-h-[44px] px-3 rounded-lg bg-slate-800 border border-white/10 text-white text-sm" />
+              <input value={linkNationalId} onChange={(e) => setLinkNationalId(e.target.value)} placeholder="เลขบัตรประชาชนผู้ปกครอง 13 หลัก" inputMode="numeric" autoComplete="off" required
+                className="w-full min-h-[44px] px-3 rounded-lg bg-slate-800 border border-white/10 text-white text-sm" />
+              <button type="submit" disabled={loading}
+                className="w-full min-h-[44px] bg-[#00B900] hover:bg-[#00A000] disabled:opacity-60 text-white font-medium rounded-lg text-sm cursor-pointer">
+                ยืนยันและเข้าสู่ระบบ
+              </button>
+            </form>
+          )}
         </div>
 
         {/* บัญชีทดสอบสำหรับ Development & Firebase Emulator (Gated behind import.meta.env.DEV) */}

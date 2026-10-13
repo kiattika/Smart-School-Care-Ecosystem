@@ -1001,9 +1001,12 @@ service cloud.firestore {
 
     // 22. Parent Verification Records (identity matching for LINE/LIFF account linking)
     // ข้อมูลอ่อนไหวตาม PDPA (hash เลขบัตร ปชช. + เบอร์โทร) — ใช้เทียบยืนยันฝั่ง backend เท่านั้น
-    // SUPER_ADMIN เท่านั้นที่อ่าน/เขียนได้ (แม้แต่ผู้ปกครองเจ้าของข้อมูลก็ไม่ควรอ่านได้จาก client)
+    // SUPER_ADMIN อ่านได้ (ดูสถานะการเชื่อมบัญชี) — เขียนจาก client ไม่ได้เลย: เขียนผ่าน Cloud Functions
+    // (importParentVerification / linkParentLine / unlinkParentLine) ที่คำนวณ HMAC ด้วย secret ฝั่งเซิร์ฟเวอร์เท่านั้น
+    // parent_link_attempts (ตัวนับกรอกผิด) ไม่มี match = ปฏิเสธทุกคน เข้าถึงได้ผ่าน Admin SDK เท่านั้น
     match /parent_verification_records/{recordId} {
-      allow read, write: if hasRole('SUPER_ADMIN');
+      allow read: if hasRole('SUPER_ADMIN');
+      allow write: if false;
     }
 
     // 24. Student Portfolio Entries — นักเรียนบันทึกผลงานเอง (รางวัล/อบรม/ฝึกงาน/จิตอาสา)

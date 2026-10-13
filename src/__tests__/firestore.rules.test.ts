@@ -1179,20 +1179,20 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
 
   // 17. parent_verification_records - SUPER_ADMIN only (PDPA-sensitive identity data)
   describe('parent_verification_records collection', () => {
-    it('allows SUPER_ADMIN to read and write parent verification records', async () => {
+    it('allows SUPER_ADMIN to read but NOT write parent verification records (writes go through Cloud Functions)', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('parent_verification_records/38501_verify').set({
           studentId: '38501',
-          parentNationalIdHash: 'abc123',
+          parentNationalIdHmac: 'abc123',
           relationship: 'บิดา',
           linkedParentUid: null,
         });
       });
 
       await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('parent_verification_records/38501_verify').get());
-      await assertSucceeds(
+      await assertFails(
         asRole('SUPER_ADMIN').firestore().doc('parent_verification_records/38502_verify').set({
-          studentId: '38502', parentNationalIdHash: 'def456', relationship: 'มารดา', linkedParentUid: null,
+          studentId: '38502', parentNationalIdHmac: 'def456', relationship: 'มารดา', linkedParentUid: null,
         })
       );
     });
@@ -1200,7 +1200,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     it('REGRESSION: denies HOMEROOM_TEACHER, EXECUTIVE, and PARENT from reading parent verification records', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('parent_verification_records/38501_verify').set({
-          studentId: '38501', parentNationalIdHash: 'abc123', linkedParentUid: null,
+          studentId: '38501', parentNationalIdHmac: 'abc123', linkedParentUid: null,
         });
       });
 
