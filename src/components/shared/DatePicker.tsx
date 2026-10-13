@@ -250,7 +250,7 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
                   className={`aspect-square rounded-lg text-[11px] font-semibold transition-colors ${
                     active ? 'bg-emerald-600 text-white' :
                     disabledDay ? 'text-slate-700 cursor-not-allowed' :
-                    isToday ? 'bg-slate-800 text-emerald-400 border border-emerald-500/40' :
+                    isToday ? 'bg-slate-800 text-emerald-300 font-extrabold ring-2 ring-emerald-400' :
                     'text-slate-200 hover:bg-slate-800'
                   }`}
                 >
@@ -259,6 +259,22 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
               );
             })}
           </div>
+          {(() => {
+            const today = new Date();
+            const todayOk = !isDisabled(today);
+            const viewingThisMonth = today.getFullYear() === year && today.getMonth() === month;
+            if (viewingThisMonth && !todayOk) return null;
+            return (
+              <div className="mt-2 pt-2 border-t border-slate-800 flex justify-between items-center">
+                <span className="text-[10px] text-slate-500">วันนี้ {today.getDate()} {THAI_MONTHS_SHORT[today.getMonth()]} {today.getFullYear() + 543}</span>
+                <button type="button" data-testid="datepicker-today"
+                  onClick={() => (todayOk ? handlePick(today) : setViewDate(new Date(today.getFullYear(), today.getMonth(), 1)))}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-emerald-300 hover:bg-slate-800">
+                  {todayOk ? 'เลือกวันนี้' : 'ไปเดือนนี้'}
+                </button>
+              </div>
+            );
+          })()}
           </>)}
         </div>,
         document.body,

@@ -57,3 +57,13 @@ describe('ผู้ปกครองไม่มีปุ่ม GPS (ทั้�
     expect(src('components/NavbarWithRoleSwitcher.tsx')).toContain("activeRole !== 'PARENT'");
   });
 });
+
+describe('DatePicker แสดงวันปัจจุบันชัดเจน', () => {
+  const dp = src('components/shared/DatePicker.tsx');
+  it('วันนี้มีวงแหวนเด่น + ปุ่มลัด "เลือกวันนี้/ไปเดือนนี้" พร้อมบอกวันที่วันนี้', () => {
+    expect(dp).toContain('ring-2 ring-emerald-400');
+    expect(dp).toContain('data-testid="datepicker-today"');
+    expect(dp).toContain('เลือกวันนี้');
+    expect(dp).toContain('ไปเดือนนี้');
+  });
+});
