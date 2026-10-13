@@ -12,7 +12,9 @@ import {
   ShieldAlert, UserCheck, UserX, FileText, CheckCircle, XCircle, Users, Activity,
   MapPin, Route, Navigation, MessageCircle, Home, ClipboardList, AlertTriangle, Heart, Shield, X, Map as MapIcon, ChevronRight, CheckCircle2,
   Edit3, Clock, Compass, Brain, Sparkles, Target, Search, Filter, Eye
+  , Radar
 } from 'lucide-react';
+import { SkipRadarPanel } from './components/advisor/SkipRadarPanel';
 import { ClassChatTeacherView, useRoomChatUnread } from './components/chat/ClassChatPanel';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import clsx from 'clsx';
@@ -61,7 +63,7 @@ export function AdvisorPortal() {
   // store จะมีข้อมูลก็ต่อเมื่อมีคน import ในเซสชันเดียวกันเท่านั้น — เปิดใหม่/ล็อกอินใหม่แล้วว่าง
   const { students, loading: studentsLoading } = useRealStudents();
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq' | 'screening' | 'class-chat'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq' | 'screening' | 'class-chat' | 'skip-radar'>('dashboard');
   const [assessmentModalStudent, setAssessmentModalStudent] = useState<Student | null>(null);
   const [assessmentSearch, setAssessmentSearch] = useState('');
   const [assessmentFilter, setAssessmentFilter] = useState<'ALL' | 'COMPLETED' | 'PENDING'>('ALL');
@@ -294,6 +296,7 @@ export function AdvisorPortal() {
             { id: 'class-chat', label: 'ข้อความ (ผู้ปกครอง/นักเรียน)', icon: MessageCircle, badge: chatUnread },
             { id: 'visit-planner', label: 'เยี่ยมบ้าน', icon: MapPin },
             { id: 'school-checkin', label: 'เช็คชื่อโฮมรูม', icon: ClipboardList },
+            { id: 'skip-radar', label: 'เรดาร์โดดเรียน', icon: Radar },
             { id: 'analytics', label: 'สถิติวิชาการ', icon: Sparkles },
           ]}
         >
@@ -885,6 +888,10 @@ export function AdvisorPortal() {
               </div>
             </div>
           )}
+          {activeTab === 'skip-radar' && (
+            <SkipRadarPanel room={myRoom || ''} students={myStudents} />
+          )}
+
           {activeTab === 'analytics' && (
             <div className="max-w-7xl mx-auto w-full pb-10 space-y-8">
               <div className="bg-[#121624] border border-white/10 rounded-2xl px-5 py-3">
