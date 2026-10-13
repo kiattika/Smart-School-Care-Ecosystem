@@ -4,6 +4,8 @@ import { Student, SemesterHealthLog } from '../../types';
 import { computeBmi, BMI_CATEGORY_LABEL } from '../../lib/utils';
 import { saveSemesterHealthLog } from '../../services/firestoreService';
 import type { CurrentSemester } from '../../hooks/useCurrentSemester';
+import { BloodTypeCard } from '../health/BloodTypeCard';
+import { useStudentBloodType } from '../../hooks/useStudentBloodType';
 
 /**
  * ฟอร์มให้นักเรียนกรอกน้ำหนัก/ส่วนสูงของตัวเอง — ภาคเรียนละ 1 ครั้ง
@@ -26,7 +28,7 @@ export function SemesterHealthSelfReportForm({
 }) {
   const [height, setHeight] = useState('');
   const [weight, setWeight] = useState('');
-  const [bloodType, setBloodType] = useState('');
+  const { doc: bloodDoc } = useStudentBloodType(student.studentId);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedNow, setSavedNow] = useState(false);
@@ -45,6 +47,7 @@ export function SemesterHealthSelfReportForm({
   }
 
   const alreadySubmitted = !!existing || savedNow;
+  const studentUidOk = !!studentUid;
 
   const handleSubmit = async () => {
     if (!valid) { setError('กรุณากรอกส่วนสูง (80–230 ซม.) และน้ำหนัก (20–200 กก.) ให้ถูกต้อง'); return; }
@@ -56,7 +59,7 @@ export function SemesterHealthSelfReportForm({
         {
           studentId: student.studentId,
           studentUid,
-          parentUid: student.parentUid ?? student.parentId ?? null,
+          parentUid: student.parentUid ?? null, // ค่าจริงที่ใช้บันทึกอ่านจากทะเบียนใน saveSemesterHealthLog
           academicYear: currentSemester.academicYear,
           term: currentSemester.term,
           semester: currentSemester.label,
@@ -64,7 +67,7 @@ export function SemesterHealthSelfReportForm({
           weight: Math.round(w * 10) / 10,
           bmi,
           bmiCategory: category,
-          bloodType: bloodType.trim(),
+          bloodType: bloodDoc?.bloodType ?? '',
           recordedByRole: 'STUDENT',
         },
         studentUid,
@@ -90,6 +93,8 @@ export function SemesterHealthSelfReportForm({
           {currentSemester.isConfigured ? 'อ้างอิงปฏิทินการศึกษาของโรงเรียน' : 'อ้างอิงจากช่วงเวลาปัจจุบัน'}
         </span>
       </div>
+
+      {studentUidOk && <BloodTypeCard studentId={student.studentId} actor={{ uid: studentUid, role: 'STUDENT' }} />}
 
       {alreadySubmitted ? (
         <div className="bg-emerald-950/20 border border-emerald-800/40 rounded-2xl p-4 space-y-2">
@@ -119,7 +124,7 @@ export function SemesterHealthSelfReportForm({
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="text-xs text-slate-400 space-y-1 block">
               <span>ส่วนสูง (ซม.)</span>
               <input
@@ -136,14 +141,7 @@ export function SemesterHealthSelfReportForm({
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
               />
             </label>
-            <label className="text-xs text-slate-400 space-y-1 block">
-              <span>หมู่เลือด (ไม่บังคับ)</span>
-              <input
-                value={bloodType} onChange={e => setBloodType(e.target.value)} maxLength={12}
-                placeholder="เช่น O"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
-              />
-            </label>
+
           </div>
 
           {valid && (

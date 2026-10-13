@@ -308,6 +308,14 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - UI: `HealthProfileSection` (นักเรียน+ผู้ปกครอง ผ่าน HealthMentalWellbeingModule), `InfirmaryHealthProfilePanel` (พยาบาล); ตรวจเนื้อหารายการที่ client (`src/lib/healthProfile.ts`) เพราะ rules วนตรวจฟิลด์ในรายการไม่ได้
 - ❌ `store.chronicIllnesses/allergies/specialCareNeeds` ว่างเสมอ (ไม่มีใครเขียน) — ห้ามกลับไปอ่านจากตรงนั้น; แท็บ "ข้อมูลโรคประจำตัว" ของพยาบาลเคยโชว์ข้อมูลปลอมตายตัวกับนักเรียนทุกคน (guard test `healthProfile.test.ts`)
 
+## หมู่เลือด — `student_blood_type/{studentId}` (เลือกครั้งเดียว)
+- หมู่เลือดไม่เปลี่ยนตลอดชีวิต: นักเรียน/ผู้ปกครองตัวจริง **create ได้ครั้งเดียว** (A/B/AB/O) แล้วล็อก; แก้/เปลี่ยนได้เฉพาะ INFIRMARY_STAFF/SUPER_ADMIN (rules: update ไม่รวม self/parent; ลบไม่ได้) — UI `BloodTypeCard` (ฟอร์มน้ำหนัก/ส่วนสูงของนักเรียน, HealthProfileSection ฝั่งผู้ปกครอง, แผงพยาบาล `canChange`)
+- ❌ ห้ามให้พิมพ์หมู่เลือดอิสระ/เก็บซ้ำในที่อื่น: ฟอร์มเยี่ยมบ้านข้อ 3 ดึงหมู่เลือด + น้ำหนัก/ส่วนสูงล่าสุดจากข้อมูลสุขภาพ (`pickHealthPrefill`); หมู่เลือดที่ล็อกแล้วแสดงอ่านอย่างเดียวในแบบเยี่ยมบ้าน
+
+## ⚠️ studentUid/parentUid ในเอกสารที่ rules ตรวจกับทะเบียน
+- `useRealStudents` ตั้ง `student.parentUid = data.parentUid || data.parentId` (alias) แต่ rules เทียบกับ `students/{id}.parentUid` จริง (ไม่มี = null) → ส่งค่า alias แล้ว **permission-denied** (อาการ: นักเรียนบันทึกน้ำหนัก/ส่วนสูงไม่ได้)
+- ต้องใช้ `getStudentLinkIds(studentId)` (อ่านทะเบียนจริง) เมื่อสร้างเอกสารที่ rules บังคับ studentUid/parentUid ตรงทะเบียน (`saveSemesterHealthLog`, `saveStudentHealthProfile`, `setStudentBloodType`); ห้ามใช้ `student.parentId` เป็น parentUid
+
 ## ผู้ติดต่อฉุกเฉิน — `student_emergency_contacts/{studentId}`
 - ดึงจากแบบเยี่ยมบ้านฝั่งผู้ปกครอง (บิดา/มารดา/ผู้ปกครอง ที่มีเบอร์ใช้ได้; ตัดผู้เสียชีวิตและเบอร์ซ้ำ) ผ่าน `deriveEmergencyContacts()` (`src/lib/emergencyContacts.ts`) — ห้ามใส่ชื่อ/เบอร์ตายตัว
 - เป็น **สำเนาเฉพาะชื่อ-ความสัมพันธ์-เบอร์** เพราะ `home_visit_family_info` มีรายได้/ครัวเรือน → ❌ ห้ามเปิดสิทธิ์อ่านเอกสารเยี่ยมบ้านให้ INFIRMARY_STAFF

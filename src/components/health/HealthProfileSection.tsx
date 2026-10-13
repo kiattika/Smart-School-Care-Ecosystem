@@ -7,6 +7,7 @@ import {
   normalizeHealthLists, validateHealthLists, type HealthProfileLists,
 } from '../../lib/healthProfile';
 import { formatThaiDateTime, toMillis } from '../../lib/enrollmentWindow';
+import { BloodTypeCard } from './BloodTypeCard';
 
 /** โหลดโปรไฟล์สุขภาพของนักเรียน 1 คนแบบ live — undefined = ยังโหลด, null = ยังไม่เคยบันทึก */
 export function useStudentHealthProfile(studentId: string | undefined) {
@@ -114,7 +115,7 @@ export function HealthProfileSection({ student, viewer }: { student: Student; vi
     setBusy(true); setErrs([]);
     try {
       await saveStudentHealthProfile({
-        studentId: student.studentId, studentUid: student.studentUid, parentUid: student.parentUid ?? student.parentId ?? null,
+        studentId: student.studentId, studentUid: student.studentUid, parentUid: student.parentUid ?? null, // ค่าจริงอ่านจากทะเบียนใน saveStudentHealthProfile
         actorUid: viewer.uid, actorRole: viewer.role, lists: clean,
       });
       setEditing(false); setSaved(true);
@@ -130,6 +131,7 @@ export function HealthProfileSection({ student, viewer }: { student: Student; vi
 
   return (
     <div className="space-y-4" data-testid="health-profile-section">
+      {viewer?.role === 'PARENT' && <BloodTypeCard studentId={student.studentId} actor={{ uid: viewer.uid, role: 'PARENT' }} />}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <HealthVerifyBadge profile={profile} />
         {viewer && !editing && (

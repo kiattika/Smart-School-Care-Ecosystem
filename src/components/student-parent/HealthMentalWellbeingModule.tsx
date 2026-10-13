@@ -34,6 +34,7 @@ import { readDocOrNull, loadParentNotices, type ParentNoticeDoc } from '../../se
 import { BMI_CATEGORY_LABEL } from '../../lib/utils';
 import { SemesterHealthSelfReportForm } from './SemesterHealthSelfReportForm';
 import { HealthProfileSection } from '../health/HealthProfileSection';
+import { useStudentBloodType } from '../../hooks/useStudentBloodType';
 import {
   InfirmaryVisit,
   TwoQuestionScreening,
@@ -198,6 +199,7 @@ function HealthMentalWellbeingModuleInner({
   const [sdqSubmitError, setSdqSubmitError] = useState<string | null>(null);
 
   // ตัวเลขล่าสุดจาก Firestore จริง — ไม่มี fallback mock อีกต่อไป (null = ยังไม่เคยกรอก → แสดง empty state)
+  const { doc: bloodDoc } = useStudentBloodType(studentId);
   const latestHealth: SemesterHealthLog | null = healthLogs[healthLogs.length - 1] || null;
   const canSelfReport = !isParentView && !!user?.uid && !!student.studentUid && student.studentUid === user.uid;
 
@@ -364,7 +366,7 @@ function HealthMentalWellbeingModuleInner({
             <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4">
               <span className="text-[11px] text-slate-400 block mb-1">หมู่เลือด & ความดัน</span>
               <div className="flex items-baseline gap-1.5">
-                <span className="text-xl font-bold text-white">{latestHealth.bloodType || '—'}</span>
+                <span className="text-xl font-bold text-white">{bloodDoc?.bloodType || latestHealth.bloodType || '—'}</span>
               </div>
               <span className="text-[10px] text-slate-400 mt-1 block">
                 {latestHealth.systolicBp && latestHealth.diastolicBp

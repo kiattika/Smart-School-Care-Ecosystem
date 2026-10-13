@@ -3,6 +3,7 @@ import { BadgeCheck, Loader2 } from 'lucide-react';
 import { HealthProfileCards, HealthVerifyBadge, useStudentHealthProfile } from '../health/HealthProfileSection';
 import { verifyStudentHealthProfile } from '../../services/firestoreService';
 import { healthVerifyStatus } from '../../lib/healthProfile';
+import { BloodTypeCard } from '../health/BloodTypeCard';
 
 /** พยาบาลดูข้อมูลสุขภาพประจำตัวที่ครอบครัวกรอก และยืนยันความถูกต้อง (แก้เนื้อหาเองไม่ได้ — rules ให้แตะได้แค่ตรายืนยัน) */
 export function InfirmaryHealthProfilePanel({ studentId, actor }: { studentId: string; actor: { uid: string; name: string } }) {
@@ -21,6 +22,7 @@ export function InfirmaryHealthProfilePanel({ studentId, actor }: { studentId: s
 
   return (
     <div className="space-y-3" data-testid="infirmary-health-profile">
+      <BloodTypeCard studentId={studentId} actor={{ uid: actor.uid, role: 'NURSE' }} canChange />
       <div className="flex items-center gap-3 flex-wrap">
         <HealthVerifyBadge profile={profile} />
         {healthVerifyStatus(profile) === 'UNVERIFIED' && (
