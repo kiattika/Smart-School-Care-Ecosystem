@@ -337,6 +337,11 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - ❌ ห้ามกลับไปใส่ค่าตัวอย่างในแท็บตรวจสุขภาพ (เคยโชว์ BMI 21.4 / สายตา 20/20 / "รพ.สต. เมืองอุตรดิตถ์" ให้นักเรียนทุกคน) — guard test `infirmaryRecords.test.ts`
 - **หน้าหลักงานพยาบาล = `InfirmaryOverview`** (สถิติจากข้อมูลจริง: การมาใช้บริการรายเดือน/อาการ/ห้อง, ยาที่จ่าย, BMI ทั้งโรงเรียน, หมู่เลือด, บริจาคโลหิต, ตรวจสายตา-หู, วัคซีน); คำนวณใน `src/lib/infirmaryStats.ts` (ข้อมูลว่าง = ศูนย์/ว่าง); โหลดทั้งโรงเรียนด้วย `fetchInfirmaryDashboardData(ปี)` (เฉพาะพยาบาล/แอดมิน)
 
+## สุขภาพนักเรียนสำหรับครูที่ปรึกษา (แจ้งครูผู้สอนเท่าที่จำเป็น)
+- แท็บ "สุขภาพนักเรียน" ใน AdvisorPortal = `AdvisorHealthSummaryPanel` (+ `src/lib/advisorHealthSummary.ts`): ครูที่ปรึกษาเห็นโรค/แพ้/ดูแลพิเศษ (ที่ครอบครัวกรอก, สถานะพยาบาลยืนยัน), หมู่เลือด, จำนวนผู้ติดต่อฉุกเฉิน, ผลตรวจสายตา/การได้ยินผิดปกติ — อ่านรายคนผ่าน `fetchStudentHealthBrief` (rules อนุญาตเฉพาะครูที่ปรึกษาของห้อง; list ทั้งห้องด้วย query เดียวไม่ได้เพราะ rules ใช้ get() ต่อ studentId)
+- **ข้อความแจ้งครูผู้สอน** สร้างจากรายการที่ครอบครัวติ๊ก `shareWithTeachers` เท่านั้น (ฟอร์ม `HealthProfileSection`): โรคประจำตัวแจ้งเฉพาะ "ข้อควรระวัง" **ไม่ระบุชื่อโรค**, แพ้ → ชื่อสิ่งที่แพ้, ดูแลพิเศษ → รายละเอียด+สิ่งที่ครูควรช่วย; คำแนะนำที่นั่งจากสายตา/หูรวมเมื่อครูเลือกรายคนเท่านั้น. ระบบ **ไม่ส่งเอง** — ครูคัดลอกไปส่ง (ไม่มี write path ใหม่/ไม่ต้องแก้ rules)
+- ❌ ห้ามแสดง "ไม่มีโรค" เมื่อไม่มีเอกสาร — ใช้ "ยังไม่ได้บันทึก"; ห้ามแจ้งครูผู้สอนข้อมูลที่ครอบครัวไม่ได้อนุญาต (guard test `advisorHealthSummary.test.ts`)
+
 ## คลังยาห้องพยาบาล — infirmary_medicines / infirmary_stock_movements
 - ยอดคงเหลือ (`stock`) เปลี่ยนได้เฉพาะพร้อม "รายการเคลื่อนไหว" (append-only) ใน batch/transaction เดียวกัน: ยาชี้ movement ล่าสุดด้วย `lastMovementId`, rules ตรวจด้วย `getAfter` (`balanceAfter == stock`, `delta == stock - เดิม`, ชนิด/เครื่องหมาย delta ตรงกัน, `byUid == auth.uid`, ยอดไม่ติดลบ) — ชนิด INITIAL/RESTOCK/DISPENSE/DISCARD/ADJUST (`src/lib/infirmaryStock.ts`)
 - การจ่ายยาในบันทึกเคสห้องพยาบาลตัดสต็อกใน transaction เดียวกับเคส+แจ้งเตือนผู้ปกครอง (`recordInfirmaryVisit({dispensed})`); รับเข้า/ทิ้ง/ปรับยอดผ่าน `changeMedicineStock`; ห้ามลบยา (ปิดด้วย `active=false`)

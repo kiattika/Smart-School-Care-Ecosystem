@@ -152,7 +152,8 @@ export function HealthProfileSection({ student, viewer }: { student: Student; vi
 
           <fieldset className="space-y-2"><legend className="text-xs font-bold text-amber-400">โรคประจำตัว</legend>
             {lists.chronicIllnesses.map((c, i) => (
-              <div key={c.id} className="grid grid-cols-1 sm:grid-cols-[1fr_9rem_2fr_auto] gap-2 items-start">
+              <div key={c.id} className="space-y-1">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_9rem_2fr_auto] gap-2 items-start">
                 <input className={INPUT} placeholder="ชื่อโรค" value={c.name} onChange={e => upd('chronicIllnesses', i, { name: e.target.value })} aria-label="ชื่อโรค" />
                 <select className={INPUT} value={c.severity} onChange={e => upd('chronicIllnesses', i, { severity: e.target.value as ChronicIllness['severity'] })} aria-label="ระดับ">
                   {(Object.keys(SEVERITY_LABEL) as ChronicIllness['severity'][]).map(k => <option key={k} value={k}>{SEVERITY_LABEL[k]}</option>)}
@@ -160,13 +161,19 @@ export function HealthProfileSection({ student, viewer }: { student: Student; vi
                 <input className={INPUT} placeholder="การดูแล/ข้อควรระวัง" value={c.treatmentCare} onChange={e => upd('chronicIllnesses', i, { treatmentCare: e.target.value })} aria-label="การดูแล" />
                 <button onClick={() => del('chronicIllnesses', i)} className="p-2 text-rose-400 hover:bg-rose-500/10 rounded-lg" aria-label="ลบรายการ"><Trash2 className="w-3.5 h-3.5" /></button>
               </div>
+                <label className="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none">
+                  <input type="checkbox" checked={!!c.shareWithTeachers} onChange={e => upd('chronicIllnesses', i, { shareWithTeachers: e.target.checked })} className="rounded border-slate-700 bg-slate-950" />
+                  อนุญาตให้ครูที่ปรึกษาแจ้งครูผู้สอนได้ (แจ้งเฉพาะข้อควรระวัง ไม่แจ้งชื่อโรค)
+                </label>
+              </div>
             ))}
             <button onClick={() => add('chronicIllnesses', { id: newItemId('ci'), name: '', severity: 'MILD', treatmentCare: '' } as ChronicIllness)} className="text-[11px] text-indigo-300 flex items-center gap-1"><Plus className="w-3 h-3" /> เพิ่มโรคประจำตัว</button>
           </fieldset>
 
           <fieldset className="space-y-2"><legend className="text-xs font-bold text-rose-400">แพ้ยา / แพ้อาหาร</legend>
             {lists.allergies.map((a, i) => (
-              <div key={a.id} className="grid grid-cols-1 sm:grid-cols-[1fr_9rem_2fr_auto] gap-2 items-start">
+              <div key={a.id} className="space-y-1">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_9rem_2fr_auto] gap-2 items-start">
                 <input className={INPUT} placeholder="สิ่งที่แพ้" value={a.allergen} onChange={e => upd('allergies', i, { allergen: e.target.value })} aria-label="สิ่งที่แพ้" />
                 <select className={INPUT} value={a.type} onChange={e => upd('allergies', i, { type: e.target.value as AllergyRecord['type'] })} aria-label="ประเภทการแพ้">
                   {(Object.keys(ALLERGY_TYPE_LABEL) as AllergyRecord['type'][]).map(k => <option key={k} value={k}>{ALLERGY_TYPE_LABEL[k]}</option>)}
@@ -174,17 +181,28 @@ export function HealthProfileSection({ student, viewer }: { student: Student; vi
                 <input className={INPUT} placeholder="อาการที่เกิด" value={a.reaction} onChange={e => upd('allergies', i, { reaction: e.target.value })} aria-label="อาการ" />
                 <button onClick={() => del('allergies', i)} className="p-2 text-rose-400 hover:bg-rose-500/10 rounded-lg" aria-label="ลบรายการ"><Trash2 className="w-3.5 h-3.5" /></button>
               </div>
+                <label className="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none">
+                  <input type="checkbox" checked={!!a.shareWithTeachers} onChange={e => upd('allergies', i, { shareWithTeachers: e.target.checked })} className="rounded border-slate-700 bg-slate-950" />
+                  อนุญาตให้ครูที่ปรึกษาแจ้งครูผู้สอนได้ (แจ้งว่าแพ้อะไร เพื่อระวังในกิจกรรม)
+                </label>
+              </div>
             ))}
             <button onClick={() => add('allergies', { id: newItemId('al'), allergen: '', type: 'DRUG', reaction: '' } as AllergyRecord)} className="text-[11px] text-indigo-300 flex items-center gap-1"><Plus className="w-3 h-3" /> เพิ่มรายการแพ้</button>
           </fieldset>
 
           <fieldset className="space-y-2"><legend className="text-xs font-bold text-indigo-400">ความต้องการพิเศษในการดูแลในชั้นเรียน</legend>
             {lists.specialCare.map((s, i) => (
-              <div key={s.id} className="grid grid-cols-1 sm:grid-cols-[1fr_2fr_2fr_auto] gap-2 items-start">
+              <div key={s.id} className="space-y-1">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_2fr_2fr_auto] gap-2 items-start">
                 <input className={INPUT} placeholder="ประเภท (เช่น สายตา, การได้ยิน)" value={s.category} onChange={e => upd('specialCare', i, { category: e.target.value })} aria-label="ประเภท" />
                 <input className={INPUT} placeholder="รายละเอียด" value={s.description} onChange={e => upd('specialCare', i, { description: e.target.value })} aria-label="รายละเอียด" />
                 <input className={INPUT} placeholder="สิ่งที่ครูควรช่วย" value={s.actionPlan} onChange={e => upd('specialCare', i, { actionPlan: e.target.value })} aria-label="แผนการดูแล" />
                 <button onClick={() => del('specialCare', i)} className="p-2 text-rose-400 hover:bg-rose-500/10 rounded-lg" aria-label="ลบรายการ"><Trash2 className="w-3.5 h-3.5" /></button>
+              </div>
+                <label className="flex items-center gap-2 text-[11px] text-slate-400 cursor-pointer select-none">
+                  <input type="checkbox" checked={!!s.shareWithTeachers} onChange={e => upd('specialCare', i, { shareWithTeachers: e.target.checked })} className="rounded border-slate-700 bg-slate-950" />
+                  อนุญาตให้ครูที่ปรึกษาแจ้งครูผู้สอนได้ (แจ้งรายละเอียดและสิ่งที่ครูควรช่วย)
+                </label>
               </div>
             ))}
             <button onClick={() => add('specialCare', { id: newItemId('sc'), category: '', description: '', actionPlan: '' } as SpecialCareNeed)} className="text-[11px] text-indigo-300 flex items-center gap-1"><Plus className="w-3 h-3" /> เพิ่มความต้องการพิเศษ</button>

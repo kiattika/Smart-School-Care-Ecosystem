@@ -696,6 +696,8 @@ export interface ChronicIllness {
   name: string;
   severity: 'MILD' | 'MODERATE' | 'SEVERE';
   treatmentCare: string;
+  /** ครอบครัวอนุญาตให้ครูที่ปรึกษาแจ้งครูผู้สอนได้ — แจ้งเฉพาะข้อควรระวัง (treatmentCare) ไม่แจ้งชื่อโรค */
+  shareWithTeachers?: boolean;
 }
 
 export interface AllergyRecord {
@@ -703,6 +705,8 @@ export interface AllergyRecord {
   allergen: string;
   type: 'FOOD' | 'DRUG' | 'ENVIRONMENTAL';
   reaction: string;
+  /** ครอบครัวอนุญาตให้ครูที่ปรึกษาแจ้งครูผู้สอนได้ (แจ้งว่าแพ้อะไร) */
+  shareWithTeachers?: boolean;
 }
 
 export interface SpecialCareNeed {
@@ -710,6 +714,8 @@ export interface SpecialCareNeed {
   category: string;
   description: string;
   actionPlan: string;
+  /** ครอบครัวอนุญาตให้ครูที่ปรึกษาแจ้งครูผู้สอนได้ */
+  shareWithTeachers?: boolean;
 }
 
 export interface InfirmaryVisit {
