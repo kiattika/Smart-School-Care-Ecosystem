@@ -23,7 +23,7 @@ export function useMobileDue(opts: { role: 'student' | 'parent' | null; uid: str
     if (role !== 'student' || !uid || !studentId || sem.loading) { setHealthDone(undefined); return; }
     return subscribeSemesterHealthLogs(
       logs => setHealthDone(logs.some(l => l.studentId === studentId && l.academicYear === sem.academicYear && l.term === sem.term)),
-      { studentUid: uid },
+      { studentId },
     );
   }, [role, uid, studentId, sem.loading, sem.academicYear, sem.term]);
 
