@@ -5,7 +5,7 @@ import { useTeacherFirestoreSchedule } from '../../hooks/useTeacherFirestoreSche
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { buildCourseAttendanceRows, CourseAttendanceStatsMap } from '../../lib/courseAttendanceStats';
 import { DEFAULT_RANK_LEVELS, rankColor, rankLabel, summarizeCoursePoints, type RankLevel } from '../../lib/courseRank';
-import { mergeCourseOverview } from '../../lib/courseOverview';
+import { buildCourseIdToCode, mergeCourseOverview } from '../../lib/courseOverview';
 import { subscribeActiveLearningLogsForStudent, subscribeCourseRankLevels } from '../../services/firestoreService';
 import type { ActiveLearningRecord } from '../../types';
 
@@ -33,7 +33,12 @@ export function CourseOverviewCards({ studentId, room, courseStats }: {
     () => summarizeCoursePoints(logs, { academicYear, term }, levels),
     [logs, academicYear, term, levels],
   );
-  const { items, unassigned } = useMemo(() => mergeCourseOverview(attendance, points), [attendance, points]);
+  // คะแนนรุ่นเก่าไม่มี courseKey — จับคู่กับวิชาด้วยรหัสวิชาจากตารางสอน (courseId = course_<scheduleId>)
+  const courseIdToCode = useMemo(() => buildCourseIdToCode(schedules as any[]), [schedules]);
+  const { items, unassigned } = useMemo(
+    () => mergeCourseOverview(attendance, points, { courseIdToCode, levels }),
+    [attendance, points, courseIdToCode, levels],
+  );
 
   return (
     <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-4" data-testid="course-overview-cards">
