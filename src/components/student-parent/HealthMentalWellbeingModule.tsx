@@ -155,13 +155,11 @@ function HealthMentalWellbeingModuleInner({
   const currentSemester = useCurrentSemester();
   const [semHealthLogs, setSemHealthLogs] = useState<SemesterHealthLog[]>([]);
   useEffect(() => {
-    if (!user?.uid) { setSemHealthLogs([]); return; }
-    const unsubscribe = subscribeSemesterHealthLogs(
-      setSemHealthLogs,
-      isParentView ? { parentUid: user.uid } : { studentUid: user.uid }
-    );
+    if (!user?.uid || !studentId) { setSemHealthLogs([]); return; }
+    // ตามทะเบียนนักเรียน (studentId) ทั้งนักเรียนและผู้ปกครอง — ไม่พึ่งสำเนา studentUid/parentUid ในเอกสารที่อาจค้างเก่า
+    const unsubscribe = subscribeSemesterHealthLogs(setSemHealthLogs, { studentId });
     return () => unsubscribe();
-  }, [user?.uid, isParentView]);
+  }, [user?.uid, studentId]);
 
   // ใช้ student ของจริงที่ผู้เรียก (StudentPortal/ParentPortal) ดึงมาจาก useRealStudents() ถ้าส่งมาให้
   // แทนการค้นจาก state.students ของ Zustand (session-local ไม่เคยมี listener ผูกไว้ — ค่า studentUid/

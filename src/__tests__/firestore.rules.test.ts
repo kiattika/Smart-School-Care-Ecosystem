@@ -3639,6 +3639,18 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(studentDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, weight: 99 }));
     });
 
+    it('อ่านตามทะเบียนจริง: เอกสารที่ค้าง studentUid เก่า/parentUid=null นักเรียนตัวจริงและผู้ปกครองตัวจริงอ่านได้ (query ด้วย studentId); คนอื่นอ่านไม่ได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${SID}`).update({ parentUid: PARENT_UID });
+        await ctx.firestore().doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, studentUid: 'old-account-uid', parentUid: null, recordedByUid: 'old-account-uid' });
+      });
+      const col = (db: any) => db.collection('student_semester_health').where('studentId', '==', SID);
+      await assertSucceeds(col(asUser(STU_UID, ['STUDENT']).firestore()).get());
+      await assertSucceeds(col(asUser(PARENT_UID, ['PARENT']).firestore()).get());
+      await assertFails(col(asUser('other-stu', ['STUDENT']).firestore()).get());
+      await assertFails(col(asUser('other-par', ['PARENT']).firestore()).get());
+    });
+
     it('เขียนทับเอกสารค้างได้เฉพาะนักเรียนตัวจริง/ภาคเรียนเดิม/ข้อมูลตรงทะเบียน (คนอื่น เปลี่ยนภาคเรียน ส่งเจ้าของผิด ถูกปฏิเสธ)', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, studentUid: 'old-account-uid', recordedByUid: 'old-account-uid' });

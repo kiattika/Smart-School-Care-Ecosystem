@@ -199,7 +199,7 @@ export function MobileApp({ onLogout }: Props) {
 function MobileHealthForm({ student, studentUid }: { student: import('../types').Student; studentUid: string }) {
   const currentSemester = useCurrentSemester();
   const [logs, setLogs] = useState<SemesterHealthLog[]>([]);
-  useEffect(() => subscribeSemesterHealthLogs(setLogs, { studentUid }), [studentUid]);
+  useEffect(() => subscribeSemesterHealthLogs(setLogs, { studentId: student.studentId }), [student.studentId]);
   const existing = logs.find(l => l.studentId === student.studentId && l.academicYear === currentSemester.academicYear && l.term === currentSemester.term) || null;
   return <SemesterHealthSelfReportForm student={student} studentUid={studentUid} currentSemester={currentSemester} existing={existing} />;
 }

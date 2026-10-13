@@ -1423,7 +1423,11 @@ service cloud.firestore {
                      hasRole('INFIRMARY_STAFF') ||
                      hasRole('HOMEROOM_TEACHER') ||
                      hasRole('GUIDANCE_COUNSELOR') ||
-                     (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
+                     (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid)) ||
+                     // ตัดสินจากทะเบียน students/{id} จริง ไม่ใช่สำเนา studentUid/parentUid ในเอกสาร — สำเนาเก่าค้างได้เมื่อผูกบัญชีใหม่/ผู้ปกครองเชื่อมทีหลัง
+                     // (query ต้อง where('studentId','==',id))
+                     isSelfStudent(resource.data.studentId) ||
+                     isParentOfStudent(resource.data.studentId);
 
       // studentUid/parentUid ต้อง denormalize ตรงกับ students/{studentId} จริงเสมอ (กันส่งข้อมูล
       // ไปให้ครอบครัวอื่นเห็น) + docId ต้องเป็น {studentId}_{academicYear}_{term} เป๊ะ

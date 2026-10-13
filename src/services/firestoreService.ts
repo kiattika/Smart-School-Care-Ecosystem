@@ -3261,17 +3261,20 @@ export async function saveSemesterHealthLog(
 
 /**
  * real-time listener — ต้อง filter ฝั่ง query ให้ผ่าน firestore.rules:
+ *  - { studentId } → นักเรียนตัวจริง/ผู้ปกครองตัวจริงตามทะเบียน (แนะนำ — ไม่พึ่งสำเนา uid ในเอกสาร)
  *  - { studentUid } → นักเรียนเจ้าของ (ทุกภาคเรียน)
  *  - { parentUid }  → ผู้ปกครองของบุตรหลาน
  * ครู/พยาบาล/แอดมิน ที่มี role อ่านได้ ส่ง filter ตัวใดตัวหนึ่งเพื่อ scope ให้แคบก็ได้
  */
 export function subscribeSemesterHealthLogs(
   onUpdate: (logs: SemesterHealthLog[]) => void,
-  filter: { studentUid?: string; parentUid?: string },
+  filter: { studentUid?: string; parentUid?: string; studentId?: string },
 ): () => void {
   try {
     const col = collection(db, SEMESTER_HEALTH_COL);
     const clauses = [];
+    // studentId = ตัดสินสิทธิ์จากทะเบียนจริง (นักเรียน/ผู้ปกครองตัวจริง) — ใช้แทน studentUid/parentUid ที่เป็นสำเนาในเอกสารและอาจค้างเก่า
+    if (filter.studentId) clauses.push(where('studentId', '==', filter.studentId));
     if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
     if (filter.parentUid) clauses.push(where('parentUid', '==', filter.parentUid));
     if (clauses.length === 0) { onUpdate([]); return () => {}; }

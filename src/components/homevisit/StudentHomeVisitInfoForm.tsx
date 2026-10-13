@@ -80,7 +80,7 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
   useEffect(() => subscribeSemesterHealthLogs((logs) => {
     const last = [...logs].sort((a, b) => (a.recordedAt || '').localeCompare(b.recordedAt || '')).pop();
     setLatestLog(last ? { weight: last.weight, height: last.height, recordedAt: last.recordedAt } : null);
-  }, { studentUid }), [studentUid]);
+  }, { studentId: student.studentId }), [student.studentId]);
   const bloodLocked = !!bloodDoc;
   useEffect(() => {
     if (!initialised) return;
