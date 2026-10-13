@@ -4,6 +4,7 @@ import path from 'path';
 import { readSource } from './helpers/readSource';
 import { isMobilePath, canRegisterServiceWorker } from '../lib/pwa';
 import { mobileMenuFor } from '../mobile/mobileMenu';
+import { isTwoQDue } from '../lib/mobileDue';
 import { buildTeacherDaySchedule } from '../lib/teacherDaySchedule';
 
 const root = path.resolve(__dirname, '../..');
@@ -72,10 +73,10 @@ describe('pwa: ไฟล์ manifest / icons / service worker / hosting', () => 
 describe('mobileMenuFor', () => {
   const ids = (x: ReturnType<typeof mobileMenuFor>) => x.map(i => i.id);
   it('นักเรียน', () => {
-    expect(ids(mobileMenuFor({ appRole: 'student', roles: ['STUDENT'] }))).toEqual(['checkin', 'schedule', 'homeLocation', 'chat']);
+    expect(ids(mobileMenuFor({ appRole: 'student', roles: ['STUDENT'] }))).toEqual(['checkin', 'schedule', 'club', 'homeLocation', 'chat']);
   });
   it('ผู้ปกครอง: ไม่มีเช็คอิน/พิกัดบ้าน; ไม่มีบทบาท PARENT = ไม่มีเมนู', () => {
-    expect(ids(mobileMenuFor({ appRole: 'parent', roles: ['PARENT'] }))).toEqual(['schedule', 'chat']);
+    expect(ids(mobileMenuFor({ appRole: 'parent', roles: ['PARENT'] }))).toEqual(['childGate', 'schedule', 'leave', 'appointment', 'homeVisit', 'chat']);
     expect(mobileMenuFor({ appRole: 'parent', roles: [] })).toEqual([]);
   });
   it('ครูประจำวิชา: เช็คอิน + ตารางสอน ไม่มีเช็คชื่อโฮมรูม', () => {
@@ -112,5 +113,33 @@ describe('buildTeacherDaySchedule', () => {
   });
   it('ไม่ตรงใคร = ว่าง ไม่เดา', () => {
     expect(buildTeacherDaySchedule({ schedules, periods, user: { email: 'x@utd.ac.th', staffId: null }, now: wed(9, 0) }).rows).toEqual([]);
+  });
+});
+
+
+describe('เมนูแบบประเมินบนมือถือ (หายเมื่อทำแล้ว / โผล่เมื่อถึงกำหนด)', () => {
+  const ids = (x: ReturnType<typeof mobileMenuFor>) => x.map(i => i.id);
+  const student = (due: any) => ids(mobileMenuFor({ appRole: 'student', roles: ['STUDENT'], due }));
+  it('นักเรียน: ยังไม่ทำสุขภาพ/SDQ และ 2Q ถึงกำหนด = เห็นครบ', () => {
+    expect(student({ healthDone: false, sdqDone: false, twoQDue: true }))
+      .toEqual(['checkin', 'schedule', 'club', 'health', 'sdq', 'twoQ', 'homeLocation', 'chat']);
+  });
+  it('นักเรียน: ทำแล้ว = เมนูหาย; ยังไม่รู้สถานะ = ซ่อนไว้ก่อน', () => {
+    expect(student({ healthDone: true, sdqDone: true, twoQDue: false })).toEqual(['checkin', 'schedule', 'club', 'homeLocation', 'chat']);
+    expect(student({})).toEqual(['checkin', 'schedule', 'club', 'homeLocation', 'chat']);
+  });
+  it('ผู้ปกครอง: SDQ หายเมื่อประเมินแล้ว และไม่เห็นเมนูสุขภาพ/2Q ของนักเรียน', () => {
+    const p = (due: any) => ids(mobileMenuFor({ appRole: 'parent', roles: ['PARENT'], due }));
+    expect(p({ sdqDone: false })).toContain('sdq');
+    expect(p({ sdqDone: true })).not.toContain('sdq');
+    expect(p({ healthDone: false, twoQDue: true })).not.toEqual(expect.arrayContaining(['health']));
+    expect(p({ healthDone: false, twoQDue: true })).not.toContain('twoQ');
+  });
+  it('isTwoQDue: ครบ 14 วัน / ไม่เคยทำ / วันที่เพี้ยน', () => {
+    expect(isTwoQDue(null, '2026-10-13')).toBe(true);
+    expect(isTwoQDue('bad', '2026-10-13')).toBe(true);
+    expect(isTwoQDue('2026-10-13', '2026-10-13')).toBe(false);
+    expect(isTwoQDue('2026-09-30', '2026-10-13')).toBe(false); // 13 วัน
+    expect(isTwoQDue('2026-09-29', '2026-10-13')).toBe(true);  // 14 วัน
   });
 });

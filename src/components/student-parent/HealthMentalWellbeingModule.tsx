@@ -97,7 +97,7 @@ function ParentScreeningResultsView({ studentId, studentName }: { studentId: str
   );
 }
 
-type HealthMentalWellbeingModuleProps = { studentId: string; student?: Student; isParentView?: boolean };
+type HealthMentalWellbeingModuleProps = { studentId: string; student?: Student; isParentView?: boolean; /** หน้ามือถือ: แสดงแท็บเดียว ซ่อนแถบสลับแท็บ */ onlyTab?: 'physical' | 'infirmary' | 'screening' | 'sdq' };
 
 /** ไม่มีนักเรียนจริง = empty state (ห้าม fallback เป็นนักเรียนปลอม/คนแรกของ store — อาจเป็นลูกคนอื่น) */
 export function HealthMentalWellbeingModule(props: HealthMentalWellbeingModuleProps) {
@@ -110,7 +110,8 @@ export function HealthMentalWellbeingModule(props: HealthMentalWellbeingModulePr
 function HealthMentalWellbeingModuleInner({
   studentId,
   student: studentProp,
-  isParentView = false
+  isParentView = false,
+  onlyTab
 }: HealthMentalWellbeingModuleProps) {
   const user = useStore(s => s.user);
   const {
@@ -180,7 +181,7 @@ function HealthMentalWellbeingModuleInner({
   const screening2Q = twoQuestionScreenings[student.studentId];
   const studentSDQs = sdqAssessments.filter(s => s.studentId === student.studentId);
 
-  const [activeTab, setActiveTab] = useState<'physical' | 'infirmary' | 'screening' | 'sdq'>('physical');
+  const [activeTab, setActiveTab] = useState<'physical' | 'infirmary' | 'screening' | 'sdq'>(onlyTab || 'physical');
 
   // 2Q Form State
   const [q1, setQ1] = useState<boolean>(screening2Q ? screening2Q.q1Depressed : false);
@@ -272,7 +273,7 @@ function HealthMentalWellbeingModuleInner({
   return (
     <div className="space-y-6">
       {/* Sub tabs */}
-      <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-900/60 border border-slate-800 rounded-2xl w-full max-w-2xl mx-auto">
+      {!onlyTab && <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-900/60 border border-slate-800 rounded-2xl w-full max-w-2xl mx-auto">
         <button
           onClick={() => setActiveTab('physical')}
           className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
@@ -317,7 +318,7 @@ function HealthMentalWellbeingModuleInner({
           <BarChart3 className="w-3.5 h-3.5" />
           <span>ประเมิน SDQ 3 มิติ</span>
         </button>
-      </div>
+      </div>}
 
       {activeTab === 'physical' && (
         <div className="space-y-6">
