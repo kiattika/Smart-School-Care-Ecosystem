@@ -36,7 +36,7 @@ import { DatePicker } from '../shared/DatePicker';
 import { NoStudentNotice } from './NoStudentNotice';
 import { format } from 'date-fns';
 
-type GateAttendanceTrackerProps = { studentId: string; student?: Student; isParentView?: boolean };
+type GateAttendanceTrackerProps = { studentId: string; student?: Student; isParentView?: boolean; /** หน้ามือถือ: แสดงแท็บเดียว ซ่อนแถบสลับแท็บ */ onlyTab?: 'gate' | 'leave' };
 
 /** ไม่มีนักเรียนจริง = empty state (ห้าม fallback เป็นนักเรียนปลอม/คนแรกของ store — อาจเป็นลูกคนอื่น) */
 export function GateAttendanceTracker(props: GateAttendanceTrackerProps) {
@@ -46,7 +46,7 @@ export function GateAttendanceTracker(props: GateAttendanceTrackerProps) {
   return <GateAttendanceTrackerInner {...props} student={student} />;
 }
 
-function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentView = false }: GateAttendanceTrackerProps) {
+function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentView = false, onlyTab }: GateAttendanceTrackerProps) {
   const {
     students,
     courses,
@@ -75,7 +75,7 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
   }, [user?.uid, isParentView]);
   const leaves = allLeaves.filter(l => l.studentId === student.studentId);
 
-  const [activeTab, setActiveTab] = useState<'gate' | 'leave'>('gate');
+  const [activeTab, setActiveTab] = useState<'gate' | 'leave'>(onlyTab || 'gate');
   const [isGPSModalOpen, setIsGPSModalOpen] = useState(false);
 
   // e-Leave form state — เริ่มว่าง (ไม่เติมวันที่/ไฟล์แนบสมมติ)
@@ -177,7 +177,7 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
   return (
     <div className="space-y-6">
       {/* Sub navigation pills */}
-      <div className="flex items-center gap-2 p-1.5 bg-slate-900/60 border border-slate-800 rounded-2xl w-full max-w-lg mx-auto">
+      {!onlyTab && <div className="flex items-center gap-2 p-1.5 bg-slate-900/60 border border-slate-800 rounded-2xl w-full max-w-lg mx-auto">
         <button
           onClick={() => setActiveTab('gate')}
           className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
@@ -200,7 +200,7 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
           <FileText className="w-3.5 h-3.5" />
           <span>ยื่นใบลาออนไลน์ (e-Leave)</span>
         </button>
-      </div>
+      </div>}
 
       {activeTab === 'gate' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
