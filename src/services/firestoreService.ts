@@ -1,5 +1,6 @@
 import { omitUndefined } from '../lib/firestorePayload';
 import { applyStockChange, type DispenseLine, type StockMovementType } from '../lib/infirmaryStock';
+import { deriveEmergencyContacts } from '../lib/emergencyContacts';
 import { chatThreadId, normalizeChatText, senderRoleFor } from '../lib/classChat';
 import type { ChatChannel, ChatSenderRole, ChatSide } from '../lib/classChat';
 import { 
@@ -3315,7 +3316,43 @@ export async function saveStudentHomeVisitInfo(info: import('../types').StudentH
   await setDoc(doc(db, HV_STUDENT_COL, info.studentId), { ...info, updatedAt: new Date().toISOString() });
 }
 export async function saveFamilyHomeVisitInfo(info: import('../types').FamilyHomeVisitInfo): Promise<void> {
-  await setDoc(doc(db, HV_FAMILY_COL, info.studentId), { ...info, updatedAt: new Date().toISOString() });
+  // เขียนข้อมูลเยี่ยมบ้าน + สำเนาผู้ติดต่อฉุกเฉิน (เฉพาะชื่อ/เบอร์) ใน batch เดียว — พยาบาลอ่านรายได้/ครัวเรือนไม่ได้ จึงอ่านเฉพาะสำเนานี้
+  const batch = writeBatch(db);
+  batch.set(doc(db, HV_FAMILY_COL, info.studentId), { ...info, updatedAt: new Date().toISOString() });
+  batch.set(doc(db, EMERGENCY_CONTACTS_COL, info.studentId), emergencyContactsDoc(info));
+  await batch.commit();
+}
+
+/** สำเนาผู้ติดต่อฉุกเฉิน student_emergency_contacts/{studentId} — ผู้ปกครองตัวจริงเขียนเท่านั้น */
+const EMERGENCY_CONTACTS_COL = 'student_emergency_contacts';
+export interface StudentEmergencyContactsDoc {
+  studentId: string; parentUid: string; homeroomClass: string;
+  contacts: import('../lib/emergencyContacts').EmergencyContact[];
+  updatedAt?: Timestamp | null;
+}
+function emergencyContactsDoc(info: import('../types').FamilyHomeVisitInfo) {
+  return {
+    studentId: info.studentId,
+    parentUid: info.parentUid,
+    homeroomClass: info.homeroomClass,
+    contacts: deriveEmergencyContacts(info),
+    updatedAt: serverTimestamp(),
+  };
+}
+/** ผู้ปกครองเปิดฟอร์มที่เคยบันทึกไว้ก่อนมีฟีเจอร์นี้ → สร้างสำเนาให้ (ไม่แตะเอกสารเยี่ยมบ้าน) */
+export async function syncEmergencyContacts(info: import('../types').FamilyHomeVisitInfo): Promise<void> {
+  await setDoc(doc(db, EMERGENCY_CONTACTS_COL, info.studentId), emergencyContactsDoc(info));
+}
+export function subscribeEmergencyContacts(
+  studentId: string,
+  onUpdate: (d: StudentEmergencyContactsDoc | null) => void,
+  onError?: (err: Error) => void,
+): () => void {
+  return onSnapshot(
+    doc(db, EMERGENCY_CONTACTS_COL, studentId),
+    (snap) => onUpdate(snap.exists() ? ({ ...(snap.data() as StudentEmergencyContactsDoc), studentId }) : null),
+    (err) => { console.warn('[subscribeEmergencyContacts] listener error:', err.message); onError?.(err); },
+  );
 }
 function subscribeSingle<T>(col: string, id: string, onUpdate: (v: T | null) => void): () => void {
   try {
