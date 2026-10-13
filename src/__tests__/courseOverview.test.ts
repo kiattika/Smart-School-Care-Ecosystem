@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildRoomPointsRows, courseCodeOfPointsKey, mergeCourseOverview } from '../lib/courseOverview';
+import { buildCourseIdToCode, buildRoomPointsRows, courseCodeOfPointsKey, mergeCourseOverview } from '../lib/courseOverview';
 import { studentPointsTotals, summarizeCoursePoints } from '../lib/courseRank';
 import { attendanceStatsFromCounts } from '../lib/studentAttendanceStats';
 import type { CourseAttendanceRow } from '../lib/courseAttendanceStats';
@@ -38,9 +38,33 @@ describe('รวมสถิติเข้าเรียน + คะแนน�
     expect(items[0].points).toBeUndefined();
     expect(unassigned?.points).toBe(4);
   });
+  it('คะแนนรุ่นเก่า (มีแต่ courseId) จับคู่กับวิชาด้วยรหัสวิชาจากตารางสอน และรวมหลายคาบของวิชาเดียวกัน', () => {
+    const schedules = [
+      { id: 'sch_a1', subjectCode: 'CZ' },
+      { id: 'sch_a2', subjectCode: 'CZ' }, // คาบอื่นของวิชาเดียวกัน
+      { id: 'sch_b1', subjectCode: 'ค32102' },
+    ];
+    const map = buildCourseIdToCode(schedules);
+    expect(map.get('course_a1')).toBe('CZ');
+    const pts = summarizeCoursePoints([
+      log({ courseId: 'course_a1', courseName: 'Cleaning Zone (กิจกรรม) - ม.5/8', points: 4 }),
+      log({ courseId: 'course_a2', courseName: 'Cleaning Zone (กิจกรรม) - ม.5/8', points: 3 }),
+    ], term);
+    expect(pts).toHaveLength(2); // แยกกันเพราะเป็นคนละ courseId
+    const { items } = mergeCourseOverview([attRow('CZ', 'Cleaning Zone'), attRow('ค32102', 'คณิต')], pts, { courseIdToCode: map });
+    expect(items).toHaveLength(2);
+    expect(items.find(i => i.code === 'CZ')?.points?.points).toBe(7);
+    expect(items.find(i => i.code === 'ค32102')?.points).toBeUndefined();
+    // หารหัสไม่ได้ (ไม่มีในตาราง) → แถวของตัวเอง ไม่เดาวิชาให้
+    const lone = mergeCourseOverview([attRow('CZ', 'Cleaning Zone')], pts, { courseIdToCode: new Map() }).items;
+    expect(lone.map(i => i.name)).toEqual(['Cleaning Zone', 'Cleaning Zone (กิจกรรม) - ม.5/8']);
+  });
   it('courseCodeOfPointsKey', () => {
     expect(courseCodeOfPointsKey('ค32102|ม.5/9')).toBe('ค32102');
     expect(courseCodeOfPointsKey('elective_x')).toBe('');
+  });
+  it('guard: การ์ดรวมส่งตารางสอนให้จับคู่คะแนนรุ่นเก่า', () => {
+    expect(readSource('src/components/student-parent/CourseOverviewCards.tsx')).toContain('buildCourseIdToCode(schedules');
   });
   it('guard: หน้านักเรียน/ผู้ปกครองใช้การ์ดรวมเดียว ไม่เหลือ component เดิมแยกสองอัน', () => {
     for (const f of ['src/StudentPortal.tsx', 'src/ParentPortal.tsx']) {
