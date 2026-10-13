@@ -36,3 +36,16 @@ describe('guard: เช็คอิน GPS เขียน Firestore ได้�
     expect(readSource('firestore.rules')).toMatch(/request\.resource\.data\.authUid == request\.auth\.uid/);
   });
 });
+
+import { describeCheckinError } from '../components/GPSGeofenceCheckinModal';
+describe('describeCheckinError', () => {
+  it('แยกสาเหตุ: สิทธิ์ / เครือข่าย / อื่น ๆ พร้อมรหัส', () => {
+    expect(describeCheckinError(new Error("FIRESTORE_PERMISSION-DENIED: Operation 'write' failed on resource."))).toMatch(/ไม่อนุญาต.*PERMISSION-DENIED/);
+    expect(describeCheckinError(new Error("FIRESTORE_UNAVAILABLE: x"))).toMatch(/อินเทอร์เน็ต/);
+    expect(describeCheckinError(new Error("FIRESTORE_INVALID-ARGUMENT: x"))).toMatch(/INVALID-ARGUMENT/);
+    expect(describeCheckinError('boom')).toMatch(/ไม่สำเร็จ/);
+  });
+  it('store ใช้ authUid เป็น studentUid ก่อนค่าใน students doc', () => {
+    expect(readSource('src/store.ts')).toMatch(/studentUid = authUid \|\| matchedStudent\?\.studentUid/);
+  });
+});

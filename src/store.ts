@@ -1028,7 +1028,8 @@ export const useStore = create<StoreState>((set, get) => ({
     if (isStudent) {
       const parentUid = matchedStudent?.parentUid || matchedStudent?.parentId;
       // studentUid ต้องเป็น auth uid ของนักเรียนที่เช็คอินจริง (rules เทียบกับ request.auth.uid)
-      const studentUid = matchedStudent?.studentUid || authUid;
+      // rules เทียบกับ request.auth.uid — ใช้ uid ที่ล็อกอินอยู่จริงก่อน (studentUid ใน students doc อาจว่าง/ไม่ตรง ทำให้ถูกปฏิเสธ)
+      const studentUid = authUid || matchedStudent?.studentUid;
       gateLog = {
         id: `gate-gps-${Date.now()}`,
         studentId: log.userId,
