@@ -108,6 +108,18 @@ export function TeacherPortal() {
   // --- บันทึกหลังสอนแทน (deadline ก่อน 24:00 น. ของวันที่สอน) ---
   const [subCompleteTarget, setSubCompleteTarget] = useState<SubstituteAssignment | null>(null);
   const [subCSummary, setSubCSummary] = useState('');
+  const [behaviorScoreError, setBehaviorScoreError] = useState<string | null>(null);
+  // ปิดหน้าต่างเฉพาะเมื่อบันทึกคะแนนสำเร็จจริง — ล้มเหลวให้ค้างไว้พร้อมข้อความ
+  const applyBehaviorScore = async (amount: number, reason?: string) => {
+    if (!selectedStudentForScore) return;
+    setBehaviorScoreError(null);
+    try {
+      await adjustBehaviorScore(selectedStudentForScore.studentId, amount, reason);
+      setSelectedStudentForScore(null);
+    } catch {
+      setBehaviorScoreError('บันทึกคะแนนไม่สำเร็จ — ตรวจสอบสิทธิ์และการเชื่อมต่อ แล้วลองใหม่');
+    }
+  };
   const [subCProblems, setSubCProblems] = useState('');
   const [subCSolutions, setSubCSolutions] = useState('');
   const [subCSubmitting, setSubCSubmitting] = useState(false);
@@ -2546,59 +2558,44 @@ export function TeacherPortal() {
                 </div>
               </div>
 
+              {behaviorScoreError && (
+                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs">{behaviorScoreError}</div>
+              )}
               <div>
                 <div className="text-xs text-slate-400 mb-2.5 font-bold uppercase tracking-wider">ปรับปรุงคะแนนด่วน (Presets)</div>
                 <div className="grid grid-cols-3 gap-2">
                   <button 
-                    onClick={() => {
-                      adjustBehaviorScore(selectedStudentForScore.studentId, 5);
-                      setSelectedStudentForScore(null);
-                    }}
+                    onClick={() => applyBehaviorScore(5)}
                     className="py-2.5 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/20 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1"
                   >
                     <Plus className="w-3.5 h-3.5" /> 5 คะแนน
                   </button>
                   <button 
-                    onClick={() => {
-                      adjustBehaviorScore(selectedStudentForScore.studentId, 10);
-                      setSelectedStudentForScore(null);
-                    }}
+                    onClick={() => applyBehaviorScore(10)}
                     className="py-2.5 bg-green-500/15 hover:bg-green-500/25 text-green-300 border border-green-500/30 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1"
                   >
                     <Plus className="w-3.5 h-3.5" /> 10 คะแนน
                   </button>
                   <button 
-                    onClick={() => {
-                      adjustBehaviorScore(selectedStudentForScore.studentId, 1);
-                      setSelectedStudentForScore(null);
-                    }}
+                    onClick={() => applyBehaviorScore(1)}
                     className="py-2.5 bg-[#10b981]/10 hover:bg-[#10b981]/20 text-emerald-400 border border-[#10b981]/20 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1"
                   >
                     <Plus className="w-3.5 h-3.5" /> 1 คะแนน
                   </button>
                   <button 
-                    onClick={() => {
-                      adjustBehaviorScore(selectedStudentForScore.studentId, -5);
-                      setSelectedStudentForScore(null);
-                    }}
+                    onClick={() => applyBehaviorScore(-5)}
                     className="py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1"
                   >
                     <Minus className="w-3.5 h-3.5" /> 5 คะแนน
                   </button>
                   <button 
-                    onClick={() => {
-                      adjustBehaviorScore(selectedStudentForScore.studentId, -10);
-                      setSelectedStudentForScore(null);
-                    }}
+                    onClick={() => applyBehaviorScore(-10)}
                     className="py-2.5 bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1"
                   >
                     <Minus className="w-3.5 h-3.5" /> 10 คะแนน
                   </button>
                   <button 
-                    onClick={() => {
-                      adjustBehaviorScore(selectedStudentForScore.studentId, -1);
-                      setSelectedStudentForScore(null);
-                    }}
+                    onClick={() => applyBehaviorScore(-1)}
                     className="py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1"
                   >
                     <Minus className="w-3.5 h-3.5" /> 1 คะแนน
@@ -2614,8 +2611,7 @@ export function TeacherPortal() {
                       key={reason}
                       onClick={() => {
                         const amt = reason.includes('ดีเยี่ยม') || reason.includes('ช่วยแนะนำ') ? 5 : -5;
-                        adjustBehaviorScore(selectedStudentForScore.studentId, amt, reason);
-                        setSelectedStudentForScore(null);
+                        applyBehaviorScore(amt, reason);
                       }}
                       className="p-2 bg-[#1c1f2b] hover:bg-white/5 border border-white/5 text-slate-300 rounded-lg text-[11px] text-left transition-colors truncate"
                     >

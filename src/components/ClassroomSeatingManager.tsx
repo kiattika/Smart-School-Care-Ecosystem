@@ -1339,11 +1339,15 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
                                 {/* Quick Point Increment */}
                                 {!isLayoutLocked && !isAbsent && !attendanceOnly && (
                                   <button
-                                    onClick={e => {
+                                    onClick={async e => {
                                       e.stopPropagation();
-                                      addActiveLearningPoints(student.studentId, 1);
-                                      setSaveToast(`+1 คะแนนจิตพิสัย: ${student.name}`);
-                                      setTimeout(() => setSaveToast(null), 2000);
+                                      try {
+                                        await addActiveLearningPoints(student.studentId, 1);
+                                        setSaveToast(`+1 คะแนนจิตพิสัย: ${student.name}`);
+                                      } catch {
+                                        setSaveToast(`บันทึกคะแนนของ ${student.name} ไม่สำเร็จ — ลองใหม่`);
+                                      }
+                                      setTimeout(() => setSaveToast(null), 2500);
                                     }}
                                     title="+1 แต้มการมีส่วนร่วม"
                                     className="px-1.5 py-0.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded font-bold transition-all text-[9px]"
