@@ -12,9 +12,9 @@ describe('ParentPortal ไม่ฝังข้อมูลปลอม', () => 
   it("ไม่มี fallback ห้อง '5/8'", () => {
     expect(src).not.toMatch(/\|\|\s*'5\/8'/);
   });
-  it('ข้อความล่าสุดมาจาก store จริง และมี empty state', () => {
-    expect(src).toContain('ยังไม่มีข้อความจากครูหรือโรงเรียน');
-    expect(src).toContain("m.senderRole !== 'PARENT'");
+  it('ข้อความล่าสุดมาจาก class_chat_threads จริง และมี empty state', () => {
+    expect(src).toContain('ยังไม่มีข้อความจากครูประจำชั้น');
+    expect(src).toContain('useMemberThreads');
   });
 });
 

@@ -6,7 +6,7 @@ import {
   assertSucceeds,
   assertFails,
 } from '@firebase/rules-unit-testing';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc as mDoc, setDoc as mSetDoc, updateDoc as mUpdateDoc, getDoc as mGetDoc, serverTimestamp as mServerTimestamp } from 'firebase/firestore';
 import { enrollInActivity, withdrawFromActivity, createBillingInvoice, createBillingInvoicesBulk, recordInfirmaryVisit, createParentNotification } from '../services/firestoreService';
 import { readSource } from './helpers/readSource';
 
@@ -1527,6 +1527,143 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       it('still denies a wrong studentUid even from finance', async () => {
         await seed();
         await assertFails(asUser('fin', ['FINANCE_STAFF']).firestore().doc('parent_notifications/f2').set(base('f2', { studentUid: 'someone-else' })));
+      });
+    });
+  });
+
+  // 15c2. class_messages / class_chat_threads — แชทแยกช่องส่วนตัว (ครูประจำชั้น ↔ ผู้ปกครอง | นักเรียน)
+  describe('class chat (class_messages + class_chat_threads)', () => {
+    const SID = 'chat-std-1';
+    const ROOM = 'ม.5/8';
+    const STU_UID = 'chat-stu';
+    const PARENT_UID = 'chat-parent';
+    const HR_UID = 'chat-hr';
+    const par = () => asUser(PARENT_UID, ['PARENT']).firestore() as any;
+    const stu = () => asUser(STU_UID, ['STUDENT']).firestore() as any;
+    const hr = () => asUser(HR_UID, ['HOMEROOM_TEACHER'], { staffId: HR_UID }).firestore() as any;
+    const otherHr = () => asUser('chat-hr2', ['HOMEROOM_TEACHER'], { staffId: 'chat-hr2' }).firestore() as any;
+    const otherPar = () => asUser('chat-parent-2', ['PARENT']).firestore() as any;
+    const admin = () => asUser('chat-admin', ['SUPER_ADMIN']).firestore() as any;
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${SID}`).set({ studentId: SID, studentUid: STU_UID, parentUid: PARENT_UID, room: ROOM, name: 'Chat Kid' });
+        await ctx.firestore().doc(`staff/${HR_UID}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+        await ctx.firestore().doc('staff/chat-hr2').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+      });
+    }
+    const msg = (id: string, over: Record<string, unknown> = {}) => ({
+      id, studentId: SID, channel: 'PARENT', room: ROOM, memberUid: PARENT_UID, senderUid: PARENT_UID, senderRole: 'PARENT',
+      senderName: 'ผู้ปกครอง', text: 'สวัสดีครับ', sentAt: '2026-10-13T00:00:00.000Z', createdAt: mServerTimestamp(), ...over,
+    });
+    const teacherMsg = (id: string, channel: 'PARENT' | 'STUDENT', memberUid: string) =>
+      msg(id, { channel, memberUid, senderUid: HR_UID, senderRole: 'TEACHER', senderName: 'ครูประจำชั้น' });
+    async function put(id: string, over: Record<string, unknown> = {}) {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`class_messages/${id}`).set({ ...msg(id, over), createdAt: new Date() });
+      });
+    }
+
+    it('parent can send in the PARENT channel; teacher can reply; student can send in the STUDENT channel', async () => {
+      await seed();
+      await assertSucceeds(mSetDoc(mDoc(par(), 'class_messages/m1'), msg('m1')));
+      await assertSucceeds(mSetDoc(mDoc(hr(), 'class_messages/m2'), teacherMsg('m2', 'PARENT', PARENT_UID)));
+      await assertSucceeds(mSetDoc(mDoc(stu(), 'class_messages/m3'), msg('m3', { channel: 'STUDENT', memberUid: STU_UID, senderUid: STU_UID, senderRole: 'STUDENT' })));
+      await assertSucceeds(mSetDoc(mDoc(hr(), 'class_messages/m4'), teacherMsg('m4', 'STUDENT', STU_UID)));
+    });
+
+    it('rejects spoofed identity: other parent, wrong memberUid, wrong room, wrong role, forged sender, bad text', async () => {
+      await seed();
+      await assertFails(mSetDoc(mDoc(otherPar(), 'class_messages/x1'), msg('x1', { senderUid: 'chat-parent-2', memberUid: 'chat-parent-2' })));
+      await assertFails(mSetDoc(mDoc(par(), 'class_messages/x2'), msg('x2', { memberUid: STU_UID })));
+      await assertFails(mSetDoc(mDoc(par(), 'class_messages/x3'), msg('x3', { room: 'ม.1/1' })));
+      await assertFails(mSetDoc(mDoc(par(), 'class_messages/x4'), msg('x4', { senderRole: 'TEACHER' })));
+      await assertFails(mSetDoc(mDoc(par(), 'class_messages/x5'), msg('x5', { senderUid: 'someone-else' })));
+      await assertFails(mSetDoc(mDoc(par(), 'class_messages/x6'), msg('x6', { text: '' })));
+      await assertFails(mSetDoc(mDoc(par(), 'class_messages/x7'), msg('x7', { text: 'ก'.repeat(1001) })));
+      await assertFails(mSetDoc(mDoc(par(), 'class_messages/x8'), msg('x8', { createdAt: new Date('2020-01-01') })));
+      await assertFails(mSetDoc(mDoc(par(), 'class_messages/x9'), { ...msg('x9'), extra: 1 }));
+      await assertFails(mSetDoc(mDoc(otherHr(), 'class_messages/x10'), teacherMsg('x10', 'PARENT', PARENT_UID)));
+      // parent cannot post into the student's channel and vice versa
+      await assertFails(mSetDoc(mDoc(par(), 'class_messages/x11'), msg('x11', { channel: 'STUDENT', memberUid: STU_UID })));
+      await assertFails(mSetDoc(mDoc(stu(), 'class_messages/x12'), msg('x12', { channel: 'PARENT', memberUid: PARENT_UID, senderUid: STU_UID, senderRole: 'PARENT' })));
+    });
+
+    it('read is private per channel: member + homeroom teacher of the room only (not the other channel, other parent, other teacher, admin)', async () => {
+      await seed();
+      await put('r1');
+      await put('r2', { channel: 'STUDENT', memberUid: STU_UID, senderUid: STU_UID, senderRole: 'STUDENT' });
+      await assertSucceeds(mGetDoc(mDoc(par(), 'class_messages/r1')));
+      await assertSucceeds(mGetDoc(mDoc(hr(), 'class_messages/r1')));
+      await assertSucceeds(mGetDoc(mDoc(hr(), 'class_messages/r2')));
+      await assertSucceeds(mGetDoc(mDoc(stu(), 'class_messages/r2')));
+      await assertFails(mGetDoc(mDoc(stu(), 'class_messages/r1')));
+      await assertFails(mGetDoc(mDoc(par(), 'class_messages/r2')));
+      await assertFails(mGetDoc(mDoc(otherPar(), 'class_messages/r1')));
+      await assertFails(mGetDoc(mDoc(otherHr(), 'class_messages/r1')));
+      await assertFails(mGetDoc(mDoc(admin(), 'class_messages/r1')));
+    });
+
+    it('list queries: member by memberUid, teacher by room; unscoped query denied', async () => {
+      await seed();
+      await put('q1');
+      await assertSucceeds(getDocs(query(collection(par(), 'class_messages'), where('memberUid', '==', PARENT_UID), where('studentId', '==', SID), where('channel', '==', 'PARENT'))));
+      await assertSucceeds(getDocs(query(collection(hr(), 'class_messages'), where('room', '==', ROOM), where('studentId', '==', SID), where('channel', '==', 'PARENT'))));
+      await assertFails(getDocs(query(collection(par(), 'class_messages'), where('studentId', '==', SID))));
+      await assertFails(getDocs(query(collection(otherHr(), 'class_messages'), where('room', '==', ROOM))));
+    });
+
+    it('messages are immutable (no update, no delete)', async () => {
+      await seed();
+      await put('i1');
+      await assertFails(mUpdateDoc(mDoc(par(), 'class_messages/i1'), { text: 'แก้' }));
+      await assertFails(par().doc('class_messages/i1').delete());
+      await assertFails(hr().doc('class_messages/i1').delete());
+    });
+
+    describe('threads', () => {
+      const thread = (over: Record<string, unknown> = {}) => ({
+        id: `${SID}_PARENT`, studentId: SID, studentName: 'Chat Kid', channel: 'PARENT', room: ROOM, memberUid: PARENT_UID,
+        lastText: 'สวัสดี', lastSenderRole: 'PARENT', lastAt: '2026-10-13T00:00:00.000Z', memberLastReadAt: '2026-10-13T00:00:00.000Z', updatedAt: '2026-10-13T00:00:00.000Z', ...over,
+      });
+      async function putThread() {
+        await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`class_chat_threads/${SID}_PARENT`).set(thread()); });
+      }
+
+      it('member or homeroom teacher can create the thread; others cannot; id must match', async () => {
+        await seed();
+        await assertSucceeds(mSetDoc(mDoc(par(), `class_chat_threads/${SID}_PARENT`), thread()));
+        await assertSucceeds(mSetDoc(mDoc(hr(), `class_chat_threads/${SID}_STUDENT`), thread({ id: `${SID}_STUDENT`, channel: 'STUDENT', memberUid: STU_UID, memberLastReadAt: '', teacherLastReadAt: '2026-10-13T00:00:00.000Z', lastSenderRole: 'TEACHER' })));
+        await assertFails(mSetDoc(mDoc(otherPar(), `class_chat_threads/${SID}_PARENT`), thread()));
+        await assertFails(mSetDoc(mDoc(otherHr(), `class_chat_threads/${SID}_PARENT`), thread()));
+        await assertFails(mSetDoc(mDoc(par(), 'class_chat_threads/wrong-id'), thread({ id: 'wrong-id' })));
+        await assertFails(mSetDoc(mDoc(par(), `class_chat_threads/${SID}_PARENT`), thread({ memberUid: 'forged' })));
+      });
+
+      it('each side can only touch its own read marker + last message fields', async () => {
+        await seed();
+        await putThread();
+        const ref = (db: any) => mDoc(db, `class_chat_threads/${SID}_PARENT`);
+        await assertSucceeds(mUpdateDoc(ref(par()), { memberLastReadAt: '2026-10-13T01:00:00.000Z', updatedAt: 'x' }));
+        await assertSucceeds(mUpdateDoc(ref(hr()), { teacherLastReadAt: '2026-10-13T01:00:00.000Z', lastText: 'ตอบ', lastSenderRole: 'TEACHER', lastAt: '2026-10-13T01:00:00.000Z' }));
+        await assertFails(mUpdateDoc(ref(par()), { teacherLastReadAt: '2026-10-13T02:00:00.000Z' }));
+        await assertFails(mUpdateDoc(ref(hr()), { memberLastReadAt: '2026-10-13T02:00:00.000Z' }));
+        await assertFails(mUpdateDoc(ref(par()), { memberUid: 'forged' }));
+        await assertFails(mUpdateDoc(ref(hr()), { room: 'ม.1/1' }));
+        await assertFails(mUpdateDoc(ref(otherPar()), { memberLastReadAt: 'z' }));
+        await assertFails(mUpdateDoc(ref(otherHr()), { teacherLastReadAt: 'z' }));
+      });
+
+      it('thread read: member + homeroom teacher only; no delete', async () => {
+        await seed();
+        await putThread();
+        const ref = (db: any) => mDoc(db, `class_chat_threads/${SID}_PARENT`);
+        await assertSucceeds(mGetDoc(ref(par())));
+        await assertSucceeds(mGetDoc(ref(hr())));
+        await assertFails(mGetDoc(ref(stu())));
+        await assertFails(mGetDoc(ref(otherHr())));
+        await assertFails(mGetDoc(ref(admin())));
+        await assertFails(par().doc(`class_chat_threads/${SID}_PARENT`).delete());
       });
     });
   });

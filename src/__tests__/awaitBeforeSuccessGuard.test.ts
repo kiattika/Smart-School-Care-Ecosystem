@@ -26,9 +26,10 @@ describe('guard: ห้ามแจ้งสำเร็จก่อนเขี
     const tp = readSource('src/TeacherPortal.tsx');
     expect(tp).toMatch(/await submitPostTeachingRecord\(/);
     expect(tp).toMatch(/บันทึกหลังสอนไม่สำเร็จ/);
-    const pe = readSource('src/components/student-parent/ParentEngagementServices.tsx');
-    expect(pe).toMatch(/await sendParentTeacherMessage\(/);
-    expect(pe).toMatch(/setMsgError\(/);
+    // แชทใหม่ (ClassChatPanel) ต้อง await sendClassMessage และแจ้งผู้ใช้เมื่อส่งไม่สำเร็จ ไม่ล้างช่องพิมพ์
+    const chat = readSource('src/components/chat/ClassChatPanel.tsx');
+    expect(chat).toMatch(/await sendClassMessage\(/);
+    expect(chat).toMatch(/setError\('ส่งข้อความไม่สำเร็จ/);
   });
   it('โหมดจำลองพิกัดไม่มีพิกัดสำรองฝังตายตัว', () => {
     expect(readSource('src/components/GPSGeofenceCheckinModal.tsx')).not.toMatch(/17\.625|100\.093|100\.094/);

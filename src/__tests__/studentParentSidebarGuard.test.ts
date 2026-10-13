@@ -3,8 +3,8 @@ import { readSource } from './helpers/readSource';
 
 describe('เมนูย่อยนักเรียน/ผู้ปกครองใช้ PortalSidebarLayout', () => {
   it.each([
-    ['src/StudentPortal.tsx', ['overview', 'gate', 'health', 'socio', 'behavior', 'electives', 'portfolio', 'academic', 'parent', 'assessment']],
-    ['src/ParentPortal.tsx', ['timeline', 'gate', 'health', 'behavior', 'portfolio', 'academic', 'services']],
+    ['src/StudentPortal.tsx', ['overview', 'gate', 'health', 'socio', 'behavior', 'electives', 'portfolio', 'academic', 'billing', 'chat', 'appointment', 'assessment']],
+    ['src/ParentPortal.tsx', ['timeline', 'gate', 'health', 'behavior', 'portfolio', 'academic', 'billing', 'chat', 'appointment']],
   ])('%s', (file, ids) => {
     const src = readSource(file);
     expect(src).toMatch(/<PortalSidebarLayout/);
