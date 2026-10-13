@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Satellite, MapPin, Clock, ShieldCheck, ShieldAlert, ExternalLink } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, subDays } from 'date-fns';
 import { Student, GPSCheckInLog } from '../../types';
 import { formatCheckInClock } from '../../lib/gateMorningStatus';
-import { subscribeGpsCheckInLogsByDate } from '../../services/firestoreService';
+import { subscribeGpsCheckInLogsSince } from '../../services/firestoreService';
+import { flagCheckIns } from '../../lib/checkinFlags';
 
 /**
  * แผงแสดง "พิกัด GPS การเช็คอินเข้าโรงเรียนของนักเรียน" สำหรับครูที่ปรึกษา
@@ -13,9 +14,13 @@ import { subscribeGpsCheckInLogsByDate } from '../../services/firestoreService';
  */
 export function AdvisorGpsCheckInPanel({ students }: { students: Student[] }) {
   const today = format(new Date(), 'yyyy-MM-dd');
-  const [logs, setLogs] = useState<GPSCheckInLog[]>([]);
+  const [allLogs, setAllLogs] = useState<GPSCheckInLog[]>([]);
 
-  useEffect(() => subscribeGpsCheckInLogsByDate(today, setLogs), [today]);
+  // ย้อนหลัง 14 วัน — ใช้เทียบรูปแบบข้ามวัน/ข้ามคนเพื่อตั้งธง "ควรตรวจสอบ" (แสดงเฉพาะของวันนี้)
+  const since = format(subDays(new Date(), 14), 'yyyy-MM-dd');
+  useEffect(() => subscribeGpsCheckInLogsSince(since, setAllLogs), [since]);
+  const logs = useMemo(() => allLogs.filter(l => l.date === today).sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || '')), [allLogs, today]);
+  const flags = useMemo(() => flagCheckIns(allLogs), [allLogs]);
 
   // เฉพาะนักเรียนในห้องนี้ (จับด้วย userId = studentId หรือ studentUid) + เข้า (ENTRY)
   const idset = useMemo(() => {
@@ -29,6 +34,8 @@ export function AdvisorGpsCheckInPanel({ students }: { students: Student[] }) {
     [logs, idset]
   );
 
+  const flaggedCount = rows.filter(l => (flags.get(l.id) || []).length > 0).length;
+
   const nameOf = useMemo(() => {
     const m = new Map<string, string>();
     students.forEach(st => { m.set(st.studentId, st.fullName || st.name); if (st.studentUid) m.set(st.studentUid, st.fullName || st.name); });
@@ -40,7 +47,9 @@ export function AdvisorGpsCheckInPanel({ students }: { students: Student[] }) {
       <div className="flex items-center gap-2 mb-1">
         <Satellite className="w-5 h-5 text-emerald-400" />
         <h3 className="text-sm font-bold text-white">พิกัด GPS การเช็คอินเข้าโรงเรียน (วันนี้)</h3>
-        <span className="ml-auto text-xs text-slate-400">{rows.length} รายการ</span>
+        <span className="ml-auto text-xs text-slate-400">
+          {rows.length} รายการ{flaggedCount > 0 ? <span className="ml-2 text-amber-400 font-bold">· ควรตรวจสอบ {flaggedCount}</span> : null}
+        </span>
       </div>
       <p className="text-[11px] text-slate-500 mb-3">นักเรียนเช็คอินผ่าน GPS Geofence — ครูที่ปรึกษาตรวจสอบพิกัด/เวลา/สถานะได้ที่นี่</p>
 
@@ -50,8 +59,10 @@ export function AdvisorGpsCheckInPanel({ students }: { students: Student[] }) {
         </div>
       ) : (
         <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-          {rows.map(l => (
-            <div key={l.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 bg-black/20 rounded-lg px-3 py-2 text-xs">
+          {rows.map(l => {
+            const fl = flags.get(l.id) || [];
+            return (
+            <div key={l.id} className={`flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg px-3 py-2 text-xs ${fl.length ? 'bg-amber-500/5 border border-amber-500/30' : 'bg-black/20'}`}>
               <span className="font-bold text-white min-w-[9rem]">{nameOf(l.userId, l.userName || l.userId)}</span>
               <span className="flex items-center gap-1 text-slate-300"><Clock className="w-3.5 h-3.5" /> {formatCheckInClock(l.timestamp)}</span>
               <span className={`flex items-center gap-1 ${l.isInsideGeofence ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -68,8 +79,15 @@ export function AdvisorGpsCheckInPanel({ students }: { students: Student[] }) {
               >
                 <MapPin className="w-3 h-3" /> {l.latitude.toFixed(5)}, {l.longitude.toFixed(5)} <ExternalLink className="w-3 h-3" />
               </a>
+              {fl.length > 0 && (
+                <div className="basis-full text-[11px] text-amber-300 space-y-0.5" role="note">
+                  <div className="font-bold">⚠ ควรตรวจสอบ (เป็นสัญญาณช่วยตรวจ ไม่ได้แปลว่าปลอมแน่นอน)</div>
+                  {fl.map(f => <div key={f.code}>• {f.label}</div>)}
+                </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

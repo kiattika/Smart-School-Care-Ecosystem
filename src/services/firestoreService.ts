@@ -1167,8 +1167,12 @@ export async function saveGPSCheckInLogFirestore(log: GPSCheckInLog): Promise<vo
   const collectionPath = 'gps_check_in_logs';
   try {
     const ref = doc(db, collectionPath, log.id);
+    // serverTimeMs = field ฝั่งอ่านเท่านั้น ห้ามเขียนกลับ
+    const { serverTimeMs: _ignored, ...rest } = log;
+    void _ignored;
     await setDoc(ref, omitUndefined({
-      ...log,
+      ...rest,
+      serverTime: serverTimestamp(),
       createdAt: serverTimestamp()
     }), { merge: true });
   } catch (error) {
@@ -1216,6 +1220,31 @@ export async function deactivateDepartmentConfig(id: string): Promise<void> {
  * ครูที่ปรึกษาใช้ดูว่านักเรียนคนไหนเช็คอินเข้าโรงเรียนด้วย GPS จากพิกัดไหน เวลาไหน
  * (HOMEROOM_TEACHER อ่านได้ตาม firestore.rules)
  */
+function gpsLogFromDoc(id: string, data: Record<string, any>): GPSCheckInLog {
+  const { serverTime, ...rest } = data;
+  const ms = serverTime && typeof serverTime.toMillis === 'function' ? serverTime.toMillis() : undefined;
+  return { id, ...rest, ...(ms !== undefined ? { serverTimeMs: ms } : {}) } as GPSCheckInLog;
+}
+
+/** log ตั้งแต่วันที่ startDate (yyyy-MM-dd) เป็นต้นไป — ใช้ตรวจรูปแบบข้ามวัน (ช่วง range บน field เดียว ไม่ต้องสร้าง index) */
+export function subscribeGpsCheckInLogsSince(
+  startDate: string,
+  onUpdate: (logs: GPSCheckInLog[]) => void
+): () => void {
+  try {
+    const q = query(collection(db, 'gps_check_in_logs'), where('date', '>=', startDate));
+    return onSnapshot(q, (snap) => {
+      onUpdate(snap.docs.map(d => gpsLogFromDoc(d.id, d.data())));
+    }, (error) => {
+      console.warn('[subscribeGpsCheckInLogsSince] Listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeGpsCheckInLogsSince] Setup error:', error);
+    return () => {};
+  }
+}
+
 export function subscribeGpsCheckInLogsByDate(
   dateStr: string,
   onUpdate: (logs: GPSCheckInLog[]) => void
@@ -1223,7 +1252,7 @@ export function subscribeGpsCheckInLogsByDate(
   try {
     const q = query(collection(db, 'gps_check_in_logs'), where('date', '==', dateStr));
     return onSnapshot(q, (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as GPSCheckInLog));
+      const list = snap.docs.map(d => gpsLogFromDoc(d.id, d.data()));
       list.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
       onUpdate(list);
     }, (error) => {

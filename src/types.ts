@@ -591,6 +591,12 @@ export interface GPSCheckInLog {
   notes?: string;
   /** Firebase Auth uid ของผู้เช็คอินจริง (userId เป็นรหัสนักเรียน/รหัสบุคลากร ไม่ใช่ uid) — rules ใช้เทียบสิทธิ์เขียน/อ่านของเจ้าของ */
   authUid?: string;
+  /** เวลาที่มาจากเซิร์ฟเวอร์ (header Date) หรือเครื่องผู้ใช้ — ใช้ตัดสิน "สาย"/วัน/เวลา */
+  clockSource?: 'SERVER' | 'DEVICE';
+  /** เวลาเครื่อง − เวลาเซิร์ฟเวอร์ (วินาที) ตอนเช็คอิน */
+  clockSkewSeconds?: number;
+  /** เวลาที่ Firestore ประทับตอนรับเขียน (serverTimestamp) เป็น ms — ฝั่งอ่านแปลงมาจาก field serverTime */
+  serverTimeMs?: number;
 }
 
 /** วันลาที่อนุมัติแล้วแบบไม่มีเหตุผล (student_leave_days) — ให้ครูผู้สอนเห็นสถานะ "ลา" ตอนเช็คชื่อ */
