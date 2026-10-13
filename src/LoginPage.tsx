@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useStore } from './store';
 import { LogIn, AlertCircle, Loader2, KeyRound, Sparkles } from 'lucide-react';
 import { signInWithGoogle, signInWithEmailPassword, signInWithParentToken } from './lib/auth';
-import { isLineConfigured, isLinePending, markLinePending, getLineIdToken, requestParentSignIn, requestParentLink } from './lib/lineParent';
+import { isLineConfigured, isLinePending, markLinePending, getLineIdToken, requestParentSignIn, requestParentLink, resetLineSession } from './lib/lineParent';
 import { describeAuthError } from './lib/authErrors';
 
 const EMULATOR_TEST_USERS = [
@@ -91,6 +91,7 @@ export function LoginPage({ initialError = null }: { initialError?: string | nul
       setUser(await signInWithParentToken(result.customToken));
     } catch (err: any) {
       markLinePending(false);
+      if (err?.code === 'functions/unauthenticated') await resetLineSession();
       console.error('LINE Sign-In Error:', err);
       setErrorMessage(describeAuthError(err));
     } finally {
@@ -115,6 +116,7 @@ export function LoginPage({ initialError = null }: { initialError?: string | nul
       const customToken = await requestParentLink(lineIdToken, linkStudentId.trim(), linkNationalId);
       setUser(await signInWithParentToken(customToken));
     } catch (err: any) {
+      if (err?.code === 'functions/unauthenticated') { setLineIdToken(null); await resetLineSession(); }
       setErrorMessage(describeAuthError(err));
     } finally {
       setLoading(false);

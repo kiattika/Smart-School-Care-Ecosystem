@@ -26,9 +26,27 @@ export async function getLineIdToken(): Promise<string | null> {
     liff.login({ redirectUri: window.location.href });
     return null;
   }
+  // ID token ของ LINE อายุสั้น — หมดอายุ/ใกล้หมดแล้วให้ล้างเซสชัน LIFF แล้วล็อกอินใหม่ (กันค้างวนส่ง token เก่า → 401)
+  const exp = Number((liff.getDecodedIDToken() as { exp?: number } | null)?.exp || 0);
   const token = liff.getIDToken();
-  if (!token) throw new Error('LINE_NO_ID_TOKEN');
+  if (!token || (exp && exp * 1000 < Date.now() + 60_000)) {
+    liff.logout();
+    markLinePending(true);
+    liff.login({ redirectUri: window.location.href });
+    return null;
+  }
   return token;
+}
+
+/** เซิร์ฟเวอร์ปฏิเสธ token (401) → ล้างเซสชัน LIFF เพื่อให้ปุ่มถัดไปขอ token ใหม่จริง ๆ */
+export async function resetLineSession(): Promise<void> {
+  markLinePending(false);
+  if (!isLineConfigured()) return;
+  try {
+    const { default: liff } = await import('@line/liff');
+    await liff.init({ liffId: LIFF_ID });
+    if (liff.isLoggedIn()) liff.logout();
+  } catch { /* ignore */ }
 }
 
 export type ParentSignInResult = { customToken: string } | { notLinked: true };
