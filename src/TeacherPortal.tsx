@@ -22,6 +22,7 @@ import { useSchoolCalendar } from './hooks/useSchoolCalendar';
 import { DatePicker } from './components/shared/DatePicker';
 import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
+import { useTeacherActivityStudentCount } from './hooks/useCourseActivityPoints';
 import { useLeaveStudentIds } from './hooks/useApprovedLeaveDays';
 import { rosterLevels, sortRoster, filterRosterByLevel, studentLevelLabel } from './lib/gradebookRoster';
 import { TeacherAttendanceStatsPanel } from './components/attendance/TeacherAttendanceStatsPanel';
@@ -82,7 +83,6 @@ export function TeacherPortal() {
     clearTimeSimulation,
     setScheduleConfig,
     courses,
-    activeLearningPoints,
     setCourses,
     markAttendanceDone,
     postTeachingRecords,
@@ -425,6 +425,7 @@ export function TeacherPortal() {
   );
 
   // Dynamic Role-Based Access Control (RBAC) Tab Filtering
+  const activityStudentCount = useTeacherActivityStudentCount();
   const availableDashboardTabs = useMemo(() => {
     const rawTabs: Array<{
       id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats';
@@ -437,7 +438,7 @@ export function TeacherPortal() {
       { id: 'attendance-stats', label: 'สถิติการเข้าเรียนรายบุคคล', icon: NavAttendanceStatsIcon, count: 0 },
       { id: 'gps-geofence', label: 'พิกัดดาวเทียม & เช็คอิน (GPS Geofence)', icon: NavGpsIcon, count: 0 },
       { id: 'teaching-load', label: 'ตารางภาระงานสอน (Teaching Load)', icon: NavLoadIcon, count: 6, hideForRoles: ['SUBJECT_TEACHER'] },
-      { id: 'leaderboard', label: 'กระดานคะแนน Active Learning (Leaderboard)', icon: NavLeaderboardIcon, count: Object.values(activeLearningPoints).filter(p => p > 0).length },
+      { id: 'leaderboard', label: 'กระดานคะแนน Active Learning (Leaderboard)', icon: NavLeaderboardIcon, count: activityStudentCount },
       {
         id: 'substitutions',
         label: 'จัดการภาระลา & สอนแทน',
@@ -452,7 +453,7 @@ export function TeacherPortal() {
 
     // ซ่อนตามบทบาท (hideForRoles) — ตรรกะกลางของแถบเมนู (portalSidebarLogic.ts) ค่าเริ่มต้นบทบาทเหมือนเดิม
     return visibleSidebarItems(rawTabs, user?.activeRole || 'SUBJECT_TEACHER');
-  }, [user?.activeRole, myCourses.length, activeLearningPoints, substituteAssignments, user?.email, todayStr, postTeachingRecords]);
+  }, [user?.activeRole, myCourses.length, activityStudentCount, substituteAssignments, user?.email, todayStr, postTeachingRecords, activityStudentCount]);
 
   // Seamless fallback when role changes and current tab is restricted
   useEffect(() => {

@@ -144,6 +144,8 @@ export interface CoursePointsSummary {
   courseName: string;
   points: number;
   rank: RankResult;
+  /** true = คะแนนที่ไม่ได้ระบุวิชา (ให้ก่อนระบบแยกวิชา) — ไม่ควรแสดงเป็นแรงค์ของวิชาใด */
+  unassigned: boolean;
 }
 
 /**
@@ -168,7 +170,7 @@ export function summarizeCoursePoints(
   return Array.from(byCourse.entries())
     .map(([courseId, v]) => {
       const points = Math.max(0, v.points);
-      return { courseId, courseName: v.name, points, rank: rankForPoints(points, levels) };
+      return { courseId, courseName: v.name, points, rank: rankForPoints(points, levels), unassigned: courseId === '__none__' };
     })
     .sort((a, b) => b.points - a.points || a.courseName.localeCompare(b.courseName, 'th'));
 }
@@ -230,4 +232,23 @@ export function coursesInLogs(
   }
   return Array.from(m, ([courseId, courseName]) => ({ courseId, courseName }))
     .sort((a, b) => a.courseName.localeCompare(b.courseName, 'th'));
+}
+
+/** จำนวนนักเรียนที่มีคะแนนรายวิชาเกิน 0 ในอย่างน้อยหนึ่งวิชา (ภาคเรียนที่ระบุ) — ใช้เป็นตัวเลขบนเมนูกระดานคะแนน */
+export function countStudentsWithPoints(
+  logs: ActiveLearningRecord[],
+  term: { academicYear: string; term: '1' | '2' },
+): number {
+  const perStudentCourse = new Map<string, number>();
+  for (const log of logs) {
+    const key = logCourseKey(log);
+    if (!key) continue;
+    const t = logTerm(log);
+    if (!t || t.academicYear !== term.academicYear || t.term !== term.term) continue;
+    const k = `${log.studentId}\u0000${key}`;
+    perStudentCourse.set(k, (perStudentCourse.get(k) || 0) + Number(log.points || 0));
+  }
+  const students = new Set<string>();
+  perStudentCourse.forEach((pts, k) => { if (pts > 0) students.add(k.split('\u0000')[0]); });
+  return students.size;
 }

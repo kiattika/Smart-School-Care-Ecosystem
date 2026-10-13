@@ -42,6 +42,14 @@ export function CourseActivityPoints({ studentId }: { studentId: string }) {
       <div className="space-y-2">
         {rows.map(r => {
           const color = rankColor(r.rank.level.key);
+          if (r.unassigned) {
+            return (
+              <div key={r.courseId} className="rounded-2xl border border-slate-800 bg-slate-800/30 p-3.5" data-testid="course-activity-row-unassigned">
+                <div className="text-xs font-bold text-slate-300">ไม่ระบุวิชา</div>
+                <div className="text-[10px] text-slate-500">คะแนนสะสม {r.points} คะแนน — ให้ก่อนระบบแยกรายวิชา จึงไม่นับเป็นเครื่องหมายเชิดชูของวิชาใด</div>
+              </div>
+            );
+          }
           return (
             <div key={r.courseId} className="rounded-2xl border border-slate-800 bg-slate-800/40 p-3.5 space-y-2" data-testid="course-activity-row">
               <div className="flex items-center justify-between gap-3">

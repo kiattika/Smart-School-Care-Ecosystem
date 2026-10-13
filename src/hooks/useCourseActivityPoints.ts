@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { subscribeActiveLearningLogsForTeacher } from '../services/firestoreService';
 import { useStore } from '../store';
 import { useCurrentSemester } from './useCurrentSemester';
-import { pointsByStudentForCourse } from '../lib/courseRank';
+import { countStudentsWithPoints, pointsByStudentForCourse } from '../lib/courseRank';
 import type { ActiveLearningRecord } from '../types';
 
 /**
@@ -15,4 +15,13 @@ export function useCourseActivityPoints(courseKey: string, legacyCourseId?: stri
   const [logs, setLogs] = useState<ActiveLearningRecord[]>([]);
   useEffect(() => subscribeActiveLearningLogsForTeacher(myStaffId, setLogs), [myStaffId]);
   return useMemo(() => pointsByStudentForCourse(logs, courseKey, { academicYear, term }, legacyCourseId), [logs, courseKey, legacyCourseId, academicYear, term]);
+}
+
+/** จำนวนนักเรียนที่ครูคนนี้ให้คะแนนรายวิชา (>0 อย่างน้อยหนึ่งวิชา) ในภาคเรียนปัจจุบัน — ป้ายบนเมนูกระดานคะแนน */
+export function useTeacherActivityStudentCount(): number {
+  const myStaffId = useStore(s => s.user?.staffId) ?? '';
+  const { academicYear, term } = useCurrentSemester();
+  const [logs, setLogs] = useState<ActiveLearningRecord[]>([]);
+  useEffect(() => subscribeActiveLearningLogsForTeacher(myStaffId, setLogs), [myStaffId]);
+  return useMemo(() => countStudentsWithPoints(logs, { academicYear, term }), [logs, academicYear, term]);
 }
