@@ -140,8 +140,8 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
     switch (type) {
       case 'GATE_1':
         setCurrentCoords({
-          latitude: schoolGeofenceConfig.gates[0]?.coordinates.latitude || 17.625620,
-          longitude: schoolGeofenceConfig.gates[0]?.coordinates.longitude || 100.093200,
+          latitude: schoolGeofenceConfig.gates[0]?.coordinates.latitude ?? schoolGeofenceConfig.centerCoordinates.latitude,
+          longitude: schoolGeofenceConfig.gates[0]?.coordinates.longitude ?? schoolGeofenceConfig.centerCoordinates.longitude,
         });
         setAccuracy(4);
         break;
@@ -154,8 +154,8 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
         break;
       case 'SPORTS_FIELD':
         setCurrentCoords({
-          latitude: schoolGeofenceConfig.gates[2]?.coordinates.latitude || 17.625800,
-          longitude: schoolGeofenceConfig.gates[2]?.coordinates.longitude || 100.094100,
+          latitude: schoolGeofenceConfig.gates[2]?.coordinates.latitude ?? (schoolGeofenceConfig.centerCoordinates.latitude + 0.0003),
+          longitude: schoolGeofenceConfig.gates[2]?.coordinates.longitude ?? (schoolGeofenceConfig.centerCoordinates.longitude + 0.0004),
         });
         setAccuracy(5);
         break;

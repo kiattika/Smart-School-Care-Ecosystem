@@ -1202,7 +1202,7 @@ export interface StoreState {
   updateStudentProfile: (studentId: string, profile: { nickname?: string; photoUrl?: string; address?: string; parentUid?: string; parentEmail?: string }) => void;
   updateMorningAttendance: (studentId: string, status: 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE', method: 'SCAN' | 'GEOFENCE' | 'MANUAL') => void;
   
-  submitPostTeachingRecord: (record: PostTeachingRecord) => void;
+  submitPostTeachingRecord: (record: PostTeachingRecord) => Promise<void>;
   assignSubstituteTeacher: (assignment: Omit<SubstituteAssignment, 'id'>) => void;
   removeSubstituteAssignment: (id: string) => void;
 
@@ -1262,7 +1262,7 @@ export interface StoreState {
   addPortfolioItem: (item: Omit<PortfolioItem, 'id' | 'isVerifiedByTeacher'>) => void;
   addDigitalCertificate: (cert: Omit<DigitalCertificate, 'id'>) => void;
   submitVolunteerHours: (record: Omit<VolunteerHourRecord, 'id' | 'status'>) => void;
-  sendParentTeacherMessage: (studentId: string, senderRole: ParentTeacherMessage['senderRole'], senderName: string, message: string) => void;
+  sendParentTeacherMessage: (studentId: string, senderRole: ParentTeacherMessage['senderRole'], senderName: string, message: string) => Promise<void>;
 
   // GPS Geofence Actions
   addGPSCheckInLog: (log: Omit<GPSCheckInLog, 'id'>) => Promise<void>;

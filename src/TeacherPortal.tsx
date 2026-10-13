@@ -750,7 +750,7 @@ export function TeacherPortal() {
     }, 120);
   };
 
-  const handlePostTeachingSubmit = (e: React.FormEvent) => {
+  const handlePostTeachingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!postTeachingCourse) return;
 
@@ -763,21 +763,29 @@ export function TeacherPortal() {
     const teachingMidnight = new Date(dateParts[0], dateParts[1] - 1, dateParts[2], 23, 59, 59, 999);
     const isLate = isAfter(submittedAt, teachingMidnight);
 
-    submitPostTeachingRecord({
-      courseId: postTeachingCourse.id,
-      date: teachingDateStr,
-      summary: ptSummary,
-      problems: ptProblems,
-      solutions: ptSolutions,
-      submittedAt: submittedAtIso,
-      isLate: isLate,
-      scheduleId: postTeachingPeriod?.scheduleId || postTeachingPeriod?.id,
-      subjectCode: postTeachingPeriod?.subjectCode || postTeachingCourse.code,
-      level: postTeachingPeriod?.level || postTeachingPeriod?.className || (postTeachingCourse as any).level,
-      room: postTeachingPeriod?.room || postTeachingCourse.room,
-      // ผู้บันทึก — ให้ประวัติอยู่กับครูคนนี้แม้ภายหลังเปลี่ยนครูผู้สอนของคาบ (ไม่มี staffId = ไม่ใส่ ห้ามเดา)
-      ...(staffIdOf(user) ? { recordedByStaffId: staffIdOf(user) as string, recordedByName: user?.displayName || user?.email || '' } : {}),
-    });
+    try {
+      await submitPostTeachingRecord({
+        courseId: postTeachingCourse.id,
+        date: teachingDateStr,
+        summary: ptSummary,
+        problems: ptProblems,
+        solutions: ptSolutions,
+        submittedAt: submittedAtIso,
+        isLate: isLate,
+        scheduleId: postTeachingPeriod?.scheduleId || postTeachingPeriod?.id,
+        subjectCode: postTeachingPeriod?.subjectCode || postTeachingCourse.code,
+        level: postTeachingPeriod?.level || postTeachingPeriod?.className || (postTeachingCourse as any).level,
+        room: postTeachingPeriod?.room || postTeachingCourse.room,
+        // ผู้บันทึก — ให้ประวัติอยู่กับครูคนนี้แม้ภายหลังเปลี่ยนครูผู้สอนของคาบ (ไม่มี staffId = ไม่ใส่ ห้ามเดา)
+        ...(staffIdOf(user) ? { recordedByStaffId: staffIdOf(user) as string, recordedByName: user?.displayName || user?.email || '' } : {}),
+      });
+    } catch (err) {
+      console.error('[postTeaching] save failed:', err);
+      setToast('❌ บันทึกหลังสอนไม่สำเร็จ (ยังไม่มีการบันทึก) — ตรวจสอบสัญญาณอินเทอร์เน็ตแล้วลองอีกครั้ง');
+      setTimeout(() => setToast(null), 5000);
+      return;
+    }
+
 
     setToast(`บันทึกหลังสอนวิชา ${postTeachingCourse.name} เรียบร้อยแล้ว! ${isLate ? '⚠️ (ส่งช้ากว่ากำหนด)' : '✅ (ส่งตรงเวลา)'}`);
     setShowPostTeachingModal(false);
