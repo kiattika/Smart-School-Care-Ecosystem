@@ -46,11 +46,11 @@ export function EnrollmentWindowEditor({ cfg, onDone }: { cfg: ElectiveActivityC
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1">
           <span className="text-[10px] text-slate-400">เปิดรับสมัคร (ว่าง = เปิดทันที)</span>
-          <div className="flex gap-2"><DatePicker value={openDate} onChange={setOpenDate} clearable ariaLabel="วันที่เปิดรับสมัคร" /><TimePicker value={openTime} onChange={setOpenTime} minuteStep={5} ariaLabel="เวลาเปิดรับสมัคร" /></div>
+          <div className="flex gap-2"><DatePicker value={openDate} onChange={setOpenDate} clearable ariaLabel="วันที่เปิดรับสมัคร" openAtToday /><TimePicker value={openTime} onChange={setOpenTime} minuteStep={5} ariaLabel="เวลาเปิดรับสมัคร" /></div>
         </div>
         <div className="space-y-1">
           <span className="text-[10px] text-slate-400">ปิดรับสมัคร (ว่าง = ไม่กำหนดเวลาปิด; ไม่ใส่เวลา = สิ้นวัน 23:59)</span>
-          <div className="flex gap-2"><DatePicker value={closeDate} onChange={setCloseDate} clearable ariaLabel="วันที่ปิดรับสมัคร" /><TimePicker value={closeTime} onChange={setCloseTime} minuteStep={5} ariaLabel="เวลาปิดรับสมัคร" /></div>
+          <div className="flex gap-2"><DatePicker value={closeDate} onChange={setCloseDate} clearable ariaLabel="วันที่ปิดรับสมัคร" openAtToday /><TimePicker value={closeTime} onChange={setCloseTime} minuteStep={5} ariaLabel="เวลาปิดรับสมัคร" /></div>
         </div>
       </div>
       {error && <p className="text-[11px] text-rose-400">{error}</p>}

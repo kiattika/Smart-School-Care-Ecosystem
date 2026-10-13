@@ -75,3 +75,15 @@ describe('DatePicker ช่องว่างเปิดที่เดือ�
     expect(dp).not.toContain('parseYmd(min) || new Date()');
   });
 });
+
+describe('openAtToday — ปฏิทินช่วงเวลาเปิด-ปิดของแอดมินเปิดที่เดือนปัจจุบัน', () => {
+  it('DatePicker มี prop และหน้าล็อกระบบ/ชุมนุมเปิดใช้', () => {
+    expect(src('components/shared/DatePicker.tsx')).toMatch(/openAtToday \? defaultView\(min, max\)/);
+    const locks = src('components/SystemSettingsAndLocksPage.tsx');
+    expect(locks).toContain('ariaLabel="วันที่เปิดระบบ" openAtToday');
+    expect(locks).toContain('ariaLabel="วันที่ล็อกระบบ" openAtToday');
+    const ew = src('components/elective/EnrollmentWindowEditor.tsx');
+    expect(ew).toContain('ariaLabel="วันที่เปิดรับสมัคร" openAtToday');
+    expect(ew).toContain('ariaLabel="วันที่ปิดรับสมัคร" openAtToday');
+  });
+});

@@ -26,6 +26,8 @@ interface DatePickerProps {
   ariaLabel?: string;
   /** เปิดปฏิทินที่หน้าเลือกปี (พ.ศ.) ก่อน → เดือน → วัน — เหมาะกับวันเกิดที่ต้องย้อนไปหลายปี */
   yearFirst?: boolean;
+  /** เปิดปฏิทินที่เดือนปัจจุบันเสมอ แม้มีค่าเดิม (ช่วงเวลาเปิด-ปิดที่แอดมินตั้งล่วงหน้า) — ค่าที่เลือกไว้ยังไฮไลต์เมื่อเลื่อนไปถึงเดือนนั้น */
+  openAtToday?: boolean;
 }
 
 const parseYmd = (s: string): Date | null => {
@@ -60,13 +62,13 @@ const formatDisplay = (s: string): string => {
  * ปฏิทินชัดเจน) ใช้ในฟอร์มลากิจ/ไปราชการ และเช็คชื่อย้อนหลัง — ค่าที่เก็บ/ส่งออกยังเป็น string
  * รูปแบบ YYYY-MM-DD เหมือนเดิมทุกที่ที่เรียกใช้ ไม่ต้องแก้ตรรกะอื่นที่กินค่านี้ต่อ
  */
-export function DatePicker({ value, onChange, min, max, placeholder, className, disabled, required, clearable, ariaLabel, yearFirst }: DatePickerProps) {
+export function DatePicker({ value, onChange, min, max, placeholder, className, disabled, required, clearable, ariaLabel, yearFirst, openAtToday }: DatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   // days = ตารางวัน, months = เลือกเดือน, years = เลือกปี (พ.ศ.) — กดหัวข้อ "เดือน ปี" เพื่อย้อนไปเลือกเดือน/ปี
   const [mode, setMode] = useState<'days' | 'months' | 'years'>('days');
   const [yearPageStart, setYearPageStart] = useState(0);
   const selected = parseYmd(value);
-  const [viewDate, setViewDate] = useState(() => selected || defaultView(min, max));
+  const [viewDate, setViewDate] = useState(() => (openAtToday ? defaultView(min, max) : selected || defaultView(min, max)));
   const wrapRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   // ป๊อปอัปวาดผ่าน portal ที่ body (position: fixed) — ไม่ถูก overflow/stacking ของกล่องแม่ตัดหรือถูกการ์ดอื่นทับ; เปิดขึ้นบนเมื่อด้านล่างไม่พอ
@@ -92,7 +94,7 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
 
   useEffect(() => {
     if (isOpen) {
-      const base = selected || defaultView(min, max);
+      const base = openAtToday ? defaultView(min, max) : selected || defaultView(min, max);
       setViewDate(base);
       setMode(yearFirst ? 'years' : 'days');
       // หน้าเลือกปี 20 ปี/หน้า: มีค่าแล้ว → หน้าที่มีปีนั้น; ยังไม่มี → ให้ปีล่าสุด (max/วันนี้) อยู่ท้ายหน้า
