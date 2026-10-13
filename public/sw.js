@@ -4,7 +4,7 @@
  *   → ข้อมูลนักเรียน/ผลเช็คชื่อไม่ถูกเก็บในแคชของ service worker เด็ดขาด
  * - เวอร์ชันใหม่ "รอ" จนผู้ใช้กดอัปเดต (ข้อความ SKIP_WAITING) ไม่รีโหลดกลางงาน
  */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL_CACHE = `ssc-shell-${VERSION}`;
 const ASSET_CACHE = `ssc-assets-${VERSION}`;
 const SHELL_URLS = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
