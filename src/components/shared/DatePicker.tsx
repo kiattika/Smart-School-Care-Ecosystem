@@ -40,6 +40,14 @@ const toYmd = (d: Date): string => {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 };
+/** ช่องว่างเปิดที่เดือนปัจจุบัน (บีบให้อยู่ในช่วง min/max) — ไม่เปิดที่เดือนของ min เมื่อ min อยู่ในอดีต */
+const defaultView = (min?: string, max?: string): Date => {
+  const today = new Date();
+  const lo = parseYmd(min || ''); const hi = parseYmd(max || '');
+  if (lo && today < lo) return lo;
+  if (hi && today > hi) return hi;
+  return today;
+};
 const formatDisplay = (s: string): string => {
   const d = parseYmd(s);
   if (!d) return '';
@@ -58,7 +66,7 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
   const [mode, setMode] = useState<'days' | 'months' | 'years'>('days');
   const [yearPageStart, setYearPageStart] = useState(0);
   const selected = parseYmd(value);
-  const [viewDate, setViewDate] = useState(() => selected || parseYmd(min) || new Date());
+  const [viewDate, setViewDate] = useState(() => selected || defaultView(min, max));
   const wrapRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   // ป๊อปอัปวาดผ่าน portal ที่ body (position: fixed) — ไม่ถูก overflow/stacking ของกล่องแม่ตัดหรือถูกการ์ดอื่นทับ; เปิดขึ้นบนเมื่อด้านล่างไม่พอ
@@ -84,7 +92,7 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
 
   useEffect(() => {
     if (isOpen) {
-      const base = selected || parseYmd(min) || new Date();
+      const base = selected || defaultView(min, max);
       setViewDate(base);
       setMode(yearFirst ? 'years' : 'days');
       // หน้าเลือกปี 20 ปี/หน้า: มีค่าแล้ว → หน้าที่มีปีนั้น; ยังไม่มี → ให้ปีล่าสุด (max/วันนี้) อยู่ท้ายหน้า

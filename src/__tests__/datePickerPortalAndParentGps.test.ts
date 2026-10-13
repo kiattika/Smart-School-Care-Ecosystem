@@ -67,3 +67,11 @@ describe('DatePicker แสดงวันปัจจุบันชัดเ�
     expect(dp).toContain('ไปเดือนนี้');
   });
 });
+
+describe('DatePicker ช่องว่างเปิดที่เดือนปัจจุบัน', () => {
+  it('ไม่เปิดที่เดือนของ min เมื่อ min เป็นอดีต (บีบด้วย min/max เท่านั้น)', () => {
+    const dp = src('components/shared/DatePicker.tsx');
+    expect(dp).toContain('defaultView(min, max)');
+    expect(dp).not.toContain('parseYmd(min) || new Date()');
+  });
+});
