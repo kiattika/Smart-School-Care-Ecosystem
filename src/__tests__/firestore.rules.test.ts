@@ -1848,6 +1848,79 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // 17c. active_learning_logs — คะแนนกิจกรรมรายวิชา (ครูผู้ให้ + นักเรียนเจ้าของ + SUPER_ADMIN/EXECUTIVE เท่านั้น)
+  describe('active_learning_logs collection (คะแนนกิจกรรมรายวิชา)', () => {
+    const STU_UID = 'stu-uid-al';
+    const STU_ID = 'al-std-1';
+    const OTHER_STU_UID = 'stu-uid-al-2';
+    const T_UID = 'teacher-uid-al';
+    const T_STAFF = 'tch-al-001';
+    const OTHER_T_UID = 'teacher-uid-al-2';
+    const OTHER_T_STAFF = 'tch-al-002';
+
+    const logDoc = (over: Record<string, unknown> = {}) => ({
+      id: 'log-1', studentId: STU_ID, courseId: 'ค32102', courseName: 'คณิต ม.5/8', points: 2, category: 'ANSWER',
+      awardedAt: '2026-10-13T03:00:00.000Z', teacherStaffId: T_STAFF, academicYear: '2569', term: '1', createdAt: new Date(),
+      ...over,
+    });
+    const teacher = () => asUser(T_UID, ['SUBJECT_TEACHER'], { staffId: T_STAFF });
+    const otherTeacher = () => asUser(OTHER_T_UID, ['SUBJECT_TEACHER'], { staffId: OTHER_T_STAFF });
+
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, room: 'ม.5/8' });
+        await ctx.firestore().doc('active_learning_logs/log-1').set(logDoc());
+      });
+    }
+
+    it('ครูผู้ให้คะแนนสร้าง log ของตัวเองได้ (teacherStaffId ตรง claim)', async () => {
+      await seed();
+      await assertSucceeds(teacher().firestore().doc('active_learning_logs/log-new').set(logDoc({ id: 'log-new' })));
+    });
+    it('ครูสร้าง log ในนามครูท่านอื่น / ไม่ระบุผู้ให้ / มี field แปลกปลอม ไม่ได้', async () => {
+      await seed();
+      await assertFails(teacher().firestore().doc('active_learning_logs/log-x').set(logDoc({ id: 'log-x', teacherStaffId: OTHER_T_STAFF })));
+      const { teacherStaffId: _omit, ...noTeacher } = logDoc({ id: 'log-y' });
+      await assertFails(teacher().firestore().doc('active_learning_logs/log-y').set(noTeacher));
+      await assertFails(teacher().firestore().doc('active_learning_logs/log-z').set(logDoc({ id: 'log-z', behaviorScore: 100 })));
+    });
+    it('นักเรียนสร้าง/แก้/ลบ log ไม่ได้', async () => {
+      await seed();
+      const stu = asUser(STU_UID, ['STUDENT']);
+      await assertFails(stu.firestore().doc('active_learning_logs/log-s').set(logDoc({ id: 'log-s' })));
+      await assertFails(stu.firestore().doc('active_learning_logs/log-1').update({ points: 99 }));
+      await assertFails(stu.firestore().doc('active_learning_logs/log-1').delete());
+    });
+    it('ครูแก้/ลบ log ย้อนหลังไม่ได้ (เฉพาะ SUPER_ADMIN)', async () => {
+      await seed();
+      await assertFails(teacher().firestore().doc('active_learning_logs/log-1').update({ points: 99 }));
+      await assertFails(teacher().firestore().doc('active_learning_logs/log-1').delete());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('active_learning_logs/log-1').update({ points: 3 }));
+    });
+    it('ครูอ่านได้เฉพาะที่ตนให้ — query where teacherStaffId ผ่าน, ครูท่านอื่นและ query ทั้งหมดไม่ผ่าน', async () => {
+      await seed();
+      const col = (c: ReturnType<typeof teacher>) => c.firestore().collection('active_learning_logs');
+      await assertSucceeds(col(teacher()).where('teacherStaffId', '==', T_STAFF).get());
+      await assertFails(col(otherTeacher()).where('teacherStaffId', '==', T_STAFF).get());
+      await assertFails(col(teacher()).get());
+      await assertFails(otherTeacher().firestore().doc('active_learning_logs/log-1').get());
+    });
+    it('นักเรียนเจ้าของอ่านของตัวเองได้ (where studentId) — คนอื่นอ่านไม่ได้', async () => {
+      await seed();
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().collection('active_learning_logs').where('studentId', '==', STU_ID).get());
+      await assertFails(asUser(OTHER_STU_UID, ['STUDENT']).firestore().collection('active_learning_logs').where('studentId', '==', STU_ID).get());
+      await assertFails(asUser(STU_UID, ['STUDENT']).firestore().collection('active_learning_logs').get());
+    });
+    it('REGRESSION: bare signed-in (ไม่มีบทบาท/ผู้ปกครอง/ครูที่ปรึกษาที่ไม่ใช่ผู้ให้) อ่านไม่ได้ ส่วน SUPER_ADMIN/EXECUTIVE อ่านได้', async () => {
+      await seed();
+      await assertFails(asUser('random-uid', []).firestore().doc('active_learning_logs/log-1').get());
+      await assertFails(asUser('parent-uid', ['PARENT']).firestore().doc('active_learning_logs/log-1').get());
+      await assertFails(asUser('hr-uid', ['HOMEROOM_TEACHER'], { staffId: 'tch-hr' }).firestore().doc('active_learning_logs/log-1').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('active_learning_logs/log-1').get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().collection('active_learning_logs').get());
+    });
+  });
+
   // 18. department_config — แอดมินจัดการกลุ่มสาระฯ
   describe('department_config collection', () => {
     it('lets any signed-in user read', async () => {

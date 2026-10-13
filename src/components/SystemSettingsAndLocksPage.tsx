@@ -3,6 +3,7 @@ import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { SchoolCalendarSection } from './admin/SchoolCalendarSection';
 import { StudentEmailFormatSection } from './admin/StudentEmailFormatSection';
+import { CourseRankLevelsSection } from './admin/CourseRankLevelsSection';
 import { BillingPaymentInfoSection } from './admin/BillingPaymentInfoSection';
 import { GuidanceStatusSection } from './admin/GuidanceStatusSection';
 import { DatePicker } from './shared/DatePicker';
@@ -336,6 +337,9 @@ export function SystemSettingsAndLocksPage() {
 
           {/* 1.7 สถานะครูแนะแนว — school_settings/guidance_status (อ่านสด + ปุ่ม refreshGuidanceStatus) */}
           <GuidanceStatusSection />
+
+          {/* 1.8 เกณฑ์เครื่องหมายเชิดชูรายวิชา (แรงค์จากคะแนนกิจกรรม) — school_settings/course_rank_levels */}
+          <CourseRankLevelsSection />
 
           {/* 2. Grade Entry Time-Window Settings (ตั้งค่าเปิด-ปิดระบบกรอกเกรด) */}
           <div className="space-y-4">

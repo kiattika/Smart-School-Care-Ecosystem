@@ -20,6 +20,7 @@ import {
 import { Student, AttendanceStatus } from '../types';
 import { playCelebrationSound, playTickSound, playPointAwardSound } from '../lib/soundEffects';
 import { useStore } from '../store';
+import { useCurrentSemester } from '../hooks/useCurrentSemester';
 
 export interface ClassroomDeskGroup {
   id: string;
@@ -37,6 +38,8 @@ interface RandomStudentPickerModalProps {
   classroomGroups?: ClassroomDeskGroup[];
   attendanceRecords: Record<string, AttendanceStatus>;
   courseId: string;
+  /** ชื่อวิชา (พร้อมระดับชั้น/ห้อง) — เก็บกับคะแนนเพื่อให้หน้านักเรียนแสดงเป็นรายวิชา */
+  courseName?: string;
   onSelectHighlight?: (studentIds: string[]) => void;
 }
 
@@ -47,9 +50,17 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   classroomGroups = [],
   attendanceRecords,
   courseId,
+  courseName,
   onSelectHighlight
 }) => {
-  const { addActiveLearningPoints, adjustBehaviorScore, activeLearningPoints } = useStore();
+  // คะแนนจากกิจกรรมนี้เป็น "คะแนนกิจกรรมรายวิชา" (active_learning_logs ต่อวิชา) — ห้ามไปปรับคะแนนความประพฤติ
+  // (students.behaviorScore) ซึ่งเป็นคนละเรื่อง และจะส่งแจ้งเตือนผู้ปกครอง/นักเรียนผิดความหมาย
+  const { addActiveLearningPoints, activeLearningPoints } = useStore();
+  const { academicYear, term, isConfigured } = useCurrentSemester();
+  const awardExtra = {
+    courseName,
+    ...(isConfigured ? { academicYear, term } : {}),
+  };
 
   // Mode: 'INDIVIDUAL' (สุ่มรายบุคคล) | 'DESK_GROUP' (สุ่มรายโต๊ะ/กลุ่ม)
   const [pickMode, setPickMode] = useState<'INDIVIDUAL' | 'DESK_GROUP'>('INDIVIDUAL');
@@ -247,9 +258,9 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
         points,
         'ANSWER',
         `กิจกรรมสุ่มตอบคำถาม Active Learning (+${points} คะแนน)`,
-        courseId
+        courseId,
+        awardExtra
       );
-      await adjustBehaviorScore(student.studentId, points);
     } catch {
       setAwardError('บันทึกคะแนนไม่สำเร็จ — ตรวจสอบสิทธิ์และการเชื่อมต่อ แล้วลองใหม่');
       return;
@@ -274,9 +285,9 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
         points,
         'COLLABORATION',
         `กิจกรรมกลุ่ม/โต๊ะเรียน: ${group.name} (+${points} คะแนน)`,
-        courseId
+        courseId,
+        awardExtra
       );
-      await adjustBehaviorScore(student.studentId, points);
     }));
     const failed = results.filter(r => r.status === 'rejected').length;
     if (failed > 0) {

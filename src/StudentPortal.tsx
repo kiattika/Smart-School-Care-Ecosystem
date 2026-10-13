@@ -6,6 +6,7 @@ import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { useRealStudents } from './hooks/useRealStudents';
 import { attendanceStatsFromCounts } from './lib/studentAttendanceStats';
 import { CourseAttendanceStats } from './components/student-parent/CourseAttendanceStats';
+import { CourseActivityPoints } from './components/student-parent/CourseActivityPoints';
 import { Loader2 } from 'lucide-react';
 import { 
   QrCode, 
@@ -303,6 +304,8 @@ export function StudentPortal() {
 
             {/* สถิติแยกรายวิชา — ทุกวิชาในตารางเรียนจริงของห้อง + ยอดสะสมจาก students/{id}.courseAttendanceStats */}
             <CourseAttendanceStats studentId={student.studentId} room={student.room} courseStats={student.courseAttendanceStats} />
+            {/* คะแนนกิจกรรมรายวิชา + เครื่องหมายเชิดชู (ไม่ใช่คะแนนความประพฤติ) */}
+            <CourseActivityPoints studentId={student.studentId} />
 
             {/* ตารางเรียนวันนี้ + บัตรประจำตัว */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

@@ -26,7 +26,8 @@ import {
 } from 'recharts';
 import { ActiveLearningRecord } from '../types';
 import { useRealStudents } from '../hooks/useRealStudents';
-import { subscribeActiveLearningLogs } from '../services/firestoreService';
+import { subscribeActiveLearningLogsForTeacher } from '../services/firestoreService';
+import { useStore } from '../store';
 import { cn } from '../lib/utils';
 import { motion } from 'motion/react';
 
@@ -45,7 +46,9 @@ export const ClassroomLeaderboard: React.FC = () => {
   // ข้อมูลจริงจาก Firestore สด — ไม่พึ่ง Zustand store ที่ว่างเมื่อเปิดหน้าใหม่/ล็อกอินใหม่
   const { students } = useRealStudents();
   const [alLogs, setAlLogs] = useState<ActiveLearningRecord[]>([]);
-  useEffect(() => subscribeActiveLearningLogs(setAlLogs), []);
+  // อ่านเฉพาะคะแนนที่ครูคนนี้ให้เอง (rules ไม่เปิดให้ครูอ่านคะแนนของวิชา/ครูท่านอื่นแล้ว)
+  const myStaffId = useStore(s => s.user?.staffId) ?? '';
+  useEffect(() => subscribeActiveLearningLogsForTeacher(myStaffId, setAlLogs), [myStaffId]);
 
   // รวมคะแนนต่อคนจาก log ทั้งหมด (ไม่ต่ำกว่า 0)
   const activeLearningPoints = useMemo(() => {

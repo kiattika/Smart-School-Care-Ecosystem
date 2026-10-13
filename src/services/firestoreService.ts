@@ -19,6 +19,7 @@ import {
   writeBatch,
   Firestore
 } from 'firebase/firestore';
+import type { Query } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { db, auth } from '../lib/firebase';
 import type { buildSlipSubmissionPatch, buildVerifyPatch, buildRejectPatch } from '../lib/billingPayment';
@@ -33,6 +34,7 @@ import { emptyShared, fillMissing, sharedFromAssessment, sharedFromInfo, sharedE
 import { emptyStudentInfo } from '../lib/homeVisitData';
 import { validateAppointmentForm, validateConfirmation, type AppointmentFormInput } from '../lib/appointmentFlow';
 import { normalizeEmail } from '../lib/normalizeEmail';
+import { DEFAULT_RANK_LEVELS, resolveRankLevels, validateRankLevels, type RankLevel } from '../lib/courseRank';
 import type { StaffNotificationKind, StaffNotificationDraft } from '../lib/staffNotifications';
 import { countLeaveDays, initialLeaveStatus, validateLeaveForm, type LeaveSubmitterRole, type LeaveType } from '../lib/leaveFlow';
 import { diffCourseAttendance, computeCourseStatsMap } from '../lib/courseAttendanceStats';
@@ -1994,38 +1996,87 @@ export async function saveActiveLearningLogFirestore(record: ActiveLearningRecor
   }
 }
 
-/**
- * Real-time listener สำหรับ active_learning_logs ทั้งหมด — ใช้ใน ClassroomLeaderboard
- * เพื่อให้กระดานคะแนนแสดงข้อมูลจริงจาก Firestore (เดิมอ่านจาก Zustand store ที่ว่างเมื่อ
- * เปิดหน้าใหม่/ล็อกอินใหม่ → กระดานว่างทั้งที่มี log จริง)
- */
-export function subscribeActiveLearningLogs(
-  callback: (records: ActiveLearningRecord[]) => void
+function activeLearningFromDoc(d: { id: string; data: () => Record<string, any> }): ActiveLearningRecord {
+  const data = d.data();
+  return {
+    id: d.id,
+    studentId: String(data.studentId || ''),
+    courseId: data.courseId || undefined,
+    points: Number(data.points || 0),
+    category: data.category || 'GENERAL',
+    note: data.note || undefined,
+    awardedAt: data.awardedAt || '',
+    courseName: data.courseName || undefined,
+    teacherStaffId: data.teacherStaffId || undefined,
+    academicYear: data.academicYear || undefined,
+    term: data.term === '1' || data.term === '2' ? data.term : undefined,
+  };
+}
+
+function subscribeActiveLearningQuery(
+  tag: string,
+  build: () => Query,
+  callback: (records: ActiveLearningRecord[]) => void,
 ): () => void {
   try {
-    const ref = collection(db, 'active_learning_logs');
-    return onSnapshot(ref, (snapshot) => {
-      const rows = snapshot.docs.map(d => {
-        const data = d.data() as any;
-        return {
-          id: d.id,
-          studentId: String(data.studentId || ''),
-          courseId: data.courseId || undefined,
-          points: Number(data.points || 0),
-          category: data.category || 'GENERAL',
-          note: data.note || undefined,
-          awardedAt: data.awardedAt || '',
-        } as ActiveLearningRecord;
-      });
-      callback(rows);
+    return onSnapshot(build(), (snapshot) => {
+      callback(snapshot.docs.map(activeLearningFromDoc));
     }, (error) => {
-      console.warn('[subscribeActiveLearningLogs] Listener error:', error.message);
+      console.warn(`[${tag}] Listener error:`, error.message);
       callback([]);
     });
   } catch (error) {
-    console.warn('[subscribeActiveLearningLogs] Setup error:', error);
+    console.warn(`[${tag}] Setup error:`, error);
+    callback([]);
     return () => {};
   }
+}
+
+/**
+ * คะแนนกิจกรรมรายวิชา (active_learning_logs) — อ่านตามผู้ดู เพราะ rules ไม่เปิดให้ทุกคนอ่านทั้งหมดแล้ว:
+ *  - ทั้งโรงเรียน: เฉพาะ EXECUTIVE/SUPER_ADMIN (แดชบอร์ดผู้บริหาร)
+ *  - ครูผู้สอน: เฉพาะที่ตนให้ (where teacherStaffId == staffId)
+ *  - นักเรียน: เฉพาะของตัวเอง (where studentId == รหัสนักเรียน; rules เทียบ students/{id}.studentUid)
+ */
+export function subscribeActiveLearningLogs(callback: (records: ActiveLearningRecord[]) => void): () => void {
+  return subscribeActiveLearningQuery('subscribeActiveLearningLogs', () => collection(db, 'active_learning_logs'), callback);
+}
+
+export function subscribeActiveLearningLogsForTeacher(staffId: string, callback: (records: ActiveLearningRecord[]) => void): () => void {
+  if (!staffId) { callback([]); return () => {}; }
+  return subscribeActiveLearningQuery('subscribeActiveLearningLogsForTeacher',
+    () => query(collection(db, 'active_learning_logs'), where('teacherStaffId', '==', staffId)), callback);
+}
+
+export function subscribeActiveLearningLogsForStudent(studentId: string, callback: (records: ActiveLearningRecord[]) => void): () => void {
+  if (!studentId) { callback([]); return () => {}; }
+  return subscribeActiveLearningQuery('subscribeActiveLearningLogsForStudent',
+    () => query(collection(db, 'active_learning_logs'), where('studentId', '==', studentId)), callback);
+}
+
+/** ตารางระดับแรงค์รายวิชา (school_settings/course_rank_levels) — ไม่มี/ผิดรูปแบบ = ค่าเริ่มต้นใน src/lib/courseRank.ts */
+export function subscribeCourseRankLevels(callback: (levels: RankLevel[]) => void): () => void {
+  try {
+    return onSnapshot(doc(db, 'school_settings', 'course_rank_levels'), (snap) => {
+      callback(resolveRankLevels(snap.exists() ? snap.data().levels : undefined));
+    }, (error) => {
+      console.warn('[subscribeCourseRankLevels] Listener error:', error.message);
+      callback(DEFAULT_RANK_LEVELS);
+    });
+  } catch {
+    callback(DEFAULT_RANK_LEVELS);
+    return () => {};
+  }
+}
+
+export async function saveCourseRankLevelsFirestore(levels: RankLevel[], updatedBy: string): Promise<void> {
+  const v = validateRankLevels(levels);
+  if ('error' in v) throw new Error(v.error);
+  await setDoc(doc(db, 'school_settings', 'course_rank_levels'), {
+    levels: v.levels,
+    updatedAt: serverTimestamp(),
+    updatedBy,
+  });
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
