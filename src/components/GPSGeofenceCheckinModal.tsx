@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Navigation, 
@@ -26,6 +25,7 @@ import {
 import { useStore } from '../store';
 import { useSchoolGeofence } from '../hooks/useSchoolGeofence';
 import { saveSchoolGeofenceConfigFirestore } from '../services/firestoreService';
+import { getTrustedNow, schoolClockParts } from '../lib/trustedClock';
 import { selfieThumbnailDataUrl } from '../lib/selfieThumbnail';
 import { GateDraft, MAX_GATES, DEFAULT_GATE_RADIUS, CENTER_RADIUS_MIN, CENTER_RADIUS_MAX, GATE_RADIUS_MIN, GATE_RADIUS_MAX, gatesToDrafts, draftsToGates, newGateId, validateGeofenceSettings } from '../lib/geofenceConfig';
 import { 
@@ -238,15 +238,15 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
     setIsSubmitting(true);
     setCheckinError(null);
 
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
-    // .toISOString() แปลงเป็น UTC เสมอ — ช่วงเที่ยงคืน-ตี 6 กว่าๆ ตามเวลาไทย (UTC+7) จะลากวันถอยหลัง
-    // ไป 1 วัน ใช้ format() จาก date-fns แทน (คำนวณจาก local time fields ตรงๆ)
-    const dateStr = format(now, 'yyyy-MM-dd');
+    // เวลาที่เชื่อถือได้: ถามเซิร์ฟเวอร์ (header Date) + ใช้เขตเวลาโรงเรียน — เปลี่ยนนาฬิกา/เขตเวลาเครื่องไม่ช่วยหลบ "สาย"
+    const trusted = await getTrustedNow();
+    const clock = schoolClockParts(trusted.now);
+    const timeStr = clock.label;
+    const dateStr = clock.ymd;
 
     // Determine status (entry after 08:00 is late)
-    const currentHour = now.getHours();
-    const currentMin = now.getMinutes();
+    const currentHour = clock.hour;
+    const currentMin = clock.minute;
     const isLate = type === 'ENTRY' && (currentHour > 8 || (currentHour === 8 && currentMin > 0));
 
     let status: 'ON_TIME' | 'LATE' | 'EARLY_DEPARTURE' | 'NORMAL_DEPARTURE' = 'ON_TIME';
@@ -276,6 +276,8 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
         isInsideGeofence: true,
         status,
         accuracyMeters: accuracy ?? 0,
+        clockSource: trusted.source,
+        clockSkewSeconds: trusted.skewSeconds,
         nearestGate: geofenceResult.nearestGateName,
         selfieUrl: selfiePreview || undefined,
         notes: checkinNote || (isRealGPSActive ? 'พิกัดดาวเทียมจริง (High Precision GPS)' : 'พิกัด Geofence')
