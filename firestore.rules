@@ -1572,5 +1572,89 @@ service cloud.firestore {
     match /{document=**} {
       allow read, write: if false;
     }
+
+    // 36. ตรวจสายตา/การได้ยินประจำปี student_checkups/{studentId}_{academicYear} — พยาบาล/แอดมินบันทึกเท่านั้น
+    //     นักเรียน/ผู้ปกครอง/ครูที่ปรึกษาอ่านได้ตามทะเบียนจริง (query ต้อง where('studentId','==',id)); ลบไม่ได้
+    function checkupShapeOk(d) {
+      return d.keys().hasOnly(['studentId', 'academicYear', 'examDate', 'visionLeft', 'visionRight', 'visionResult', 'hearingResult', 'note', 'recordedByUid', 'recordedByName', 'recordedAt'])
+        && d.studentId is string && d.academicYear is string && d.academicYear.size() == 4
+        && d.examDate is string && d.examDate.size() == 10
+        && d.visionResult in ['NORMAL', 'ABNORMAL', 'NOT_TESTED']
+        && d.hearingResult in ['NORMAL', 'ABNORMAL', 'NOT_TESTED']
+        && (!('visionLeft' in d) || (d.visionLeft is string && d.visionLeft.size() <= 12))
+        && (!('visionRight' in d) || (d.visionRight is string && d.visionRight.size() <= 12))
+        && (!('note' in d) || (d.note is string && d.note.size() <= 300))
+        && d.recordedByUid == request.auth.uid
+        && d.recordedAt == request.time;
+    }
+    match /student_checkups/{docId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') ||
+                     isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId) ||
+                     isHomeroomOfStudent(resource.data.studentId);
+      allow create: if (hasRole('INFIRMARY_STAFF') || hasRole('SUPER_ADMIN'))
+                       && checkupShapeOk(request.resource.data)
+                       && docId == request.resource.data.studentId + '_' + request.resource.data.academicYear
+                       && exists(/databases/$(database)/documents/students/$(request.resource.data.studentId));
+      allow update: if (hasRole('INFIRMARY_STAFF') || hasRole('SUPER_ADMIN'))
+                       && checkupShapeOk(request.resource.data)
+                       && request.resource.data.studentId == resource.data.studentId
+                       && request.resource.data.academicYear == resource.data.academicYear;
+      allow delete: if false;
+    }
+
+    // 37. ประวัติวัคซีน student_vaccinations/{id} — พยาบาล/แอดมินบันทึก/แก้ (ถ่ายจากสมุดสุขภาพ/รพ.สต.); ลบเฉพาะ SUPER_ADMIN
+    function vaccinationShapeOk(d) {
+      return d.keys().hasOnly(['studentId', 'vaccine', 'doseDate', 'place', 'note', 'recordedByUid', 'recordedByName', 'recordedAt'])
+        && d.studentId is string
+        && d.vaccine is string && d.vaccine.size() > 0 && d.vaccine.size() <= 80
+        && d.doseDate is string && d.doseDate.size() == 10
+        && (!('place' in d) || (d.place is string && d.place.size() <= 80))
+        && (!('note' in d) || (d.note is string && d.note.size() <= 200))
+        && d.recordedByUid == request.auth.uid
+        && d.recordedAt == request.time;
+    }
+    match /student_vaccinations/{vid} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') ||
+                     isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId) ||
+                     isHomeroomOfStudent(resource.data.studentId);
+      allow create: if (hasRole('INFIRMARY_STAFF') || hasRole('SUPER_ADMIN'))
+                       && vaccinationShapeOk(request.resource.data)
+                       && exists(/databases/$(database)/documents/students/$(request.resource.data.studentId));
+      allow update: if (hasRole('INFIRMARY_STAFF') || hasRole('SUPER_ADMIN'))
+                       && vaccinationShapeOk(request.resource.data)
+                       && request.resource.data.studentId == resource.data.studentId;
+      allow delete: if hasRole('SUPER_ADMIN');
+    }
+
+    // 38. ประวัติบริจาคโลหิต blood_donations/{id} — นักเรียน (subjectType STUDENT + studentId) และบุคลากร (STAFF + staffId)
+    //     พยาบาล/แอดมินบันทึก; อ่าน: พยาบาล/แอดมิน/ผู้บริหาร + นักเรียนเจ้าของ/ผู้ปกครอง (ตามทะเบียน) + บุคลากรเจ้าของ (claim staffId); ลบเฉพาะ SUPER_ADMIN
+    function donationShapeOk(d) {
+      return d.keys().hasOnly(['subjectType', 'studentId', 'staffId', 'donorName', 'donatedAt', 'place', 'note', 'recordedByUid', 'recordedByName', 'recordedAt'])
+        && d.subjectType in ['STUDENT', 'STAFF']
+        && d.donorName is string && d.donorName.size() > 0 && d.donorName.size() <= 120
+        && d.donatedAt is string && d.donatedAt.size() == 10
+        && (!('place' in d) || (d.place is string && d.place.size() <= 80))
+        && (!('note' in d) || (d.note is string && d.note.size() <= 200))
+        && d.recordedByUid == request.auth.uid
+        && d.recordedAt == request.time
+        && (
+          (d.subjectType == 'STUDENT' && d.studentId is string && !('staffId' in d)
+            && exists(/databases/$(database)/documents/students/$(d.studentId)))
+          ||
+          (d.subjectType == 'STAFF' && d.staffId is string && !('studentId' in d)
+            && exists(/databases/$(database)/documents/staff/$(d.staffId)))
+        );
+    }
+    match /blood_donations/{did} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') || hasRole('EXECUTIVE') ||
+                     (resource.data.subjectType == 'STUDENT' && (isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId))) ||
+                     (resource.data.subjectType == 'STAFF' && myStaffId() != '' && resource.data.staffId == myStaffId());
+      allow create: if (hasRole('INFIRMARY_STAFF') || hasRole('SUPER_ADMIN')) && donationShapeOk(request.resource.data);
+      allow update: if (hasRole('INFIRMARY_STAFF') || hasRole('SUPER_ADMIN')) && donationShapeOk(request.resource.data)
+                       && request.resource.data.subjectType == resource.data.subjectType
+                       && request.resource.data.get('studentId', '') == resource.data.get('studentId', '')
+                       && request.resource.data.get('staffId', '') == resource.data.get('staffId', '');
+      allow delete: if hasRole('SUPER_ADMIN');
+    }
   }
 }

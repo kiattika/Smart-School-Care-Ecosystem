@@ -39,3 +39,11 @@ export function portfolioDecisionNotice(entry: { title: string }, decision: 'APP
     ? { title: '✅ แฟ้มสะสมผลงานได้รับการอนุมัติ', message: `${reviewerName} อนุมัติรายการ "${entry.title}" ในแฟ้มสะสมผลงานแล้ว`, type: 'info' }
     : { title: '❌ แฟ้มสะสมผลงานไม่ได้รับการอนุมัติ', message: `${reviewerName} ไม่อนุมัติรายการ "${entry.title}"${reason ? ` — เหตุผล: ${reason}` : ''}`, type: 'warning' };
 }
+
+export function infirmaryVisitNotice(visit: { symptoms: string; visitTime: string; isUrgentAlert: boolean }, studentName: string): { title: string; message: string; type: 'info' | 'warning' | 'critical' } {
+  return {
+    title: visit.isUrgentAlert ? '🚨 แจ้งเตือนด่วน: นักเรียนเข้าห้องพยาบาล' : '🏥 แจ้งเตือน: นักเรียนเข้าห้องพยาบาล',
+    message: `น้อง${studentName} เข้ารับบริการห้องพยาบาลด้วยอาการ "${visit.symptoms}" เมื่อเวลา ${visit.visitTime} กรุณากดรับทราบที่เมนูห้องพยาบาล`,
+    type: visit.isUrgentAlert ? 'critical' : 'warning',
+  };
+}

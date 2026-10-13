@@ -80,7 +80,7 @@ describe('mobileMenuFor', () => {
     expect(ids(mobileMenuFor({ appRole: 'student', roles: ['STUDENT'] }))).toEqual(['checkin', 'schedule', 'homeLocation', 'chat']);
   });
   it('ผู้ปกครอง: ไม่มีเช็คอิน/พิกัดบ้าน; ไม่มีบทบาท PARENT = ไม่มีเมนู', () => {
-    expect(ids(mobileMenuFor({ appRole: 'parent', roles: ['PARENT'] }))).toEqual(['childGate', 'schedule', 'leave', 'appointment', 'homeVisit', 'chat']);
+    expect(ids(mobileMenuFor({ appRole: 'parent', roles: ['PARENT'] }))).toEqual(['childGate', 'schedule', 'leave', 'appointment', 'infirmary', 'homeVisit', 'chat']);
     expect(mobileMenuFor({ appRole: 'parent', roles: [] })).toEqual([]);
   });
   it('ครูประจำวิชา: เช็คอิน + ตารางสอน ไม่มีเช็คชื่อโฮมรูม', () => {

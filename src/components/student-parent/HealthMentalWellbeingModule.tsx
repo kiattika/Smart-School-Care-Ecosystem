@@ -35,6 +35,7 @@ import { BMI_CATEGORY_LABEL } from '../../lib/utils';
 import { SemesterHealthSelfReportForm } from './SemesterHealthSelfReportForm';
 import { HealthProfileSection } from '../health/HealthProfileSection';
 import { GrowthTrendChart } from '../health/GrowthTrendChart';
+import { StudentHealthRecordsCards } from '../health/StudentHealthRecordsCards';
 import { useStudentBloodType } from '../../hooks/useStudentBloodType';
 import {
   InfirmaryVisit,
@@ -381,6 +382,9 @@ function HealthMentalWellbeingModuleInner({
                 : 'ยังไม่มีข้อมูลน้ำหนัก/ส่วนสูง — กรอกในแบบฟอร์มด้านบนเพื่อเริ่มบันทึก'}
             </div>
           )}
+
+          {/* ผลตรวจสายตา/การได้ยิน วัคซีน และประวัติบริจาคโลหิต — ข้อมูลจริงที่พยาบาลบันทึก */}
+          <StudentHealthRecordsCards studentId={student.studentId} />
 
           {/* Historical Growth Chart & Health Conditions */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
