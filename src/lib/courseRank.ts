@@ -252,3 +252,40 @@ export function countStudentsWithPoints(
   perStudentCourse.forEach((pts, k) => { if (pts > 0) students.add(k.split('\u0000')[0]); });
   return students.size;
 }
+
+export interface StudentPointsTotal {
+  studentId: string;
+  /** ผลรวมคะแนนทุกวิชา (แต่ละวิชาไม่ต่ำกว่า 0) ในภาคเรียนที่ระบุ */
+  total: number;
+  byCourse: { courseName: string; points: number }[];
+}
+
+/** คะแนนรวมรายบุคคล (ใช้กับกราฟของครูที่ปรึกษา) เรียงมาก→น้อย; ไม่รวมคนที่ได้ 0 */
+export function studentPointsTotals(
+  logs: ActiveLearningRecord[],
+  term: { academicYear: string; term: '1' | '2' },
+): StudentPointsTotal[] {
+  const per = new Map<string, Map<string, { name: string; points: number }>>();
+  for (const log of logs) {
+    if (!log.studentId) continue;
+    const t = logTerm(log);
+    if (!t || t.academicYear !== term.academicYear || t.term !== term.term) continue;
+    const key = logCourseKey(log) || '__none__';
+    const courses = per.get(log.studentId) ?? new Map();
+    const cur = courses.get(key) ?? { name: log.courseName || (key === '__none__' ? 'ไม่ระบุวิชา' : key), points: 0 };
+    if (log.courseName) cur.name = log.courseName;
+    cur.points += Number(log.points || 0);
+    courses.set(key, cur);
+    per.set(log.studentId, courses);
+  }
+  const out: StudentPointsTotal[] = [];
+  per.forEach((courses, studentId) => {
+    const byCourse = Array.from(courses.values())
+      .map(c => ({ courseName: c.name, points: Math.max(0, c.points) }))
+      .filter(c => c.points > 0)
+      .sort((a, b) => b.points - a.points);
+    const total = byCourse.reduce((n, c) => n + c.points, 0);
+    if (total > 0) out.push({ studentId, total, byCourse });
+  });
+  return out.sort((a, b) => b.total - a.total || a.studentId.localeCompare(b.studentId));
+}

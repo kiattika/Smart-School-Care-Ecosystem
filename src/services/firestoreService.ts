@@ -2008,6 +2008,7 @@ function activeLearningFromDoc(d: { id: string; data: () => Record<string, any> 
     awardedAt: data.awardedAt || '',
     courseName: data.courseName || undefined,
     courseKey: data.courseKey || undefined,
+    homeroomClass: data.homeroomClass || undefined,
     teacherStaffId: data.teacherStaffId || undefined,
     academicYear: data.academicYear || undefined,
     term: data.term === '1' || data.term === '2' ? data.term : undefined,
@@ -2053,6 +2054,13 @@ export function subscribeActiveLearningLogsForStudent(studentId: string, callbac
   if (!studentId) { callback([]); return () => {}; }
   return subscribeActiveLearningQuery('subscribeActiveLearningLogsForStudent',
     () => query(collection(db, 'active_learning_logs'), where('studentId', '==', studentId)), callback);
+}
+
+/** คะแนนกิจกรรมของนักเรียนทั้งห้องที่ฉันเป็นครูที่ปรึกษา (query ต้อง where homeroomClass==ห้อง ตาม rules) — log รุ่นเก่าไม่มี homeroomClass จึงไม่ขึ้น */
+export function subscribeActiveLearningLogsForRoom(homeroomClass: string, callback: (records: ActiveLearningRecord[]) => void): () => void {
+  if (!homeroomClass) { callback([]); return () => {}; }
+  return subscribeActiveLearningQuery('subscribeActiveLearningLogsForRoom',
+    () => query(collection(db, 'active_learning_logs'), where('homeroomClass', '==', homeroomClass)), callback);
 }
 
 /** ตารางระดับแรงค์รายวิชา (school_settings/course_rank_levels) — ไม่มี/ผิดรูปแบบ = ค่าเริ่มต้นใน src/lib/courseRank.ts */

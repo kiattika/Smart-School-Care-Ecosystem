@@ -943,7 +943,8 @@ service cloud.firestore {
 
     // 21. คะแนนกิจกรรมรายวิชา (Active Learning) — คะแนนต่อวิชาจากกิจกรรมในคาบ (สุ่มตอบ/ทำงานกลุ่ม) ใช้ประกอบจิตพิสัย/เครื่องหมายเชิดชูรายวิชา
     //     ไม่ใช่คะแนนความประพฤติ. อ่านได้: SUPER_ADMIN, EXECUTIVE (สรุปภาพรวม — ฝั่ง UI รวมเป็นตัวเลข), ครูผู้ให้คะแนน (teacherStaffId == claim staffId),
-    //     นักเรียนเจ้าของ (เทียบ students/{studentId}.studentUid ไม่ใช่สำเนาในเอกสาร — query ต้อง where studentId==รหัสนักเรียน).
+    //     นักเรียนเจ้าของ (เทียบ students/{studentId}.studentUid ไม่ใช่สำเนาในเอกสาร — query ต้อง where studentId==รหัสนักเรียน),
+    //     ผู้ปกครองของนักเรียน (students.parentUid), ครูที่ปรึกษาของห้อง (homeroomClass).
     //     ไม่เปิดให้ signed-in ทั่วไปอ่านอีก (เดิม bare isSignedIn() ทำให้ทุกคนเห็นคะแนนทุกคนทุกวิชา)
     //     เขียน: ครูสร้างได้เฉพาะ log ที่ระบุตนเองเป็นผู้ให้ (teacherStaffId) ; แก้/ลบได้เฉพาะ SUPER_ADMIN (เป็นหลักฐานการให้คะแนน)
     match /active_learning_logs/{logId} {
@@ -952,7 +953,12 @@ service cloud.firestore {
                      || ((hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER'))
                          && myStaffId() is string && myStaffId() != ''
                          && resource.data.get('teacherStaffId', '') == myStaffId())
-                     || (resource.data.get('studentId', null) is string && isSelfStudent(resource.data.studentId));
+                     || (resource.data.get('studentId', null) is string && isSelfStudent(resource.data.studentId))
+                     // ผู้ปกครองของนักเรียนคนนั้น — เทียบ students/{studentId}.parentUid (registry) ไม่ใช่สำเนาใน log; query ต้อง where studentId==บุตร
+                     || (resource.data.get('studentId', null) is string && isSignedIn()
+                         && studentField(resource.data.studentId, 'parentUid', '__none__') == request.auth.uid)
+                     // ครูที่ปรึกษาของห้อง — เทียบ homeroomClass ที่ denormalize ตอนให้คะแนน (create ตรวจกับ students.room); query ต้อง where homeroomClass==ห้องฉัน
+                     || (resource.data.get('homeroomClass', '') != '' && isHomeroomTeacherOf(resource.data.homeroomClass));
       allow create: if hasRole('SUPER_ADMIN')
                        || ((hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER'))
                            && myStaffId() is string && myStaffId() != ''
@@ -960,8 +966,11 @@ service cloud.firestore {
                            && request.resource.data.id == logId
                            && request.resource.data.studentId is string
                            && request.resource.data.points is number
+                           && (!('homeroomClass' in request.resource.data)
+                               || request.resource.data.homeroomClass == studentField(request.resource.data.studentId, 'room', '__none__'))
                            && request.resource.data.keys().hasOnly(['id', 'studentId', 'courseId', 'points', 'category', 'note', 'awardedAt',
-                                                                    'createdAt', 'courseName', 'courseKey', 'teacherStaffId', 'academicYear', 'term']));
+                                                                    'createdAt', 'courseName', 'courseKey', 'teacherStaffId', 'academicYear', 'term',
+                                                                    'homeroomClass']));
       allow update, delete: if hasRole('SUPER_ADMIN');
     }
 

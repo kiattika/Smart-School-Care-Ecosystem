@@ -176,6 +176,8 @@ export type ActiveLearningCategory =
 export interface ActiveLearningExtra {
   courseName?: string;
   courseKey?: string;
+  /** ห้องของนักเรียนตอนให้คะแนน (students.room) — ให้ครูที่ปรึกษาอ่านเฉพาะห้องตัวเอง (rules ตรวจกับ students.room) */
+  homeroomClass?: string;
   academicYear?: string;
   term?: '1' | '2';
 }
@@ -192,6 +194,7 @@ export interface ActiveLearningRecord {
   courseName?: string;
   /** กุญแจวิชาสำหรับรวมคะแนนข้ามคาบ (รหัสวิชา+ชั้น; ชุมนุม=id ชุมนุม) — ดู courseActivityKey() */
   courseKey?: string;
+  homeroomClass?: string;
   /** staff doc id ของครูผู้ให้คะแนน (= claim staffId) — rules ให้ครูอ่านเฉพาะที่ตนให้ */
   teacherStaffId?: string;
   academicYear?: string;

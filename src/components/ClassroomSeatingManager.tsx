@@ -1415,6 +1415,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
             await addActiveLearningPoints(quickAwardStudent.studentId, points, 'GENERAL', `ครูให้คะแนนรายบุคคล (+${points} คะแนน)`, course?.id, {
               courseName: formatCourseTitle(course.name, course.level, course.room),
               courseKey,
+              ...(quickAwardStudent.room ? { homeroomClass: quickAwardStudent.room } : {}),
               ...(alConfigured ? { academicYear: alYear, term: alTerm } : {}),
             });
             setSaveToast(`+${points} คะแนนกิจกรรม: ${quickAwardStudent.name}`);
