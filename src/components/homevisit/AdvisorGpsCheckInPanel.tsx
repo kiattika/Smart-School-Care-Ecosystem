@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Satellite, MapPin, Clock, ShieldCheck, ShieldAlert, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
 import { Student, GPSCheckInLog } from '../../types';
+import { formatCheckInClock } from '../../lib/gateMorningStatus';
 import { subscribeGpsCheckInLogsByDate } from '../../services/firestoreService';
 
 /**
@@ -52,7 +53,7 @@ export function AdvisorGpsCheckInPanel({ students }: { students: Student[] }) {
           {rows.map(l => (
             <div key={l.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 bg-black/20 rounded-lg px-3 py-2 text-xs">
               <span className="font-bold text-white min-w-[9rem]">{nameOf(l.userId, l.userName || l.userId)}</span>
-              <span className="flex items-center gap-1 text-slate-300"><Clock className="w-3.5 h-3.5" /> {l.timestamp ? new Date(l.timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '-'}</span>
+              <span className="flex items-center gap-1 text-slate-300"><Clock className="w-3.5 h-3.5" /> {formatCheckInClock(l.timestamp)}</span>
               <span className={`flex items-center gap-1 ${l.isInsideGeofence ? 'text-emerald-400' : 'text-rose-400'}`}>
                 {l.isInsideGeofence ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldAlert className="w-3.5 h-3.5" />}
                 {l.isInsideGeofence ? 'ในเขตโรงเรียน' : 'นอกเขต'} · {Math.round(l.distanceMeters)} ม.
