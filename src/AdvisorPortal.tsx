@@ -13,6 +13,7 @@ import {
   MapPin, Route, Navigation, MessageCircle, Home, ClipboardList, AlertTriangle, Heart, Shield, X, Map as MapIcon, ChevronRight, CheckCircle2,
   Edit3, Clock, Compass, Brain, Sparkles, Target, Search, Filter, Eye
 } from 'lucide-react';
+import { ClassChatTeacherView, useRoomChatUnread } from './components/chat/ClassChatPanel';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -60,7 +61,7 @@ export function AdvisorPortal() {
   // store จะมีข้อมูลก็ต่อเมื่อมีคน import ในเซสชันเดียวกันเท่านั้น — เปิดใหม่/ล็อกอินใหม่แล้วว่าง
   const { students, loading: studentsLoading } = useRealStudents();
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq' | 'screening'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq' | 'screening' | 'class-chat'>('dashboard');
   const [assessmentModalStudent, setAssessmentModalStudent] = useState<Student | null>(null);
   const [assessmentSearch, setAssessmentSearch] = useState('');
   const [assessmentFilter, setAssessmentFilter] = useState<'ALL' | 'COMPLETED' | 'PENDING'>('ALL');
@@ -69,6 +70,7 @@ export function AdvisorPortal() {
   const [attendanceOverrides, setAttendanceOverrides] = useState<Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>>({});
 
   const myRoom = user?.profile?.assignments?.homeroomClass;
+  const chatUnread = useRoomChatUnread(myRoom);
 
   // ใบลานักเรียนห้องที่ฉันเป็นครูที่ปรึกษา — real-time จาก Firestore (rules: isHomeroomTeacherOf(homeroomClass))
   const [roomLeaves, setRoomLeaves] = useState<import('./types').DetailedLeaveRequest[]>([]);
@@ -289,6 +291,7 @@ export function AdvisorPortal() {
             { id: 'self-assessment', label: 'วิเคราะห์ 30 ข้อ', icon: Brain },
             { id: 'sdq', label: 'SDQ นักเรียน', icon: Heart },
             { id: 'screening', label: 'คัดกรองซึมเศร้า', icon: ShieldAlert },
+            { id: 'class-chat', label: 'ข้อความ (ผู้ปกครอง/นักเรียน)', icon: MessageCircle, badge: chatUnread },
             { id: 'visit-planner', label: 'เยี่ยมบ้าน', icon: MapPin },
             { id: 'school-checkin', label: 'เช็คชื่อโฮมรูม', icon: ClipboardList },
             { id: 'analytics', label: 'สถิติวิชาการ', icon: Sparkles },
@@ -445,6 +448,15 @@ export function AdvisorPortal() {
             </div>
 
           )}
+          {activeTab === 'class-chat' && user?.uid && (
+            <ClassChatTeacherView
+              room={myRoom || ''}
+              students={myStudents}
+              viewerUid={user.uid}
+              viewerName={user.displayName || 'ครูประจำชั้น'}
+            />
+          )}
+
           {activeTab === 'visit-planner' && (
             <div className="animate-in fade-in duration-300 space-y-6">
             <div className="bg-[#1c1f2b] border border-white/10 rounded-xl p-4">

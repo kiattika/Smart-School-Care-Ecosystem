@@ -4,6 +4,8 @@ import { format } from 'date-fns';
 import { useStore } from './store';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { useRealStudents } from './hooks/useRealStudents';
+import { ClassChatMemberView, useMemberThreads } from './components/chat/ClassChatPanel';
+import { isThreadUnread } from './lib/classChat';
 import { attendanceStatsFromCounts } from './lib/studentAttendanceStats';
 import { CourseOverviewCards } from './components/student-parent/CourseOverviewCards';
 import { Loader2 } from 'lucide-react';
@@ -31,7 +33,8 @@ import {
   ShieldCheck,
   Zap,
   HelpCircle,
-  Users
+  Users,
+  MessageSquare
 } from 'lucide-react';
 
 import { NotificationBell } from './components/notifications/NotificationBell';
@@ -65,7 +68,7 @@ export function StudentPortal() {
 
   // 7 Module Tabs + Assessment + Overview
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'gate' | 'health' | 'socio' | 'behavior' | 'electives' | 'portfolio' | 'academic' | 'parent' | 'assessment'
+    'overview' | 'gate' | 'health' | 'socio' | 'behavior' | 'electives' | 'portfolio' | 'academic' | 'billing' | 'chat' | 'appointment' | 'assessment'
   >('overview');
 
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
@@ -87,6 +90,10 @@ export function StudentPortal() {
   // selectedStudentId ใช้เฉพาะ DEV profile switcher ถ้ามีมากกว่าหนึ่ง
   const student =
     myStudents.find(s => s.studentId === selectedStudentId) || myStudents[0];
+
+  // ห้องสนทนากับครูประจำชั้น (ช่อง STUDENT) — badge เมนู
+  const chatThreads = useMemberThreads(user?.uid).filter(t => t.channel === 'STUDENT');
+  const chatUnread = chatThreads.filter(t => t.studentId === student?.studentId && isThreadUnread(t, 'MEMBER')).length;
 
   const studentIdForAssessment = student?.studentId;
   const [assessmentLoadError, setAssessmentLoadError] = useState<string | null>(null);
@@ -213,7 +220,9 @@ export function StudentPortal() {
             { id: 'electives', label: 'สมัครชุมนุม', icon: Users },
             { id: 'portfolio', label: '6. แฟ้มผลงาน', icon: FolderGit2 },
             { id: 'academic', label: '7. ปพ.6 & การบ้าน & สอบ', icon: BookOpen },
-            { id: 'parent', label: '8. ชำระเงิน & นัดพบครู', icon: CreditCard },
+            { id: 'billing', label: '8. ชำระเงิน', icon: CreditCard },
+            { id: 'chat', label: '9. สนทนากับครู', icon: MessageSquare, badge: chatUnread },
+            { id: 'appointment', label: '10. นัดพบครู (ดูสถานะ)', icon: CalendarDays },
           ]}>
       {/* Main Content Area */}
       <div className="transition-all duration-300">
@@ -396,9 +405,15 @@ export function StudentPortal() {
           <AcademicHomeworkModule studentId={student.studentId} />
         )}
 
-        {/* 7. Parent Engagement & e-Billing */}
-        {activeTab === 'parent' && (
-          <ParentEngagementServices studentId={student.studentId} student={student} isParentView={false} />
+        {/* 8-10. ชำระเงิน | สนทนากับครู (ช่องส่วนตัวนักเรียน) | นัดพบครู (ดูสถานะ — ผู้ปกครองเป็นคนขอนัด) */}
+        {activeTab === 'billing' && (
+          <ParentEngagementServices studentId={student.studentId} student={student} isParentView={false} section="billing" />
+        )}
+        {activeTab === 'chat' && user?.uid && (
+          <ClassChatMemberView channel="STUDENT" student={student} viewerUid={user.uid} viewerName={student.name} />
+        )}
+        {activeTab === 'appointment' && (
+          <ParentEngagementServices studentId={student.studentId} student={student} isParentView={false} section="appointment" />
         )}
 
         {/* Self Assessment Form */}

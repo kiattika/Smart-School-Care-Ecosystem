@@ -282,3 +282,10 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 ## เมื่อไม่แน่ใจ
 
 ถามก่อนเดา โดยเฉพาะเรื่อง: role mapping ที่ยังไม่มีใน `UserRole` enum, ความสัมพันธ์ระหว่างฟีเจอร์ที่อาจซ้ำซ้อนกัน, และ business logic ที่ไม่ได้ระบุไว้ในเอกสารนี้
+
+## แชทห้องเรียน (แยกช่องส่วนตัว) — class_messages / class_chat_threads
+- ช่อง `PARENT` = ครูประจำชั้น ↔ ผู้ปกครอง, ช่อง `STUDENT` = ครูประจำชั้น ↔ นักเรียน; แต่ละช่องมองไม่เห็นกัน (rules ผูกด้วย `memberUid` = `students/{sid}.parentUid|studentUid`, และ `isHomeroomTeacherOf(room)`) — SUPER_ADMIN อ่านไม่ได้โดยตั้งใจ
+- ข้อความแก้/ลบไม่ได้; thread id = `{studentId}_{channel}`; ยังไม่อ่านคำนวณจาก `lastAt/lastSenderRole` เทียบ `memberLastReadAt/teacherLastReadAt` (src/lib/classChat.ts)
+- query ต้องกรอง `memberUid == uid` (ผู้ปกครอง/นักเรียน) หรือ `room == ห้อง` (ครู) + studentId + channel
+- UI: `src/components/chat/ClassChatPanel.tsx`; เมนูแยกใน ParentPortal/StudentPortal (ชำระเงิน | สนทนากับครู | นัดพบครู) และ AdvisorPortal (`class-chat`); `ParentEngagementServices` รับ prop `section` ('billing'|'appointment')
+- คอลเลกชันเดิม `parent_teacher_messages` เลิกใช้ (ไม่ลบข้อมูลเก่า)

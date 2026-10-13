@@ -1,12 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import {
   CreditCard,
-  MessageSquare,
   Calendar,
   CheckCircle2,
   Download,
   Upload,
-  Send,
   Video,
   MapPin,
   Clock,
@@ -28,13 +26,14 @@ import {
 } from '../../lib/appointmentFlow';
 import { uploadBillingFile } from '../../services/storageService';
 import { validateBillingFile, buildSlipSubmissionPatch, canSubmitSlip } from '../../lib/billingPayment';
-import { BillingInvoice, ParentTeacherMessage, ParentAppointment, Student } from '../../types';
+import { BillingInvoice, ParentAppointment, Student } from '../../types';
 import { DatePicker } from '../shared/DatePicker';
 import { PromptPayQr } from '../shared/PromptPayQr';
 import { useBillingPaymentInfo } from '../../hooks/useBillingPaymentInfo';
 import { hasPaymentChannel } from '../../lib/billingPaymentInfo';
 
-type ParentEngagementServicesProps = { studentId: string; student?: Student; isParentView?: boolean };
+/** เมนูแยกกัน: ชำระเงิน | นัดพบครู & ปรึกษา (การสนทนาย้ายไปที่ ClassChatPanel เมนูของตัวเอง) */
+type ParentEngagementServicesProps = { studentId: string; student?: Student; isParentView?: boolean; section?: 'billing' | 'appointment' };
 
 /** ไม่มีนักเรียนจริง = empty state (ห้าม fallback เป็นนักเรียนปลอม/คนแรกของ store — อาจเป็นลูกคนอื่น) */
 export function ParentEngagementServices(props: ParentEngagementServicesProps) {
@@ -47,14 +46,11 @@ export function ParentEngagementServices(props: ParentEngagementServicesProps) {
 function ParentEngagementServicesInner({
   studentId,
   student: studentProp,
-  isParentView = false
+  isParentView = false,
+  section = 'billing'
 }: ParentEngagementServicesProps) {
   const user = useStore(s => s.user);
-  const {
-    parentTeacherMessages,
-    sendParentTeacherMessage,
-    students
-  } = useStore();
+  const { students } = useStore();
 
   // ใช้ student ของจริงที่ผู้เรียก (StudentPortal/ParentPortal) ดึงมาจาก useRealStudents() ถ้าส่งมาให้
   // แทนการค้นจาก state.students ของ Zustand (session-local ไม่เคยมี listener ผูกไว้ — ค่า studentUid/
@@ -78,7 +74,6 @@ function ParentEngagementServicesInner({
   // TASK 2: แยกรายการค้างชำระ (PENDING/OVERDUE) ออกจากที่จ่ายแล้วให้ชัดเจน
   const unpaidInvoices = invoices.filter(i => i.status !== 'PAID'); // รวม VERIFYING (รอตรวจสอบ)
   const paidInvoices = invoices.filter(i => i.status === 'PAID');
-  const messages = parentTeacherMessages.filter(m => m.studentId === student.studentId);
   // นัดพบครูจริงจาก Firestore แบบ real-time (ผู้ปกครองกรองด้วย parentUid, นักเรียนด้วย studentUid) — ไม่ใช้ Zustand
   const [allAppointments, setAllAppointments] = useState<ParentAppointment[]>([]);
   useEffect(() => {
@@ -87,7 +82,7 @@ function ParentEngagementServicesInner({
   }, [user?.uid, isParentView]);
   const appointments = allAppointments.filter(a => a.studentId === student.studentId);
 
-  const [activeTab, setActiveTab] = useState<'billing' | 'messaging' | 'appointment'>('billing');
+  const activeTab = section;
 
   // PromptPay Modal / Payment state
   const [selectedInvoice, setSelectedInvoice] = useState<BillingInvoice | null>(null);
@@ -99,7 +94,6 @@ function ParentEngagementServicesInner({
   const closePaymentModal = () => { setSelectedInvoice(null); setSlipFile(null); setSlipNote(''); setSlipError(''); };
 
   // Chat message state
-  const [msgText, setMsgText] = useState('');
 
   // Appointment request form state — ไม่ตั้งค่าเริ่มต้นแทนผู้ใช้ (ต้องเลือกเอง)
   const [recipient, setRecipient] = useState<AppointmentRecipient | ''>('');
@@ -111,27 +105,7 @@ function ParentEngagementServicesInner({
   const [bookingError, setBookingError] = useState('');
   const [bookingBusy, setBookingBusy] = useState(false);
 
-  const [msgError, setMsgError] = useState('');
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!msgText.trim()) return;
-    setMsgError('');
 
-    try {
-      await sendParentTeacherMessage(
-        student.studentId,
-        'PARENT',
-        'ผู้ปกครอง',
-        msgText
-      );
-    } catch (err) {
-      console.error('[parentTeacherMessage] send failed:', err);
-      setMsgError('ส่งข้อความไม่สำเร็จ (ยังไม่ได้ส่ง) กรุณาลองอีกครั้ง');
-      return;
-    }
-    setMsgText('');
-    // ห้ามสร้างข้อความตอบกลับของครูเอง — ข้อความของครูต้องมาจากครูที่ตอบจริงเท่านั้น
-  };
 
   const handlePickSlip = (file: File | null) => {
     setSlipError('');
@@ -205,43 +179,6 @@ function ParentEngagementServicesInner({
 
   return (
     <div className="space-y-6">
-      {/* Sub navigation pills */}
-      <div className="flex items-center gap-2 p-1.5 bg-slate-900/60 border border-slate-800 rounded-2xl w-full max-w-lg mx-auto">
-        <button
-          onClick={() => setActiveTab('billing')}
-          className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === 'billing'
-              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <CreditCard className="w-3.5 h-3.5" />
-          <span>ชำระค่าบำรุง & สลิป QR</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('messaging')}
-          className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === 'messaging'
-              ? 'bg-gradient-to-r from-indigo-500 to-blue-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <MessageSquare className="w-3.5 h-3.5" />
-          <span>สนทนากับครู ({messages.length})</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('appointment')}
-          className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === 'appointment'
-              ? 'bg-gradient-to-r from-purple-500 to-indigo-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Calendar className="w-3.5 h-3.5" />
-          <span>นัดพบครู & ปรึกษา</span>
-        </button>
-      </div>
-
       {activeTab === 'billing' && (
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -488,64 +425,6 @@ function ParentEngagementServicesInner({
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {activeTab === 'messaging' && (
-        <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl flex flex-col h-[520px]">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-                <User className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-white">ห้องสนทนาครูประจำชั้น & ผู้ปกครอง</h3>
-                <p className="text-[11px] text-slate-400">ข้อความจะถึงครูเมื่อครูเปิดอ่าน — ไม่มีการตอบกลับอัตโนมัติ</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Messages feed */}
-          <div className="flex-1 overflow-y-auto py-4 space-y-3 pr-1">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex flex-col ${msg.senderRole === 'PARENT' ? 'items-end' : 'items-start'}`}
-              >
-                <span className="text-[10px] text-slate-500 mb-1 px-1">
-                  {msg.senderName} • {msg.timestamp}
-                </span>
-                <div
-                  className={`max-w-[80%] p-3.5 rounded-2xl text-xs leading-relaxed ${
-                    msg.senderRole === 'PARENT'
-                      ? 'bg-indigo-600 text-white rounded-tr-none'
-                      : 'bg-slate-800 text-slate-200 rounded-tl-none border border-slate-700/60'
-                  }`}
-                >
-                  {msg.message}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Send Input */}
-          <form onSubmit={handleSendMessage} className="pt-3 border-t border-slate-800 flex gap-2">
-            <input
-              type="text"
-              value={msgText}
-              onChange={(e) => setMsgText(e.target.value)}
-              placeholder="พิมพ์ข้อความสอบถามครูประจำชั้น..."
-              className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-indigo-500"
-            />
-            <button
-              type="submit"
-              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5 cursor-pointer"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>ส่ง</span>
-            </button>
-          </form>
-          {msgError && <p role="alert" className="text-xs text-rose-400 pt-1">{msgError}</p>}
         </div>
       )}
 

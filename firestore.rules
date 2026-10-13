@@ -856,6 +856,66 @@ service cloud.firestore {
                       (isSignedIn() && (request.resource.data.parentUid == request.auth.uid || request.resource.data.parentId == request.auth.uid || request.resource.data.senderId == request.auth.uid || request.resource.data.studentId == request.auth.uid));
     }
 
+    // แชทห้องเรียนแบบแยกช่องส่วนตัว (src/lib/classChat.ts)
+    //   channel PARENT  = ครูประจำชั้น ↔ ผู้ปกครอง (memberUid = students/{sid}.parentUid)
+    //   channel STUDENT = ครูประจำชั้น ↔ นักเรียน   (memberUid = students/{sid}.studentUid)
+    // อ่านได้เฉพาะสมาชิกของช่องนั้น + ครูประจำชั้นของห้อง (ไม่รวม SUPER_ADMIN โดยตั้งใจ — เป็นข้อความส่วนตัว)
+    // query ต้องกรองด้วย memberUid == uid หรือ room == ห้องของครู
+    function chatMemberUidOf(sid, channel) {
+      return channel == 'PARENT' ? studentField(sid, 'parentUid', null) : studentField(sid, 'studentUid', null);
+    }
+    function chatIdentityOk(d) {
+      return d.channel in ['PARENT', 'STUDENT']
+        && d.studentId is string
+        && d.memberUid is string
+        && d.memberUid == chatMemberUidOf(d.studentId, d.channel)
+        && d.room == studentField(d.studentId, 'room', '__none__');
+    }
+
+    match /class_messages/{messageId} {
+      allow read: if isSignedIn() && (resource.data.memberUid == request.auth.uid || isHomeroomTeacherOf(resource.data.room));
+      allow create: if isSignedIn()
+                    && request.resource.data.keys().hasOnly([
+                         'id', 'studentId', 'channel', 'room', 'memberUid', 'senderUid', 'senderRole', 'senderName', 'text', 'sentAt', 'createdAt'])
+                    && request.resource.data.keys().hasAll([
+                         'id', 'studentId', 'channel', 'room', 'memberUid', 'senderUid', 'senderRole', 'senderName', 'text', 'sentAt', 'createdAt'])
+                    && request.resource.data.id == messageId
+                    && chatIdentityOk(request.resource.data)
+                    && request.resource.data.senderUid == request.auth.uid
+                    && request.resource.data.text is string
+                    && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 1000
+                    && request.resource.data.senderName is string && request.resource.data.senderName.size() <= 200
+                    && request.resource.data.sentAt is string
+                    && request.resource.data.createdAt == request.time
+                    && ((request.resource.data.senderRole == 'TEACHER' && isHomeroomTeacherOf(request.resource.data.room))
+                        || (request.resource.data.senderRole == request.resource.data.channel
+                            && request.auth.uid == request.resource.data.memberUid));
+      allow update, delete: if false;
+    }
+
+    // สรุปห้องสนทนาต่อ (นักเรียน, ช่อง) — id = {studentId}_{channel}; ใช้ทำรายการ + จุดแจ้งเตือนยังไม่อ่าน
+    match /class_chat_threads/{threadId} {
+      allow read: if isSignedIn() && (resource.data.memberUid == request.auth.uid || isHomeroomTeacherOf(resource.data.room));
+      allow create: if isSignedIn()
+                    && request.resource.data.keys().hasOnly([
+                         'id', 'studentId', 'studentName', 'channel', 'room', 'memberUid',
+                         'lastText', 'lastSenderRole', 'lastAt', 'memberLastReadAt', 'teacherLastReadAt', 'updatedAt'])
+                    && request.resource.data.keys().hasAll(['id', 'studentId', 'channel', 'room', 'memberUid', 'lastAt'])
+                    && request.resource.data.id == threadId
+                    && threadId == request.resource.data.studentId + '_' + request.resource.data.channel
+                    && chatIdentityOk(request.resource.data)
+                    && (isHomeroomTeacherOf(request.resource.data.room) || request.auth.uid == request.resource.data.memberUid);
+      // แก้ได้เฉพาะ: ข้อความล่าสุด + เวลาอ่านของ "ฝั่งตัวเอง" (ฝั่งสมาชิกแตะ teacherLastReadAt ไม่ได้ และกลับกัน)
+      allow update: if isSignedIn()
+                    && ((request.auth.uid == resource.data.memberUid
+                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+                               ['studentName', 'lastText', 'lastSenderRole', 'lastAt', 'memberLastReadAt', 'updatedAt']))
+                        || (isHomeroomTeacherOf(resource.data.room)
+                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+                               ['studentName', 'lastText', 'lastSenderRole', 'lastAt', 'teacherLastReadAt', 'updatedAt'])));
+      allow delete: if false;
+    }
+
     // นัดพบครูของผู้ปกครอง — สายงาน (ตรงกับ src/lib/appointmentFlow.ts):
     //   ผู้ปกครองขอนัด → REQUESTED → (ครูผู้รับ) CONFIRMED | DECLINED ; CONFIRMED → (ครูผู้รับ) COMPLETED ; REQUESTED|CONFIRMED → (ผู้ปกครอง) CANCELLED
     // ผู้รับ: HOMEROOM = ครูที่ปรึกษาของ homeroomClass นั้น, GUIDANCE = ครูแนะแนว. ข้อความส่วนตัว → อ่านได้เฉพาะเจ้าของ (parentUid/studentUid) + ผู้รับ + SUPER_ADMIN

@@ -27,7 +27,8 @@ import {
   Sparkles,
   Phone,
   AlertTriangle,
-  Users
+  Users,
+  CalendarDays
 } from 'lucide-react';
 
 import { GateAttendanceTracker } from './components/student-parent/GateAttendanceTracker';
@@ -38,16 +39,19 @@ import { ParentPortfolioView } from './components/portfolio/ParentPortfolioView'
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
 import { FamilyHomeVisitInfoForm } from './components/homevisit/FamilyHomeVisitInfoForm';
+import { ClassChatMemberView, useMemberThreads } from './components/chat/ClassChatPanel';
+import { isThreadUnread } from './lib/classChat';
 import { NotificationBell } from './components/notifications/NotificationBell';
 
 export function ParentPortal() {
   const {
     user,
-    attendanceRecords,
-    parentTeacherMessages
+    attendanceRecords
   } = useStore();
   // นักเรียนของผู้ปกครองคนนี้จาก Firestore สด — query filter ด้วย parentUid (ผ่าน firestore.rules)
   const { students: linkedStudents } = useRealStudents({ parentUid: user?.uid });
+  // ห้องสนทนากับครูประจำชั้น (ช่อง PARENT) แบบสด — ทำ badge เมนู + ข้อความล่าสุดบนภาพรวม
+  const chatThreads = useMemberThreads(user?.uid).filter(t => t.channel === 'PARENT');
 
   // TASK 2 (เฟส 2 การเงิน): ใบแจ้งหนี้จริงจาก Firestore แบบ real-time แทน state.billingInvoices
   // ของ Zustand (ไม่เคยมี listener ผูกไว้เลย — ป้ายแจ้งเตือน "มียอดค้างชำระ" เดิมจึงไม่เคยขึ้นจริง)
@@ -70,13 +74,14 @@ export function ParentPortal() {
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
 
   const student = linkedStudents.find(s => s.studentId === selectedStudentId) || linkedStudents[0];
+  const chatUnread = chatThreads.filter(t => t.studentId === student?.studentId && isThreadUnread(t, 'MEMBER')).length;
   // FIX (Task 0): เดิมอ่านจาก StudentAnalytics (session-local store, ว่างเปล่าเสมอ) → ตัวเลขที่เห็น
   // เป็น fallback 98 ตายตัวทุกครั้ง ไม่เคยเปลี่ยนตามพฤติกรรมจริง — ตอนนี้อ่านจาก students/{id}.behaviorScore
   // ของจริงผ่าน useRealStudents() (real-time)
   const bScore = student?.behaviorScore;
   
   const [activeTab, setActiveTab] = useState<
-    'timeline' | 'gate' | 'health' | 'behavior' | 'portfolio' | 'academic' | 'services' | 'family'
+    'timeline' | 'gate' | 'health' | 'behavior' | 'portfolio' | 'academic' | 'billing' | 'chat' | 'appointment' | 'family'
   >('timeline');
 
 
@@ -136,7 +141,7 @@ export function ParentPortal() {
 
           {pendingInvoices.length > 0 && (
             <div 
-              onClick={() => setActiveTab('services')}
+              onClick={() => setActiveTab('billing')}
               className="px-3 py-2 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center gap-2 cursor-pointer hover:bg-amber-500/20 transition-all text-xs text-amber-300 font-bold"
             >
               <Bell className="w-4 h-4 text-amber-400 animate-bounce" />
@@ -173,8 +178,10 @@ export function ParentPortal() {
           { id: 'behavior', label: '3. คะแนนความประพฤติ', icon: ShieldCheck },
           { id: 'portfolio', label: '4. แฟ้มผลงาน', icon: FolderGit2 },
           { id: 'academic', label: '5. ผลการเรียน & การบ้าน', icon: BookOpen },
-          { id: 'services', label: '6. ชำระเงิน & นัดพบครู', icon: CreditCard },
-          { id: 'family', label: '7. ข้อมูลครอบครัว (เยี่ยมบ้าน)', icon: Users },
+          { id: 'billing', label: '6. ชำระเงิน', icon: CreditCard },
+          { id: 'chat', label: '7. สนทนากับครู', icon: MessageSquare, badge: chatUnread },
+          { id: 'appointment', label: '8. นัดพบครู & ปรึกษา', icon: CalendarDays },
+          { id: 'family', label: '9. ข้อมูลครอบครัว (เยี่ยมบ้าน)', icon: Users },
         ]}>
       {/* Main Content View */}
       <div className="transition-all duration-300">
@@ -246,7 +253,7 @@ export function ParentPortal() {
               </div>
 
               <div 
-                onClick={() => setActiveTab('services')}
+                onClick={() => setActiveTab('billing')}
                 className="bg-slate-900/70 border border-slate-800 hover:border-teal-500/40 rounded-3xl p-5 backdrop-blur-md cursor-pointer transition-all space-y-1"
               >
                 <div className="flex items-center justify-between text-teal-400 mb-1">
@@ -322,32 +329,30 @@ export function ParentPortal() {
                     ข้อความล่าสุดจากโรงเรียนและครูประจำชั้น
                   </h3>
                   <button 
-                    onClick={() => setActiveTab('services')}
+                    onClick={() => setActiveTab('chat')}
                     className="text-xs text-emerald-400 font-bold hover:underline cursor-pointer"
                   >
-                    เปิดห้องสนทนา & นัดพบ →
+                    เปิดห้องสนทนา →
                   </button>
                 </div>
 
                 {(() => {
-                  // ข้อความล่าสุดที่ "ครู/โรงเรียนส่งมาจริง" ถึงนักเรียนคนนี้ — ไม่มี = empty state (ห้ามแสดงข้อความตัวอย่าง)
-                  const latest = [...parentTeacherMessages]
-                    .filter(m => m.studentId === student.studentId && m.senderRole !== 'PARENT')
-                    .slice(-1)[0];
-                  if (!latest) {
+                  // ข้อความล่าสุดในช่องสนทนาของนักเรียนคนนี้ (จริงจาก class_chat_threads) — ไม่มี = empty state
+                  const thread = chatThreads.find(t => t.studentId === student.studentId && t.lastAt);
+                  if (!thread) {
                     return (
                       <div className="p-4 bg-slate-800/40 border border-slate-800 rounded-2xl text-xs text-slate-400">
-                        ยังไม่มีข้อความจากครูหรือโรงเรียน
+                        ยังไม่มีข้อความจากครูประจำชั้น
                       </div>
                     );
                   }
                   return (
                     <div className="p-4 bg-slate-800/40 border border-slate-800 rounded-2xl space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-white">{latest.senderName}</span>
-                        <span className="text-[10px] text-slate-500">{latest.timestamp}</span>
+                        <span className="text-xs font-bold text-white">{thread.lastSenderRole === 'TEACHER' ? 'ครูประจำชั้น' : 'คุณ'}</span>
+                        <span className="text-[10px] text-slate-500">{new Date(thread.lastAt!).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <p className="text-xs text-slate-300 leading-relaxed">{latest.message}</p>
+                      <p className="text-xs text-slate-300 leading-relaxed">{thread.lastText}</p>
                     </div>
                   );
                 })()}
@@ -385,8 +390,14 @@ export function ParentPortal() {
         )}
 
         {/* 7. Parent Engagement & e-Billing & Appointments */}
-        {activeTab === 'services' && (
-          <ParentEngagementServices studentId={student.studentId} student={student} isParentView={true} />
+        {activeTab === 'billing' && (
+          <ParentEngagementServices studentId={student.studentId} student={student} isParentView={true} section="billing" />
+        )}
+        {activeTab === 'chat' && user?.uid && (
+          <ClassChatMemberView channel="PARENT" student={student} viewerUid={user.uid} viewerName={`ผู้ปกครอง ${student.name}`} />
+        )}
+        {activeTab === 'appointment' && (
+          <ParentEngagementServices studentId={student.studentId} student={student} isParentView={true} section="appointment" />
         )}
 
         {activeTab === 'family' && user?.uid && (

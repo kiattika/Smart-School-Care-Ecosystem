@@ -1,4 +1,6 @@
 import { omitUndefined } from '../lib/firestorePayload';
+import { chatThreadId, normalizeChatText, senderRoleFor } from '../lib/classChat';
+import type { ChatChannel, ChatSenderRole, ChatSide } from '../lib/classChat';
 import { 
   collection, 
   query, 
@@ -1977,6 +1979,152 @@ export function subscribeAppointments(
   } catch (error) {
     console.warn('[subscribeAppointments] setup error:', error);
     return () => {};
+  }
+}
+
+/**
+ * แชทห้องเรียนแบบแยกช่องส่วนตัว (class_messages + class_chat_threads) — ดู src/lib/classChat.ts
+ */
+const CLASS_MESSAGE_COL = 'class_messages';
+const CLASS_THREAD_COL = 'class_chat_threads';
+
+export interface ClassChatMessage {
+  id: string;
+  studentId: string;
+  channel: ChatChannel;
+  room: string;
+  memberUid: string;
+  senderUid: string;
+  senderRole: ChatSenderRole;
+  senderName: string;
+  text: string;
+  sentAt: string;
+}
+
+export interface ClassChatThread {
+  id: string;
+  studentId: string;
+  studentName?: string;
+  channel: ChatChannel;
+  room: string;
+  memberUid: string;
+  lastText?: string;
+  lastSenderRole?: ChatSenderRole | '';
+  lastAt?: string;
+  memberLastReadAt?: string;
+  teacherLastReadAt?: string;
+}
+
+export interface SendClassMessageInput {
+  studentId: string;
+  studentName: string;
+  channel: ChatChannel;
+  room: string;
+  memberUid: string;
+  side: ChatSide;
+  senderUid: string;
+  senderName: string;
+  text: string;
+}
+
+/** ส่งข้อความ + อัปเดตสรุปห้องสนทนาในชุดเดียว (batch) — ผู้ส่งถือว่า "อ่านแล้ว" ถึงเวลานี้ */
+export async function sendClassMessage(input: SendClassMessageInput): Promise<void> {
+  const text = normalizeChatText(input.text);
+  if (!text) throw new Error('EMPTY_OR_TOO_LONG');
+  if (!input.memberUid) throw new Error('NO_LINKED_MEMBER');
+  const senderRole = senderRoleFor(input.side, input.channel);
+  const nowIso = new Date().toISOString();
+  const msgRef = doc(collection(db, CLASS_MESSAGE_COL));
+  const threadId = chatThreadId(input.studentId, input.channel);
+  const batch = writeBatch(db);
+  batch.set(msgRef, {
+    id: msgRef.id,
+    studentId: input.studentId,
+    channel: input.channel,
+    room: input.room,
+    memberUid: input.memberUid,
+    senderUid: input.senderUid,
+    senderRole,
+    senderName: input.senderName.slice(0, 200),
+    text,
+    sentAt: nowIso,
+    createdAt: serverTimestamp(),
+  });
+  // merge: ครั้งแรก = create (ต้องมี identity ครบ), ครั้งต่อไป = update (affectedKeys มีแค่ฟิลด์ที่เปลี่ยน)
+  batch.set(doc(db, CLASS_THREAD_COL, threadId), {
+    id: threadId,
+    studentId: input.studentId,
+    studentName: input.studentName,
+    channel: input.channel,
+    room: input.room,
+    memberUid: input.memberUid,
+    lastText: text.slice(0, 120),
+    lastSenderRole: senderRole,
+    lastAt: nowIso,
+    [input.side === 'TEACHER' ? 'teacherLastReadAt' : 'memberLastReadAt']: nowIso,
+    updatedAt: nowIso,
+  }, { merge: true });
+  try {
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `${CLASS_MESSAGE_COL}/${msgRef.id}`);
+  }
+}
+
+export function subscribeClassMessages(
+  onUpdate: (list: ClassChatMessage[]) => void,
+  filter: { studentId: string; channel: ChatChannel; memberUid?: string; room?: string },
+): () => void {
+  // สมาชิก: กรองด้วย memberUid ของตัวเอง, ครู: กรองด้วย room (ให้ตรงเงื่อนไข rules)
+  const scope = filter.memberUid ? where('memberUid', '==', filter.memberUid) : filter.room ? where('room', '==', filter.room) : null;
+  if (!scope) { onUpdate([]); return () => {}; }
+  const q = query(collection(db, CLASS_MESSAGE_COL), scope, where('studentId', '==', filter.studentId), where('channel', '==', filter.channel));
+  try {
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ClassChatMessage));
+      list.sort((a, b) => (a.sentAt || '').localeCompare(b.sentAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeClassMessages] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeClassMessages] setup error:', error);
+    return () => {};
+  }
+}
+
+export function subscribeClassChatThreads(
+  onUpdate: (list: ClassChatThread[]) => void,
+  filter: { memberUid?: string; room?: string },
+): () => void {
+  const scope = filter.memberUid ? where('memberUid', '==', filter.memberUid) : filter.room ? where('room', '==', filter.room) : null;
+  if (!scope) { onUpdate([]); return () => {}; }
+  try {
+    return onSnapshot(query(collection(db, CLASS_THREAD_COL), scope), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ClassChatThread));
+      list.sort((a, b) => (b.lastAt || '').localeCompare(a.lastAt || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeClassChatThreads] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeClassChatThreads] setup error:', error);
+    return () => {};
+  }
+}
+
+/** ทำเครื่องหมายอ่านแล้ว (ฝั่งตัวเอง) — thread ยังไม่มี/เขียนไม่ได้ = ข้ามเงียบๆ */
+export async function markClassThreadRead(studentId: string, channel: ChatChannel, side: ChatSide): Promise<void> {
+  try {
+    const nowIso = new Date().toISOString();
+    await updateDoc(doc(db, CLASS_THREAD_COL, chatThreadId(studentId, channel)), {
+      [side === 'TEACHER' ? 'teacherLastReadAt' : 'memberLastReadAt']: nowIso,
+      updatedAt: nowIso,
+    });
+  } catch (error) {
+    console.warn('[markClassThreadRead] skipped:', (error as Error)?.message);
   }
 }
 
