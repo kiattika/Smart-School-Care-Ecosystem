@@ -1,4 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { computePopupPosition } from './popupPosition';
 import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react';
 
 const THAI_MONTHS = [
@@ -58,6 +60,27 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
   const selected = parseYmd(value);
   const [viewDate, setViewDate] = useState(() => selected || parseYmd(min) || new Date());
   const wrapRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+  // ป๊อปอัปวาดผ่าน portal ที่ body (position: fixed) — ไม่ถูก overflow/stacking ของกล่องแม่ตัดหรือถูกการ์ดอื่นทับ; เปิดขึ้นบนเมื่อด้านล่างไม่พอ
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
+  const reposition = useCallback(() => {
+    const wrap = wrapRef.current; const pop = popupRef.current;
+    if (!wrap || !pop) return;
+    const r = wrap.getBoundingClientRect();
+    const next = computePopupPosition(
+      { top: r.top, bottom: r.bottom, left: r.left, right: r.right },
+      { width: 288, height: pop.scrollHeight || 340 },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    setPos(prev => (prev && prev.top === next.top && prev.left === next.left && prev.maxHeight === next.maxHeight ? prev : { top: next.top, left: next.left, maxHeight: next.maxHeight }));
+  }, []);
+  useLayoutEffect(() => { if (isOpen) reposition(); }, [isOpen, mode, viewDate, yearPageStart, reposition]);
+  useEffect(() => {
+    if (!isOpen) { setPos(null); return; }
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => { window.removeEventListener('resize', reposition); window.removeEventListener('scroll', reposition, true); };
+  }, [isOpen, reposition]);
 
   useEffect(() => {
     if (isOpen) {
@@ -73,10 +96,14 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
   useEffect(() => {
     if (!isOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setIsOpen(false);
+      const t = e.target as Node;
+      if (wrapRef.current?.contains(t) || popupRef.current?.contains(t)) return;
+      setIsOpen(false);
     };
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsOpen(false); };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEsc);
+    return () => { document.removeEventListener('mousedown', handleClickOutside); document.removeEventListener('keydown', handleEsc); };
   }, [isOpen]);
 
   const minDate = parseYmd(min);
@@ -142,8 +169,13 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
         </button>
       )}
 
-      {isOpen && (
-        <div className="absolute z-50 mt-1 w-72 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-3">
+      {isOpen && createPortal(
+        <div
+          ref={popupRef}
+          data-testid="datepicker-popup"
+          style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: 288, maxHeight: pos?.maxHeight, overflowY: 'auto', zIndex: 1000, visibility: pos ? 'visible' : 'hidden' }}
+          className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3"
+        >
           {mode === 'years' && (
             <>
               <div className="flex items-center justify-between mb-2">
@@ -228,7 +260,8 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
             })}
           </div>
           </>)}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

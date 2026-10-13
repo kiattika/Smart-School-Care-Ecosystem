@@ -31,6 +31,9 @@ export function QuickActionHub() {
   };
   const geofence = isWithinSchoolGeofence(defaultCoord, schoolGeofenceConfig);
 
+  // ผู้ปกครองไม่ต้องเช็คอิน GPS (ใช้กับบุคลากร/นักเรียนเท่านั้น) — ซ่อนปุ่มลอยทั้งชุด ให้ตรงกับแถบด้านบน (NavbarWithRoleSwitcher)
+  if (user?.activeRole === 'PARENT') return null;
+
   return (
     <>
       {/* Floating Quick Action Button (Desktop & Tablet bottom right, or Mobile quick trigger) */}

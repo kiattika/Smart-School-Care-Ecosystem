@@ -120,6 +120,7 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 
 - วันที่: `src/components/shared/DatePicker` — ค่าเป็น `YYYY-MM-DD` เหมือนเดิม (ห้ามเปลี่ยนรูปแบบข้อมูลใน Firestore); รองรับ `min`/`max`, `required` (validation ของฟอร์มเหมือน input เดิม), `clearable` (ตัวกรองที่ค่าว่าง = ไม่กรอง)
 - เวลา: `src/components/shared/TimePicker` — 24 ชั่วโมง (ชั่วโมง 00-23 + นาที) ค่าเป็น `'HH:mm'` เหมือนเดิม (`<input type="time">` บางเบราว์เซอร์/locale แสดงเป็น AM/PM)
+- `DatePicker` วางปฏิทินผ่าน **portal ที่ body (position: fixed, พื้นทึบ, z 1000)** และเปิดขึ้นบนเมื่อด้านล่างไม่พอ (`popupPosition.ts`) — ห้ามกลับไปใช้ `absolute` ในกล่องแม่ (เคยถูก overflow ตัดขอบล่างและมีการ์ดอื่นทับจนอ่านไม่ออก)
 - ข้อยกเว้นเดียว: ช่องเวลาใน Time Simulation ของ TeacherPortal (DEV-only) — guard test `dateTimeInputsGuard.test.ts` สแกน `src/`
 
 ### เมนูย่อยของหน้าบุคลากรใช้ `PortalSidebarLayout` กลาง (ห้ามทำแท็บแนวนอน/แถบเมนูเอง)
@@ -244,7 +245,7 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - ⚠️ blocking functions (`beforeCreate`/`beforeSignIn`) **ไม่ถูกเรียกเมื่อ sign in ด้วย custom token** — claims `{roles:['PARENT']}` ของผู้ปกครองจึงออกจาก callable เอง (uid = `line_<LINE sub>`) ห้ามคาดหวังให้ `resolveAccess` ดูแลผู้ปกครอง
 - คู่มือตั้งค่า LINE สำหรับแอดมิน: `docs/line-parent-login.md`
 - ⚠️ `createCustomToken` ต้องมีสิทธิ์ลงนาม: บัญชีบริการ `<project>@appspot.gserviceaccount.com` ต้องมีบทบาท Service Account Token Creator (+ เปิด IAM Credentials API) ไม่งั้น callable ล้มด้วย `iam.serviceAccounts.signBlob denied`
-- พอร์ทัลผู้ปกครอง: ไม่มีปุ่มเช็คอิน GPS; แท็บคัดกรองอารมณ์เป็น "ดูอย่างเดียว" (ระดับ 2Q + รายการที่ครูแจ้งผู้ปกครอง ไม่แสดงคำตอบรายข้อ/หมายเหตุภายใน, ไม่เห็น 9Q/8Q); เมนูประตูไม่มีแท็บสถิติการเข้าเรียน (ผู้ปกครอง+นักเรียน) — สถิติรายวิชาอยู่ที่ `CourseOverviewCards`; ข้อ 13 ในแบบเยี่ยมบ้านเลือก บิดา/มารดา/อื่น ๆ (บิดา/มารดาใช้ข้อมูลข้อ 7/8)
+- พอร์ทัลผู้ปกครอง: ไม่มีปุ่มเช็คอิน GPS (ทั้งแถบบนและปุ่มลอย `QuickActionHub` — ซ่อนด้วย `activeRole === 'PARENT'` ทั้งสองจุด); แท็บคัดกรองอารมณ์เป็น "ดูอย่างเดียว" (ระดับ 2Q + รายการที่ครูแจ้งผู้ปกครอง ไม่แสดงคำตอบรายข้อ/หมายเหตุภายใน, ไม่เห็น 9Q/8Q); เมนูประตูไม่มีแท็บสถิติการเข้าเรียน (ผู้ปกครอง+นักเรียน) — สถิติรายวิชาอยู่ที่ `CourseOverviewCards`; ข้อ 13 ในแบบเยี่ยมบ้านเลือก บิดา/มารดา/อื่น ๆ (บิดา/มารดาใช้ข้อมูลข้อ 7/8)
 - `linkedParentUid` ต้องเป็น `null` จนกว่าผู้ปกครองจะเชื่อมบัญชี LINE จริงสำเร็จ ห้าม fabricate
 
 ### บทบาทเริ่มต้นของครู/บุคลากรที่ import
