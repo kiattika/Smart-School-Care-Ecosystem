@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { courseCodeOfPointsKey, mergeCourseOverview } from '../lib/courseOverview';
+import { buildRoomPointsRows, courseCodeOfPointsKey, mergeCourseOverview } from '../lib/courseOverview';
 import { studentPointsTotals, summarizeCoursePoints } from '../lib/courseRank';
 import { attendanceStatsFromCounts } from '../lib/studentAttendanceStats';
 import type { CourseAttendanceRow } from '../lib/courseAttendanceStats';
@@ -64,6 +64,20 @@ describe('คะแนนรวมรายบุคคล (กราฟคร�
     ], term);
     expect(t.map(x => [x.studentId, x.total])).toEqual([['a', 7], ['b', 6]]);
     expect(t[0].byCourse).toEqual([{ courseName: 'วิชา A', points: 5 }, { courseName: 'วิชา B', points: 2 }]);
+  });
+  it('กราฟครูที่ปรึกษาเรียงตามเลขที่ (ไม่ใช่ตามคะแนน) และรวมคนที่ยังไม่มีคะแนนเป็น 0', () => {
+    const totals = studentPointsTotals([
+      log({ studentId: 'b', courseKey: 'A|x', courseName: 'วิชา A', points: 9 }),
+      log({ studentId: 'a', courseKey: 'A|x', courseName: 'วิชา A', points: 2 }),
+    ], term);
+    const rows = buildRoomPointsRows([
+      { studentId: 'c', studentNo: 3, name: 'ค' },
+      { studentId: 'b', studentNo: 2, name: 'ข', nickname: 'บี' },
+      { studentId: 'a', studentNo: 1, name: 'ก' },
+      { studentId: 'z', studentNo: undefined, name: 'ไม่มีเลขที่' },
+    ], totals);
+    expect(rows.map(r => [r.studentNo, r.total])).toEqual([[1, 2], [2, 9], [3, 0], [Number.MAX_SAFE_INTEGER, 0]]);
+    expect(rows[1].name).toBe('ข (บี)');
   });
   it('guard: เมนูสถิติวิชาการของครูที่ปรึกษามีกราฟ และอ่านด้วย query ตามห้อง (ตรง rules)', () => {
     expect(readSource('src/AdvisorPortal.tsx')).toContain('<AdvisorActivityPointsChart');

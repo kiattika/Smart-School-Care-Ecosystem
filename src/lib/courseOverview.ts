@@ -4,7 +4,7 @@
  */
 import { courseStatKey } from './attendanceHistory';
 import type { CourseAttendanceRow } from './courseAttendanceStats';
-import type { CoursePointsSummary } from './courseRank';
+import type { CoursePointsSummary, StudentPointsTotal } from './courseRank';
 
 export interface CourseOverviewItem {
   key: string;
@@ -42,4 +42,39 @@ export function mergeCourseOverview(attendance: CourseAttendanceRow[], points: C
     items.push({ key: `points:${p.courseId}`, name: p.courseName, code: code || '', inSchedule: false, points: p });
   }
   return { items, unassigned };
+}
+
+export interface RoomPointsRow {
+  studentId: string;
+  studentNo: number;
+  name: string;
+  total: number;
+  byCourse: { courseName: string; points: number }[];
+}
+
+/**
+ * แถวกราฟของครูที่ปรึกษา: นักเรียนทุกคนในห้อง เรียงตามเลขที่ (คนที่ยังไม่มีคะแนนได้ 0 — แท่งว่าง)
+ * เลขที่ไม่มี/ซ้ำ เรียงต่อด้วยชื่อ เพื่อให้ลำดับคงที่
+ */
+export function buildRoomPointsRows(
+  students: { studentId: string; studentNo?: number | string | null; name: string; nickname?: string }[],
+  totals: StudentPointsTotal[],
+): RoomPointsRow[] {
+  const byId = new Map(totals.map(t => [t.studentId, t]));
+  const no = (v: number | string | null | undefined) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : Number.MAX_SAFE_INTEGER;
+  };
+  return students
+    .map(s => {
+      const t = byId.get(s.studentId);
+      return {
+        studentId: s.studentId,
+        studentNo: no(s.studentNo),
+        name: s.nickname ? `${s.name} (${s.nickname})` : s.name,
+        total: t?.total ?? 0,
+        byCourse: t?.byCourse ?? [],
+      };
+    })
+    .sort((a, b) => a.studentNo - b.studentNo || a.name.localeCompare(b.name, 'th'));
 }
