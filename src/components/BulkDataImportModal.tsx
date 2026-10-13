@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
+import { importParentRecords, ParentImportRecord } from '../lib/lineParent';
 import { writeBatch, doc, serverTimestamp, collection, getDocs, onSnapshot } from 'firebase/firestore';
 import {
   computeSyncReplacePlan, scheduleDocIdFor, primaryTeacherKey,
@@ -61,15 +62,6 @@ function isValidThaiNationalId(raw: string): boolean {
   }
   const check = (11 - (sum % 11)) % 10;
   return check === parseInt(id.charAt(12), 10);
-}
-
-/** SHA-256 → hex (Web Crypto API, ฝั่ง client — เลขบัตรดิบไม่ถูกส่ง/เก็บที่ใดนอกจาก hash) */
-async function sha256Hex(input: string): Promise<string> {
-  const data = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(digest))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
 }
 
 export interface BulkDataImportModalProps {
@@ -854,6 +846,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         }
       }
 
+      const parentImportRecords: ParentImportRecord[] = [];
       for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
         const chunk = validRows.slice(i, i + BATCH_SIZE);
         const batch = writeBatch(db);
@@ -939,25 +932,17 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             batch.set(staffRef, teacherPayload, { merge: true });
 
           } else if (importType === 'PARENT') {
-            // PARENT — เขียนเป็น parent_verification_records/{studentId}_verify
-            // เลขบัตรประชาชนถูก hash (SHA-256) ฝั่ง client ก่อนเสมอ — ไม่เก็บค่าดิบใน Firestore
-            const verifyRef = doc(db, 'parent_verification_records', `${parsedData.studentId}_verify`);
-            const parentNationalIdHash = await sha256Hex(parsedData.parentNationalId);
-
-            batch.set(verifyRef, {
-              id: `${parsedData.studentId}_verify`,
+            // PARENT — ไม่เขียน Firestore จาก client: ส่งให้ Cloud Function importParentVerification คำนวณ HMAC
+            // (เลขบัตรดิบส่งผ่าน TLS ไปเซิร์ฟเวอร์เท่านั้น ไม่ถูกเก็บ) แล้วเขียน parent_verification_records/{studentId}_verify
+            parentImportRecords.push({
               studentId: parsedData.studentId,
               parentPrefix: parsedData.parentPrefix || '',
               parentFirstName: parsedData.parentFirstName,
               parentLastName: parsedData.parentLastName,
-              parentNationalIdHash,
+              parentNationalId: parsedData.parentNationalId,
               parentMobile: parsedData.parentMobile || '',
               relationship: parsedData.relationship,
-              linkedParentUid: null,   // null จนกว่าผู้ปกครองจะเชื่อมบัญชี LINE สำเร็จจริง
-              linkedAt: null,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp()
-            }, { merge: true });
+            });
 
           } else {
             // COURSE Import
@@ -1107,6 +1092,14 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         await batch.commit();
         processedCount += chunk.length;
         setImportProgress(Math.min(95, Math.round((processedCount / totalValid) * 90) + 10));
+      }
+
+      if (importType === 'PARENT' && parentImportRecords.length > 0) {
+        const result = await importParentRecords(parentImportRecords);
+        if (result.errors.length > 0) {
+          const detail = result.errors.slice(0, 10).map(e => `${e.studentId || '(ว่าง)'}: ${e.reason}`).join('\n');
+          alert(`นำเข้าผู้ปกครองสำเร็จ ${result.written} รายการ แต่มี ${result.errors.length} รายการที่ถูกปฏิเสธโดยเซิร์ฟเวอร์:\n${detail}`);
+        }
       }
 
       // ── ผลกระทบของการนำเข้าซ้ำ: โอนประวัติให้ครูคนเดิม + เก็บกวาดตารางของครูที่ปิดการใช้งานและมีคนมาแทนแล้ว ──
@@ -1455,7 +1448,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                   เพื่อให้ระบบเทียบยืนยันตอนผู้ปกครองเชื่อมบัญชี LINE ครั้งแรก แล้วจึงเติม <code>linkedParentUid</code>
                 </p>
                 <p className="text-[11px] leading-relaxed text-amber-300/90">
-                  🔒 เลขบัตรประชาชนจะถูกทำ hash (SHA-256) ในเบราว์เซอร์ก่อนส่งเสมอ — <strong>ไม่มีการเก็บเลขบัตรแบบข้อความธรรมดาใน Firestore</strong> ตาม PDPA
+                  🔒 เลขบัตรประชาชนถูกส่งผ่านการเข้ารหัส (TLS) ไปให้เซิร์ฟเวอร์คำนวณ HMAC ด้วยรหัสลับฝั่งเซิร์ฟเวอร์ทันที — <strong>ไม่มีการเก็บเลขบัตรแบบข้อความธรรมดาใน Firestore</strong> ตาม PDPA
                 </p>
               </div>
             </div>

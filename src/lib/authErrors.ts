@@ -64,6 +64,8 @@ export function describeAuthError(err: unknown): string {
       return 'บัญชีนี้ถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ';
     case 'auth/network-request-failed':
       return 'เชื่อมต่อเซิร์ฟเวอร์ยืนยันตัวตนไม่ได้ กรุณาตรวจสอบอินเทอร์เน็ต (หรือ Auth/Functions Emulator ในเครื่อง) แล้วลองใหม่';
+    case 'functions/internal':
+      return 'ระบบยืนยันตัวตนขัดข้อง กรุณาลองใหม่ภายหลัง';
     case 'auth/too-many-requests':
       return 'พยายามเข้าสู่ระบบหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่';
   }

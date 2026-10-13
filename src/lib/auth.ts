@@ -2,6 +2,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signInWithEmailAndPassword,
+  signInWithCustomToken,
   signOut,
   onAuthStateChanged,
   User as FirebaseUser,
@@ -35,6 +36,12 @@ export async function signInWithGoogle(): Promise<User> {
  */
 export async function signInWithEmailPassword(email: string, password: string): Promise<User> {
   const result = await signInWithEmailAndPassword(auth, email, password);
+  return buildAppUser(result.user);
+}
+
+/** ผู้ปกครอง: sign in ด้วย custom token ที่ Cloud Function ออกให้หลังยืนยัน LINE + ทะเบียนแล้ว (claims มาจาก token) */
+export async function signInWithParentToken(customToken: string): Promise<User> {
+  const result = await signInWithCustomToken(auth, customToken);
   return buildAppUser(result.user);
 }
 

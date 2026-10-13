@@ -239,7 +239,10 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 ### ข้อมูลผู้ปกครอง (Parent Verification)
 - ผู้ปกครอง login ผ่าน LINE ไม่ใช่ email/password — ข้อมูลที่ import ล่วงหน้าคือ "ข้อมูลยืนยันตัวตน" (`parent_verification_records`) ไม่ใช่บัญชี login โดยตรง
 - ผูกกับนักเรียนด้วย Student ID (5 หลัก) + เลขบัตรประชาชนผู้ปกครอง (13 หลัก, ต้อง validate checksum จริง) เป็น 2 ปัจจัยยืนยัน
-- **ห้ามเก็บเลขบัตรประชาชนแบบ plaintext ใน Firestore เด็ดขาด** ต้อง hash (SHA-256) ก่อนเก็บเสมอ — เป็นข้อมูลอ่อนไหวตาม PDPA
+- **ห้ามเก็บเลขบัตรประชาชนแบบ plaintext ใน Firestore เด็ดขาด** — เก็บเป็น HMAC-SHA256 (`parentNationalIdHmac`) ที่คำนวณ "ฝั่งเซิร์ฟเวอร์" ด้วย secret `PARENT_ID_PEPPER` เท่านั้น (SHA-256 เปล่าๆ ฝั่ง client เดาย้อนได้ง่ายเพราะเลขบัตรมี 13 หลักตาม checksum) เป็นข้อมูลอ่อนไหวตาม PDPA
+- `parent_verification_records` เขียนจาก client ไม่ได้ (rules `write: false`) — เขียนผ่าน callable เท่านั้น: `importParentVerification` (SUPER_ADMIN), `linkParentLine`, `unlinkParentLine`; ผู้ปกครองกลับมาเข้าใหม่ผ่าน `signInParentLine` (ตรวจ `students.parentUid == uid` ทุกครั้ง) — code ใน `functions/src/parentLine.ts`, logic ล้วนใน `parentLineLogic.ts`
+- ⚠️ blocking functions (`beforeCreate`/`beforeSignIn`) **ไม่ถูกเรียกเมื่อ sign in ด้วย custom token** — claims `{roles:['PARENT']}` ของผู้ปกครองจึงออกจาก callable เอง (uid = `line_<LINE sub>`) ห้ามคาดหวังให้ `resolveAccess` ดูแลผู้ปกครอง
+- คู่มือตั้งค่า LINE สำหรับแอดมิน: `docs/line-parent-login.md`
 - `linkedParentUid` ต้องเป็น `null` จนกว่าผู้ปกครองจะเชื่อมบัญชี LINE จริงสำเร็จ ห้าม fabricate
 
 ### บทบาทเริ่มต้นของครู/บุคลากรที่ import
