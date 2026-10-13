@@ -58,3 +58,15 @@ describe('wiring + rules', () => {
     expect(b).toContain("bloodType in ['A', 'B', 'AB', 'O']");
   });
 });
+
+describe('student_semester_health — เอกสารค้างของบัญชีเก่า', () => {
+  it('rules ให้นักเรียนตัวจริงเขียนทับได้เฉพาะเมื่อ studentUid เดิมไม่ใช่บัญชีนี้ และห้ามเปลี่ยนภาคเรียน/รหัสเอกสาร', () => {
+    const r = readSource(path.resolve(__dirname, '../../firestore.rules'));
+    const blk = r.slice(r.indexOf('match /student_semester_health/'), r.indexOf('// 33. Student Health Profile'));
+    expect(blk).toContain('allow update: if isSelfStudent(resource.data.studentId)');
+    expect(blk).toContain('resource.data.studentUid != request.auth.uid');
+    expect(blk).toContain('request.resource.data.academicYear == resource.data.academicYear');
+    expect(blk).toContain('request.resource.data.term == resource.data.term');
+    expect(blk).toContain("request.resource.data.recordedByRole == 'STUDENT'");
+  });
+});

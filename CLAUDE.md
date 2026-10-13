@@ -315,6 +315,7 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 
 ## ⚠️ studentUid/parentUid ในเอกสารที่ rules ตรวจกับทะเบียน
 - `useRealStudents` ตั้ง `student.parentUid = data.parentUid || data.parentId` (alias) แต่ rules เทียบกับ `students/{id}.parentUid` จริง (ไม่มี = null) → ส่งค่า alias แล้ว **permission-denied** (อาการ: นักเรียนบันทึกน้ำหนัก/ส่วนสูงไม่ได้)
+- **เอกสารค้างของบัญชีเก่า:** นักเรียนทดสอบที่ถูกผูกบัญชีใหม่ (uid เปลี่ยน) ทำให้ `student_semester_health/{id}_{ปี}_{เทอม}` เดิมมี `studentUid` เก่า → นักเรียนมองไม่เห็นและเขียนทับไม่ได้ (permission-denied; ฟอร์มยังแสดงช่องกรอก). rules มีกฎ update พิเศษให้นักเรียนตัวจริงเขียนทับได้ครั้งเดียว (เฉพาะ `resource.data.studentUid != auth.uid`, ภาคเรียน/รหัสเดิม, ข้อมูลตรงทะเบียน); เอกสารอื่นที่ผูก studentUid เดิมอาจมีอาการเดียวกัน — อาการจริงดูได้จาก Console `[Firestore Diagnostic Error]` (มี path + userId)
 - ต้องใช้ `getStudentLinkIds(studentId)` (อ่านทะเบียนจริง) เมื่อสร้างเอกสารที่ rules บังคับ studentUid/parentUid ตรงทะเบียน (`saveSemesterHealthLog`, `saveStudentHealthProfile`, `setStudentBloodType`); ห้ามใช้ `student.parentId` เป็น parentUid
 
 ## ผู้ติดต่อฉุกเฉิน — `student_emergency_contacts/{studentId}`

@@ -1445,6 +1445,20 @@ service cloud.firestore {
                        request.resource.data.studentId == resource.data.studentId &&
                        request.resource.data.studentUid == resource.data.studentUid;
 
+      // เอกสารค้างของ "บัญชีเก่า": นักเรียนถูกผูกบัญชีใหม่ (students/{id}.studentUid เปลี่ยน) แต่เอกสารภาคเรียนนี้ยังมี studentUid เดิม
+      // → นักเรียนตัวจริงมองไม่เห็น/เขียนทับไม่ได้ ทั้งที่ยังไม่เคยบันทึกด้วยบัญชีนี้ — อนุญาตให้นักเรียนตัวจริงตามทะเบียนเขียนทับได้ "ครั้งเดียว"
+      // (หลังเขียน studentUid ตรงบัญชีนี้ จึงกลับไปเป็นล็อกตามปกติ); ต้องเป็นภาคเรียนเดิม/รหัสเอกสารเดิม ห้ามแตะเอกสารของบัญชีปัจจุบัน
+      allow update: if isSelfStudent(resource.data.studentId) &&
+                       resource.data.studentUid != request.auth.uid &&
+                       request.resource.data.studentId == resource.data.studentId &&
+                       request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__') &&
+                       request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', null) &&
+                       request.resource.data.academicYear == resource.data.academicYear &&
+                       request.resource.data.term == resource.data.term &&
+                       docId == request.resource.data.studentId + '_' + request.resource.data.academicYear + '_' + request.resource.data.term &&
+                       request.resource.data.recordedByUid == request.auth.uid &&
+                       request.resource.data.recordedByRole == 'STUDENT';
+
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
