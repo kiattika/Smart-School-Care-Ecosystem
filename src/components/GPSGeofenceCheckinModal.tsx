@@ -26,6 +26,7 @@ import {
 import { useStore } from '../store';
 import { useSchoolGeofence } from '../hooks/useSchoolGeofence';
 import { saveSchoolGeofenceConfigFirestore } from '../services/firestoreService';
+import { selfieThumbnailDataUrl } from '../lib/selfieThumbnail';
 import { GateDraft, MAX_GATES, DEFAULT_GATE_RADIUS, CENTER_RADIUS_MIN, CENTER_RADIUS_MAX, GATE_RADIUS_MIN, GATE_RADIUS_MAX, gatesToDrafts, draftsToGates, newGateId, validateGeofenceSettings } from '../lib/geofenceConfig';
 import { 
   Coordinates, 
@@ -210,11 +211,11 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setSelfiePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+      // ย่อเป็นภาพขนาดเล็กก่อน — รูปเต็มจากกล้องใหญ่เกินเอกสาร Firestore (1 MiB) ทำให้เช็คอินเขียนไม่ได้
+      selfieThumbnailDataUrl(file).then(url => {
+        if (url) setSelfiePreview(url);
+        else setCheckinError('ใช้รูปนี้ไม่ได้ (ไม่ใช่รูปภาพหรือไฟล์ใหญ่เกินไป) — เลือกรูปอื่นหรือเช็คอินโดยไม่แนบรูป');
+      });
     }
   };
 

@@ -1,3 +1,4 @@
+import { omitUndefined } from '../lib/firestorePayload';
 import { 
   collection, 
   query, 
@@ -926,10 +927,10 @@ export async function saveGateAttendanceRecordFirestore(record: GateAttendanceRe
   const collectionPath = 'gate_attendance_logs';
   try {
     const ref = doc(db, collectionPath, record.id);
-    await setDoc(ref, {
+    await setDoc(ref, omitUndefined({
       ...record,
       createdAt: serverTimestamp()
-    }, { merge: true });
+    }), { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${record.id}`);
   }
@@ -1166,10 +1167,10 @@ export async function saveGPSCheckInLogFirestore(log: GPSCheckInLog): Promise<vo
   const collectionPath = 'gps_check_in_logs';
   try {
     const ref = doc(db, collectionPath, log.id);
-    await setDoc(ref, {
+    await setDoc(ref, omitUndefined({
       ...log,
       createdAt: serverTimestamp()
-    }, { merge: true });
+    }), { merge: true });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${log.id}`);
   }

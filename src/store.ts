@@ -1012,12 +1012,14 @@ export const useStore = create<StoreState>((set, get) => ({
 
   // บันทึกเช็คอิน GPS — เขียน Firestore ก่อน (throw เมื่อไม่สำเร็จ) แล้วค่อยอัปเดต state; ห้ามแจ้งสำเร็จทั้งที่ยังไม่ได้บันทึก
   addGPSCheckInLog: async (log) => {
-    const newLog: GPSCheckInLog = {
-      ...log,
-      id: `gps-log-${Date.now()}`
-    };
     const isStudent = String(log.userRole || '').toUpperCase() === 'STUDENT';
     const authUid = get().user?.uid;
+    const newLog: GPSCheckInLog = {
+      ...log,
+      id: `gps-log-${Date.now()}`,
+      // ใส่ auth uid ของผู้เช็คอินจริง ให้ rules เทียบ (userId เป็นรหัสนักเรียน/บุคลากร ไม่ใช่ uid)
+      ...(authUid ? { authUid } : {}),
+    };
     const matchedStudent = isStudent
       ? get().students.find(s => s.studentId === log.userId || s.id === log.userId)
       : undefined;

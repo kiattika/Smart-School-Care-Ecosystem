@@ -589,6 +589,8 @@ export interface GPSCheckInLog {
   nearestGate?: string;
   selfieUrl?: string;
   notes?: string;
+  /** Firebase Auth uid ของผู้เช็คอินจริง (userId เป็นรหัสนักเรียน/รหัสบุคลากร ไม่ใช่ uid) — rules ใช้เทียบสิทธิ์เขียน/อ่านของเจ้าของ */
+  authUid?: string;
 }
 
 /** วันลาที่อนุมัติแล้วแบบไม่มีเหตุผล (student_leave_days) — ให้ครูผู้สอนเห็นสถานะ "ลา" ตอนเช็คชื่อ */
