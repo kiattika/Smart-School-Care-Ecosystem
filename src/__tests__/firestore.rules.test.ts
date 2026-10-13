@@ -3234,6 +3234,18 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(S().doc('home_visit_student_info/10001').set(stu({ homeroomClass: 'ม.6/1' })));
       await assertFails(P().doc('home_visit_student_info/10001').set(stu()));
     });
+    it('REGRESSION: ผูกบัญชีนักเรียนใหม่ (uid เปลี่ยน) — เอกสารเดิมที่เก็บ uid เก่ายังอ่านได้ด้วย uid ปัจจุบัน; uid เก่า/คนอื่นอ่านไม่ได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('home_visit_student_info/10001').set(stu({ studentUid: 'old-uid-before-relink' }));
+        await ctx.firestore().doc('home_visit_family_info/10001').set(fam({ parentUid: 'old-parent-uid' }));
+      });
+      // students/10001.studentUid = 'stu-1' (uid ปัจจุบัน)
+      await assertSucceeds(S().doc('home_visit_student_info/10001').get());
+      await assertSucceeds(P().doc('home_visit_family_info/10001').get());
+      await assertFails(asUser('old-uid-before-relink', ['STUDENT']).firestore().doc('home_visit_student_info/10001').get());
+      await assertFails(asUser('stranger', ['STUDENT']).firestore().doc('home_visit_student_info/10001').get());
+      await assertFails(asUser('old-parent-uid', ['PARENT']).firestore().doc('home_visit_family_info/10001').get());
+    });
     it('ผู้ปกครองที่ผูก parentUid เขียน/อ่านเอกสารครอบครัวได้; นักเรียนอ่าน/เขียนไม่ได้; ผู้ปกครองคนอื่นไม่ได้', async () => {
       await assertSucceeds(P().doc('home_visit_family_info/10001').set(fam()));
       await assertSucceeds(P().doc('home_visit_family_info/10001').get());

@@ -1069,8 +1069,9 @@ service cloud.firestore {
       allow read: if hasRole('SUPER_ADMIN')
                      || hasRole('EXECUTIVE')
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass))
-                     || (isSignedIn() && resource != null && resource.data.studentUid == request.auth.uid)
-                     || (isSignedIn() && resource == null && studentField(studentId, 'studentUid', '__none__') == request.auth.uid);
+                     // เจ้าของตัดสินจากทะเบียน students/{id}.studentUid (ค่าจริง) ไม่ใช่สำเนาในเอกสารนี้ —
+                     // ผูกบัญชีนักเรียนใหม่ (uid เปลี่ยน) แล้วสำเนา uid เก่าในเอกสารไม่ทำให้เจ้าของอ่านไม่ได้
+                     || isSelfStudent(studentId);
       allow create, update: if isSignedIn()
                        && request.resource.data.studentId == studentId
                        && request.resource.data.studentUid == request.auth.uid
@@ -1086,8 +1087,8 @@ service cloud.firestore {
       allow read: if hasRole('SUPER_ADMIN')
                      || hasRole('EXECUTIVE')
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass))
-                     || (isSignedIn() && resource != null && resource.data.parentUid == request.auth.uid)
-                     || (isSignedIn() && resource == null && studentField(studentId, 'parentUid', '__none__') == request.auth.uid);
+                     // ผู้ปกครองตัดสินจากทะเบียน students/{id}.parentUid (ค่าจริง) ไม่ใช่สำเนาในเอกสารนี้
+                     || (isSignedIn() && studentField(studentId, 'parentUid', '__none__') == request.auth.uid);
       allow create, update: if isSignedIn()
                        && request.resource.data.studentId == studentId
                        && request.resource.data.parentUid == request.auth.uid
