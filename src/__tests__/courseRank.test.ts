@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  courseActivityKey, coursesInLogs, pointsByStudentForCourse,
+  courseActivityKey, countStudentsWithPoints, coursesInLogs, pointsByStudentForCourse,
   DEFAULT_RANK_LEVELS, rankForPoints, rankLabel, resolveRankLevels, summarizeCoursePoints, termOfDate, validateRankLevels,
 } from '../lib/courseRank';
 import type { ActiveLearningRecord } from '../types';
@@ -145,6 +145,19 @@ describe('คะแนนแยกอิสระรายวิชา (ไม�
     const seat = readSource('src/components/ClassroomSeatingManager.tsx');
     expect(seat).not.toMatch(/addActiveLearningPoints\(student\.studentId, 1\)/);
     expect(seat).toMatch(/addActiveLearningPoints\(student\.studentId, 1, 'GENERAL', undefined, course\?\.id/);
+  });
+  it('countStudentsWithPoints: นับนักเรียนที่มีคะแนน >0 อย่างน้อยหนึ่งวิชา (ไม่รวมซ้ำข้ามวิชา)', () => {
+    const l = [
+      log({ studentId: '1', courseKey: 'A|x', points: 2 }),
+      log({ studentId: '1', courseKey: 'B|x', points: 5 }),
+      log({ studentId: '2', courseKey: 'A|x', points: 1 }),
+      log({ studentId: '2', courseKey: 'A|x', points: -1 }),
+    ];
+    expect(countStudentsWithPoints(l, term)).toBe(1);
+  });
+  it('guard: เมนู leaderboard และการ์ดนักเรียนไม่ใช้ยอดรวมใน store / แสดง "ไม่ระบุวิชา" แยกไม่ให้มีแรงค์', () => {
+    expect(readSource('src/TeacherPortal.tsx')).not.toMatch(/Object\.values\(activeLearningPoints\)/);
+    expect(readSource('src/components/student-parent/CourseActivityPoints.tsx')).toContain('r.unassigned');
   });
   it('guard: คาบที่สิ้นสุดแล้วไม่มีปุ่ม "เข้าสู่ชั้นเรียน"', () => {
     expect(readSource('src/components/TeacherScheduleList.tsx')).not.toContain('btn-past-enter-class');

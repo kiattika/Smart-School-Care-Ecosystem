@@ -26,6 +26,6 @@ describe('guard: คะแนนพฤติกรรม/Active Learning รอ�
     expect(rp).toMatch(/await addActiveLearningPoints\(/);
     expect(rp).toMatch(/Promise\.allSettled/);
     const cs = readSource('src/components/ClassroomSeatingManager.tsx');
-    expect(cs).toMatch(/await addActiveLearningPoints\(student\.studentId, 1\)/);
+    expect(cs).toMatch(/await addActiveLearningPoints\(student\.studentId, 1,/);
   });
 });
