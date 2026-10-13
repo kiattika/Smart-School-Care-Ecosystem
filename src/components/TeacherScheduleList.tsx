@@ -387,19 +387,11 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                         </span>
                       ) : (
                         <div className="flex flex-wrap items-center gap-2">
+                          {/* คาบที่สิ้นสุดแล้ว: ไม่เปิด "เข้าสู่ชั้นเรียน" (ให้คะแนนกิจกรรม/สุ่มตอบ) — ทำได้เฉพาะคาบที่กำลังสอน
+                              เหมือนคาบที่เช็คชื่อย้อนหลัง; การเช็คชื่อ/แก้ย้อนหลังใช้ขั้นตอนขอเช็คชื่อย้อนหลังตามเดิม */}
                           <span className="px-3 py-1.5 text-xs font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 rounded-lg flex items-center gap-1">
                             <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> เช็คชื่อเรียบร้อยแล้ว
                           </span>
-                          {onEnterClassroom && (
-                            <button
-                              id={`btn-past-enter-class-${period.id}`}
-                              onClick={() => onEnterClassroom(period.courseId)}
-                              className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/50 rounded-lg flex items-center gap-1.5 transition active:scale-95 shadow-md shadow-indigo-600/25"
-                            >
-                              <Sparkles className="w-3.5 h-3.5 text-indigo-200" />
-                              เข้าสู่ชั้นเรียน
-                            </button>
-                          )}
                         </div>
                       )}
 

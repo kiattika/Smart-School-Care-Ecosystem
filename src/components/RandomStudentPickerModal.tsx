@@ -40,6 +40,10 @@ interface RandomStudentPickerModalProps {
   courseId: string;
   /** ชื่อวิชา (พร้อมระดับชั้น/ห้อง) — เก็บกับคะแนนเพื่อให้หน้านักเรียนแสดงเป็นรายวิชา */
   courseName?: string;
+  /** กุญแจวิชาสำหรับรวมคะแนนข้ามคาบ (courseActivityKey) */
+  courseKey?: string;
+  /** คะแนนกิจกรรมสะสมของ "วิชานี้" ต่อนักเรียน (ภาคเรียนปัจจุบัน) — ไม่ใช่ยอดรวมทุกวิชา */
+  coursePoints?: Record<string, number>;
   onSelectHighlight?: (studentIds: string[]) => void;
 }
 
@@ -51,14 +55,17 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
   attendanceRecords,
   courseId,
   courseName,
+  courseKey,
+  coursePoints = {},
   onSelectHighlight
 }) => {
   // คะแนนจากกิจกรรมนี้เป็น "คะแนนกิจกรรมรายวิชา" (active_learning_logs ต่อวิชา) — ห้ามไปปรับคะแนนความประพฤติ
   // (students.behaviorScore) ซึ่งเป็นคนละเรื่อง และจะส่งแจ้งเตือนผู้ปกครอง/นักเรียนผิดความหมาย
-  const { addActiveLearningPoints, activeLearningPoints } = useStore();
+  const { addActiveLearningPoints } = useStore();
   const { academicYear, term, isConfigured } = useCurrentSemester();
   const awardExtra = {
     courseName,
+    ...(courseKey ? { courseKey } : {}),
     ...(isConfigured ? { academicYear, term } : {}),
   };
 
@@ -526,7 +533,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                 const studentNo = winner.studentNo || winner.number || (winner.seatIndex !== null ? winner.seatIndex + 1 : 1);
                 const nickname = winner.nickname || '-';
                 const studentCode = winner.studentCode || winner.studentId;
-                const currentALPoints = activeLearningPoints[winner.studentId] || 0;
+                const currentALPoints = coursePoints[winner.studentId] || 0;
                 const awardedNow = awardedStudents[winner.studentId] || 0;
 
                 return (
@@ -665,7 +672,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 my-4">
                   {selectedGroupWinner.students.map((st, idx) => {
                     const stNo = st.studentNo || st.number || (st.seatIndex !== null ? st.seatIndex + 1 : idx + 1);
-                    const currentPts = activeLearningPoints[st.studentId] || 0;
+                    const currentPts = coursePoints[st.studentId] || 0;
                     const awardedForStudent = awardedStudents[st.studentId] || 0;
 
                     return (

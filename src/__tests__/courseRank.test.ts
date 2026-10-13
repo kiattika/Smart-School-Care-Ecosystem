@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  courseActivityKey, coursesInLogs, pointsByStudentForCourse,
   DEFAULT_RANK_LEVELS, rankForPoints, rankLabel, resolveRankLevels, summarizeCoursePoints, termOfDate, validateRankLevels,
 } from '../lib/courseRank';
 import type { ActiveLearningRecord } from '../types';
@@ -104,5 +105,43 @@ describe('guard — คะแนนกิจกรรมรายวิชาแ
     expect(readSource('src/StudentPortal.tsx')).toContain('<CourseActivityPoints');
     expect(readSource('src/components/ClassroomLeaderboard.tsx')).toContain('subscribeActiveLearningLogsForTeacher');
     expect(readSource('src/components/ClassroomLeaderboard.tsx')).not.toMatch(/subscribeActiveLearningLogs\(/);
+  });
+});
+
+describe('คะแนนแยกอิสระรายวิชา (ไม่รวมข้ามวิชา)', () => {
+  const term = { academicYear: '2569', term: '1' as const };
+  const logs = [
+    log({ courseKey: 'HR|ม.5/8', courseId: 'course_a', courseName: 'HomeRoom', points: 2 }),
+    log({ courseKey: 'CZ|ม.5/8', courseId: 'course_b', courseName: 'Cleaning Zone', points: 5 }),
+    log({ courseKey: 'CZ|ม.5/8', courseId: 'course_c', courseName: 'Cleaning Zone', points: 2 }), // คนละคาบ วิชาเดียวกัน
+    log({ courseId: 'course_old', courseName: 'วิชาเก่า', points: 7 }), // รุ่นเก่า ไม่มี courseKey
+  ];
+  it('คะแนนของวิชาหนึ่งไม่ไปรวมกับอีกวิชา แต่รวมข้ามคาบของวิชาเดียวกัน', () => {
+    expect(pointsByStudentForCourse(logs, 'HR|ม.5/8', term)['10001']).toBe(2);
+    expect(pointsByStudentForCourse(logs, 'CZ|ม.5/8', term)['10001']).toBe(7);
+  });
+  it('log รุ่นเก่า (ไม่มี courseKey) นับให้คาบที่มี id ตรงกันเท่านั้น', () => {
+    expect(pointsByStudentForCourse(logs, 'CZ|ม.5/8', term, 'course_old')['10001']).toBe(14);
+    expect(pointsByStudentForCourse(logs, 'HR|ม.5/8', term, 'course_x')['10001']).toBe(2);
+  });
+  it('สรุปฝั่งนักเรียนแยกเป็นรายวิชา ใช้ courseKey เป็นหลัก', () => {
+    const rows = summarizeCoursePoints(logs, term);
+    expect(rows.map(r => [r.courseName, r.points])).toEqual([['วิชาเก่า', 7], ['Cleaning Zone', 7], ['HomeRoom', 2]].sort((a, b) => (b[1] as number) - (a[1] as number) || String(a[0]).localeCompare(String(b[0]), 'th')));
+    expect(coursesInLogs(logs, term).map(c => c.courseId).sort()).toEqual(['CZ|ม.5/8', 'HR|ม.5/8', 'course_old'].sort());
+  });
+  it('courseActivityKey: รหัสวิชา+ชั้น; ชุมนุมใช้ id ชุมนุม; ไม่มีข้อมูล = id', () => {
+    expect(courseActivityKey({ id: 'course_x', code: 'ค32102', level: 'ม.5/9' })).toBe('ค32102|ม.5/9');
+    expect(courseActivityKey({ id: 'elective_abc', code: 'ชุมนุม', level: 'ชุมนุม' })).toBe('elective_abc');
+    expect(courseActivityKey({ id: 'course_y' })).toBe('course_y');
+  });
+  it('guard: ผังที่นั่ง/ตัวสุ่มตอบ แสดงคะแนนต่อวิชา ไม่ใช้ยอดรวมใน store', () => {
+    const seat = readSource('src/components/ClassroomSeatingManager.tsx');
+    expect(seat).toContain('useCourseActivityPoints(');
+    expect(seat).not.toMatch(/activeLearningPoints\[/);
+    const picker = readSource('src/components/RandomStudentPickerModal.tsx');
+    expect(picker).not.toMatch(/activeLearningPoints\[/);
+  });
+  it('guard: คาบที่สิ้นสุดแล้วไม่มีปุ่ม "เข้าสู่ชั้นเรียน"', () => {
+    expect(readSource('src/components/TeacherScheduleList.tsx')).not.toContain('btn-past-enter-class');
   });
 });
