@@ -22,6 +22,8 @@ import { setupAuthListener, signOutUser } from './lib/auth';
 import { describeAuthError } from './lib/authErrors';
 import { useSubstituteSync } from './hooks/useSubstituteSync';
 import { useAppClock } from './hooks/useAppClock';
+import { MobileApp } from './mobile/MobileApp';
+import { isMobilePath } from './lib/pwa';
 
 export default function App() {
   const { user, setUser } = useStore();
@@ -98,6 +100,11 @@ export default function App() {
       });
     }
   };
+
+  // หน้ามือถือ (PWA) — /m : เมนูใช้บ่อยตามบทบาท (ต้องล็อกอินแล้ว; ยังไม่ล็อกอินเห็นหน้า Login ปกติ)
+  if (isMobilePath(window.location.pathname)) {
+    return <MobileApp onLogout={handleLogout} />;
+  }
 
   const showNavbar = user.profile && user.activeRole;
 

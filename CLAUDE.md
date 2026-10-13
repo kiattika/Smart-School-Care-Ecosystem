@@ -289,3 +289,9 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - query ต้องกรอง `memberUid == uid` (ผู้ปกครอง/นักเรียน) หรือ `room == ห้อง` (ครู) + studentId + channel
 - UI: `src/components/chat/ClassChatPanel.tsx`; เมนูแยกใน ParentPortal/StudentPortal (ชำระเงิน | สนทนากับครู | นัดพบครู) และ AdvisorPortal (`class-chat`); `ParentEngagementServices` รับ prop `section` ('billing'|'appointment')
 - คอลเลกชันเดิม `parent_teacher_messages` เลิกใช้ (ไม่ลบข้อมูลเก่า)
+
+## หน้ามือถือ (PWA) `/m`
+- ติดตั้งลงหน้าจอหลักได้ (`public/manifest.webmanifest`, ไอคอน `public/icons/`, `start_url: /m`); `App.tsx` ส่ง `/m` ไป `MobileApp` **หลังล็อกอินเท่านั้น** (ยังไม่ล็อกอิน = หน้า Login ปกติ)
+- เมนูตามบทบาทอยู่ที่ `src/mobile/mobileMenu.ts` (เช็คอินเข้าโรงเรียน=GPS modal เดิม, ตารางวันนี้, เช็คชื่อโฮมรูม [ใช้ `useHomeroomAttendance` ตัวเดียวกับหน้าครูที่ปรึกษา], พิกัดบ้านนักเรียน [`StudentHomeLocationForm` เดิม], ข้อความ [`ClassChatPanel`]) — งานอื่นเปิดเว็บเต็มด้วยลิงก์ `/`
+- `public/sw.js`: แคชเฉพาะเปลือกแอปของโดเมนเรา; **ห้ามแตะคำขอข้ามโดเมน (Firestore/Auth/Functions/Storage) และ `/__/`**; เวอร์ชันใหม่รอผู้ใช้กด "อัปเดต" (SKIP_WAITING) ไม่ skipWaiting เอง; ลงทะเบียนเฉพาะ production บน https (`src/lib/pwa.ts`); `firebase.json` ตั้ง `/sw.js` เป็น no-cache — เปลี่ยนไฟล์แคชต้องขยับ `VERSION` ใน sw.js
+- ผู้ปกครองที่เข้าทาง LINE: LIFF Endpoint URL ตั้งไว้ที่ `/` — การล็อกอิน LINE ทำที่หน้าแรกตามเดิม; `/m` สำหรับผู้ที่ล็อกอินแล้ว (ตรวจในเครื่องจริงก่อนแนะนำให้ผู้ปกครองติดตั้ง)
