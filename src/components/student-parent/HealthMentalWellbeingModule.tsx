@@ -34,6 +34,7 @@ import { readDocOrNull, loadParentNotices, type ParentNoticeDoc } from '../../se
 import { BMI_CATEGORY_LABEL } from '../../lib/utils';
 import { SemesterHealthSelfReportForm } from './SemesterHealthSelfReportForm';
 import { HealthProfileSection } from '../health/HealthProfileSection';
+import { GrowthTrendChart } from '../health/GrowthTrendChart';
 import { useStudentBloodType } from '../../hooks/useStudentBloodType';
 import {
   InfirmaryVisit,
@@ -390,6 +391,10 @@ function HealthMentalWellbeingModuleInner({
                 ประวัติการเจริญเติบโตรายภาคเรียน (Growth Trends)
               </h3>
               <p className="text-[11px] text-slate-400 mb-4">นักเรียนกรอกเองรายภาคเรียน (พยาบาลบันทึกแทน/แก้ไขกรณีพิเศษ)</p>
+
+              <div className="mb-5">
+                <GrowthTrendChart logs={healthLogs} />
+              </div>
 
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">

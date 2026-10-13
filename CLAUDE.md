@@ -325,6 +325,11 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - `saveFamilyHomeVisitInfo` เขียนทั้งสองเอกสารใน batch เดียว; `FamilyHomeVisitInfoForm` ซิงก์ให้เองครั้งเดียวสำหรับผู้ปกครองที่เคยบันทึกก่อนมีฟีเจอร์ (ข้อมูลเก่าจะขึ้นเมื่อผู้ปกครองเปิดฟอร์ม); เขียน: ผู้ปกครองตัวจริงเท่านั้น; อ่าน: พยาบาล/แอดมิน/ครูที่ปรึกษา/ผู้ปกครอง; ลบไม่ได้
 - UI พยาบาล: `InfirmaryEmergencyContactsPanel` (แท็บข้อมูลโรคประจำตัว); ไม่มีข้อมูล = แจ้งว่าผู้ปกครองยังไม่ได้กรอก
 
+## กราฟพัฒนาการน้ำหนัก/ส่วนสูง/BMI — `GrowthTrendChart`
+- `src/components/health/GrowthTrendChart.tsx` (SVG ล้วน) + `src/lib/growthChart.ts` แสดงใน "Growth Trends" ของ `HealthMentalWellbeingModule` (นักเรียน+ผู้ปกครอง) เหนือตารางเดิม (ตารางคือ table view ของข้อมูลชุดเดียวกัน)
+- **ห้ามทำกราฟสองแกน (dual-axis)** — ส่วนสูง/น้ำหนัก/BMI คนละหน่วยและสเกล ใช้ 3 แผงเรียงต่อกัน แกนภาคเรียนร่วม + crosshair/tooltip ร่วม (เมาส์/นิ้ว/ลูกศรซ้ายขวา); แผง BMI มีแถบ "ช่วงปกติ" 18.5–22.9 (`BMI_HEALTHY_MIN/MAX`)
+- ใช้เฉพาะ `student_semester_health` จริง (ไม่มีข้อมูล = empty state; 1 ภาคเรียน = แสดงจุดเดียว)
+
 ## คลังยาห้องพยาบาล — infirmary_medicines / infirmary_stock_movements
 - ยอดคงเหลือ (`stock`) เปลี่ยนได้เฉพาะพร้อม "รายการเคลื่อนไหว" (append-only) ใน batch/transaction เดียวกัน: ยาชี้ movement ล่าสุดด้วย `lastMovementId`, rules ตรวจด้วย `getAfter` (`balanceAfter == stock`, `delta == stock - เดิม`, ชนิด/เครื่องหมาย delta ตรงกัน, `byUid == auth.uid`, ยอดไม่ติดลบ) — ชนิด INITIAL/RESTOCK/DISPENSE/DISCARD/ADJUST (`src/lib/infirmaryStock.ts`)
 - การจ่ายยาในบันทึกเคสห้องพยาบาลตัดสต็อกใน transaction เดียวกับเคส+แจ้งเตือนผู้ปกครอง (`recordInfirmaryVisit({dispensed})`); รับเข้า/ทิ้ง/ปรับยอดผ่าน `changeMedicineStock`; ห้ามลบยา (ปิดด้วย `active=false`)
