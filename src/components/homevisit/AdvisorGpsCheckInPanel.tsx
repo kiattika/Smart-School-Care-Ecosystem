@@ -1,10 +1,45 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Satellite, MapPin, Clock, ShieldCheck, ShieldAlert, ExternalLink } from 'lucide-react';
+import { Satellite, Camera, MapPin, Clock, ShieldCheck, ShieldAlert, ExternalLink } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 import { Student, GPSCheckInLog } from '../../types';
 import { formatCheckInClock } from '../../lib/gateMorningStatus';
-import { subscribeGpsCheckInLogsSince } from '../../services/firestoreService';
+import { subscribeGpsCheckInLogsForUsers, getCheckInSelfieFirestore } from '../../services/firestoreService';
+import { SELFIE_RETENTION_DAYS } from '../../lib/selfieRetention';
 import { flagCheckIns } from '../../lib/checkinFlags';
+
+/** ดูรูปเซลฟี่เช็คอิน — โหลดจากคอลเลกชันแยกเฉพาะตอนกด (รูปหมดอายุเองใน SELFIE_RETENTION_DAYS วัน) */
+function SelfieViewer({ log }: { log: GPSCheckInLog }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'missing' | 'error' | 'ok'>('idle');
+  const [src, setSrc] = useState<string | null>(null);
+  if (!log.hasSelfie && !log.selfieUrl) return null;
+  const open = async () => {
+    if (log.selfieUrl) { setSrc(log.selfieUrl); setState('ok'); return; }
+    setState('loading');
+    try {
+      const url = await getCheckInSelfieFirestore(log.id);
+      if (url) { setSrc(url); setState('ok'); } else setState('missing');
+    } catch (e) {
+      console.warn('[SelfieViewer] load failed', e);
+      setState('error');
+    }
+  };
+  return (
+    <span className="flex items-center gap-2">
+      {state === 'ok' && src ? (
+        <>
+          <img src={src} alt="รูปเช็คอิน" className="h-24 rounded-lg border border-white/10" />
+          <button type="button" onClick={() => { setSrc(null); setState('idle'); }} className="text-slate-400 underline">ซ่อน</button>
+        </>
+      ) : (
+        <button type="button" onClick={open} disabled={state === 'loading'} className="flex items-center gap-1 text-sky-400 hover:text-sky-300">
+          <Camera className="w-3.5 h-3.5" /> {state === 'loading' ? 'กำลังโหลด...' : 'ดูรูป'}
+        </button>
+      )}
+      {state === 'missing' && <span className="text-slate-500">รูปหมดอายุแล้ว (เก็บ {SELFIE_RETENTION_DAYS} วัน)</span>}
+      {state === 'error' && <span className="text-rose-400">โหลดรูปไม่สำเร็จ (ไม่มีสิทธิ์หรือเครือข่ายขัดข้อง)</span>}
+    </span>
+  );
+}
 
 /**
  * แผงแสดง "พิกัด GPS การเช็คอินเข้าโรงเรียนของนักเรียน" สำหรับครูที่ปรึกษา
@@ -16,22 +51,23 @@ export function AdvisorGpsCheckInPanel({ students }: { students: Student[] }) {
   const today = format(new Date(), 'yyyy-MM-dd');
   const [allLogs, setAllLogs] = useState<GPSCheckInLog[]>([]);
 
-  // ย้อนหลัง 14 วัน — ใช้เทียบรูปแบบข้ามวัน/ข้ามคนเพื่อตั้งธง "ควรตรวจสอบ" (แสดงเฉพาะของวันนี้)
-  const since = format(subDays(new Date(), 14), 'yyyy-MM-dd');
-  useEffect(() => subscribeGpsCheckInLogsSince(since, setAllLogs), [since]);
-  const logs = useMemo(() => allLogs.filter(l => l.date === today).sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || '')), [allLogs, today]);
-  const flags = useMemo(() => flagCheckIns(allLogs), [allLogs]);
-
-  // เฉพาะนักเรียนในห้องนี้ (จับด้วย userId = studentId หรือ studentUid) + เข้า (ENTRY)
+  // เฉพาะนักเรียนในห้อง (จับด้วย userId = studentId หรือ studentUid)
   const idset = useMemo(() => {
     const s = new Set<string>();
     students.forEach(st => { s.add(st.studentId); if (st.studentUid) s.add(st.studentUid); });
     return s;
   }, [students]);
+  const idKey = useMemo(() => Array.from(idset).sort().join('|'), [idset]);
+
+  // ย้อนหลัง 7 วัน เฉพาะนักเรียนในห้องตัวเอง (ไม่ดึงทั้งโรงเรียน) — ใช้ตั้งธง "ควรตรวจสอบ" ข้ามวัน แต่แสดงเฉพาะของวันนี้
+  const since = format(subDays(new Date(), 7), 'yyyy-MM-dd');
+  useEffect(() => subscribeGpsCheckInLogsForUsers(Array.from(idset), since, setAllLogs), [idKey, since]); // eslint-disable-line react-hooks/exhaustive-deps
+  const logs = useMemo(() => allLogs.filter(l => l.date === today).sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || '')), [allLogs, today]);
+  const flags = useMemo(() => flagCheckIns(allLogs), [allLogs]);
 
   const rows = useMemo(
-    () => logs.filter(l => l.type === 'ENTRY' && (idset.has(l.userId) || /STUDENT/i.test(l.userRole || ''))),
-    [logs, idset]
+    () => logs.filter(l => l.type === 'ENTRY'),
+    [logs]
   );
 
   const flaggedCount = rows.filter(l => (flags.get(l.id) || []).length > 0).length;
@@ -79,6 +115,7 @@ export function AdvisorGpsCheckInPanel({ students }: { students: Student[] }) {
               >
                 <MapPin className="w-3 h-3" /> {l.latitude.toFixed(5)}, {l.longitude.toFixed(5)} <ExternalLink className="w-3 h-3" />
               </a>
+              <SelfieViewer log={l} />
               {fl.length > 0 && (
                 <div className="basis-full text-[11px] text-amber-300 space-y-0.5" role="note">
                   <div className="font-bold">⚠ ควรตรวจสอบ (เป็นสัญญาณช่วยตรวจ ไม่ได้แปลว่าปลอมแน่นอน)</div>

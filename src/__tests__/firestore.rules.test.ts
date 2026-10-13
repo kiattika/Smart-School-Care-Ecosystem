@@ -3051,6 +3051,67 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // gps_checkin_selfies — รูปเซลฟี่เช็คอินแยกเอกสาร หมดอายุเองด้วย TTL (expireAt)
+  describe('gps_checkin_selfies collection', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const selfie = (over: Record<string, unknown> = {}) => ({
+      authUid: 'sf-stu-uid', userId: '10001', homeroomClass: 'ม.5/8', date: '2026-10-13',
+      dataUrl: 'data:image/jpeg;base64,AAAA', expireAt: new Date(Date.now() + 30 * DAY), ...over,
+    });
+    beforeEach(async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('staff/teacher-07').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.5/8' } });
+        await ctx.firestore().doc('staff/teacher-08').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+      });
+    });
+
+    it('lets the owner create their own selfie (authUid == auth.uid) and read it back', async () => {
+      const db = asUser('sf-stu-uid', ['STUDENT']).firestore();
+      await assertSucceeds(db.doc('gps_checkin_selfies/s1').set(selfie()));
+      await assertSucceeds(db.doc('gps_checkin_selfies/s1').get());
+    });
+
+    it('denies creating a selfie attributed to someone else', async () => {
+      await assertFails(asUser('sf-stu-uid', ['STUDENT']).firestore().doc('gps_checkin_selfies/s2').set(selfie({ authUid: 'other-uid' })));
+    });
+
+    it('denies a missing/past/too-far expireAt, an oversized dataUrl and unknown fields', async () => {
+      const db = asUser('sf-stu-uid', ['STUDENT']).firestore();
+      await assertFails(db.doc('gps_checkin_selfies/s3').set(selfie({ expireAt: new Date(Date.now() - DAY) })));
+      await assertFails(db.doc('gps_checkin_selfies/s4').set(selfie({ expireAt: new Date(Date.now() + 365 * DAY) })));
+      await assertFails(db.doc('gps_checkin_selfies/s5').set(selfie({ dataUrl: 'x'.repeat(140001) })));
+      await assertFails(db.doc('gps_checkin_selfies/s6').set(selfie({ extra: 1 })));
+      const { expireAt: _e, ...noExpire } = selfie();
+      await assertFails(db.doc('gps_checkin_selfies/s7').set(noExpire));
+    });
+
+    it('denies updating an existing selfie (even by the owner)', async () => {
+      const db = asUser('sf-stu-uid', ['STUDENT']).firestore();
+      await assertSucceeds(db.doc('gps_checkin_selfies/s8').set(selfie()));
+      await assertFails(db.doc('gps_checkin_selfies/s8').set(selfie({ dataUrl: 'data:image/jpeg;base64,BBBB' })));
+    });
+
+    it('lets the homeroom teacher of THAT room read; denies another room, another student, and a blank-room doc', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gps_checkin_selfies/s9').set(selfie());
+        await ctx.firestore().doc('gps_checkin_selfies/s10').set(selfie({ homeroomClass: '' }));
+      });
+      await assertSucceeds(asUser('hr-1', ['HOMEROOM_TEACHER'], { staffId: 'teacher-07' }).firestore().doc('gps_checkin_selfies/s9').get());
+      await assertFails(asUser('hr-2', ['HOMEROOM_TEACHER'], { staffId: 'teacher-08' }).firestore().doc('gps_checkin_selfies/s9').get());
+      await assertFails(asUser('stu-2', ['STUDENT']).firestore().doc('gps_checkin_selfies/s9').get());
+      await assertFails(asUser('hr-1', ['HOMEROOM_TEACHER'], { staffId: 'teacher-07' }).firestore().doc('gps_checkin_selfies/s10').get());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('gps_checkin_selfies/s9').get());
+    });
+
+    it('only SUPER_ADMIN may delete', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gps_checkin_selfies/s11').set(selfie());
+      });
+      await assertFails(asUser('sf-stu-uid', ['STUDENT']).firestore().doc('gps_checkin_selfies/s11').delete());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('gps_checkin_selfies/s11').delete());
+    });
+  });
+
   // gate_attendance_logs — การผ่านประตูโรงเรียน (ครูที่ปรึกษา/ผู้ปกครอง/นักเรียน อ่านผ่าน denormalized uid)
   describe('gate_attendance_logs collection', () => {
     const LOG = {

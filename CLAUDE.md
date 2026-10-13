@@ -174,6 +174,12 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 
 ---
 
+### รูปเซลฟี่เช็คอิน (PDPA) — แยกเอกสาร หมดอายุเอง 30 วัน
+
+- รูปเก็บที่ `gps_checkin_selfies/{logId}` (ไม่ฝังใน `gps_check_in_logs`/`gate_attendance_logs` — เอกสารเช็คอินเล็ก อ่านเร็ว) มี `expireAt` ให้ **Firestore TTL** ลบเอง (`src/lib/selfieRetention.ts`, 30 วัน; rules บังคับ ≤ 31 วัน) — **ต้องเปิด TTL policy ที่ Firebase Console ครั้งเดียว:** collection group `gps_checkin_selfies`, field `expireAt` (ถ้าไม่เปิด รูปไม่ถูกลบ)
+- log มี `hasSelfie: true`; ครูที่ปรึกษากด "ดูรูป" ในแผงพิกัด GPS (โหลดตอนกดเท่านั้น); อ่านได้เฉพาะเจ้าของ/SUPER_ADMIN/ครูที่ปรึกษาของ `homeroomClass` นั้น (ค่าว่าง = ไม่ผ่าน); สร้างได้แค่เจ้าของ ห้ามแก้ ลบได้เฉพาะ SUPER_ADMIN. log รุ่นเก่าที่ฝัง `selfieUrl` ยังแสดงได้
+- แผงครูที่ปรึกษาดึง `gps_check_in_logs` **เฉพาะนักเรียนในห้อง ย้อนหลัง 7 วัน** (`subscribeGpsCheckInLogsForUsers`, ต้องมี composite index `userId+date` ใน `firestore.indexes.json`) — ห้าม query ทั้งโรงเรียน (3,000 คน × หลายวัน = หลายหมื่นเอกสารต่อการเปิดหนึ่งครั้ง)
+
 ## Environment & Tooling
 
 ### Firebase Emulator (local dev)

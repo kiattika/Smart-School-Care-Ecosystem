@@ -503,6 +503,25 @@ service cloud.firestore {
                       (isSignedIn() && (request.resource.data.userId == request.auth.uid || request.resource.data.studentId == request.auth.uid || request.resource.data.authUid == request.auth.uid));
     }
 
+    // 17b. รูปเซลฟี่เช็คอิน — แยกจาก gps_check_in_logs เพื่อให้เอกสารเช็คอินเล็ก และหมดอายุเองด้วย Firestore TTL (expireAt, 30 วัน)
+    // อ่านได้: เจ้าของ, SUPER_ADMIN, ครูที่ปรึกษาของห้องนั้น (homeroomClass ต้องไม่ว่าง) — สร้างได้แค่เจ้าของ ห้ามแก้ ลบได้เฉพาะ SUPER_ADMIN
+    match /gps_checkin_selfies/{logId} {
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     (isSignedIn() && resource.data.authUid == request.auth.uid) ||
+                     (resource.data.get('homeroomClass', '') != '' && isHomeroomTeacherOf(resource.data.homeroomClass));
+      allow create: if isSignedIn()
+                    && request.resource.data.authUid == request.auth.uid
+                    && request.resource.data.keys().hasOnly(['authUid', 'userId', 'homeroomClass', 'date', 'dataUrl', 'expireAt', 'createdAt'])
+                    && request.resource.data.keys().hasAll(['authUid', 'dataUrl', 'expireAt'])
+                    && request.resource.data.dataUrl is string
+                    && request.resource.data.dataUrl.size() <= 140000
+                    && request.resource.data.expireAt is timestamp
+                    && request.resource.data.expireAt > request.time
+                    && request.resource.data.expireAt <= request.time + duration.value(31, 'd');
+      allow update: if false;
+      allow delete: if hasRole('SUPER_ADMIN');
+    }
+
     // 18. Substitute Teaching Assignments & Post Teaching Records
     // TODO(security): ตอนนี้ write เป็น role-based ล้วน (ยังบังคับลำดับ 4 ขั้นที่ layer นี้ไม่ได้).
     //   หลัง workflow ฝั่ง client verify ผ่าน emulator แล้ว ให้เพิ่มการตรวจ:

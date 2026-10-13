@@ -12,6 +12,7 @@ import {
   deleteDoc,
   runTransaction,
   serverTimestamp,
+  Timestamp,
   orderBy,
   onSnapshot,
   increment,
@@ -1226,23 +1227,66 @@ function gpsLogFromDoc(id: string, data: Record<string, any>): GPSCheckInLog {
   return { id, ...rest, ...(ms !== undefined ? { serverTimeMs: ms } : {}) } as GPSCheckInLog;
 }
 
-/** log ตั้งแต่วันที่ startDate (yyyy-MM-dd) เป็นต้นไป — ใช้ตรวจรูปแบบข้ามวัน (ช่วง range บน field เดียว ไม่ต้องสร้าง index) */
-export function subscribeGpsCheckInLogsSince(
+/**
+ * log ของ "รายชื่อผู้ใช้ที่ระบุ" ตั้งแต่ startDate — ครูที่ปรึกษาดึงเฉพาะนักเรียนในห้องตัวเอง (ไม่ดึงทั้งโรงเรียน)
+ * `in` รับได้ครั้งละ 30 ค่า จึงแบ่งเป็นชุดละ 30 แล้วรวมผล; ต้องมี composite index (userId ASC, date ASC)
+ */
+export function subscribeGpsCheckInLogsForUsers(
+  userIds: string[],
   startDate: string,
   onUpdate: (logs: GPSCheckInLog[]) => void
 ): () => void {
+  const ids = Array.from(new Set(userIds.filter(Boolean)));
+  if (ids.length === 0) { onUpdate([]); return () => {}; }
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+  const results: GPSCheckInLog[][] = chunks.map(() => []);
+  const emit = () => onUpdate(results.flat());
+  const unsubs = chunks.map((chunk, idx) => {
+    try {
+      const q = query(collection(db, 'gps_check_in_logs'), where('userId', 'in', chunk), where('date', '>=', startDate));
+      return onSnapshot(q, (snap) => {
+        results[idx] = snap.docs.map(d => gpsLogFromDoc(d.id, d.data()));
+        emit();
+      }, (error) => {
+        console.warn('[subscribeGpsCheckInLogsForUsers] Listener error:', error.message);
+        results[idx] = [];
+        emit();
+      });
+    } catch (error) {
+      console.warn('[subscribeGpsCheckInLogsForUsers] Setup error:', error);
+      return () => {};
+    }
+  });
+  return () => unsubs.forEach(u => u());
+}
+
+/** เซฟรูปเซลฟี่เช็คอินลงคอลเลกชันแยก (หมดอายุเอง) — throw เมื่อเขียนไม่สำเร็จ */
+export async function saveCheckInSelfieFirestore(p: {
+  logId: string; authUid: string; userId: string; homeroomClass?: string; date: string; dataUrl: string; expireAt: Date;
+}): Promise<void> {
+  const path = `gps_checkin_selfies/${p.logId}`;
   try {
-    const q = query(collection(db, 'gps_check_in_logs'), where('date', '>=', startDate));
-    return onSnapshot(q, (snap) => {
-      onUpdate(snap.docs.map(d => gpsLogFromDoc(d.id, d.data())));
-    }, (error) => {
-      console.warn('[subscribeGpsCheckInLogsSince] Listener error:', error.message);
-      onUpdate([]);
-    });
+    await setDoc(doc(db, 'gps_checkin_selfies', p.logId), omitUndefined({
+      authUid: p.authUid,
+      userId: p.userId,
+      homeroomClass: p.homeroomClass,
+      date: p.date,
+      dataUrl: p.dataUrl,
+      expireAt: Timestamp.fromDate(p.expireAt),
+      createdAt: serverTimestamp(),
+    }));
   } catch (error) {
-    console.warn('[subscribeGpsCheckInLogsSince] Setup error:', error);
-    return () => {};
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
+}
+
+/** อ่านรูปเซลฟี่ของ log หนึ่งรายการ — null = ไม่มี/หมดอายุแล้ว (ถูก TTL ลบ) */
+export async function getCheckInSelfieFirestore(logId: string): Promise<string | null> {
+  const snap = await getDoc(doc(db, 'gps_checkin_selfies', logId));
+  if (!snap.exists()) return null;
+  const v = snap.data().dataUrl;
+  return typeof v === 'string' ? v : null;
 }
 
 export function subscribeGpsCheckInLogsByDate(
