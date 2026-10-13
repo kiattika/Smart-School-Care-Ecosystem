@@ -16,4 +16,5 @@ export interface MobileDueStatus {
   healthDone?: boolean; // บันทึกสุขภาพภาคเรียนนี้แล้ว (นักเรียน)
   sdqDone?: boolean;    // ประเมิน SDQ ปีการศึกษานี้แล้ว (ฉบับของผู้ใช้เอง)
   twoQDue?: boolean;    // ถึงกำหนดทำ 2Q (นักเรียน)
+  clubOpen?: boolean;   // มีชุมนุมที่เปิดรับสมัครอยู่ ณ ตอนนี้ (นักเรียน) — ปิดรับหมด = เมนูสมัครชุมนุมหาย
 }

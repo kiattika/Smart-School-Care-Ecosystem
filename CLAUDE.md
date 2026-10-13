@@ -297,6 +297,17 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - เมนูแบบประเมินบนมือถือ (`mobileMenuFor({due})`, `src/lib/mobileDue.ts`, `src/mobile/useMobileDue.ts`): สุขภาพรายภาคเรียน/SDQ รายปีการศึกษา **หายจากหน้าหลักเมื่อทำแล้ว**, 2Q โผล่เมื่อครบ 14 วันนับจากครั้งล่าสุด (ฝั่ง client เท่านั้น ไม่ได้บังคับที่ rules) — ยังไม่รู้สถานะ = ซ่อนไว้ก่อน; หน้าจอใช้ฟอร์มเดิมของเว็บผ่าน prop `onlyTab` (HealthMentalWellbeingModule / GateAttendanceTracker) ห้ามเขียนฟอร์มซ้ำ
 - ผู้ปกครองที่เข้าทาง LINE: LIFF Endpoint URL ตั้งไว้ที่ `/` — การล็อกอิน LINE ทำที่หน้าแรกตามเดิม; `/m` สำหรับผู้ที่ล็อกอินแล้ว (ตรวจในเครื่องจริงก่อนแนะนำให้ผู้ปกครองติดตั้ง)
 
+## ช่วงเวลารับสมัครชุมนุม + นับถอยหลัง
+- `elective_activities_config.enrollmentOpensAt/ClosesAt` (Firestore Timestamp, ว่าง = ไม่จำกัดด้านนั้น): สถานะจริงต้องคำนวณด้วย `enrollmentState()` (`src/lib/enrollmentWindow.ts`) เท่านั้น — **ห้ามเทียบ `enrollmentStatus` อย่างเดียว**; rules บังคับด้วยเวลาเซิร์ฟเวอร์ (`activityEnrollmentOpen`: สมัคร/สมัครใหม่หลังถอน) ถอนตัวไม่ผูกช่วงเวลา
+- ตั้งช่วงเวลาได้โดย SUPER_ADMIN/ACADEMIC_HEAD (หน้าชุมนุมของแอดมิน) และ **ครูรับผิดชอบชุมนุมนั้น** (`ResponsibleClubWindowCard` ใน TeacherPortal; rules ให้แตะได้แค่ enrollmentStatus/OpensAt/ClosesAt); ใช้ `DatePicker`+`TimePicker` เท่านั้น
+- ตัวนับถอยหลังกลาง `DeadlineCountdown` (เหลือ ≤ 24 ชม. เหลือง, ≤ 1 ชม. แดง) ใช้กับชุมนุม + `GradeLockCountdownBanner` (อ่าน `school_settings/system_locks` ผ่าน `useGradeLocks`, ตรรกะ `src/lib/gradeLockWindow.ts`); เมนู "สมัครชุมนุม" บนมือถือโผล่เฉพาะตอนมีชุมนุมเปิดรับอยู่ (`due.clubOpen`)
+- ชุมนุมที่ "ปิดแล้ว" (สั่งปิดหรือเลยเวลาปิด) เข้าตารางสอนครูรับผิดชอบ (`isEnrollmentClosed`)
+
+## ข้อมูลสุขภาพประจำตัว (โรคประจำตัว / แพ้ยา-อาหาร / ดูแลพิเศษ) — `student_health_profiles/{studentId}`
+- **ครอบครัว (นักเรียนเจ้าของ/ผู้ปกครองตัวจริง) เป็นผู้กรอก; พยาบาล (INFIRMARY_STAFF/SUPER_ADMIN) ยืนยันได้อย่างเดียว** (แตะได้เฉพาะ `verifiedAt/By/Name`); ครอบครัวแก้ทุกครั้งตรายืนยันถูกล้าง (rules บังคับ `verifiedAt == null`); อ่านได้: ครอบครัว/พยาบาล/แอดมิน/ครูที่ปรึกษาของห้อง; ลบไม่ได้
+- UI: `HealthProfileSection` (นักเรียน+ผู้ปกครอง ผ่าน HealthMentalWellbeingModule), `InfirmaryHealthProfilePanel` (พยาบาล); ตรวจเนื้อหารายการที่ client (`src/lib/healthProfile.ts`) เพราะ rules วนตรวจฟิลด์ในรายการไม่ได้
+- ❌ `store.chronicIllnesses/allergies/specialCareNeeds` ว่างเสมอ (ไม่มีใครเขียน) — ห้ามกลับไปอ่านจากตรงนั้น; แท็บ "ข้อมูลโรคประจำตัว" ของพยาบาลเคยโชว์ข้อมูลปลอมตายตัวกับนักเรียนทุกคน (guard test `healthProfile.test.ts`)
+
 ## คลังยาห้องพยาบาล — infirmary_medicines / infirmary_stock_movements
 - ยอดคงเหลือ (`stock`) เปลี่ยนได้เฉพาะพร้อม "รายการเคลื่อนไหว" (append-only) ใน batch/transaction เดียวกัน: ยาชี้ movement ล่าสุดด้วย `lastMovementId`, rules ตรวจด้วย `getAfter` (`balanceAfter == stock`, `delta == stock - เดิม`, ชนิด/เครื่องหมาย delta ตรงกัน, `byUid == auth.uid`, ยอดไม่ติดลบ) — ชนิด INITIAL/RESTOCK/DISPENSE/DISCARD/ADJUST (`src/lib/infirmaryStock.ts`)
 - การจ่ายยาในบันทึกเคสห้องพยาบาลตัดสต็อกใน transaction เดียวกับเคส+แจ้งเตือนผู้ปกครอง (`recordInfirmaryVisit({dispensed})`); รับเข้า/ทิ้ง/ปรับยอดผ่าน `changeMedicineStock`; ห้ามลบยา (ปิดด้วย `active=false`)

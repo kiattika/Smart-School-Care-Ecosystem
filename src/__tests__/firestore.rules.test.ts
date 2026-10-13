@@ -1624,6 +1624,130 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // 15c1b. ช่วงเวลารับสมัครชุมนุม — เวลาเซิร์ฟเวอร์บังคับที่ rules (activityEnrollmentOpen) + ครูรับผิดชอบตั้งช่วงเวลาของตัวเอง
+  describe('club enrollment window (enrollmentOpensAt/ClosesAt)', () => {
+    const SID = 'win-std-1';
+    const STU = 'win-stu-uid';
+    const HOUR = 3_600_000;
+    const stu = () => asUser(STU, ['STUDENT']).firestore() as any;
+    const owner = () => asUser('win-t1', ['SUBJECT_TEACHER'], { staffId: 'win-t1' }).firestore() as any;
+    const otherT = () => asUser('win-t2', ['SUBJECT_TEACHER'], { staffId: 'win-t2' }).firestore() as any;
+    async function seedClub(id: string, over: Record<string, unknown>) {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${SID}`).set({ studentId: SID, studentUid: STU, room: 'ม.1/1', name: 'Win Kid' });
+        await ctx.firestore().doc(`elective_activities_config/${id}`).set({
+          name: 'ชุมนุมทดสอบ', capacity: 20, responsibleTeacherUids: ['win-t1'], responsibleTeacherNames: ['ครูหนึ่ง'], enrollmentStatus: 'OPEN', ...over,
+        });
+      });
+    }
+    const enrollDoc = (club: string) => ({ activityId: club, studentId: SID, studentUid: STU, enrolledAt: new Date().toISOString(), removedAt: null, removedBy: null, removedReason: null });
+
+    it('สมัครได้เมื่ออยู่ในช่วงเวลา / ไม่กำหนดเวลา', async () => {
+      await seedClub('c-in', { enrollmentOpensAt: new Date(Date.now() - HOUR), enrollmentClosesAt: new Date(Date.now() + HOUR) });
+      await seedClub('c-none', {});
+      await assertSucceeds(mSetDoc(mDoc(stu(), `activity_enrollments/c-in_${SID}`), enrollDoc('c-in')));
+      await assertSucceeds(mSetDoc(mDoc(stu(), `activity_enrollments/c-none_${SID}`), enrollDoc('c-none')));
+    });
+
+    it('สมัครไม่ได้เมื่อเลยเวลาปิด / ยังไม่ถึงเวลาเปิด / สั่งปิดมือ', async () => {
+      await seedClub('c-late', { enrollmentClosesAt: new Date(Date.now() - HOUR) });
+      await seedClub('c-early', { enrollmentOpensAt: new Date(Date.now() + HOUR) });
+      await seedClub('c-closed', { enrollmentStatus: 'CLOSED' });
+      await assertFails(mSetDoc(mDoc(stu(), `activity_enrollments/c-late_${SID}`), enrollDoc('c-late')));
+      await assertFails(mSetDoc(mDoc(stu(), `activity_enrollments/c-early_${SID}`), enrollDoc('c-early')));
+      await assertFails(mSetDoc(mDoc(stu(), `activity_enrollments/c-closed_${SID}`), enrollDoc('c-closed')));
+    });
+
+    it('ครูรับผิดชอบตั้งช่วงเวลา/สถานะของชุมนุมตัวเองได้ แต่แก้ฟิลด์อื่นหรือชุมนุมคนอื่นไม่ได้', async () => {
+      await seedClub('c-own', {});
+      const ref = (db: any) => mDoc(db, 'elective_activities_config/c-own');
+      await assertSucceeds(mUpdateDoc(ref(owner()), { enrollmentOpensAt: new Date(Date.now() + HOUR), enrollmentClosesAt: new Date(Date.now() + 5 * HOUR) }));
+      await assertSucceeds(mUpdateDoc(ref(owner()), { enrollmentStatus: 'CLOSED' }));
+      await assertFails(mUpdateDoc(ref(owner()), { capacity: 999 }));
+      await assertFails(mUpdateDoc(ref(owner()), { enrollmentClosesAt: 'not-a-timestamp' }));
+      await assertFails(mUpdateDoc(ref(otherT()), { enrollmentStatus: 'CLOSED' }));
+      await assertFails(mUpdateDoc(ref(stu()), { enrollmentStatus: 'CLOSED' }));
+    });
+  });
+
+  // 15c1c. ข้อมูลสุขภาพประจำตัว — ครอบครัวกรอก พยาบาลยืนยันได้อย่างเดียว
+  describe('student_health_profiles (โรคประจำตัว/แพ้/ดูแลพิเศษ)', () => {
+    const SID = 'hp-std-1';
+    const STU = 'hp-stu';
+    const PAR = 'hp-par';
+    const HR = 'hp-hr';
+    const stu = () => asUser(STU, ['STUDENT']).firestore() as any;
+    const par = () => asUser(PAR, ['PARENT']).firestore() as any;
+    const otherPar = () => asUser('hp-par-2', ['PARENT']).firestore() as any;
+    const nurse = () => asUser('hp-nurse', ['INFIRMARY_STAFF']).firestore() as any;
+    const hr = () => asUser(HR, ['HOMEROOM_TEACHER'], { staffId: HR }).firestore() as any;
+    const otherHr = () => asUser('hp-hr2', ['HOMEROOM_TEACHER'], { staffId: 'hp-hr2' }).firestore() as any;
+    const ref = (db: any) => mDoc(db, `student_health_profiles/${SID}`);
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${SID}`).set({ studentId: SID, studentUid: STU, parentUid: PAR, room: 'ม.2/2', name: 'HP Kid' });
+        await ctx.firestore().doc(`staff/${HR}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.2/2' } });
+        await ctx.firestore().doc('staff/hp-hr2').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+      });
+    }
+    const profile = (role: 'STUDENT' | 'PARENT', uid: string, over: Record<string, unknown> = {}) => ({
+      studentId: SID, studentUid: STU, parentUid: PAR,
+      chronicIllnesses: [{ id: 'ci1', name: 'หอบหืด', severity: 'MODERATE', treatmentCare: 'พกยาพ่น' }],
+      allergies: [{ id: 'al1', allergen: 'เพนิซิลลิน', type: 'DRUG', reaction: 'ผื่น' }],
+      specialCare: [],
+      updatedAt: mServerTimestamp(), updatedByUid: uid, updatedByRole: role,
+      verifiedAt: null, verifiedByUid: null, verifiedByName: null, ...over,
+    });
+    async function put(over: Record<string, unknown> = {}) {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_health_profiles/${SID}`).set({ ...profile('PARENT', PAR), updatedAt: new Date(), ...over });
+      });
+    }
+
+    it('ผู้ปกครองตัวจริง/นักเรียนเจ้าของสร้างได้; คนอื่นและพยาบาลสร้างไม่ได้', async () => {
+      await seed();
+      await assertSucceeds(mSetDoc(ref(par()), profile('PARENT', PAR)));
+      await put(); // รีเซ็ต
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`student_health_profiles/${SID}`).delete(); });
+      await assertSucceeds(mSetDoc(ref(stu()), profile('STUDENT', STU)));
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`student_health_profiles/${SID}`).delete(); });
+      await assertFails(mSetDoc(ref(otherPar()), profile('PARENT', 'hp-par-2')));
+      await assertFails(mSetDoc(ref(nurse()), profile('PARENT', 'hp-nurse')));
+    });
+
+    it('สร้างโดยแอบติดตรายืนยัน / ปลอมเจ้าของ / ปลอมผู้เขียน / รายการเกิน 20 → ถูกปฏิเสธ', async () => {
+      await seed();
+      await assertFails(mSetDoc(ref(par()), profile('PARENT', PAR, { verifiedAt: mServerTimestamp(), verifiedByUid: PAR, verifiedByName: 'x' })));
+      await assertFails(mSetDoc(ref(par()), profile('PARENT', PAR, { studentUid: 'someone-else' })));
+      await assertFails(mSetDoc(ref(par()), profile('PARENT', 'not-me')));
+      await assertFails(mSetDoc(ref(par()), profile('PARENT', PAR, { allergies: Array.from({ length: 21 }, (_, i) => ({ id: `a${i}`, allergen: 'x', type: 'FOOD', reaction: '' })) })));
+      await assertFails(mSetDoc(ref(par()), { ...profile('PARENT', PAR), extraField: 1 }));
+    });
+
+    it('พยาบาลยืนยันได้อย่างเดียว (แตะรายการข้อมูลไม่ได้) และครอบครัวแก้ใหม่ต้องล้างตรา', async () => {
+      await seed(); await put();
+      await assertSucceeds(mUpdateDoc(ref(nurse()), { verifiedAt: mServerTimestamp(), verifiedByUid: 'hp-nurse', verifiedByName: 'พยาบาลเอ' }));
+      await put({ verifiedAt: new Date(), verifiedByUid: 'hp-nurse', verifiedByName: 'พยาบาลเอ' });
+      await assertFails(mUpdateDoc(ref(nurse()), { allergies: [] }));
+      await assertFails(mUpdateDoc(ref(nurse()), { verifiedAt: mServerTimestamp(), verifiedByUid: 'someone-else', verifiedByName: 'ปลอม' }));
+      // ครอบครัวแก้โดยยังคงตรา → ไม่ได้ ; ล้างตราพร้อมแก้ → ได้
+      await assertFails(mSetDoc(ref(par()), profile('PARENT', PAR, { verifiedAt: new Date(), verifiedByUid: 'hp-nurse', verifiedByName: 'พยาบาลเอ' })));
+      await assertSucceeds(mSetDoc(ref(par()), profile('PARENT', PAR, { allergies: [] })));
+    });
+
+    it('อ่าน: ครอบครัว/พยาบาล/ครูที่ปรึกษาของห้องได้; ครูห้องอื่นและผู้ปกครองคนอื่นไม่ได้; ลบไม่ได้', async () => {
+      await seed(); await put();
+      await assertSucceeds(mGetDoc(ref(par())));
+      await assertSucceeds(mGetDoc(ref(stu())));
+      await assertSucceeds(mGetDoc(ref(nurse())));
+      await assertSucceeds(mGetDoc(ref(hr())));
+      await assertFails(mGetDoc(ref(otherHr())));
+      await assertFails(mGetDoc(ref(otherPar())));
+      await assertFails((par() as any).doc(`student_health_profiles/${SID}`).delete());
+      await assertFails((asUser('hp-admin', ['SUPER_ADMIN']).firestore() as any).doc(`student_health_profiles/${SID}`).delete());
+    });
+  });
+
   // 15c2. class_messages / class_chat_threads — แชทแยกช่องส่วนตัว (ครูประจำชั้น ↔ ผู้ปกครอง | นักเรียน)
   describe('class chat (class_messages + class_chat_threads)', () => {
     const SID = 'chat-std-1';

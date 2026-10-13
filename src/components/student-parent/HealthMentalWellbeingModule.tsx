@@ -33,6 +33,7 @@ import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits, subscribeSDQAssess
 import { readDocOrNull, loadParentNotices, type ParentNoticeDoc } from '../../services/screeningService';
 import { BMI_CATEGORY_LABEL } from '../../lib/utils';
 import { SemesterHealthSelfReportForm } from './SemesterHealthSelfReportForm';
+import { HealthProfileSection } from '../health/HealthProfileSection';
 import {
   InfirmaryVisit,
   TwoQuestionScreening,
@@ -115,9 +116,6 @@ function HealthMentalWellbeingModuleInner({
 }: HealthMentalWellbeingModuleProps) {
   const user = useStore(s => s.user);
   const {
-    chronicIllnesses,
-    allergies,
-    specialCareNeeds,
     twoQuestionScreenings,
     save2QScreening,
     submitSDQAssessment,
@@ -174,9 +172,6 @@ function HealthMentalWellbeingModuleInner({
   const currentSemHealth = healthLogs.find(
     l => l.academicYear === currentSemester.academicYear && l.term === currentSemester.term
   ) || null;
-  const studentIllnesses = chronicIllnesses[student.studentId] || [];
-  const studentAllergies = allergies[student.studentId] || [];
-  const studentSpecialCare = specialCareNeeds[student.studentId] || [];
   const visits = infirmaryVisits.filter(v => v.studentId === student.studentId);
   const screening2Q = twoQuestionScreenings[student.studentId];
   const studentSDQs = sdqAssessments.filter(s => s.studentId === student.studentId);
@@ -428,61 +423,9 @@ function HealthMentalWellbeingModuleInner({
               </div>
             </div>
 
-            {/* Allergies, Chronic Illnesses & Special Care */}
-            <div className="lg:col-span-6 space-y-4">
-              {/* Chronic Illnesses */}
-              <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 backdrop-blur-md">
-                <h4 className="text-xs font-bold text-amber-400 flex items-center gap-1.5 mb-2">
-                  <ShieldAlert className="w-4 h-4" />
-                  โรคประจำตัวและข้อควรระวัง (Chronic Illnesses)
-                </h4>
-                {studentIllnesses.map((ci) => (
-                  <div key={ci.id} className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-xs space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-amber-200">{ci.name}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">
-                        ระดับ: {ci.severity}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-amber-300/80">{ci.treatmentCare}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* Allergies */}
-              <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 backdrop-blur-md">
-                <h4 className="text-xs font-bold text-rose-400 flex items-center gap-1.5 mb-2">
-                  <Pill className="w-4 h-4" />
-                  ประวัติการแพ้ยาและอาหาร (Allergies)
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {studentAllergies.map((al) => (
-                    <div key={al.id} className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-xs space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-rose-200">{al.allergen}</span>
-                        <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold">
-                          {al.type === 'FOOD' ? 'แพ้อาหาร' : 'แพ้ยา'}
-                        </span>
-                      </div>
-                      <p className="text-[10.5px] text-rose-300/80">{al.reaction}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Special Classroom Care */}
-              <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 backdrop-blur-md">
-                <h4 className="text-xs font-bold text-indigo-400 flex items-center gap-1.5 mb-2">
-                  <Heart className="w-4 h-4" />
-                  ความต้องการพิเศษในการดูแลในชั้นเรียน (Special Classroom Care)
-                </h4>
-                {studentSpecialCare.map((sc) => (
-                  <div key={sc.id} className="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl text-xs space-y-1">
-                    <span className="font-bold text-indigo-200">{sc.category}: {sc.description}</span>
-                    <p className="text-[11px] text-indigo-300/80">👉 แผนการจัดการ: {sc.actionPlan}</p>
-                  </div>
-                ))}
-              </div>
+            {/* โรคประจำตัว / แพ้ยา-อาหาร / ดูแลพิเศษ — ข้อมูลจริงจาก student_health_profiles (ครอบครัวกรอก พยาบาลยืนยัน) */}
+            <div className="lg:col-span-6">
+              <HealthProfileSection student={student} viewer={user?.uid ? { uid: user.uid, role: isParentView ? 'PARENT' : 'STUDENT' } : null} />
             </div>
           </div>
         </div>

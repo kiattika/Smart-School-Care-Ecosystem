@@ -28,6 +28,9 @@ import {
   BookOpen
 } from 'lucide-react';
 
+import { DeadlineCountdown } from './shared/DeadlineCountdown';
+import { gradeLockDeadlines } from '../lib/gradeLockWindow';
+
 interface GradeLockConfig {
   id: string;
   title: string;
@@ -382,6 +385,9 @@ export function SystemSettingsAndLocksPage() {
                       <span className={`text-[10px] font-bold ${config.isOpen ? 'text-emerald-400' : 'text-slate-500'}`}>
                         {config.isOpen ? 'เปิดระบบอยู่' : 'ล็อกเรียบร้อย'}
                       </span>
+                      {gradeLockDeadlines([config], Date.now()).map(d => (
+                        <span key={d.id}><DeadlineCountdown targetMs={d.targetMs} label={d.kind === 'OPENS' ? 'เปิดใน' : 'ล็อกใน'} /></span>
+                      ))}
                       <button
                         type="button"
                         onClick={() => handleToggleLock(config.id)}

@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { DeadlineCountdown } from '../shared/DeadlineCountdown';
+import { enrollmentState } from '../../lib/enrollmentWindow';
 import { Users, CheckCircle2, XCircle, Loader2, UserRound, Clock, Lock } from 'lucide-react';
 import { Student, ActivityEnrollment } from '../../types';
 import { useElectiveActivities } from '../../hooks/useElectiveActivities';
@@ -93,7 +95,8 @@ export function StudentElectiveEnrollment({ student }: { student: Student }) {
           {configs.map(cfg => {
             const isMine = myCurrentEnrollment?.activityId === cfg.id;
             const remaining = seatsRemaining(cfg.id);
-            const isClosed = cfg.enrollmentStatus === 'CLOSED';
+            const win = enrollmentState(cfg, Date.now());
+            const isClosed = win.phase !== 'OPEN'; // ปิดแล้ว หรือยังไม่ถึงเวลาเปิด — สมัคร/ถอนไม่ได้ (rules บังคับด้วย)
             const isFull = remaining !== null && remaining <= 0 && !isMine;
             const blockedByOther = !!myCurrentEnrollment && !isMine;
             const teacherNames = (cfg.responsibleTeacherNames || []).join(', ') || '— ไม่ได้ระบุ —';
@@ -118,6 +121,10 @@ export function StudentElectiveEnrollment({ student }: { student: Student }) {
                     {cfg.room && ` · ห้อง ${cfg.room}`}
                   </p>
                 )}
+                {win.deadlineMs !== null && (
+                  <DeadlineCountdown targetMs={win.deadlineMs} label={win.deadlineKind === 'OPENS' ? 'เปิดรับสมัครใน' : 'ปิดรับสมัครใน'} />
+                )}
+                {win.phase === 'CLOSED' && <p className="text-[11px] text-rose-300">ปิดรับสมัครแล้ว</p>}
                 <div className="flex items-center justify-between">
                   <span className={`text-xs font-bold ${isFull ? 'text-red-400' : 'text-emerald-400'}`}>
                     เหลือ {remaining}/{cfg.capacity} ที่นั่ง
@@ -134,7 +141,7 @@ export function StudentElectiveEnrollment({ student }: { student: Student }) {
                     <button
                       onClick={() => handleEnroll(cfg.id, cfg.capacity)}
                       disabled={busyId === cfg.id || isFull || blockedByOther || isClosed}
-                      title={isClosed ? 'ปิดรับสมัครแล้ว' : blockedByOther ? 'ถอนชุมนุมเดิมก่อนสมัครใหม่' : isFull ? 'ที่นั่งเต็มแล้ว' : ''}
+                      title={isClosed ? (win.phase === 'NOT_YET' ? 'ยังไม่ถึงเวลาเปิดรับสมัคร' : 'ปิดรับสมัครแล้ว') : blockedByOther ? 'ถอนชุมนุมเดิมก่อนสมัครใหม่' : isFull ? 'ที่นั่งเต็มแล้ว' : ''}
                       className="px-3 py-1.5 text-xs font-bold text-white bg-teal-600 hover:bg-teal-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg flex items-center gap-1"
                     >
                       {busyId === cfg.id ? <Loader2 className="w-3 h-3 animate-spin" /> : isClosed ? <Lock className="w-3 h-3" /> : null}

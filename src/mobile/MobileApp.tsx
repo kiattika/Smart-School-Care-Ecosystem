@@ -16,6 +16,9 @@ import { useCurrentSemester } from '../hooks/useCurrentSemester';
 import { subscribeSemesterHealthLogs } from '../services/firestoreService';
 import type { SemesterHealthLog } from '../types';
 import { useMobileDue } from './useMobileDue';
+import { useElectiveActivities } from '../hooks/useElectiveActivities';
+import { DeadlineCountdown } from '../components/shared/DeadlineCountdown';
+import { enrollmentState } from '../lib/enrollmentWindow';
 import { ClassChatMemberView, ClassChatTeacherView, useMemberThreads, useRoomChatUnread } from '../components/chat/ClassChatPanel';
 import { isThreadUnread } from '../lib/classChat';
 import { buildTeacherDaySchedule } from '../lib/teacherDaySchedule';
@@ -81,10 +84,19 @@ export function MobileApp({ onLogout }: Props) {
   const child = own.students[0];
 
   // เมนูแบบประเมิน: สุขภาพ/SDQ หายเมื่อทำแล้ว, 2Q โผล่เมื่อครบ 2 สัปดาห์ (อ่านจาก Firestore จริง)
-  const { due, refresh: refreshDue } = useMobileDue({ role: isStudent ? 'student' : isParent ? 'parent' : null, uid: user.uid, child });
+  const { due: dueBase, refresh: refreshDue } = useMobileDue({ role: isStudent ? 'student' : isParent ? 'parent' : null, uid: user.uid, child });
+
+  // สมัครชุมนุม: แสดงเฉพาะตอนมีชุมนุมเปิดรับอยู่จริง (ตามช่วงเวลาที่แอดมิน/ครูตั้ง) — ปิดรับแล้วเมนูหาย
+  const clubs = useElectiveActivities();
+  const [clockMs, setClockMs] = useState(() => Date.now());
+  useEffect(() => { const id = setInterval(() => setClockMs(Date.now()), 30_000); return () => clearInterval(id); }, []);
+  const openClubStates = clubs.configs.map(c => enrollmentState(c, clockMs)).filter(st => st.phase === 'OPEN');
+  const clubOpen = isStudent && !clubs.loading ? openClubStates.length > 0 : undefined;
+  const clubDeadlineMs = openClubStates.reduce<number | null>((min, st) => (st.closesAtMs !== null && (min === null || st.closesAtMs < min) ? st.closesAtMs : min), null);
+  const due = { ...dueBase, clubOpen };
   const menu = useMemo(
     () => mobileMenuFor({ appRole: user.role, roles: profileRoles as string[], due }),
-    [user.role, profileRoles.join('|'), due.healthDone, due.sdqDone, due.twoQDue],
+    [user.role, profileRoles.join('|'), due.healthDone, due.sdqDone, due.twoQDue, due.clubOpen],
   );
 
   // badge ข้อความ
@@ -135,6 +147,7 @@ export function MobileApp({ onLogout }: Props) {
                     <button key={m.id} onClick={() => open(m.id)} className={`relative text-left rounded-3xl border bg-gradient-to-br p-4 min-h-[112px] flex flex-col justify-between active:scale-[0.98] transition-transform ${TONES[m.id]}`}>
                       <Icon className="w-7 h-7" />
                       <span className="text-sm font-bold text-white leading-snug">{m.label}</span>
+                      {m.id === 'club' && clubDeadlineMs !== null && <DeadlineCountdown targetMs={clubDeadlineMs} label="ปิดรับใน" />}
                       {b > 0 && <span className="absolute top-3 right-3 min-w-5 h-5 px-1.5 rounded-full bg-rose-500 text-white text-[11px] font-bold flex items-center justify-center">{b}</span>}
                     </button>
                   );

@@ -71,6 +71,7 @@ import {
   SchoolCalendarEvent,
   SemesterHealthLog
 } from '../types';
+import type { ChronicIllness, AllergyRecord, SpecialCareNeed } from '../types';
 import { SchoolGeofenceConfig } from '../utils/geoUtils';
 
 export enum OperationType {
@@ -2472,7 +2473,7 @@ export async function updateElectiveActivity(
   id: string,
   updates: Partial<Pick<ElectiveActivityConfig,
     'name' | 'capacity' | 'responsibleTeacherUids' | 'responsibleTeacherNames' |
-    'dayOfWeek' | 'periodNumber' | 'periodNumberEnd' | 'room' | 'enrollmentStatus'>>,
+    'dayOfWeek' | 'periodNumber' | 'periodNumberEnd' | 'room' | 'enrollmentStatus' | 'enrollmentOpensAt' | 'enrollmentClosesAt'>>,
   firestoreDb: Firestore = db,
 ): Promise<void> {
   try {
@@ -3550,5 +3551,70 @@ export async function markStaffNotificationRead(id: string, firestoreDb: Firesto
     await updateDoc(doc(firestoreDb, 'staff_notifications', id), { readAt: new Date().toISOString() });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `staff_notifications/${id}`);
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Student Health Profile (student_health_profiles/{studentId})
+ * โรคประจำตัว/แพ้/ดูแลพิเศษ — ครอบครัวกรอก พยาบาลยืนยัน (ดู firestore.rules ข้อ 33)
+ * ──────────────────────────────────────────────────────────────────────────── */
+export interface StudentHealthProfileDoc {
+  studentId: string; studentUid: string; parentUid: string | null;
+  chronicIllnesses: ChronicIllness[]; allergies: AllergyRecord[]; specialCare: SpecialCareNeed[];
+  updatedAt?: Timestamp | null; updatedByUid?: string; updatedByRole?: 'STUDENT' | 'PARENT';
+  verifiedAt?: Timestamp | null; verifiedByUid?: string | null; verifiedByName?: string | null;
+}
+
+/** ไม่มีเอกสาร = null (ยังไม่เคยบันทึก) — error อ่านไม่ได้ส่งต่อให้ผู้เรียกเพื่อแยกจาก "ว่าง" */
+export function subscribeStudentHealthProfile(
+  studentId: string,
+  onUpdate: (p: StudentHealthProfileDoc | null) => void,
+  onError?: (err: Error) => void,
+): () => void {
+  return onSnapshot(
+    doc(db, 'student_health_profiles', studentId),
+    (snap) => onUpdate(snap.exists() ? ({ ...(snap.data() as StudentHealthProfileDoc), studentId }) : null),
+    (err) => { console.warn('[subscribeStudentHealthProfile] listener error:', err.message); onError?.(err); },
+  );
+}
+
+/** ครอบครัวบันทึก/แก้ (นักเรียนหรือผู้ปกครองตัวจริง) — ล้างตรายืนยันเสมอ; throw เมื่อเขียนไม่สำเร็จ (ห้ามแจ้งสำเร็จลอย ๆ) */
+export async function saveStudentHealthProfile(input: {
+  studentId: string; studentUid: string; parentUid: string | null;
+  actorUid: string; actorRole: 'STUDENT' | 'PARENT';
+  lists: { chronicIllnesses: ChronicIllness[]; allergies: AllergyRecord[]; specialCare: SpecialCareNeed[] };
+}): Promise<void> {
+  const path = `student_health_profiles/${input.studentId}`;
+  try {
+    await setDoc(doc(db, 'student_health_profiles', input.studentId), {
+      studentId: input.studentId,
+      studentUid: input.studentUid,
+      parentUid: input.parentUid ?? null,
+      chronicIllnesses: input.lists.chronicIllnesses,
+      allergies: input.lists.allergies,
+      specialCare: input.lists.specialCare,
+      updatedAt: serverTimestamp(),
+      updatedByUid: input.actorUid,
+      updatedByRole: input.actorRole,
+      verifiedAt: null,
+      verifiedByUid: null,
+      verifiedByName: null,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+/** พยาบาล/แอดมินยืนยันว่าข้อมูลถูกต้อง (แตะได้แค่ฟิลด์ตรายืนยัน) */
+export async function verifyStudentHealthProfile(studentId: string, actor: { uid: string; name: string }): Promise<void> {
+  const path = `student_health_profiles/${studentId}`;
+  try {
+    await updateDoc(doc(db, 'student_health_profiles', studentId), {
+      verifiedAt: serverTimestamp(),
+      verifiedByUid: actor.uid,
+      verifiedByName: actor.name,
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
