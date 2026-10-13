@@ -1837,6 +1837,15 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc('student_home_locations/never-created').get());
       await assertSucceeds(asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore().doc('student_home_locations/never-created').get());
     });
+    it('REGRESSION: stale studentUid copy in the doc (account relinked) — current linked uid still reads; old uid and others do not', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`student_home_locations/${STU_ID}`).set(loc({ studentUid: 'old-uid-before-relink' }));
+      });
+      await assertSucceeds(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_home_locations/${STU_ID}`).get());
+      await assertFails(asUser('old-uid-before-relink', ['STUDENT']).firestore().doc(`student_home_locations/${STU_ID}`).get());
+      await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc(`student_home_locations/${STU_ID}`).get());
+    });
   });
 
   // 18. department_config — แอดมินจัดการกลุ่มสาระฯ

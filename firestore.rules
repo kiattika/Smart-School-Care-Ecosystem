@@ -1027,7 +1027,9 @@ service cloud.firestore {
       allow read: if hasRole('SUPER_ADMIN')
                      || hasRole('EXECUTIVE')
                      || (isSignedIn() && resource == null)
-                     || (resource != null && resource.data.studentUid == request.auth.uid)
+                     // เจ้าของตัดสินจากทะเบียน students/{id}.studentUid (ค่าจริง) ไม่ใช่สำเนาในเอกสารนี้ —
+                     // ผูกบัญชีนักเรียนใหม่ (uid เปลี่ยน) แล้วสำเนา uid เก่าไม่ทำให้เจ้าของอ่านไม่ได้
+                     || isSelfStudent(studentId)
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass));
 
       // นักเรียนเขียนของตัวเองเท่านั้น; homeroomClass ต้องตรงกับ students/{studentId} จริง
