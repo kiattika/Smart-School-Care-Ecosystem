@@ -496,11 +496,11 @@ service cloud.firestore {
                      hasRole('EXECUTIVE') || 
                      hasRole('HOMEROOM_TEACHER') || 
                      hasRole('SUBJECT_TEACHER') || 
-                     (isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid));
+                     (isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.studentId == request.auth.uid || resource.data.authUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
       allow write: if hasRole('SUPER_ADMIN') || 
                       hasRole('HOMEROOM_TEACHER') || 
                       hasRole('SUBJECT_TEACHER') || 
-                      (isSignedIn() && (request.resource.data.userId == request.auth.uid || request.resource.data.studentId == request.auth.uid));
+                      (isSignedIn() && (request.resource.data.userId == request.auth.uid || request.resource.data.studentId == request.auth.uid || request.resource.data.authUid == request.auth.uid));
     }
 
     // 18. Substitute Teaching Assignments & Post Teaching Records

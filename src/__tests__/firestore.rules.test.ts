@@ -3024,6 +3024,33 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // gps_check_in_logs — เช็คอิน GPS: userId เป็นรหัสนักเรียน/บุคลากร (ไม่ใช่ uid) จึงเทียบด้วย authUid
+  describe('gps_check_in_logs collection', () => {
+    const GLOG = {
+      userId: '10001', userName: 'Somchai', userRole: 'STUDENT', type: 'ENTRY', timestamp: '07:28 น.', date: '2026-09-10',
+      latitude: 17.6, longitude: 100.1, distanceMeters: 12, isInsideGeofence: true, status: 'ON_TIME', authUid: 'gps-stu-uid',
+    };
+
+    it('lets any signed-in user (even a student with role STUDENT) write their own log when authUid == auth.uid', async () => {
+      const studentDb = asUser('gps-stu-uid', ['STUDENT']).firestore();
+      await assertSucceeds(studentDb.doc('gps_check_in_logs/c1').set(GLOG));
+      await assertSucceeds(studentDb.doc('gps_check_in_logs/c1').get());
+    });
+
+    it('denies writing a log attributed to someone else (authUid != auth.uid and userId != uid)', async () => {
+      const studentDb = asUser('gps-stu-uid', ['STUDENT']).firestore();
+      await assertFails(studentDb.doc('gps_check_in_logs/c2').set({ ...GLOG, authUid: 'someone-else' }));
+    });
+
+    it('denies another student reading the log; lets homeroom teacher read', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gps_check_in_logs/c3').set(GLOG);
+      });
+      await assertFails(asUser('other-uid', ['STUDENT']).firestore().doc('gps_check_in_logs/c3').get());
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('gps_check_in_logs/c3').get());
+    });
+  });
+
   // gate_attendance_logs — การผ่านประตูโรงเรียน (ครูที่ปรึกษา/ผู้ปกครอง/นักเรียน อ่านผ่าน denormalized uid)
   describe('gate_attendance_logs collection', () => {
     const LOG = {
