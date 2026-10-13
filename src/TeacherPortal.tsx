@@ -1,3 +1,4 @@
+import { useSchoolGeofence } from './hooks/useSchoolGeofence';
 import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/utils";
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
@@ -91,8 +92,10 @@ export function TeacherPortal() {
     submitPostTeachingRecord,
     updateStudentScore,
     updateCourseScoreSetting,
-    completeSubstituteAssignment
+    completeSubstituteAssignment,
+    schoolGeofenceConfig,
   } = useStore();
+  useSchoolGeofence();
 
   // รายชื่อนักเรียนอ่านจาก Firestore สด (real-time) แทน Zustand store แบบ session-local
   // ใช้ในผังห้องเรียน (ClassroomSeatingManager), สุ่มนักเรียน, gradebook, Early Warning
@@ -1913,7 +1916,7 @@ export function TeacherPortal() {
                         เช็คอินลงเวลาปฏิบัติราชการและเข้าเรียนด้วยพิกัดดาวเทียม
                       </h3>
                       <p className="text-sm text-slate-300 max-w-2xl leading-relaxed">
-                        ระบบตรวจสอบพิกัด Geofence อัตโนมัติ (รัศมี 350 เมตร รอบสถานศึกษา) ป้องกันการปลอมแปลงพิกัด พร้อมบันทึกเวลาจริงและส่งผลการเช็คชื่อเข้าสู่ระบบบริหารสถานศึกษาทันที
+                        ระบบตรวจสอบพิกัด Geofence อัตโนมัติ (ตามรัศมีที่ผู้ดูแลระบบกำหนด) ป้องกันการปลอมแปลงพิกัด พร้อมบันทึกเวลาจริงและส่งผลการเช็คชื่อเข้าสู่ระบบบริหารสถานศึกษาทันที
                       </p>
                     </div>
 
@@ -1929,58 +1932,29 @@ export function TeacherPortal() {
                   </div>
                 </div>
 
-                {/* Campus Gate Coordinates & Status Grid */}
+                {/* ประตู/พิกัดโรงเรียน — อ่านจากที่แอดมินตั้งค่า (school_settings/geofence_config) ไม่ฝังค่าในโค้ด */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="bg-[#161f30] border border-slate-800 rounded-2xl p-5 shadow-lg">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
-                        <MapPin className="w-5 h-5" />
+                  {schoolGeofenceConfig.gates.length === 0 ? (
+                    <div className="md:col-span-3 bg-[#161f30] border border-dashed border-slate-700 rounded-2xl p-5 text-xs text-slate-400">
+                      ผู้ดูแลระบบยังไม่ได้กำหนดประตูโรงเรียน — ระบบตรวจพิกัดจากรัศมี {schoolGeofenceConfig.radiusMeters} เมตรรอบศูนย์กลางโรงเรียน
+                    </div>
+                  ) : schoolGeofenceConfig.gates.map(g => (
+                    <div key={g.id} className="bg-[#161f30] border border-slate-800 rounded-2xl p-5 shadow-lg">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                          <MapPin className="w-5 h-5" />
+                        </div>
+                        <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[11px] font-bold border border-slate-700">
+                          รัศมี {g.radiusMeters} ม.
+                        </span>
                       </div>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[11px] font-bold border border-emerald-500/20">
-                        เปิดบริการ 24 ชม.
-                      </span>
-                    </div>
-                    <h4 className="text-sm font-bold text-white mb-1">ประตู 1 (หน้าโรงเรียน)</h4>
-                    <p className="text-xs text-slate-400 mb-3">ถนนประชานิมิตร • ซุ้มประตูหลักและจุดคัดกรอง</p>
-                    <div className="text-[11px] font-mono text-slate-400 pt-2 border-t border-slate-800 flex justify-between">
-                      <span>Lat: 17.625620</span>
-                      <span>Lng: 100.093200</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-[#161f30] border border-slate-800 rounded-2xl p-5 shadow-lg">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center">
-                        <MapPin className="w-5 h-5" />
+                      <h4 className="text-sm font-bold text-white mb-3">{g.name}</h4>
+                      <div className="text-[11px] font-mono text-slate-400 pt-2 border-t border-slate-800 flex justify-between">
+                        <span>Lat: {g.coordinates.latitude.toFixed(6)}</span>
+                        <span>Lng: {g.coordinates.longitude.toFixed(6)}</span>
                       </div>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[11px] font-bold border border-emerald-500/20">
-                        เปิดบริการ 24 ชม.
-                      </span>
                     </div>
-                    <h4 className="text-sm font-bold text-white mb-1">ประตู 2 (ด้านหลังโรงเรียน)</h4>
-                    <p className="text-xs text-slate-400 mb-3">ซอยแปดวา • จุดจอดรถครูและบุคลากร</p>
-                    <div className="text-[11px] font-mono text-slate-400 pt-2 border-t border-slate-800 flex justify-between">
-                      <span>Lat: 17.624890</span>
-                      <span>Lng: 100.092800</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-[#161f30] border border-slate-800 rounded-2xl p-5 shadow-lg">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
-                        <MapPin className="w-5 h-5" />
-                      </div>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[11px] font-bold border border-emerald-500/20">
-                        เปิดบริการ 24 ชม.
-                      </span>
-                    </div>
-                    <h4 className="text-sm font-bold text-white mb-1">ประตู 3 (ศูนย์กีฬา/อาคารอเนกประสงค์)</h4>
-                    <p className="text-xs text-slate-400 mb-3">ฝั่งสนามกีฬาเฉลิมพระเกียรติ</p>
-                    <div className="text-[11px] font-mono text-slate-400 pt-2 border-t border-slate-800 flex justify-between">
-                      <span>Lat: 17.625800</span>
-                      <span>Lng: 100.094100</span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
 
               </div>

@@ -26,6 +26,7 @@ import {
 import { useStore } from '../store';
 import { useSchoolGeofence } from '../hooks/useSchoolGeofence';
 import { saveSchoolGeofenceConfigFirestore } from '../services/firestoreService';
+import { GateDraft, MAX_GATES, DEFAULT_GATE_RADIUS, CENTER_RADIUS_MIN, CENTER_RADIUS_MAX, GATE_RADIUS_MIN, GATE_RADIUS_MAX, gatesToDrafts, draftsToGates, newGateId, validateGeofenceSettings } from '../lib/geofenceConfig';
 import { 
   Coordinates, 
   SchoolGeofenceConfig, 
@@ -73,12 +74,47 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
   const [tempLat, setTempLat] = useState<number>(schoolGeofenceConfig.centerCoordinates.latitude);
   const [tempLng, setTempLng] = useState<number>(schoolGeofenceConfig.centerCoordinates.longitude);
   const [settingsSavedToast, setSettingsSavedToast] = useState<boolean>(false);
+  const [tempGates, setTempGates] = useState<GateDraft[]>(() => gatesToDrafts(schoolGeofenceConfig.gates));
+  const [locatingTarget, setLocatingTarget] = useState<string | null>(null);
+  const [locateMsg, setLocateMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setTempRadius(schoolGeofenceConfig.radiusMeters);
     setTempLat(schoolGeofenceConfig.centerCoordinates.latitude);
     setTempLng(schoolGeofenceConfig.centerCoordinates.longitude);
   }, [schoolGeofenceConfig.radiusMeters, schoolGeofenceConfig.centerCoordinates.latitude, schoolGeofenceConfig.centerCoordinates.longitude]);
+
+  useEffect(() => {
+    setTempGates(gatesToDrafts(schoolGeofenceConfig.gates));
+  }, [schoolGeofenceConfig.gates]);
+
+  const updateGate = (id: string, patch: Partial<GateDraft>) =>
+    setTempGates(prev => prev.map(g => (g.id === id ? { ...g, ...patch } : g)));
+  const addGate = () =>
+    setTempGates(prev => prev.length >= MAX_GATES ? prev : [...prev, {
+      id: newGateId(prev), name: `ประตู ${prev.length + 1}`, latitude: tempLat, longitude: tempLng, radiusMeters: DEFAULT_GATE_RADIUS,
+    }]);
+  const removeGate = (id: string) => setTempGates(prev => prev.filter(g => g.id !== id));
+
+  /** อ่านตำแหน่งจริงของอุปกรณ์แอดมิน (ยืนที่จุดนั้นแล้วกด) แล้วใส่ให้ศูนย์กลาง/ประตูที่เลือก */
+  const useMyLocationFor = (target: 'center' | string) => {
+    setLocateMsg(null);
+    if (!navigator.geolocation) { setLocateMsg('อุปกรณ์นี้ไม่รองรับการอ่านตำแหน่ง'); return; }
+    setLocatingTarget(target);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        const lat = Number(latitude.toFixed(6));
+        const lng = Number(longitude.toFixed(6));
+        if (target === 'center') { setTempLat(lat); setTempLng(lng); }
+        else updateGate(target, { latitude: lat, longitude: lng });
+        setLocateMsg(`ใช้ตำแหน่งปัจจุบันแล้ว (ความแม่นยำ ±${Math.round(accuracy)} ม.) — กด "บันทึก" เพื่อยืนยัน`);
+        setLocatingTarget(null);
+      },
+      () => { setLocateMsg('อ่านตำแหน่งไม่สำเร็จ — อนุญาตการเข้าถึงตำแหน่งในเบราว์เซอร์แล้วลองใหม่'); setLocatingTarget(null); },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -251,14 +287,18 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
   const handleSaveSettings = async () => {
     if (!canConfigure) return;
     setSettingsError(null);
+    const errors = validateGeofenceSettings({ centerLat: tempLat, centerLng: tempLng, radiusMeters: tempRadius, gates: tempGates });
+    if (errors.length > 0) { setSettingsError(errors.join(' • ')); return; }
+    const gates = draftsToGates(tempGates);
     const next = {
       ...schoolGeofenceConfig,
       radiusMeters: tempRadius,
       centerCoordinates: { latitude: tempLat, longitude: tempLng },
+      gates,
     };
     try {
       await saveSchoolGeofenceConfigFirestore(next);
-      updateSchoolGeofenceConfig({ radiusMeters: tempRadius, centerCoordinates: { latitude: tempLat, longitude: tempLng } });
+      updateSchoolGeofenceConfig({ radiusMeters: tempRadius, centerCoordinates: { latitude: tempLat, longitude: tempLng }, gates });
       setSettingsSavedToast(true);
       setTimeout(() => setSettingsSavedToast(false), 3000);
     } catch {
@@ -717,17 +757,16 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
                       </label>
                       <input
                         type="range"
-                        min="100"
-                        max="1000"
+                        min={CENTER_RADIUS_MIN}
+                        max={CENTER_RADIUS_MAX}
                         step="25"
                         value={tempRadius}
                         onChange={(e) => setTempRadius(Number(e.target.value))}
                         className="w-full accent-indigo-500"
                       />
                       <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-                        <span>100 ม. (เฉพาะในตึก)</span>
-                        <span>350 ม. (ทั่วทั้ง รร.)</span>
-                        <span>1,000 ม. (รวมรอบนอก)</span>
+                        <span>{CENTER_RADIUS_MIN} ม.</span>
+                        <span>{CENTER_RADIUS_MAX.toLocaleString()} ม.</span>
                       </div>
                     </div>
 
@@ -752,6 +791,73 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
                           className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 font-mono focus:border-indigo-500 focus:outline-none"
                         />
                       </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => useMyLocationFor('center')}
+                      disabled={locatingTarget !== null}
+                      className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 text-xs font-medium cursor-pointer"
+                    >
+                      {locatingTarget === 'center' ? 'กำลังอ่านตำแหน่ง…' : '📍 ใช้ตำแหน่งปัจจุบันของฉันเป็นศูนย์กลางโรงเรียน'}
+                    </button>
+
+                    <div className="pt-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-300">ประตูโรงเรียน ({tempGates.length}/{MAX_GATES})</span>
+                        <button
+                          type="button"
+                          onClick={addGate}
+                          disabled={tempGates.length >= MAX_GATES}
+                          className="px-2.5 py-1 rounded-lg bg-indigo-600/80 hover:bg-indigo-500 disabled:opacity-40 text-white text-[11px] font-bold cursor-pointer"
+                        >
+                          + เพิ่มประตู
+                        </button>
+                      </div>
+                      {tempGates.length === 0 && (
+                        <p className="text-[11px] text-slate-500">ยังไม่มีประตู — ระบบจะใช้รัศมีรอบศูนย์กลางโรงเรียนอย่างเดียว</p>
+                      )}
+                      {tempGates.map((g, i) => (
+                        <div key={g.id} className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={g.name}
+                              maxLength={60}
+                              onChange={(e) => updateGate(g.id, { name: e.target.value })}
+                              aria-label={`ชื่อประตูที่ ${i + 1}`}
+                              className="flex-1 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeGate(g.id)}
+                              className="px-2 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 text-[11px] cursor-pointer"
+                            >
+                              ลบ
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <input type="number" step="0.000001" value={g.latitude} aria-label="ละติจูดประตู"
+                              onChange={(e) => updateGate(g.id, { latitude: Number(e.target.value) })}
+                              className="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-200 font-mono focus:border-indigo-500 focus:outline-none" />
+                            <input type="number" step="0.000001" value={g.longitude} aria-label="ลองจิจูดประตู"
+                              onChange={(e) => updateGate(g.id, { longitude: Number(e.target.value) })}
+                              className="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-200 font-mono focus:border-indigo-500 focus:outline-none" />
+                            <input type="number" min={GATE_RADIUS_MIN} max={GATE_RADIUS_MAX} value={g.radiusMeters} aria-label="รัศมีประตู (เมตร)"
+                              onChange={(e) => updateGate(g.id, { radiusMeters: Number(e.target.value) })}
+                              className="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-slate-200 font-mono focus:border-indigo-500 focus:outline-none" />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => useMyLocationFor(g.id)}
+                            disabled={locatingTarget !== null}
+                            className="w-full py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-[11px] cursor-pointer"
+                          >
+                            {locatingTarget === g.id ? 'กำลังอ่านตำแหน่ง…' : '📍 ใช้ตำแหน่งปัจจุบันของฉันเป็นประตูนี้'}
+                          </button>
+                        </div>
+                      ))}
+                      {locateMsg && <p className="text-[11px] text-amber-300">{locateMsg}</p>}
                     </div>
 
                     <div className="pt-3">
