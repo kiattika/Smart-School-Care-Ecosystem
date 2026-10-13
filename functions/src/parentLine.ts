@@ -38,12 +38,15 @@ function pepper(): string {
 }
 
 async function lineIdentity(idToken: unknown): Promise<LineIdentity> {
-  const channelId = process.env.LINE_CHANNEL_ID || '';
+  // trim: secret ที่วางจากคลิปบอร์ดมักติดช่องว่าง/ขึ้นบรรทัดใหม่
+  const channelId = (process.env.LINE_CHANNEL_ID || '').trim();
   if (!channelId) throw new functions.https.HttpsError('failed-precondition', 'ระบบยังไม่ได้ตั้งค่า LINE Login (LINE_CHANNEL_ID)');
   if (typeof idToken !== 'string' || !idToken) throw new functions.https.HttpsError('unauthenticated', 'ไม่พบ LINE ID token');
   try {
     return await verifyLineIdToken(idToken, channelId, fetch as unknown as FetchLike);
-  } catch {
+  } catch (err: any) {
+    // บันทึกเหตุผลจริงลง log (ไม่บันทึก token) — ใช้ `firebase functions:log` ดู
+    functions.logger.warn('LINE verify failed', { reason: err?.message || String(err), channelIdLength: channelId.length });
     throw new functions.https.HttpsError('unauthenticated', 'ยืนยันตัวตนกับ LINE ไม่สำเร็จ กรุณาเข้าสู่ระบบ LINE ใหม่');
   }
 }

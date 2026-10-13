@@ -45,11 +45,13 @@ export async function verifyLineIdToken(idToken: string, channelId: string, fetc
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
   });
-  if (!res.ok) throw new Error('LINE_TOKEN_INVALID');
-  const j = await res.json();
-  if (!j || typeof j.sub !== 'string' || !j.sub) throw new Error('LINE_TOKEN_INVALID');
-  if (String(j.aud) !== String(channelId)) throw new Error('LINE_TOKEN_INVALID');
-  if (typeof j.exp === 'number' && j.exp < nowSec) throw new Error('LINE_TOKEN_INVALID');
+  let j: any = null;
+  try { j = await res.json(); } catch { /* body ไม่ใช่ JSON */ }
+  // เหตุผลจริงของ LINE (error_description ไม่มีข้อมูลลับ) ติดไปกับ message เพื่อใช้ดูใน log ฝั่งเซิร์ฟเวอร์เท่านั้น
+  if (!res.ok) throw new Error(`LINE_TOKEN_INVALID: HTTP ${res.status} ${j?.error_description || j?.error || ''}`.trim());
+  if (!j || typeof j.sub !== 'string' || !j.sub) throw new Error('LINE_TOKEN_INVALID: ไม่มี sub');
+  if (String(j.aud) !== String(channelId)) throw new Error(`LINE_TOKEN_INVALID: aud ${j.aud} ไม่ตรงกับ channelId ที่ตั้งไว้`);
+  if (typeof j.exp === 'number' && j.exp < nowSec) throw new Error('LINE_TOKEN_INVALID: token หมดอายุ');
   return { sub: j.sub, name: typeof j.name === 'string' ? j.name : '', picture: typeof j.picture === 'string' ? j.picture : undefined };
 }
 
