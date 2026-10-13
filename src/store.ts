@@ -44,6 +44,7 @@ import {
   saveGateAttendanceRecordFirestore,
   saveGPSCheckInLogFirestore,
   saveCheckInSelfieFirestore,
+  getOwnStudentRoomFirestore,
   saveSchoolGeofenceConfigFirestore,
   saveSubstituteAssignmentFirestore,
   updateSubstituteAssignmentFirestore,
@@ -1055,9 +1056,11 @@ export const useStore = create<StoreState>((set, get) => ({
 
     if (selfieDataUrl) {
       if (!authUid) throw new Error('FIRESTORE_PERMISSION-DENIED: ต้องเข้าสู่ระบบก่อนแนบรูป');
+      // ห้องของนักเรียน: จาก store ถ้ามี ไม่งั้นอ่านจาก Firestore ด้วย uid ของตัวเอง (store.students ว่างในเซสชันนักเรียน)
+      const homeroomClass = matchedStudent?.room || (isStudent ? await getOwnStudentRoomFirestore(authUid) : undefined);
       await saveCheckInSelfieFirestore({
         logId: newLog.id, authUid, userId: log.userId,
-        homeroomClass: matchedStudent?.room, date: log.date, dataUrl: selfieDataUrl,
+        homeroomClass, date: log.date, dataUrl: selfieDataUrl,
         expireAt: selfieExpiresAt(new Date()),
       });
     }

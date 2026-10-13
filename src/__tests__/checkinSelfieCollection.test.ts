@@ -21,6 +21,13 @@ describe('guards: รูปเซลฟี่แยกเอกสาร + ค�
     expect(block).not.toMatch(/selfieUrl: log\.selfieUrl/);
     expect(block.indexOf('saveCheckInSelfieFirestore(')).toBeLessThan(block.indexOf('await saveGPSCheckInLogFirestore(newLog)'));
   });
+  it('ห้องของรูป: ไม่พึ่ง store.students อย่างเดียว (ว่างในเซสชันนักเรียน) แต่อ่านจาก Firestore ด้วย uid ตัวเอง', () => {
+    const i = store.indexOf('addGPSCheckInLog: async');
+    const block = store.slice(i, i + 4500);
+    expect(block).toContain('await getOwnStudentRoomFirestore(authUid)');
+    const svc = readSource('src/services/firestoreService.ts');
+    expect(svc).toMatch(/where\('studentUid', '==', studentUid\)/);
+  });
   it('แผงครูดึงเฉพาะนักเรียนในห้อง ไม่ query ทั้งโรงเรียน และไม่ใช้ subscribe …Since แล้ว', () => {
     const panel = readSource('src/components/homevisit/AdvisorGpsCheckInPanel.tsx');
     expect(panel).toContain('subscribeGpsCheckInLogsForUsers(Array.from(idset)');
