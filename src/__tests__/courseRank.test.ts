@@ -141,6 +141,11 @@ describe('คะแนนแยกอิสระรายวิชา (ไม�
     const picker = readSource('src/components/RandomStudentPickerModal.tsx');
     expect(picker).not.toMatch(/activeLearningPoints\[/);
   });
+  it('guard: ทุกจุดที่เรียก addActiveLearningPoints ต้องส่ง courseId + courseKey (ห้ามให้คะแนนโดยไม่ระบุวิชา)', () => {
+    const seat = readSource('src/components/ClassroomSeatingManager.tsx');
+    expect(seat).not.toMatch(/addActiveLearningPoints\(student\.studentId, 1\)/);
+    expect(seat).toMatch(/addActiveLearningPoints\(student\.studentId, 1, 'GENERAL', undefined, course\?\.id/);
+  });
   it('guard: คาบที่สิ้นสุดแล้วไม่มีปุ่ม "เข้าสู่ชั้นเรียน"', () => {
     expect(readSource('src/components/TeacherScheduleList.tsx')).not.toContain('btn-past-enter-class');
   });

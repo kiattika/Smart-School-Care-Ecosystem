@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { Student, Course, AttendanceStatus } from '../types';
 import { SeatingLayout, SeatingGroup, SeatingSeat, SeatingAssignment } from '../types/seating';
+import { useCurrentSemester } from '../hooks/useCurrentSemester';
 import { cn, isSameRoom, formatRoomName, formatCourseTitle } from '../lib/utils';
 import { useStore } from '../store';
 import { RandomStudentPickerModal, ClassroomDeskGroup } from './RandomStudentPickerModal';
@@ -115,6 +116,8 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
     // คะแนนกิจกรรมของ "วิชานี้" เท่านั้น (ภาคเรียนปัจจุบัน) — ไม่ใช้ยอดรวมทุกวิชาใน store
   const courseKey = courseActivityKey({ id: course?.id, code: course?.code, level: course?.level });
   const coursePoints = useCourseActivityPoints(courseKey, course?.id);
+  // ปุ่ม +1 ลัดต้องผูกวิชา/ภาคเรียนเหมือนตัวสุ่มตอบ ไม่งั้น log ไม่มี courseId → ไปรวมเป็น "ไม่ระบุวิชา"
+  const { academicYear: alYear, term: alTerm, isConfigured: alConfigured } = useCurrentSemester();
   const courseClassId = course.room; // wrapper รับประกันว่ามีห้อง — ไม่มี = empty state ไม่ query/เขียน
   const layoutId = `layout_${courseSubjectId}_${courseClassId.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
@@ -1345,7 +1348,11 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
                                     onClick={async e => {
                                       e.stopPropagation();
                                       try {
-                                        await addActiveLearningPoints(student.studentId, 1);
+                                        await addActiveLearningPoints(student.studentId, 1, 'GENERAL', undefined, course?.id, {
+                                          courseName: formatCourseTitle(course.name, course.level, course.room),
+                                          courseKey,
+                                          ...(alConfigured ? { academicYear: alYear, term: alTerm } : {}),
+                                        });
                                         setSaveToast(`+1 คะแนนจิตพิสัย: ${student.name}`);
                                       } catch {
                                         setSaveToast(`บันทึกคะแนนของ ${student.name} ไม่สำเร็จ — ลองใหม่`);
