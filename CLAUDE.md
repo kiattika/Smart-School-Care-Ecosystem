@@ -289,3 +289,11 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - query ต้องกรอง `memberUid == uid` (ผู้ปกครอง/นักเรียน) หรือ `room == ห้อง` (ครู) + studentId + channel
 - UI: `src/components/chat/ClassChatPanel.tsx`; เมนูแยกใน ParentPortal/StudentPortal (ชำระเงิน | สนทนากับครู | นัดพบครู) และ AdvisorPortal (`class-chat`); `ParentEngagementServices` รับ prop `section` ('billing'|'appointment')
 - คอลเลกชันเดิม `parent_teacher_messages` เลิกใช้ (ไม่ลบข้อมูลเก่า)
+
+## คลังยาห้องพยาบาล — infirmary_medicines / infirmary_stock_movements
+- ยอดคงเหลือ (`stock`) เปลี่ยนได้เฉพาะพร้อม "รายการเคลื่อนไหว" (append-only) ใน batch/transaction เดียวกัน: ยาชี้ movement ล่าสุดด้วย `lastMovementId`, rules ตรวจด้วย `getAfter` (`balanceAfter == stock`, `delta == stock - เดิม`, ชนิด/เครื่องหมาย delta ตรงกัน, `byUid == auth.uid`, ยอดไม่ติดลบ) — ชนิด INITIAL/RESTOCK/DISPENSE/DISCARD/ADJUST (`src/lib/infirmaryStock.ts`)
+- การจ่ายยาในบันทึกเคสห้องพยาบาลตัดสต็อกใน transaction เดียวกับเคส+แจ้งเตือนผู้ปกครอง (`recordInfirmaryVisit({dispensed})`); รับเข้า/ทิ้ง/ปรับยอดผ่าน `changeMedicineStock`; ห้ามลบยา (ปิดด้วย `active=false`)
+- อ่านได้เฉพาะ SUPER_ADMIN / INFIRMARY_STAFF / EXECUTIVE; ห้ามมีรายการยาตัวอย่างในโค้ด (guard test `infirmaryStock.test.ts`)
+
+## เรดาร์โดดเรียน (ครูประจำชั้น)
+- คำนวณสดจาก `attendance_records` รายคาบ ไม่มีที่เก็บข้อมูลใหม่ (`src/lib/skipRadar.ts`): โดด = วันเดียวกันมี PRESENT/LATE ในเอกสารอื่น แต่ ABSENT ในคาบ ≥ 1; ขาดทั้งวัน/ลาไม่นับ; เกณฑ์ เฝ้าระวัง ≥2 / ควรติดตาม ≥4 ครั้ง เป็นค่าเริ่มต้นที่ยังไม่ยืนยันจากโรงเรียน

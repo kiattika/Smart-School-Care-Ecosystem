@@ -6,7 +6,7 @@ import {
   assertSucceeds,
   assertFails,
 } from '@firebase/rules-unit-testing';
-import { collection, getDocs, query, where, doc as mDoc, setDoc as mSetDoc, updateDoc as mUpdateDoc, getDoc as mGetDoc, serverTimestamp as mServerTimestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc as mDoc, setDoc as mSetDoc, updateDoc as mUpdateDoc, getDoc as mGetDoc, serverTimestamp as mServerTimestamp, writeBatch as mWriteBatch } from 'firebase/firestore';
 import { enrollInActivity, withdrawFromActivity, createBillingInvoice, createBillingInvoicesBulk, recordInfirmaryVisit, createParentNotification } from '../services/firestoreService';
 import { readSource } from './helpers/readSource';
 
@@ -1528,6 +1528,99 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         await seed();
         await assertFails(asUser('fin', ['FINANCE_STAFF']).firestore().doc('parent_notifications/f2').set(base('f2', { studentUid: 'someone-else' })));
       });
+    });
+  });
+
+  // 15c1. คลังยาห้องพยาบาล — ยอดคงเหลือเปลี่ยนได้เฉพาะเมื่อมี movement คู่กันใน batch เดียว
+  describe('infirmary stock (infirmary_medicines + infirmary_stock_movements)', () => {
+    const nurse = () => asUser('nurse-1', ['INFIRMARY_STAFF']).firestore() as any;
+    const exec = () => asUser('exec-1', ['EXECUTIVE']).firestore() as any;
+    const teacher = () => asUser('t-1', ['HOMEROOM_TEACHER'], { staffId: 't-1' }).firestore() as any;
+    const parent = () => asUser('p-1', ['PARENT']).firestore() as any;
+    const med = (over: Record<string, unknown> = {}) => ({
+      id: 'med1', name: 'พาราเซตามอล', category: 'สามัญ', unit: 'เม็ด', stock: 100, minAlert: 20, active: true,
+      lastMovementId: 'mv0', createdBy: 'nurse-1', createdAt: '2026-10-13T00:00:00.000Z', updatedAt: '2026-10-13T00:00:00.000Z', ...over,
+    });
+    const mv = (id: string, over: Record<string, unknown> = {}) => ({
+      id, medicineId: 'med1', medicineName: 'พาราเซตามอล', unit: 'เม็ด', type: 'RESTOCK', delta: 50, balanceAfter: 150,
+      byUid: 'nurse-1', byName: 'พยาบาล', at: '2026-10-13T01:00:00.000Z', ...over,
+    });
+    async function seedMed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('infirmary_medicines/med1').set(med());
+        await ctx.firestore().doc('infirmary_stock_movements/mv0').set(mv('mv0', { type: 'INITIAL', delta: 100, balanceAfter: 100 }));
+      });
+    }
+
+    it('create with initial stock needs the paired INITIAL movement; zero stock needs none', async () => {
+      const db = nurse();
+      const b1 = mWriteBatch(db);
+      b1.set(mDoc(db, 'infirmary_stock_movements/mvA'), mv('mvA', { medicineId: 'medA', type: 'INITIAL', delta: 30, balanceAfter: 30 }));
+      b1.set(mDoc(db, 'infirmary_medicines/medA'), med({ id: 'medA', stock: 30, lastMovementId: 'mvA' }));
+      await assertSucceeds(b1.commit());
+      const { lastMovementId: _omit, ...noMv } = med({ id: 'medB', stock: 0 });
+      await assertSucceeds(mSetDoc(mDoc(db, 'infirmary_medicines/medB'), noMv));
+      // stock > 0 without movement
+      const { lastMovementId: _omit2, ...bad } = med({ id: 'medC', stock: 5 });
+      await assertFails(mSetDoc(mDoc(db, 'infirmary_medicines/medC'), bad));
+    });
+
+    it('restock/dispense succeed only with a matching movement in the same batch', async () => {
+      await seedMed();
+      const db = nurse();
+      const ok = mWriteBatch(db);
+      ok.set(mDoc(db, 'infirmary_stock_movements/mv1'), mv('mv1'));
+      ok.update(mDoc(db, 'infirmary_medicines/med1'), { stock: 150, lastMovementId: 'mv1', updatedAt: 'x' });
+      await assertSucceeds(ok.commit());
+      const disp = mWriteBatch(db);
+      disp.set(mDoc(db, 'infirmary_stock_movements/mv2'), mv('mv2', { type: 'DISPENSE', delta: -10, balanceAfter: 140, studentId: '10001' }));
+      disp.update(mDoc(db, 'infirmary_medicines/med1'), { stock: 140, lastMovementId: 'mv2', updatedAt: 'x' });
+      await assertSucceeds(disp.commit());
+    });
+
+    it('rejects stock change without movement, mismatched balance/delta, negative stock, wrong sign', async () => {
+      await seedMed();
+      const db = nurse();
+      await assertFails(mUpdateDoc(mDoc(db, 'infirmary_medicines/med1'), { stock: 999, updatedAt: 'x' }));
+      const wrongBal = mWriteBatch(db);
+      wrongBal.set(mDoc(db, 'infirmary_stock_movements/m3'), mv('m3', { delta: 50, balanceAfter: 150 }));
+      wrongBal.update(mDoc(db, 'infirmary_medicines/med1'), { stock: 200, lastMovementId: 'm3', updatedAt: 'x' });
+      await assertFails(wrongBal.commit());
+      const neg = mWriteBatch(db);
+      neg.set(mDoc(db, 'infirmary_stock_movements/m4'), mv('m4', { type: 'DISPENSE', delta: -150, balanceAfter: -50 }));
+      neg.update(mDoc(db, 'infirmary_medicines/med1'), { stock: -50, lastMovementId: 'm4', updatedAt: 'x' });
+      await assertFails(neg.commit());
+      const sign = mWriteBatch(db);
+      sign.set(mDoc(db, 'infirmary_stock_movements/m5'), mv('m5', { type: 'DISPENSE', delta: 10, balanceAfter: 110 }));
+      sign.update(mDoc(db, 'infirmary_medicines/med1'), { stock: 110, lastMovementId: 'm5', updatedAt: 'x' });
+      await assertFails(sign.commit());
+      // movement alone (no medicine update pointing to it)
+      await assertFails(mSetDoc(mDoc(db, 'infirmary_stock_movements/m6'), mv('m6')));
+      // forged byUid
+      const forged = mWriteBatch(db);
+      forged.set(mDoc(db, 'infirmary_stock_movements/m7'), mv('m7', { byUid: 'someone-else' }));
+      forged.update(mDoc(db, 'infirmary_medicines/med1'), { stock: 150, lastMovementId: 'm7', updatedAt: 'x' });
+      await assertFails(forged.commit());
+    });
+
+    it('metadata edits (name/minAlert/active) need no movement; movements are immutable; med cannot be deleted', async () => {
+      await seedMed();
+      const db = nurse();
+      await assertSucceeds(mUpdateDoc(mDoc(db, 'infirmary_medicines/med1'), { minAlert: 30, active: false, updatedAt: 'x' }));
+      await assertFails(mUpdateDoc(mDoc(db, 'infirmary_medicines/med1'), { createdBy: 'x' }));
+      await assertFails(mUpdateDoc(mDoc(db, 'infirmary_stock_movements/mv0'), { note: 'edit' }));
+      await assertFails(db.doc('infirmary_stock_movements/mv0').delete());
+      await assertFails(db.doc('infirmary_medicines/med1').delete());
+    });
+
+    it('read: nurse/exec only; teacher, parent, anonymous denied; non-nurse cannot write', async () => {
+      await seedMed();
+      await assertSucceeds(mGetDoc(mDoc(nurse(), 'infirmary_medicines/med1')));
+      await assertSucceeds(mGetDoc(mDoc(exec(), 'infirmary_stock_movements/mv0')));
+      await assertFails(mGetDoc(mDoc(teacher(), 'infirmary_medicines/med1')));
+      await assertFails(mGetDoc(mDoc(parent(), 'infirmary_stock_movements/mv0')));
+      await assertFails(mUpdateDoc(mDoc(teacher(), 'infirmary_medicines/med1'), { minAlert: 1, updatedAt: 'x' }));
+      await assertFails(mUpdateDoc(mDoc(exec(), 'infirmary_medicines/med1'), { minAlert: 1, updatedAt: 'x' }));
     });
   });
 

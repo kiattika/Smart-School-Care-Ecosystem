@@ -6,8 +6,12 @@ import { PortalSidebarLayout } from '../shared/PortalSidebarLayout';
 import {
   recordInfirmaryVisit as recordInfirmaryVisitFirestore,
   acknowledgeInfirmaryVisit,
-  subscribeInfirmaryVisits
+  subscribeInfirmaryVisits,
+  subscribeInfirmaryMedicines,
+  type InfirmaryMedicine,
 } from '../../services/firestoreService';
+import { InfirmaryStockPanel } from './InfirmaryStockPanel';
+import { composeMedicationGiven, validateDispenseLines, type DispenseLine, isLowStock } from '../../lib/infirmaryStock';
 import {
   HeartPulse,
   Activity,
@@ -68,19 +72,15 @@ export function InfirmaryPortal() {
   const [symptoms, setSymptoms] = useState('');
   const [temperature, setTemperature] = useState('37.2');
   const [treatment, setTreatment] = useState('นอนพักผ่อน 15 นาที');
-  const [medicationGiven, setMedicationGiven] = useState('พาราเซตามอล 1 เม็ด (500 มก.)');
+  const [medicationGiven, setMedicationGiven] = useState('');
   const [restDurationMinutes, setRestDurationMinutes] = useState(20);
   const [isUrgentAlert, setIsUrgentAlert] = useState(false);
 
-  // Medicine inventory state (mock)
-  const [medicines, setMedicines] = useState([
-    { id: 'm1', name: 'พาราเซตามอล (Paracetamol 500mg)', stock: 140, unit: 'เม็ด', minAlert: 50, category: 'ยาสสามัญประจำบ้าน' },
-    { id: 'm2', name: 'ยาธาตุน้ำขาว (Carminative Mixture)', stock: 18, unit: 'ขวด', minAlert: 20, category: 'ระบบทางเดินอาหาร' },
-    { id: 'm3', name: 'เกลือแร่ (ORS)', stock: 85, unit: 'ซอง', minAlert: 30, category: 'ภาวะขาดน้ำ' },
-    { id: 'm4', name: 'ยาแก้ไอขับเสมหะ', stock: 12, unit: 'ขวด', minAlert: 15, category: 'ระบบทางเดินหายใจ' },
-    { id: 'm5', name: 'พลาสเตอร์ปิดแผล (Band-Aid)', stock: 220, unit: 'ชิ้น', minAlert: 50, category: 'ปฐมพยาบาล' },
-    { id: 'm6', name: 'ยาหยอดตา (Artificial Tears)', stock: 8, unit: 'หลอด', minAlert: 10, category: 'ตา/หู/คอ' }
-  ]);
+  // คลังเวชภัณฑ์จริงจาก Firestore (infirmary_medicines) — ไม่มีข้อมูลตัวอย่าง
+  const [medicines, setMedicines] = useState<InfirmaryMedicine[]>([]);
+  useEffect(() => subscribeInfirmaryMedicines(setMedicines), []);
+  // ยาที่เบิกจากคลังในเคสนี้ (ตัดสต็อกพร้อมบันทึกเคส)
+  const [dispenseLines, setDispenseLines] = useState<DispenseLine[]>([]);
 
   const filteredVisits = infirmaryVisits.filter(v => {
     const student = students.find(s => s.studentId === v.studentId);
@@ -104,6 +104,12 @@ export function InfirmaryPortal() {
       return;
     }
     const student = students.find(s => s.studentId === selectedStudentId);
+    const stockById = Object.fromEntries(medicines.map(m => [m.id, m.stock]));
+    const dispenseError = validateDispenseLines(dispenseLines, stockById);
+    if (dispenseError) {
+      setRecordVisitError(dispenseError);
+      return;
+    }
 
     setIsSavingVisit(true);
     setRecordVisitError(null);
@@ -116,7 +122,8 @@ export function InfirmaryPortal() {
         symptoms,
         temperature: parseFloat(temperature) || 37.0,
         treatment,
-        medicationGiven,
+        medicationGiven: composeMedicationGiven(dispenseLines, medicationGiven),
+        dispensed: dispenseLines,
         restDurationMinutes: Number(restDurationMinutes),
         isUrgentAlert,
         nurseUid: user.uid,
@@ -124,6 +131,8 @@ export function InfirmaryPortal() {
       });
       setShowAddModal(false);
       setSymptoms('');
+      setMedicationGiven('');
+      setDispenseLines([]);
       setIsUrgentAlert(false);
     } catch (err) {
       console.error('[InfirmaryPortal] recordInfirmaryVisit failed:', err);
@@ -177,7 +186,7 @@ export function InfirmaryPortal() {
           onSelect={(id) => setActiveTab(id as typeof activeTab)}
           items={[
             { id: 'visits', label: `สถิติการมารับบริการและจ่ายยา (${infirmaryVisits.length})`, icon: Activity },
-            { id: 'inventory', label: `คลังเวชภัณฑ์และยา (${medicines.length})`, icon: Pill },
+            { id: 'inventory', label: `คลังเวชภัณฑ์และยา (${medicines.filter(isLowStock).length > 0 ? medicines.filter(isLowStock).length + ' ใกล้หมด' : medicines.length})`, icon: Pill },
             { id: 'screening', label: 'ผลตรวจสุขภาพและวัคซีนประจำปี', icon: FileSpreadsheet },
             { id: 'profiles', label: 'ข้อมูลโรคประจำตัวและประวัติแพ้ยา', icon: User },
           ]}
@@ -284,63 +293,8 @@ export function InfirmaryPortal() {
         )}
 
         {/* TAB 2: INVENTORY */}
-        {activeTab === 'inventory' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-bold text-white">คลังเวชภัณฑ์และยาห้องพยาบาลโรงเรียน</h3>
-                <p className="text-xs text-slate-400">ระบบตรวจเช็กจำนวนยาอัตโนมัติ แจ้งเตือนเมื่อยาใกล้หมดสต็อก</p>
-              </div>
-              <button 
-                onClick={() => alert('เพิ่มรายการยาสำเร็จ')}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition-colors"
-              >
-                + เพิ่มเวชภัณฑ์ใหม่
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {medicines.map((med) => {
-                const isLow = med.stock <= med.minAlert;
-                return (
-                  <div key={med.id} className={`p-4 rounded-2xl border bg-slate-900/80 shadow-lg relative overflow-hidden flex flex-col justify-between ${
-                    isLow ? 'border-rose-500/50 bg-rose-950/10' : 'border-slate-800'
-                  }`}>
-                    {isLow && (
-                      <div className="absolute top-0 right-0 bg-rose-500 text-white text-[9px] font-black uppercase px-2.5 py-0.5 rounded-bl-xl font-mono">
-                        ⚠️ สต็อกใกล้หมด
-                      </div>
-                    )}
-                    <div>
-                      <span className="text-[10px] text-slate-400 font-mono uppercase bg-slate-800 px-2 py-0.5 rounded">
-                        {med.category}
-                      </span>
-                      <h4 className="text-sm font-bold text-white mt-2">{med.name}</h4>
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between">
-                      <div>
-                        <span className="text-[10px] text-slate-400 block">คงเหลือปัจจุบัน</span>
-                        <p className={`text-2xl font-black font-mono ${isLow ? 'text-rose-400' : 'text-emerald-400'}`}>
-                          {med.stock} <span className="text-xs font-normal text-slate-400">{med.unit}</span>
-                        </p>
-                      </div>
-                      <div className="flex gap-1">
-                        <button 
-                          onClick={() => {
-                            setMedicines(medicines.map(m => m.id === med.id ? { ...m, stock: m.stock + 50 } : m));
-                          }}
-                          className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg border border-slate-700 transition-colors"
-                        >
-                          +50
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+        {activeTab === 'inventory' && user?.uid && (
+          <InfirmaryStockPanel medicines={medicines} actor={{ uid: user.uid, name: user.displayName || user.email || 'เจ้าหน้าที่พยาบาล' }} />
         )}
 
         {/* TAB 3: HEALTH SCREENING & VACCINES */}
@@ -508,12 +462,42 @@ export function InfirmaryPortal() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">ยาที่จ่าย (Medication Given)</label>
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold text-slate-300">ยาที่จ่าย (เบิกจากคลัง — ตัดสต็อกอัตโนมัติ)</label>
+                {dispenseLines.map((l, i) => (
+                  <div key={l.medicineId} className="flex items-center gap-2 text-xs">
+                    <span className="flex-1 text-slate-200 truncate">{l.name}</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={l.qty}
+                      aria-label={`จำนวน ${l.name}`}
+                      onChange={(e) => setDispenseLines(dispenseLines.map((x, j) => j === i ? { ...x, qty: Number(e.target.value) } : x))}
+                      className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-white font-mono"
+                    />
+                    <span className="text-slate-400 w-10">{l.unit}</span>
+                    <button type="button" onClick={() => setDispenseLines(dispenseLines.filter((_, j) => j !== i))} className="text-rose-400 hover:text-rose-300 px-1" aria-label={`เอา ${l.name} ออก`}>✕</button>
+                  </div>
+                ))}
+                <select
+                  value=""
+                  aria-label="เพิ่มยาจากคลัง"
+                  onChange={(e) => {
+                    const m = medicines.find(x => x.id === e.target.value);
+                    if (m && !dispenseLines.some(l => l.medicineId === m.id)) setDispenseLines([...dispenseLines, { medicineId: m.id, name: m.name, unit: m.unit, qty: 1 }]);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
+                >
+                  <option value="">+ เพิ่มยาจากคลัง…</option>
+                  {medicines.filter(m => m.active && m.stock > 0).map(m => (
+                    <option key={m.id} value={m.id}>{m.name} (คงเหลือ {m.stock} {m.unit})</option>
+                  ))}
+                </select>
                 <input
                   type="text"
                   value={medicationGiven}
                   onChange={(e) => setMedicationGiven(e.target.value)}
+                  placeholder="ยา/สิ่งอื่นที่ให้ซึ่งไม่ได้เบิกจากคลัง (ถ้ามี)"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white"
                 />
               </div>

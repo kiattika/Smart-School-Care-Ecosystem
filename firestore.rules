@@ -1338,6 +1338,68 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 31b. คลังยา/เวชภัณฑ์ห้องพยาบาล — แก้ยอดคงเหลือได้ก็ต่อเมื่อมี "รายการเคลื่อนไหว" (append-only) คู่กันใน batch/transaction
+    // เดียวกันเท่านั้น (existsAfter/getAfter ผ่าน field lastMovementId) ยอดห้ามติดลบ; ข้อมูลไม่เกี่ยวผู้ปกครอง/นักเรียน
+    function stockMovementOk(med, oldStock) {
+      let mv = getAfter(/databases/$(database)/documents/infirmary_stock_movements/$(med.lastMovementId));
+      return mv.data.medicineId == med.id
+        && mv.data.balanceAfter == med.stock
+        && mv.data.delta == med.stock - oldStock;
+    }
+
+    match /infirmary_medicines/{medicineId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') || hasRole('EXECUTIVE');
+
+      allow create: if (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF'))
+                    && request.resource.data.keys().hasOnly(['id', 'name', 'category', 'unit', 'stock', 'minAlert', 'active', 'lastMovementId', 'createdBy', 'createdAt', 'updatedAt'])
+                    && request.resource.data.keys().hasAll(['id', 'name', 'unit', 'stock', 'minAlert', 'active', 'createdBy', 'createdAt'])
+                    && request.resource.data.id == medicineId
+                    && request.resource.data.name is string && request.resource.data.name.size() >= 1 && request.resource.data.name.size() <= 200
+                    && request.resource.data.unit is string && request.resource.data.unit.size() >= 1 && request.resource.data.unit.size() <= 30
+                    && request.resource.data.stock is int && request.resource.data.stock >= 0
+                    && request.resource.data.minAlert is int && request.resource.data.minAlert >= 0
+                    && request.resource.data.active is bool
+                    && request.resource.data.createdBy == request.auth.uid
+                    && (request.resource.data.stock == 0
+                        || (request.resource.data.get('lastMovementId', null) is string
+                            && stockMovementOk(request.resource.data, 0)));
+
+      allow update: if (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF'))
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'category', 'unit', 'stock', 'minAlert', 'active', 'lastMovementId', 'updatedAt'])
+                    && request.resource.data.name is string && request.resource.data.name.size() >= 1 && request.resource.data.name.size() <= 200
+                    && request.resource.data.unit is string && request.resource.data.unit.size() >= 1 && request.resource.data.unit.size() <= 30
+                    && request.resource.data.stock is int && request.resource.data.stock >= 0
+                    && request.resource.data.minAlert is int && request.resource.data.minAlert >= 0
+                    && request.resource.data.active is bool
+                    && (request.resource.data.stock == resource.data.stock
+                        || (request.resource.data.get('lastMovementId', null) is string
+                            && request.resource.data.lastMovementId != resource.data.get('lastMovementId', null)
+                            && stockMovementOk(request.resource.data, resource.data.stock)));
+
+      allow delete: if false; // ปิดการใช้งาน (active=false) แทนการลบ — ประวัติเบิกจ่ายยังอ้างถึง
+    }
+
+    match /infirmary_stock_movements/{movementId} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') || hasRole('EXECUTIVE');
+
+      allow create: if (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF'))
+                    && request.resource.data.keys().hasOnly(['id', 'medicineId', 'medicineName', 'unit', 'type', 'delta', 'balanceAfter', 'note', 'visitId', 'studentId', 'byUid', 'byName', 'at'])
+                    && request.resource.data.keys().hasAll(['id', 'medicineId', 'medicineName', 'unit', 'type', 'delta', 'balanceAfter', 'byUid', 'byName', 'at'])
+                    && request.resource.data.id == movementId
+                    && request.resource.data.byUid == request.auth.uid
+                    && request.resource.data.type in ['INITIAL', 'RESTOCK', 'DISPENSE', 'DISCARD', 'ADJUST']
+                    && request.resource.data.delta is int && request.resource.data.delta != 0
+                    && ((request.resource.data.type in ['INITIAL', 'RESTOCK'] && request.resource.data.delta > 0)
+                        || (request.resource.data.type in ['DISPENSE', 'DISCARD'] && request.resource.data.delta < 0)
+                        || request.resource.data.type == 'ADJUST')
+                    && request.resource.data.balanceAfter is int && request.resource.data.balanceAfter >= 0
+                    && request.resource.data.at is string
+                    // ต้องมาพร้อมการอัปเดตยอดของยานั้นจริง (ชี้กลับด้วย lastMovementId)
+                    && getAfter(/databases/$(database)/documents/infirmary_medicines/$(request.resource.data.medicineId)).data.lastMovementId == movementId;
+
+      allow update, delete: if false;
+    }
+
     // 32. Semester Health Log — น้ำหนัก/ส่วนสูงรายภาคเรียน
     // ยืนยันจากโรงเรียน: นักเรียนกรอกเอง "ภาคเรียนละ 1 ครั้ง" (ลดภาระงานพยาบาลที่ดูแลทั้งโรงเรียน)
     // doc id = {studentId}_{academicYear}_{term} → กรอกซ้ำภาคเรียนเดิมชนกับ doc เดิม create ไม่ผ่าน
