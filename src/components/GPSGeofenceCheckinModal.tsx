@@ -43,6 +43,15 @@ interface GPSGeofenceCheckinModalProps {
   onClose: () => void;
 }
 
+/** ข้อความผิดพลาดเช็คอินที่ตรงสาเหตุ (ไม่โทษอินเทอร์เน็ตทุกกรณี) — รหัสมาจาก handleFirestoreError: FIRESTORE_<CODE>: ... */
+export function describeCheckinError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : '';
+  const code = msg.match(/^FIRESTORE_([A-Z_-]+):/)?.[1] ?? '';
+  if (code === 'PERMISSION-DENIED') return 'ระบบไม่อนุญาตให้บันทึกเช็คอินของบัญชีนี้ (ยังไม่มีการบันทึก) — แจ้งผู้ดูแลระบบพร้อมรหัส PERMISSION-DENIED';
+  if (code === 'UNAVAILABLE' || code === 'DEADLINE-EXCEEDED') return 'บันทึกเวลาไม่สำเร็จ (ยังไม่มีการบันทึก) — ตรวจสอบสัญญาณอินเทอร์เน็ตแล้วลองอีกครั้ง';
+  return `บันทึกเวลาไม่สำเร็จ (ยังไม่มีการบันทึก)${code ? ` — รหัสข้อผิดพลาด ${code}` : ''} ลองอีกครั้ง หากยังไม่ได้ให้แจ้งผู้ดูแลระบบ`;
+}
+
 export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinModalProps) {
   const { 
     user, 
@@ -279,7 +288,7 @@ export function GPSGeofenceCheckinModal({ isOpen, onClose }: GPSGeofenceCheckinM
       }, 4000);
     } catch (err) {
       console.error('[GPSGeofenceCheckinModal] check-in failed:', err);
-      setCheckinError('บันทึกเวลาไม่สำเร็จ (ยังไม่มีการบันทึก) — ตรวจสอบสัญญาณอินเทอร์เน็ตแล้วลองอีกครั้ง');
+      setCheckinError(describeCheckinError(err));
     } finally {
       setIsSubmitting(false);
     }
