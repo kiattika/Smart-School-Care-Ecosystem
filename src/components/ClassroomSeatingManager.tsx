@@ -106,7 +106,6 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
     currentDate,
     attendanceRecords, 
     setAttendanceStatus, 
-    adjustBehaviorScore,
     addActiveLearningPoints,
     activeLearningPoints
   } = useStore();
@@ -1409,6 +1408,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
         classroomGroups={classroomGroupsForPicker}
         attendanceRecords={currentAttendance}
         courseId={courseId}
+        courseName={formatCourseTitle(course.name, course.level, course.room)}
         onSelectHighlight={(ids) => setHighlightedStudentIds(ids)}
       />
 

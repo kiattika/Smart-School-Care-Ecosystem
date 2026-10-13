@@ -180,6 +180,12 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - log มี `hasSelfie: true`; ครูที่ปรึกษากด "ดูรูป" ในแผงพิกัด GPS (โหลดตอนกดเท่านั้น); อ่านได้เฉพาะเจ้าของ/SUPER_ADMIN/ครูที่ปรึกษาของ `homeroomClass` นั้น (ค่าว่าง = ไม่ผ่าน); สร้างได้แค่เจ้าของ ห้ามแก้ ลบได้เฉพาะ SUPER_ADMIN. log รุ่นเก่าที่ฝัง `selfieUrl` ยังแสดงได้
 - แผงครูที่ปรึกษาดึง `gps_check_in_logs` **เฉพาะนักเรียนในห้อง ย้อนหลัง 7 วัน** (`subscribeGpsCheckInLogsForUsers`, ต้องมี composite index `userId+date` ใน `firestore.indexes.json`) — ห้าม query ทั้งโรงเรียน (3,000 คน × หลายวัน = หลายหมื่นเอกสารต่อการเปิดหนึ่งครั้ง)
 
+### คะแนนกิจกรรมรายวิชา (Active Learning) ≠ คะแนนความประพฤติ
+
+- คะแนนที่ครูให้จากกิจกรรมในคาบ (สุ่มตอบ/ทำงานกลุ่ม +1/+2/+5) เป็น **คะแนนต่อวิชา** เก็บที่ `active_learning_logs` (`courseId`, `courseName`, `teacherStaffId`, `academicYear`, `term`) — ครูผู้สอนวิชานั้นใช้ประกอบคะแนนจิตพิสัย/มอบเครื่องหมายเชิดชู. **ห้ามเรียก `adjustBehaviorScore`/`updateBehaviorScoreAndTriggerAlert` จากกิจกรรมนี้** (เคยทำให้คะแนนความประพฤติเปลี่ยนและส่งแจ้งเตือน "แจ้งผลคะแนนพฤติกรรม" ผิดความหมายถึงนักเรียน/ผู้ปกครอง) — guard test `courseRank.test.ts`
+- แรงค์/เครื่องหมายเชิดชูคิดจากคะแนนสะสมของ**วิชานั้นตลอดภาคเรียน** (`src/lib/courseRank.ts`: ตารางเริ่มต้นเทียบเคียงลำดับขั้นเกมแข่งขัน ปรับศัพท์ระดับสูงเป็น ปราชญ์/ยอดเมธี/เมธีเอก/เมธีอมตะ); แอดมิน (SUPER_ADMIN) แก้ได้ที่หน้า "ปีการศึกษา & ล็อกระบบ" → `school_settings/course_rank_levels` (ไม่มี/ผิดรูปแบบ = ค่าเริ่มต้น). log รุ่นเก่าไม่มี `term` ใช้วันที่ให้คะแนนคำนวณภาคเรียน
+- **สิทธิ์อ่าน** (rules): SUPER_ADMIN, EXECUTIVE, ครูผู้ให้ (`teacherStaffId == claim staffId`), นักเรียนเจ้าของ (`isSelfStudent(studentId)`) — ไม่เปิด signed-in ทั่วไปอีก; query ต้อง `where('teacherStaffId','==',staffId)` (ครู) / `where('studentId','==',id)` (นักเรียน) / ทั้งโรงเรียนเฉพาะ EXECUTIVE; log รุ่นเก่าไม่มี `teacherStaffId` ครูจึงไม่เห็น. ครูแก้/ลบย้อนหลังไม่ได้ (เฉพาะ SUPER_ADMIN)
+
 ## Environment & Tooling
 
 ### Firebase Emulator (local dev)

@@ -10,6 +10,7 @@ import {
   StudentSelfAssessment, 
   ActiveLearningCategory, 
   ActiveLearningRecord,
+  ActiveLearningExtra,
   GateAttendanceRecord,
   DetailedLeaveRequest,
   SemesterHealthRecord,
@@ -848,7 +849,9 @@ export const useStore = create<StoreState>((set, get) => ({
     }).catch(err => console.warn('Firestore parent notification notice:', err));
   },
 
-  addActiveLearningPoints: async (studentId: string, points: number, category: ActiveLearningCategory = 'GENERAL', note?: string, courseId?: string) => {
+  addActiveLearningPoints: async (studentId: string, points: number, category: ActiveLearningCategory = 'GENERAL', note?: string, courseId?: string, extra?: ActiveLearningExtra) => {
+    // ไม่มี staffId = ไม่ใช่ครูที่ระบุตัวได้ → rules จะปฏิเสธ (ครูผู้ให้ต้องเป็นเจ้าของ log ผ่าน claim staffId)
+    const teacherStaffId = get().user?.staffId;
     const newLog: ActiveLearningRecord = {
       id: `al-log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       studentId,
@@ -856,7 +859,10 @@ export const useStore = create<StoreState>((set, get) => ({
       points,
       category,
       note,
-      awardedAt: new Date().toISOString()
+      awardedAt: new Date().toISOString(),
+      ...(extra?.courseName ? { courseName: extra.courseName } : {}),
+      ...(teacherStaffId ? { teacherStaffId } : {}),
+      ...(extra?.academicYear && extra?.term ? { academicYear: extra.academicYear, term: extra.term } : {}),
     };
     // เขียน Firestore สำเร็จก่อนค่อยอัปเดตแต้มในหน้าจอ (ล้มเหลว = throw ไม่แสดงแต้มที่ไม่มีอยู่จริง)
     await saveActiveLearningLogFirestore(newLog);

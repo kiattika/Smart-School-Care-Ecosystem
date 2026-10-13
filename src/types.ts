@@ -172,6 +172,13 @@ export type ActiveLearningCategory =
   | 'CREATIVITY'     // ความคิดสร้างสรรค์และนวัตกรรม
   | 'GENERAL';       // คะแนนทั่วไป
 
+/** ข้อมูลประกอบตอนให้คะแนนกิจกรรมรายวิชา (ชื่อวิชา + ภาคเรียนที่ให้) */
+export interface ActiveLearningExtra {
+  courseName?: string;
+  academicYear?: string;
+  term?: '1' | '2';
+}
+
 export interface ActiveLearningRecord {
   id: string;
   studentId: string;
@@ -180,6 +187,12 @@ export interface ActiveLearningRecord {
   category: ActiveLearningCategory;
   note?: string;
   awardedAt: string; // ISO string
+  /** ชื่อวิชา ณ ตอนให้คะแนน (denormalize — หน้านักเรียนไม่มี catalog วิชาให้ค้น) */
+  courseName?: string;
+  /** staff doc id ของครูผู้ให้คะแนน (= claim staffId) — rules ให้ครูอ่านเฉพาะที่ตนให้ */
+  teacherStaffId?: string;
+  academicYear?: string;
+  term?: '1' | '2';
 }
 
 export interface AttendanceRecord {
@@ -1189,7 +1202,7 @@ export interface StoreState {
   gpsCheckInLogs: GPSCheckInLog[];
 
   // Actions
-  addActiveLearningPoints: (studentId: string, points: number, category?: ActiveLearningCategory, note?: string, courseId?: string) => Promise<void>;
+  addActiveLearningPoints: (studentId: string, points: number, category?: ActiveLearningCategory, note?: string, courseId?: string, extra?: ActiveLearningExtra) => Promise<void>;
   setUser: (user: User | null) => void;
   /** เดินนาฬิกา (เรียกโดย useAppClock) — production = เวลาจริงเสมอ */
   tickClock: (now?: Date) => void;
