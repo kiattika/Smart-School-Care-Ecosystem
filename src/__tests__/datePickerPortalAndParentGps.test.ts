@@ -57,3 +57,33 @@ describe('ผู้ปกครองไม่มีปุ่ม GPS (ทั้�
     expect(src('components/NavbarWithRoleSwitcher.tsx')).toContain("activeRole !== 'PARENT'");
   });
 });
+
+describe('DatePicker แสดงวันปัจจุบันชัดเจน', () => {
+  const dp = src('components/shared/DatePicker.tsx');
+  it('วันนี้มีวงแหวนเด่น + ปุ่มลัด "เลือกวันนี้/ไปเดือนนี้" พร้อมบอกวันที่วันนี้', () => {
+    expect(dp).toContain('ring-2 ring-emerald-400');
+    expect(dp).toContain('data-testid="datepicker-today"');
+    expect(dp).toContain('เลือกวันนี้');
+    expect(dp).toContain('ไปเดือนนี้');
+  });
+});
+
+describe('DatePicker ช่องว่างเปิดที่เดือนปัจจุบัน', () => {
+  it('ไม่เปิดที่เดือนของ min เมื่อ min เป็นอดีต (บีบด้วย min/max เท่านั้น)', () => {
+    const dp = src('components/shared/DatePicker.tsx');
+    expect(dp).toContain('defaultView(min, max)');
+    expect(dp).not.toContain('parseYmd(min) || new Date()');
+  });
+});
+
+describe('openAtToday — ปฏิทินช่วงเวลาเปิด-ปิดของแอดมินเปิดที่เดือนปัจจุบัน', () => {
+  it('DatePicker มี prop และหน้าล็อกระบบ/ชุมนุมเปิดใช้', () => {
+    expect(src('components/shared/DatePicker.tsx')).toMatch(/openAtToday \? defaultView\(min, max\)/);
+    const locks = src('components/SystemSettingsAndLocksPage.tsx');
+    expect(locks).toContain('ariaLabel="วันที่เปิดระบบ" openAtToday');
+    expect(locks).toContain('ariaLabel="วันที่ล็อกระบบ" openAtToday');
+    const ew = src('components/elective/EnrollmentWindowEditor.tsx');
+    expect(ew).toContain('ariaLabel="วันที่เปิดรับสมัคร" openAtToday');
+    expect(ew).toContain('ariaLabel="วันที่ปิดรับสมัคร" openAtToday');
+  });
+});

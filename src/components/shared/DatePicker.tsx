@@ -26,6 +26,8 @@ interface DatePickerProps {
   ariaLabel?: string;
   /** เปิดปฏิทินที่หน้าเลือกปี (พ.ศ.) ก่อน → เดือน → วัน — เหมาะกับวันเกิดที่ต้องย้อนไปหลายปี */
   yearFirst?: boolean;
+  /** เปิดปฏิทินที่เดือนปัจจุบันเสมอ แม้มีค่าเดิม (ช่วงเวลาเปิด-ปิดที่แอดมินตั้งล่วงหน้า) — ค่าที่เลือกไว้ยังไฮไลต์เมื่อเลื่อนไปถึงเดือนนั้น */
+  openAtToday?: boolean;
 }
 
 const parseYmd = (s: string): Date | null => {
@@ -40,6 +42,14 @@ const toYmd = (d: Date): string => {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 };
+/** ช่องว่างเปิดที่เดือนปัจจุบัน (บีบให้อยู่ในช่วง min/max) — ไม่เปิดที่เดือนของ min เมื่อ min อยู่ในอดีต */
+const defaultView = (min?: string, max?: string): Date => {
+  const today = new Date();
+  const lo = parseYmd(min || ''); const hi = parseYmd(max || '');
+  if (lo && today < lo) return lo;
+  if (hi && today > hi) return hi;
+  return today;
+};
 const formatDisplay = (s: string): string => {
   const d = parseYmd(s);
   if (!d) return '';
@@ -52,13 +62,13 @@ const formatDisplay = (s: string): string => {
  * ปฏิทินชัดเจน) ใช้ในฟอร์มลากิจ/ไปราชการ และเช็คชื่อย้อนหลัง — ค่าที่เก็บ/ส่งออกยังเป็น string
  * รูปแบบ YYYY-MM-DD เหมือนเดิมทุกที่ที่เรียกใช้ ไม่ต้องแก้ตรรกะอื่นที่กินค่านี้ต่อ
  */
-export function DatePicker({ value, onChange, min, max, placeholder, className, disabled, required, clearable, ariaLabel, yearFirst }: DatePickerProps) {
+export function DatePicker({ value, onChange, min, max, placeholder, className, disabled, required, clearable, ariaLabel, yearFirst, openAtToday }: DatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   // days = ตารางวัน, months = เลือกเดือน, years = เลือกปี (พ.ศ.) — กดหัวข้อ "เดือน ปี" เพื่อย้อนไปเลือกเดือน/ปี
   const [mode, setMode] = useState<'days' | 'months' | 'years'>('days');
   const [yearPageStart, setYearPageStart] = useState(0);
   const selected = parseYmd(value);
-  const [viewDate, setViewDate] = useState(() => selected || parseYmd(min) || new Date());
+  const [viewDate, setViewDate] = useState(() => (openAtToday ? defaultView(min, max) : selected || defaultView(min, max)));
   const wrapRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   // ป๊อปอัปวาดผ่าน portal ที่ body (position: fixed) — ไม่ถูก overflow/stacking ของกล่องแม่ตัดหรือถูกการ์ดอื่นทับ; เปิดขึ้นบนเมื่อด้านล่างไม่พอ
@@ -84,7 +94,7 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
 
   useEffect(() => {
     if (isOpen) {
-      const base = selected || parseYmd(min) || new Date();
+      const base = openAtToday ? defaultView(min, max) : selected || defaultView(min, max);
       setViewDate(base);
       setMode(yearFirst ? 'years' : 'days');
       // หน้าเลือกปี 20 ปี/หน้า: มีค่าแล้ว → หน้าที่มีปีนั้น; ยังไม่มี → ให้ปีล่าสุด (max/วันนี้) อยู่ท้ายหน้า
@@ -250,7 +260,7 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
                   className={`aspect-square rounded-lg text-[11px] font-semibold transition-colors ${
                     active ? 'bg-emerald-600 text-white' :
                     disabledDay ? 'text-slate-700 cursor-not-allowed' :
-                    isToday ? 'bg-slate-800 text-emerald-400 border border-emerald-500/40' :
+                    isToday ? 'bg-slate-800 text-emerald-300 font-extrabold ring-2 ring-emerald-400' :
                     'text-slate-200 hover:bg-slate-800'
                   }`}
                 >
@@ -259,6 +269,22 @@ export function DatePicker({ value, onChange, min, max, placeholder, className, 
               );
             })}
           </div>
+          {(() => {
+            const today = new Date();
+            const todayOk = !isDisabled(today);
+            const viewingThisMonth = today.getFullYear() === year && today.getMonth() === month;
+            if (viewingThisMonth && !todayOk) return null;
+            return (
+              <div className="mt-2 pt-2 border-t border-slate-800 flex justify-between items-center">
+                <span className="text-[10px] text-slate-500">วันนี้ {today.getDate()} {THAI_MONTHS_SHORT[today.getMonth()]} {today.getFullYear() + 543}</span>
+                <button type="button" data-testid="datepicker-today"
+                  onClick={() => (todayOk ? handlePick(today) : setViewDate(new Date(today.getFullYear(), today.getMonth(), 1)))}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-emerald-300 hover:bg-slate-800">
+                  {todayOk ? 'เลือกวันนี้' : 'ไปเดือนนี้'}
+                </button>
+              </div>
+            );
+          })()}
           </>)}
         </div>,
         document.body,
