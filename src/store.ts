@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { selfieExpiresAt } from './lib/selfieRetention';
 import { format } from 'date-fns';
 import { isValidAcademicYear, sdqDocId } from './lib/sdq';
 import { nextClockValue } from './lib/appClock';
@@ -42,6 +43,7 @@ import {
   updateStudentProfileFirestore,
   saveGateAttendanceRecordFirestore,
   saveGPSCheckInLogFirestore,
+  saveCheckInSelfieFirestore,
   saveSchoolGeofenceConfigFirestore,
   saveSubstituteAssignmentFirestore,
   updateSubstituteAssignmentFirestore,
@@ -1014,9 +1016,12 @@ export const useStore = create<StoreState>((set, get) => ({
   addGPSCheckInLog: async (log) => {
     const isStudent = String(log.userRole || '').toUpperCase() === 'STUDENT';
     const authUid = get().user?.uid;
+    // รูปเซลฟี่ไม่ฝังในเอกสารเช็คอิน/ประตู (เอกสารเล็ก อ่านเร็ว) — แยกไป gps_checkin_selfies พร้อมวันหมดอายุ
+    const { selfieUrl: selfieDataUrl, ...logNoSelfie } = log;
     const newLog: GPSCheckInLog = {
-      ...log,
+      ...logNoSelfie,
       id: `gps-log-${Date.now()}`,
+      ...(selfieDataUrl ? { hasSelfie: true } : {}),
       // ใส่ auth uid ของผู้เช็คอินจริง ให้ rules เทียบ (userId เป็นรหัสนักเรียน/บุคลากร ไม่ใช่ uid)
       ...(authUid ? { authUid } : {}),
     };
@@ -1045,10 +1050,17 @@ export const useStore = create<StoreState>((set, get) => ({
         parentNotified: false, // ระบบยังไม่ส่งแจ้งเตือนผู้ปกครองจากการเช็คอินนี้
         distanceMeters: log.distanceMeters,
         coordinates: { latitude: log.latitude, longitude: log.longitude },
-        selfieUrl: log.selfieUrl
       };
     }
 
+    if (selfieDataUrl) {
+      if (!authUid) throw new Error('FIRESTORE_PERMISSION-DENIED: ต้องเข้าสู่ระบบก่อนแนบรูป');
+      await saveCheckInSelfieFirestore({
+        logId: newLog.id, authUid, userId: log.userId,
+        homeroomClass: matchedStudent?.room, date: log.date, dataUrl: selfieDataUrl,
+        expireAt: selfieExpiresAt(new Date()),
+      });
+    }
     await saveGPSCheckInLogFirestore(newLog);
     if (gateLog) await saveGateAttendanceRecordFirestore(gateLog);
 

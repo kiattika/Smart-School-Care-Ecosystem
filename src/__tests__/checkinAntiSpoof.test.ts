@@ -109,6 +109,7 @@ describe('guards (ต่อสายจริง)', () => {
   it('แผงครูที่ปรึกษาแสดงธง "ควรตรวจสอบ"', () => {
     const src = readSource('src/components/homevisit/AdvisorGpsCheckInPanel.tsx');
     expect(src).toContain('flagCheckIns(allLogs)');
+    expect(src).toContain('subscribeGpsCheckInLogsForUsers');
     expect(src).toContain('ควรตรวจสอบ');
   });
 });

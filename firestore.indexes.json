@@ -34,6 +34,14 @@
       ]
     },
     {
+      "collectionGroup": "gps_check_in_logs",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "student_portfolio_entries",
       "queryScope": "COLLECTION",
       "fields": [

@@ -587,7 +587,10 @@ export interface GPSCheckInLog {
   status: 'ON_TIME' | 'LATE' | 'EARLY_DEPARTURE' | 'NORMAL_DEPARTURE';
   accuracyMeters?: number;
   nearestGate?: string;
+  /** log รุ่นเก่าเท่านั้น (ฝังรูปในเอกสาร) — รุ่นใหม่เก็บรูปแยกที่ gps_checkin_selfies/{id} ดู hasSelfie */
   selfieUrl?: string;
+  /** มีรูปเซลฟี่ในคอลเลกชัน gps_checkin_selfies (หมดอายุเอง 30 วัน) */
+  hasSelfie?: boolean;
   notes?: string;
   /** Firebase Auth uid ของผู้เช็คอินจริง (userId เป็นรหัสนักเรียน/รหัสบุคลากร ไม่ใช่ uid) — rules ใช้เทียบสิทธิ์เขียน/อ่านของเจ้าของ */
   authUid?: string;
