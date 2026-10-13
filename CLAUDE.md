@@ -308,6 +308,12 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - UI: `HealthProfileSection` (นักเรียน+ผู้ปกครอง ผ่าน HealthMentalWellbeingModule), `InfirmaryHealthProfilePanel` (พยาบาล); ตรวจเนื้อหารายการที่ client (`src/lib/healthProfile.ts`) เพราะ rules วนตรวจฟิลด์ในรายการไม่ได้
 - ❌ `store.chronicIllnesses/allergies/specialCareNeeds` ว่างเสมอ (ไม่มีใครเขียน) — ห้ามกลับไปอ่านจากตรงนั้น; แท็บ "ข้อมูลโรคประจำตัว" ของพยาบาลเคยโชว์ข้อมูลปลอมตายตัวกับนักเรียนทุกคน (guard test `healthProfile.test.ts`)
 
+## ผู้ติดต่อฉุกเฉิน — `student_emergency_contacts/{studentId}`
+- ดึงจากแบบเยี่ยมบ้านฝั่งผู้ปกครอง (บิดา/มารดา/ผู้ปกครอง ที่มีเบอร์ใช้ได้; ตัดผู้เสียชีวิตและเบอร์ซ้ำ) ผ่าน `deriveEmergencyContacts()` (`src/lib/emergencyContacts.ts`) — ห้ามใส่ชื่อ/เบอร์ตายตัว
+- เป็น **สำเนาเฉพาะชื่อ-ความสัมพันธ์-เบอร์** เพราะ `home_visit_family_info` มีรายได้/ครัวเรือน → ❌ ห้ามเปิดสิทธิ์อ่านเอกสารเยี่ยมบ้านให้ INFIRMARY_STAFF
+- `saveFamilyHomeVisitInfo` เขียนทั้งสองเอกสารใน batch เดียว; `FamilyHomeVisitInfoForm` ซิงก์ให้เองครั้งเดียวสำหรับผู้ปกครองที่เคยบันทึกก่อนมีฟีเจอร์ (ข้อมูลเก่าจะขึ้นเมื่อผู้ปกครองเปิดฟอร์ม); เขียน: ผู้ปกครองตัวจริงเท่านั้น; อ่าน: พยาบาล/แอดมิน/ครูที่ปรึกษา/ผู้ปกครอง; ลบไม่ได้
+- UI พยาบาล: `InfirmaryEmergencyContactsPanel` (แท็บข้อมูลโรคประจำตัว); ไม่มีข้อมูล = แจ้งว่าผู้ปกครองยังไม่ได้กรอก
+
 ## คลังยาห้องพยาบาล — infirmary_medicines / infirmary_stock_movements
 - ยอดคงเหลือ (`stock`) เปลี่ยนได้เฉพาะพร้อม "รายการเคลื่อนไหว" (append-only) ใน batch/transaction เดียวกัน: ยาชี้ movement ล่าสุดด้วย `lastMovementId`, rules ตรวจด้วย `getAfter` (`balanceAfter == stock`, `delta == stock - เดิม`, ชนิด/เครื่องหมาย delta ตรงกัน, `byUid == auth.uid`, ยอดไม่ติดลบ) — ชนิด INITIAL/RESTOCK/DISPENSE/DISCARD/ADJUST (`src/lib/infirmaryStock.ts`)
 - การจ่ายยาในบันทึกเคสห้องพยาบาลตัดสต็อกใน transaction เดียวกับเคส+แจ้งเตือนผู้ปกครอง (`recordInfirmaryVisit({dispensed})`); รับเข้า/ทิ้ง/ปรับยอดผ่าน `changeMedicineStock`; ห้ามลบยา (ปิดด้วย `active=false`)

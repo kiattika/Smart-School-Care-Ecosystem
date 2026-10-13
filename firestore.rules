@@ -1503,6 +1503,22 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 34. ผู้ติดต่อฉุกเฉิน student_emergency_contacts/{studentId}
+    //     สำเนาเฉพาะ ชื่อ/ความสัมพันธ์/เบอร์ ที่สกัดจากแบบเยี่ยมบ้านฝั่งผู้ปกครอง (บิดา/มารดา/ผู้ปกครอง) ให้พยาบาลใช้ติดต่อตอนฉุกเฉิน
+    //     เพราะ home_visit_family_info มีรายได้/ครัวเรือน (พยาบาลอ่านไม่ได้ — ห้ามเปิดสิทธิ์นั้น)
+    //     เขียน: ผู้ปกครองตัวจริงของนักเรียนเท่านั้น (พร้อมการบันทึกแบบเยี่ยมบ้านใน batch เดียว); อ่าน: พยาบาล/แอดมิน/ครูที่ปรึกษา/ผู้ปกครอง; ลบไม่ได้
+    match /student_emergency_contacts/{sid} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') || isParentOfStudent(sid) || isHomeroomOfStudent(sid);
+      allow create, update: if isParentOfStudent(sid)
+                       && request.resource.data.keys().hasOnly(['studentId', 'parentUid', 'homeroomClass', 'contacts', 'updatedAt'])
+                       && request.resource.data.studentId == sid
+                       && request.resource.data.parentUid == request.auth.uid
+                       && request.resource.data.homeroomClass == studentField(sid, 'room', '__none__')
+                       && request.resource.data.contacts is list && request.resource.data.contacts.size() <= 3
+                       && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
     // Default Deny All Catch-All for unknown paths
     match /{document=**} {
       allow read, write: if false;

@@ -1748,6 +1748,63 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  describe('student_emergency_contacts (ผู้ติดต่อฉุกเฉินจากแบบเยี่ยมบ้าน)', () => {
+    const SID = 'ec-std-1';
+    const PAR = 'ec-par';
+    const par = () => asUser(PAR, ['PARENT']).firestore() as any;
+    const otherPar = () => asUser('ec-par-2', ['PARENT']).firestore() as any;
+    const stu = () => asUser('ec-stu', ['STUDENT']).firestore() as any;
+    const nurse = () => asUser('ec-nurse', ['INFIRMARY_STAFF']).firestore() as any;
+    const hr = () => asUser('ec-hr', ['HOMEROOM_TEACHER'], { staffId: 'ec-hr' }).firestore() as any;
+    const otherHr = () => asUser('ec-hr2', ['HOMEROOM_TEACHER'], { staffId: 'ec-hr2' }).firestore() as any;
+    const ref = (db: any) => mDoc(db, `student_emergency_contacts/${SID}`);
+    const doc = (over: Record<string, unknown> = {}) => ({
+      studentId: SID, parentUid: PAR, homeroomClass: 'ม.2/2',
+      contacts: [{ source: 'MOTHER', relation: 'มารดา', name: 'นางสมศรี ใจดี', phone: '089-123-4567' }],
+      updatedAt: mServerTimestamp(), ...over,
+    });
+    async function seed() {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${SID}`).set({ studentId: SID, studentUid: 'ec-stu', parentUid: PAR, room: 'ม.2/2', name: 'EC Kid' });
+        await ctx.firestore().doc('staff/ec-hr').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.2/2' } });
+        await ctx.firestore().doc('staff/ec-hr2').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+      });
+    }
+
+    it('เขียน: ผู้ปกครองตัวจริงเท่านั้น (นักเรียน/ผู้ปกครองคนอื่น/พยาบาล/ครู เขียนไม่ได้)', async () => {
+      await seed();
+      await assertSucceeds(mSetDoc(ref(par()), doc()));
+      await assertFails(mSetDoc(ref(otherPar()), doc()));
+      await assertFails(mSetDoc(ref(stu()), doc()));
+      await assertFails(mSetDoc(ref(nurse()), doc()));
+      await assertFails(mSetDoc(ref(hr()), doc()));
+    });
+    it('เขียน: ห้ามฟิลด์เกิน/ห้องไม่ตรงทะเบียน/parentUid ไม่ใช่ตัวเอง/เกิน 3 รายการ/updatedAt ย้อนหลัง', async () => {
+      await seed();
+      await assertFails(mSetDoc(ref(par()), doc({ extra: 'x' })));
+      await assertFails(mSetDoc(ref(par()), doc({ homeroomClass: 'ม.6/1' })));
+      await assertFails(mSetDoc(ref(par()), doc({ parentUid: 'someone-else' })));
+      await assertFails(mSetDoc(ref(par()), doc({ contacts: Array.from({ length: 4 }, (_, i) => ({ source: 'GUARDIAN', relation: 'x', name: 'n', phone: `0800000000${i}` })) })));
+      await assertFails(mSetDoc(ref(par()), doc({ updatedAt: new Date('2020-01-01') })));
+    });
+    it('อ่าน: พยาบาล/แอดมิน/ครูที่ปรึกษาห้องนั้น/ผู้ปกครองตัวจริง; นักเรียน ครูห้องอื่น ผู้ปกครองคนอื่น อ่านไม่ได้; ลบไม่ได้', async () => {
+      await seed();
+      await assertSucceeds(mSetDoc(ref(par()), doc()));
+      await assertSucceeds(mGetDoc(ref(nurse())));
+      await assertSucceeds(mGetDoc(ref(par())));
+      await assertSucceeds(mGetDoc(ref(hr())));
+      await assertSucceeds(mGetDoc(ref(asUser('ec-admin', ['SUPER_ADMIN']).firestore() as any)));
+      await assertFails(mGetDoc(ref(stu())));
+      await assertFails(mGetDoc(ref(otherHr())));
+      await assertFails(mGetDoc(ref(otherPar())));
+      await assertFails((par() as any).doc(`student_emergency_contacts/${SID}`).delete());
+    });
+    it('พยาบาลยังอ่านเอกสารเยี่ยมบ้านฝั่งครอบครัว (รายได้/ครัวเรือน) ไม่ได้', async () => {
+      await seed();
+      await assertFails((nurse() as any).doc(`home_visit_family_info/${SID}`).get());
+    });
+  });
+
   // 15c2. class_messages / class_chat_threads — แชทแยกช่องส่วนตัว (ครูประจำชั้น ↔ ผู้ปกครอง | นักเรียน)
   describe('class chat (class_messages + class_chat_threads)', () => {
     const SID = 'chat-std-1';

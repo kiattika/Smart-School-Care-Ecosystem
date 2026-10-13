@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, CheckCircle2, Users } from 'lucide-react';
 import type { Student, FamilyHomeVisitInfo, ParentInfo, GuardianInfo } from '../../types';
 import { useFamilyHomeVisitInfo } from '../../hooks/useHomeVisitData';
-import { saveFamilyHomeVisitInfo } from '../../services/firestoreService';
+import { deriveEmergencyContacts } from '../../lib/emergencyContacts';
+import { saveFamilyHomeVisitInfo, subscribeEmergencyContacts, syncEmergencyContacts } from '../../services/firestoreService';
 import {
   normalizeFamilyInfo, validateFamilyInfo, PERSON_HEALTH, PARENTS_STATUS, HOUSING_STATUS, DEPENDENTS, SAFETY_RISKS,
   ELECTRICITY, DRINKING_WATER, DISASTER_RISKS, INCOME_BRACKETS, EDUCATION_LEVELS,
@@ -53,6 +54,20 @@ export function FamilyHomeVisitInfoForm({ student, parentUid }: { student: Stude
     if (loading || initialised) return;
     setForm(normalizeFamilyInfo(saved, base, student.parentMobile || '')); setInitialised(true);
   }, [loading, saved, base, student.parentMobile, initialised]);
+
+  // ผู้ปกครองที่เคยบันทึกก่อนมีฟีเจอร์ผู้ติดต่อฉุกเฉิน → สร้างสำเนาให้พยาบาลครั้งเดียวตอนเปิดฟอร์ม (ไม่ต้องกดบันทึกใหม่)
+  useEffect(() => {
+    if (loading || !saved) return;
+    let off: () => void = () => {};
+    let done = false;
+    off = subscribeEmergencyContacts(student.studentId, (d) => {
+      if (done) return; done = true;
+      if (!d || JSON.stringify(d.contacts) !== JSON.stringify(deriveEmergencyContacts(saved))) {
+        syncEmergencyContacts({ ...saved, ...base }).catch(e => console.warn('[FamilyHomeVisitInfoForm] emergency sync failed', e));
+      }
+    }, () => { done = true; });
+    return () => off();
+  }, [loading, saved, base, student.studentId]);
 
   const set = <K extends keyof FamilyHomeVisitInfo>(k: K, v: FamilyHomeVisitInfo[K]) => setForm(f => ({ ...f, [k]: v }));
   const g = form.guardian;

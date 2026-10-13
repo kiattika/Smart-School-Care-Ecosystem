@@ -12,6 +12,7 @@ import {
 } from '../../services/firestoreService';
 import { InfirmaryStockPanel } from './InfirmaryStockPanel';
 import { InfirmaryHealthProfilePanel } from './InfirmaryHealthProfilePanel';
+import { InfirmaryEmergencyContactsPanel } from './InfirmaryEmergencyContactsPanel';
 import { composeMedicationGiven, validateDispenseLines, type DispenseLine, isLowStock } from '../../lib/infirmaryStock';
 import {
   HeartPulse,
@@ -353,6 +354,7 @@ export function InfirmaryPortal() {
                   <StudentPicker mode="single" students={students} value={selectedStudentId} onSelect={setSelectedStudentId} />
                 </div>
               </div>
+              <InfirmaryEmergencyContactsPanel studentId={selectedStudentId} />
               {user?.uid && <InfirmaryHealthProfilePanel studentId={selectedStudentId} actor={{ uid: user.uid, name: user.displayName || user.email || 'เจ้าหน้าที่พยาบาล' }} />}
             </div>
           </div>
