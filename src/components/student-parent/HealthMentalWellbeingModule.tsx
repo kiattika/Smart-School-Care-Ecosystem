@@ -30,6 +30,7 @@ import { SdqStatusView } from '../shared/SdqStatusView';
 import { StudentNineQSection } from './StudentNineQSection';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits, subscribeSDQAssessments, subscribeSemesterHealthLogs } from '../../services/firestoreService';
+import { readDocOrNull, loadParentNotices, type ParentNoticeDoc } from '../../services/screeningService';
 import { BMI_CATEGORY_LABEL } from '../../lib/utils';
 import { SemesterHealthSelfReportForm } from './SemesterHealthSelfReportForm';
 import {
@@ -39,6 +40,62 @@ import {
   SemesterHealthLog,
   Student
 } from '../../types';
+
+const NOTICE_METHOD_TH: Record<string, string> = { PHONE: 'ทางโทรศัพท์', IN_PERSON: 'พบด้วยตนเอง', MESSAGE: 'ทางข้อความ', OTHER: 'ช่องทางอื่น' };
+
+/**
+ * มุมมองผู้ปกครอง — ดูอย่างเดียว ไม่มีแบบฟอร์มให้ทำ: (1) ระดับผลคัดกรองอารมณ์ล่าสุดของบุตรหลาน (ไม่แสดงคำตอบรายข้อ)
+ * (2) รายการที่ครูที่ปรึกษา/ครูแนะแนวบันทึกว่าแจ้งผู้ปกครองแล้ว (ใคร/เมื่อไร/ช่องทาง — ไม่แสดงหมายเหตุภายใน)
+ */
+function ParentScreeningResultsView({ studentId, studentName }: { studentId: string; studentName: string }) {
+  const [twoQ, setTwoQ] = useState<TwoQuestionScreening | null | undefined>(undefined);
+  const [notices, setNotices] = useState<ParentNoticeDoc[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    readDocOrNull<TwoQuestionScreening>(`student_screenings_2q/${studentId}`).then(d => { if (!cancelled) setTwoQ(d); }).catch(() => { if (!cancelled) setTwoQ(null); });
+    loadParentNotices(studentId).then(n => { if (!cancelled) setNotices(n); }).catch(() => { if (!cancelled) setNotices([]); });
+    return () => { cancelled = true; };
+  }, [studentId]);
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" data-testid="parent-screening-results">
+      <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 space-y-3">
+        <h3 className="text-sm font-bold text-white flex items-center gap-2"><Brain className="w-4 h-4 text-indigo-400" /> ผลคัดกรองอารมณ์เบื้องต้นของ {studentName}</h3>
+        {twoQ === undefined ? (
+          <p className="text-xs text-slate-400">กำลังโหลด…</p>
+        ) : !twoQ ? (
+          <p className="text-xs text-slate-400">ยังไม่มีผลคัดกรอง</p>
+        ) : (
+          <div className={`p-3.5 rounded-2xl text-xs space-y-1 ${twoQ.isPositive ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-emerald-500/10 border border-emerald-500/30'}`}>
+            <div className={`font-bold ${twoQ.isPositive ? 'text-amber-300' : 'text-emerald-300'}`}>
+              {twoQ.isPositive ? 'พบความเสี่ยงเบื้องต้น — ครูที่ปรึกษาหรือครูแนะแนวจะติดต่อพูดคุยกับท่านและบุตรหลาน' : 'ไม่พบความเสี่ยงเบื้องต้น'}
+            </div>
+            <div className="text-slate-400">ผลล่าสุดเมื่อ {twoQ.conductedAt}</div>
+          </div>
+        )}
+        <p className="text-[11px] text-slate-500">ผู้ปกครองไม่ต้องทำแบบคัดกรอง — ระบบแสดงเฉพาะผลที่เกิดขึ้นกับบุตรหลาน หากกังวลใจ ติดต่อครูที่ปรึกษาหรือครูแนะแนวได้โดยตรง</p>
+      </div>
+
+      <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 space-y-3">
+        <h3 className="text-sm font-bold text-white">ครูแจ้งถึงท่าน</h3>
+        {notices === null ? (
+          <p className="text-xs text-slate-400">กำลังโหลด…</p>
+        ) : notices.length === 0 ? (
+          <p className="text-xs text-slate-400">ยังไม่มีการแจ้งจากครู</p>
+        ) : (
+          <ul className="space-y-2">
+            {notices.map(n => (
+              <li key={n.id} className="p-3 bg-slate-800/40 border border-slate-800 rounded-xl text-xs text-slate-200">
+                <div className="font-semibold">{n.notifiedByName || 'ครู'} แจ้งผู้ปกครอง{NOTICE_METHOD_TH[n.method] ? ` (${NOTICE_METHOD_TH[n.method]})` : ''}</div>
+                <div className="text-slate-400 mt-0.5">{n.notifiedAt}</div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
 
 type HealthMentalWellbeingModuleProps = { studentId: string; student?: Student; isParentView?: boolean };
 
@@ -247,7 +304,7 @@ function HealthMentalWellbeingModuleInner({
           }`}
         >
           <Brain className="w-3.5 h-3.5" />
-          <span>คัดกรองอารมณ์ (2Q)</span>
+          <span>{isParentView ? 'ผลคัดกรองอารมณ์' : 'คัดกรองอารมณ์ (2Q)'}</span>
         </button>
         <button
           onClick={() => setActiveTab('sdq')}
@@ -531,7 +588,11 @@ function HealthMentalWellbeingModuleInner({
         </div>
       )}
 
-      {activeTab === 'screening' && (
+      {activeTab === 'screening' && isParentView && (
+        <ParentScreeningResultsView studentId={student.studentId} studentName={student.name} />
+      )}
+
+      {activeTab === 'screening' && !isParentView && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* 2Q Screening Form */}
           <div className="lg:col-span-5 bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl flex flex-col justify-between">

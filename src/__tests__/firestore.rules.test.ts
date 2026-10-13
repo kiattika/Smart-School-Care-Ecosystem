@@ -2365,6 +2365,25 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       }
     });
 
+    it('PARENT: ผู้ปกครองตัวจริง (students.parentUid) อ่าน 2Q และบันทึก "แจ้งผู้ปกครองแล้ว" ของบุตรหลานได้ แต่เขียน 2Q ไม่ได้ และผู้ปกครองคนอื่นอ่านไม่ได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, room: 'ม.5/8', parentUid: 'parent-real' });
+        await ctx.firestore().doc(`student_screenings_2q/${STU_ID}`).set({ id: '2q-p', studentId: STU_ID, q1Depressed: true, q2Hopeless: false, isPositive: true, conductedAt: '2026-09-01' });
+        await ctx.firestore().doc(`student_screening_notices/${STU_ID}/entries/n1`).set({ scope: 'NINE_Q', screeningId: 'x', notifiedByUid: 't', notifiedByName: 'ครู', notifiedAt: '2026-09-02', method: 'PHONE' });
+      });
+      const parent = asUser('parent-real', ['PARENT']).firestore();
+      const other = asUser('parent-other', ['PARENT']).firestore();
+      await assertSucceeds(parent.doc(`student_screenings_2q/${STU_ID}`).get());
+      await assertSucceeds(parent.collection(`student_screening_notices/${STU_ID}/entries`).get());
+      await assertFails(parent.doc(`student_screenings_2q/${STU_ID}`).set({ id: '2q-p2', studentId: STU_ID, q1Depressed: false, q2Hopeless: false, isPositive: false, conductedAt: '2026-09-03' }));
+      await assertFails(parent.collection(`student_screening_notices/${STU_ID}/entries`).add({ scope: 'NINE_Q', screeningId: 'x', notifiedByUid: 'parent-real', notifiedByName: 'x', notifiedAt: '2026-09-03', method: 'PHONE' }));
+      await assertFails(other.doc(`student_screenings_2q/${STU_ID}`).get());
+      await assertFails(other.collection(`student_screening_notices/${STU_ID}/entries`).get());
+      // 9Q/8Q ผู้ปกครองยังอ่านไม่ได้เหมือนเดิม
+      await assertFails(parent.doc(`student_screenings_9q/${STU_ID}`).get());
+      await assertFails(parent.doc(`student_screenings_8q/${STU_ID}`).get());
+    });
+
     it('TASK 5 (ExecutivePortal Health): EXECUTIVE can still read 2Q for school-wide counts (no identities shown in the UI)', async () => {
       await seed();
       await testEnv.withSecurityRulesDisabled(async (ctx) => {

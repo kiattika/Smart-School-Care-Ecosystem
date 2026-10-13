@@ -6,6 +6,7 @@ import { saveFamilyHomeVisitInfo } from '../../services/firestoreService';
 import {
   normalizeFamilyInfo, validateFamilyInfo, PERSON_HEALTH, PARENTS_STATUS, HOUSING_STATUS, DEPENDENTS, SAFETY_RISKS,
   ELECTRICITY, DRINKING_WATER, DISASTER_RISKS, INCOME_BRACKETS, EDUCATION_LEVELS,
+  emptyGuardian, guardianChoiceOf, guardianFromParent, GUARDIAN_RELATION, type GuardianChoice,
 } from '../../lib/homeVisitData';
 import { inputCls, Section, Label, SourceTag, Chips, Single, toNum, toggleIn, ErrorList } from './formParts';
 
@@ -57,6 +58,25 @@ export function FamilyHomeVisitInfoForm({ student, parentUid }: { student: Stude
   const g = form.guardian;
   const setG = (patch: Partial<GuardianInfo>) => setForm(f => ({ ...f, guardian: { ...f.guardian, ...patch } }));
 
+  // ข้อ 13: เลือก บิดา / มารดา / อื่น ๆ — บิดา/มารดาใช้ข้อมูลข้อ 7/8 (ซิงก์อัตโนมัติ) อื่น ๆ ค่อยแสดงฟอร์มกรอกเอง
+  const [choice, setChoice] = useState<GuardianChoice>('');
+  useEffect(() => { if (initialised) setChoice(guardianChoiceOf(saved?.guardian ?? form.guardian)); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [initialised]);
+  useEffect(() => {
+    if (choice !== 'FATHER' && choice !== 'MOTHER') return;
+    setForm(f => {
+      const src = choice === 'FATHER' ? f.father : f.mother;
+      const next = guardianFromParent(src, GUARDIAN_RELATION[choice], f.guardian);
+      return JSON.stringify(next) === JSON.stringify(f.guardian) ? f : { ...f, guardian: next };
+    });
+  }, [choice, form.father, form.mother]);
+  const pickChoice = (c: GuardianChoice) => {
+    if (c === 'OTHER' && choice !== 'OTHER') {
+      setForm(f => ({ ...f, guardian: { ...emptyGuardian(), phone: student.parentMobile || '' } }));
+    }
+    setChoice(c);
+  };
+  const choiceLabel: Record<Exclude<GuardianChoice, ''>, string> = { FATHER: 'บิดา', MOTHER: 'มารดา', OTHER: 'อื่น ๆ' };
+
   const save = async () => {
     const errs = validateFamilyInfo(form);
     setErrors(errs); setMsg(null);
@@ -87,22 +107,39 @@ export function FamilyHomeVisitInfoForm({ student, parentUid }: { student: Stude
         </div>
       </Section>
 
-      <Section title="ข้อ 13 ข้อมูลผู้ปกครอง" hint="ถ้าบิดา/มารดาเป็นผู้ปกครอง ให้กรอกข้อมูลซ้ำอีกครั้งตามความสัมพันธ์">
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          <div className="col-span-2 sm:col-span-3"><Label required>เกี่ยวข้องกับนักเรียนเป็น</Label><input className={inputCls} placeholder="เช่น บิดา, ป้า, ตา" value={g.relation} onChange={e => setG({ relation: e.target.value })} /></div>
-          <input className={inputCls} placeholder="คำนำหน้า" value={g.title} onChange={e => setG({ title: e.target.value })} />
-          <input className={inputCls} placeholder="ชื่อ *" value={g.firstName} onChange={e => setG({ firstName: e.target.value })} />
-          <input className={inputCls} placeholder="นามสกุล *" value={g.lastName} onChange={e => setG({ lastName: e.target.value })} />
-          <input className={inputCls} placeholder="อายุ (ปี) *" inputMode="numeric" value={g.age ?? ''} onChange={e => setG({ age: toNum(e.target.value) })} />
-          <input className={inputCls} placeholder="อาชีพ *" value={g.occupation} onChange={e => setG({ occupation: e.target.value })} />
-          <input className={inputCls} placeholder="เบอร์โทร *" inputMode="tel" value={g.phone} onChange={e => setG({ phone: e.target.value })} />
-          <input className={inputCls + ' col-span-2 sm:col-span-3'} placeholder="โรคประจำตัว (ถ้าไม่มีเว้นว่าง)" value={g.chronicDisease} onChange={e => setG({ chronicDisease: e.target.value })} />
+      <Section title="ข้อ 13 ข้อมูลผู้ปกครอง" hint="ถ้าบิดาหรือมารดาเป็นผู้ปกครอง เลือกได้เลย ระบบใช้ข้อมูลจากข้อ 7/8 ไม่ต้องกรอกซ้ำ">
+        <div>
+          <Label required>ผู้ปกครองของนักเรียนคือ</Label>
+          <Single options={['บิดา', 'มารดา', 'อื่น ๆ']} value={choice ? choiceLabel[choice] : ''} onPick={o => pickChoice(o === 'บิดา' ? 'FATHER' : o === 'มารดา' ? 'MOTHER' : 'OTHER')} />
         </div>
-        <div><Label>ระดับการศึกษา</Label><Single options={EDUCATION_LEVELS} value={g.education} onPick={o => setG({ education: o })} /></div>
-        <div><Label>รายได้เฉลี่ยต่อเดือน</Label><Single options={INCOME_BRACKETS} value={g.incomeBracket} onPick={o => setG({ incomeBracket: o })} /></div>
-        <div><Label required>สุขภาพ</Label><Single options={PERSON_HEALTH} value={g.health} onPick={o => setG({ health: o })} /></div>
-        <label className="flex items-center gap-2 text-xs text-slate-200"><input type="checkbox" checked={g.sameAddressAsStudent} onChange={e => setG({ sameAddressAsStudent: e.target.checked })} /> ที่อยู่ผู้ปกครองเหมือนที่อยู่นักเรียน</label>
-        {!g.sameAddressAsStudent && <textarea className={inputCls + ' h-16 resize-none'} placeholder="ที่อยู่ผู้ปกครอง" value={g.address} onChange={e => setG({ address: e.target.value })} />}
+        {(choice === 'FATHER' || choice === 'MOTHER') && (
+          <div className="bg-black/20 border border-white/5 rounded-xl p-3 text-xs text-slate-300 space-y-1">
+            <div className="font-bold text-slate-200">ใช้ข้อมูล{choiceLabel[choice]}จากด้านบน</div>
+            {(choice === 'FATHER' ? form.father : form.mother).presence === 'PRESENT'
+              ? <div>{g.title}{g.firstName} {g.lastName} · อายุ {g.age ?? '-'} ปี · {g.occupation || '-'} · โทร {g.phone || '-'}</div>
+              : <div className="text-rose-300">{choiceLabel[choice]}มีสถานะไม่ใช่ "ปรากฏ/มีชีวิตอยู่" — เลือกผู้ปกครองใหม่</div>}
+            <div className="text-slate-500">ถ้าข้อมูลไม่ถูกต้อง แก้ที่ข้อ 7/8 ด้านบน</div>
+          </div>
+        )}
+        {choice === 'OTHER' && (<>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <div className="col-span-2 sm:col-span-3"><Label required>เกี่ยวข้องกับนักเรียนเป็น</Label><input className={inputCls} placeholder="เช่น ป้า, ตา, ยาย" value={g.relation} onChange={e => setG({ relation: e.target.value })} /></div>
+            <input className={inputCls} placeholder="คำนำหน้า" value={g.title} onChange={e => setG({ title: e.target.value })} />
+            <input className={inputCls} placeholder="ชื่อ *" value={g.firstName} onChange={e => setG({ firstName: e.target.value })} />
+            <input className={inputCls} placeholder="นามสกุล *" value={g.lastName} onChange={e => setG({ lastName: e.target.value })} />
+            <input className={inputCls} placeholder="อายุ (ปี) *" inputMode="numeric" value={g.age ?? ''} onChange={e => setG({ age: toNum(e.target.value) })} />
+            <input className={inputCls} placeholder="อาชีพ *" value={g.occupation} onChange={e => setG({ occupation: e.target.value })} />
+            <input className={inputCls} placeholder="เบอร์โทร *" inputMode="tel" value={g.phone} onChange={e => setG({ phone: e.target.value })} />
+            <input className={inputCls + ' col-span-2 sm:col-span-3'} placeholder="โรคประจำตัว (ถ้าไม่มีเว้นว่าง)" value={g.chronicDisease} onChange={e => setG({ chronicDisease: e.target.value })} />
+          </div>
+          <div><Label>ระดับการศึกษา</Label><Single options={EDUCATION_LEVELS} value={g.education} onPick={o => setG({ education: o })} /></div>
+          <div><Label>รายได้เฉลี่ยต่อเดือน</Label><Single options={INCOME_BRACKETS} value={g.incomeBracket} onPick={o => setG({ incomeBracket: o })} /></div>
+          <div><Label required>สุขภาพ</Label><Single options={PERSON_HEALTH} value={g.health} onPick={o => setG({ health: o })} /></div>
+        </>)}
+        {choice && (<>
+          <label className="flex items-center gap-2 text-xs text-slate-200"><input type="checkbox" checked={g.sameAddressAsStudent} onChange={e => setG({ sameAddressAsStudent: e.target.checked })} /> ที่อยู่ผู้ปกครองเหมือนที่อยู่นักเรียน</label>
+          {!g.sameAddressAsStudent && <textarea className={inputCls + ' h-16 resize-none'} placeholder="ที่อยู่ผู้ปกครอง" value={g.address} onChange={e => setG({ address: e.target.value })} />}
+        </>)}
       </Section>
 
       <Section title="ข้อ 15 สถานะที่อยู่อาศัย">
