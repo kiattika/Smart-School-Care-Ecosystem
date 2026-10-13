@@ -1281,6 +1281,23 @@ export async function saveCheckInSelfieFirestore(p: {
   }
 }
 
+/**
+ * ห้องของนักเรียนที่ล็อกอินอยู่ (อ่านจาก students ด้วย studentUid ของตัวเอง — rules อนุญาตเจ้าของเอกสาร)
+ * ใช้ตอนเซฟรูปเช็คอิน: store.students ว่างในเซสชันของนักเรียน (มีแต่เมื่อมีคน import ในเซสชันเดียวกัน)
+ * ถ้าไม่ได้ห้อง ครูที่ปรึกษาจะเปิดรูปไม่ได้ (rules ผูกรูปกับ homeroomClass)
+ */
+export async function getOwnStudentRoomFirestore(studentUid: string): Promise<string | undefined> {
+  try {
+    const snap = await getDocs(query(collection(db, 'students'), where('studentUid', '==', studentUid)));
+    const d = snap.docs[0]?.data();
+    const room = d ? (d.room || d.className || d.homeroomClass) : undefined;
+    return typeof room === 'string' && room ? room : undefined;
+  } catch (error) {
+    console.warn('[getOwnStudentRoomFirestore] failed:', error);
+    return undefined;
+  }
+}
+
 /** อ่านรูปเซลฟี่ของ log หนึ่งรายการ — null = ไม่มี/หมดอายุแล้ว (ถูก TTL ลบ) */
 export async function getCheckInSelfieFirestore(logId: string): Promise<string | null> {
   const snap = await getDoc(doc(db, 'gps_checkin_selfies', logId));
