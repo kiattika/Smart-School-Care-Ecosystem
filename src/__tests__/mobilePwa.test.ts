@@ -61,6 +61,10 @@ describe('pwa: ไฟล์ manifest / icons / service worker / hosting', () => 
     const hdrs = fb.hosting.headers as { source: string; headers: { key: string; value: string }[] }[];
     expect(hdrs.find(h => h.source === '/sw.js')?.headers).toEqual([{ key: 'Cache-Control', value: 'no-cache' }]);
     expect(hdrs.find(h => h.source === '/manifest.webmanifest')?.headers.some(h => h.value === 'application/manifest+json')).toBe(true);
+    // หน้า HTML (/, /index.html, /m) ต้องไม่ถูกแคชของเบราว์เซอร์ — ไม่งั้นหลัง deploy ผู้ใช้ยังได้ index.html เก่า (ชี้ไฟล์ JS รุ่นเก่า) นานถึง 1 ชม.
+    for (const src of ['/', '/index.html', '/m', '/m/**']) {
+      expect(hdrs.find(h => h.source === src)?.headers).toEqual([{ key: 'Cache-Control', value: 'no-cache' }]);
+    }
     expect(fb.hosting.rewrites).toEqual([{ source: '**', destination: '/index.html' }]);
   });
   it('App ส่ง /m ไป MobileApp หลังล็อกอิน', () => {
