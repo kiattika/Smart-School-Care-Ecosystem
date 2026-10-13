@@ -266,7 +266,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
         'ANSWER',
         `กิจกรรมสุ่มตอบคำถาม Active Learning (+${points} คะแนน)`,
         courseId,
-        awardExtra
+        { ...awardExtra, ...(student.room ? { homeroomClass: student.room } : {}) }
       );
     } catch {
       setAwardError('บันทึกคะแนนไม่สำเร็จ — ตรวจสอบสิทธิ์และการเชื่อมต่อ แล้วลองใหม่');
@@ -293,7 +293,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
         'COLLABORATION',
         `กิจกรรมกลุ่ม/โต๊ะเรียน: ${group.name} (+${points} คะแนน)`,
         courseId,
-        awardExtra
+        { ...awardExtra, ...(student.room ? { homeroomClass: student.room } : {}) }
       );
     }));
     const failed = results.filter(r => r.status === 'rejected').length;

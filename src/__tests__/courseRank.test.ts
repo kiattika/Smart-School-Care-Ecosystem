@@ -103,7 +103,7 @@ describe('guard — คะแนนกิจกรรมรายวิชาแ
     expect(block).toContain('request.resource.data.teacherStaffId == myStaffId()');
   });
   it('หน้านักเรียนแสดงคะแนนรายวิชา และกระดานครูอ่านเฉพาะของตนเอง', () => {
-    expect(readSource('src/StudentPortal.tsx')).toContain('<CourseActivityPoints');
+    expect(readSource('src/StudentPortal.tsx')).toContain('<CourseOverviewCards');
     expect(readSource('src/components/ClassroomLeaderboard.tsx')).toContain('subscribeActiveLearningLogsForTeacher');
     expect(readSource('src/components/ClassroomLeaderboard.tsx')).not.toMatch(/subscribeActiveLearningLogs\(/);
   });
@@ -168,7 +168,7 @@ describe('คะแนนแยกอิสระรายวิชา (ไม�
   });
   it('guard: เมนู leaderboard และการ์ดนักเรียนไม่ใช้ยอดรวมใน store / แสดง "ไม่ระบุวิชา" แยกไม่ให้มีแรงค์', () => {
     expect(readSource('src/TeacherPortal.tsx')).not.toMatch(/Object\.values\(activeLearningPoints\)/);
-    expect(readSource('src/components/student-parent/CourseActivityPoints.tsx')).toContain('r.unassigned');
+    expect(readSource('src/components/student-parent/CourseOverviewCards.tsx')).toContain('unassigned');
   });
   it('guard: คาบที่สิ้นสุดแล้วไม่มีปุ่ม "เข้าสู่ชั้นเรียน"', () => {
     expect(readSource('src/components/TeacherScheduleList.tsx')).not.toContain('btn-past-enter-class');

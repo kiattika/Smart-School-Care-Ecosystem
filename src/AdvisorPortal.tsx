@@ -23,6 +23,7 @@ import { AdvisorSdqPanel } from './components/advisor/AdvisorSdqPanel';
 import { DepressionScreeningPanel } from './components/shared/DepressionScreeningPanel';
 import { useGuidanceStatus, useRoomScreeningRecords } from './hooks/useDepressionScreening';
 import { AdvisorStudentDetailModal } from './components/advisor/AdvisorStudentDetailModal';
+import { AdvisorActivityPointsChart } from './components/AdvisorActivityPointsChart';
 import { recomputeCourseAttendanceStatsForRoom, subscribeSelfAssessmentsByRoom } from './services/firestoreService';
 import { useRoomAttendanceRecordsFull } from './hooks/useRoomAttendanceRecords';
 import { useTeacherFirestoreSchedule } from './hooks/useTeacherFirestoreSchedule';
@@ -880,6 +881,7 @@ export function AdvisorPortal() {
                 <p className="text-[11px] text-slate-400 mt-0.5">เกรด/ผลการเรียน รางวัล การอบรม ฝึกงาน จิตอาสา — เฉพาะข้อมูลด้านวิชาการ (แยกจากส่วน A ความประพฤติ/การดูแลทั่วไป ในแท็บ “แดชบอร์ดห้อง”)</p>
               </div>
               <StudentAnalyticsDashboard roomName={myRoom || 'No Room'} students={myStudents} />
+              <AdvisorActivityPointsChart room={myRoom} students={myStudents} />
               <div className="border-t border-white/10 pt-8">
                 <AdvisorPortfolioReview homeroomClass={myRoom} />
               </div>

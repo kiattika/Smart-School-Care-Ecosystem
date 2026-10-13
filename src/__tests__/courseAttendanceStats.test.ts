@@ -77,7 +77,8 @@ describe('guard: sync สถิติรายวิชา + UI', () => {
   it('rules: ครูผู้สอนแตะได้เฉพาะ field สถิติ', () => {
     expect(readSource('firestore.rules')).toMatch(/hasRole\('SUBJECT_TEACHER'\) &&\s*request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\s*\.hasOnly\(\['attendanceStats', 'attendanceStatsUpdatedAt', 'courseAttendanceStats'\]\)/);
   });
-  it('ทั้งสอง portal แสดง CourseAttendanceStats', () => {
-    for (const f of ['src/StudentPortal.tsx', 'src/ParentPortal.tsx']) expect(readSource(f)).toMatch(/<CourseAttendanceStats /);
+  it('ทั้งสอง portal แสดงการ์ดรวม CourseOverviewCards (สถิติเข้าเรียน + คะแนนกิจกรรม) ที่ใช้ buildCourseAttendanceRows', () => {
+    for (const f of ['src/StudentPortal.tsx', 'src/ParentPortal.tsx']) expect(readSource(f)).toMatch(/<CourseOverviewCards /);
+    expect(readSource('src/components/student-parent/CourseOverviewCards.tsx')).toContain('buildCourseAttendanceRows');
   });
 });

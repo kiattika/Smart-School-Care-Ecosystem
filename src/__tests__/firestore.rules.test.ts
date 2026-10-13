@@ -1919,6 +1919,57 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('active_learning_logs/log-1').get());
       await assertSucceeds(asRole('EXECUTIVE').firestore().collection('active_learning_logs').get());
     });
+
+    describe('ผู้ปกครอง + ครูที่ปรึกษา อ่านได้ (denormalize homeroomClass)', () => {
+      const PARENT_UID = 'parent-uid-al';
+      const HR_UID = 'hr-uid-al';
+      const HR_STAFF = 'tch-hr-al';
+      async function seedFamily() {
+        await seed();
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc(`students/${STU_ID}`).set({ studentId: STU_ID, studentUid: STU_UID, parentUid: PARENT_UID, room: 'ม.5/8' });
+          await ctx.firestore().doc(`staff/${HR_STAFF}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.5/8' } });
+          await ctx.firestore().doc('staff/tch-hr-other').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+          await ctx.firestore().doc('active_learning_logs/log-room').set(logDoc({ id: 'log-room', homeroomClass: 'ม.5/8' }));
+        });
+      }
+      const parent = (uid = PARENT_UID) => asUser(uid, ['PARENT']);
+      const hr = (uid = HR_UID, staffId = HR_STAFF) => asUser(uid, ['HOMEROOM_TEACHER'], { staffId });
+      const col = (c: ReturnType<typeof teacher>) => c.firestore().collection('active_learning_logs');
+
+      it('ผู้ปกครองตัวจริงอ่านของบุตรได้ (where studentId) — ผู้ปกครองคนอื่น/query ทั้งหมดไม่ได้', async () => {
+        await seedFamily();
+        await assertSucceeds(col(parent()).where('studentId', '==', STU_ID).get());
+        await assertFails(col(parent('parent-uid-other')).where('studentId', '==', STU_ID).get());
+        await assertFails(col(parent()).get());
+      });
+      it('ผู้ปกครองสร้าง/แก้/ลบ log ไม่ได้', async () => {
+        await seedFamily();
+        await assertFails(parent().firestore().doc('active_learning_logs/log-p').set(logDoc({ id: 'log-p' })));
+        await assertFails(parent().firestore().doc('active_learning_logs/log-1').update({ points: 99 }));
+        await assertFails(parent().firestore().doc('active_learning_logs/log-1').delete());
+      });
+      it('REGRESSION: นักเรียนเปลี่ยนผู้ปกครอง (relink) — ผู้ปกครองเก่าอ่านไม่ได้ตาม registry', async () => {
+        await seedFamily();
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc(`students/${STU_ID}`).update({ parentUid: 'parent-uid-new' });
+        });
+        await assertFails(col(parent()).where('studentId', '==', STU_ID).get());
+        await assertSucceeds(col(parent('parent-uid-new')).where('studentId', '==', STU_ID).get());
+      });
+      it('ครูที่ปรึกษาอ่านของห้องตัวเองได้ (where homeroomClass) — ห้องอื่น/query ทั้งหมดไม่ได้', async () => {
+        await seedFamily();
+        await assertSucceeds(col(hr()).where('homeroomClass', '==', 'ม.5/8').get());
+        await assertFails(col(hr('hr-uid-other', 'tch-hr-other')).where('homeroomClass', '==', 'ม.5/8').get());
+        await assertFails(col(hr()).get());
+        await assertFails(hr().firestore().doc('active_learning_logs/log-1').get()); // log รุ่นเก่าไม่มี homeroomClass
+      });
+      it('create: homeroomClass ต้องตรง students.room จริง (กัน denormalize มั่วเพื่อเปิดให้ครูห้องอื่นอ่าน)', async () => {
+        await seedFamily();
+        await assertSucceeds(teacher().firestore().doc('active_learning_logs/log-hr-ok').set(logDoc({ id: 'log-hr-ok', homeroomClass: 'ม.5/8' })));
+        await assertFails(teacher().firestore().doc('active_learning_logs/log-hr-bad').set(logDoc({ id: 'log-hr-bad', homeroomClass: 'ม.6/1' })));
+      });
+    });
   });
 
   // 18. department_config — แอดมินจัดการกลุ่มสาระฯ

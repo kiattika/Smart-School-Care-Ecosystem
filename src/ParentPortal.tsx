@@ -7,7 +7,7 @@ import { useRealStudents } from './hooks/useRealStudents';
 import { subscribeBillingInvoices, subscribeGateAttendanceLogs } from './services/firestoreService';
 import { BillingInvoice, GateAttendanceRecord } from './types';
 import { attendanceStatsFromCounts } from './lib/studentAttendanceStats';
-import { CourseAttendanceStats } from './components/student-parent/CourseAttendanceStats';
+import { CourseOverviewCards } from './components/student-parent/CourseOverviewCards';
 import { 
   Calendar, 
   CheckCircle2, 
@@ -310,8 +310,8 @@ export function ParentPortal() {
               );
             })()}
 
-            {/* สถิติแยกรายวิชา — ทุกวิชาในตารางเรียนจริงของห้อง + ยอดสะสมจาก students/{id}.courseAttendanceStats */}
-            <CourseAttendanceStats studentId={student.studentId} room={student.room} courseStats={student.courseAttendanceStats} />
+            {/* รายวิชา: บน = สถิติเข้าเรียน, ล่าง = คะแนนกิจกรรม + เครื่องหมายเชิดชู (อ่านผ่าน rules ผู้ปกครองตัวจริงของนักเรียน) */}
+            <CourseOverviewCards studentId={student.studentId} room={student.room} courseStats={student.courseAttendanceStats} />
 
             {/* Recent Communication & Self Assessment Detail Button */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
