@@ -8,11 +8,11 @@ const FILES = {
 };
 
 describe('รอบ B ข้อ 2: สถิติการมาเรียนต้องมาจากข้อมูลจริง', () => {
-  it('ไม่มีรายวิชา/ตัวเลขสถิติปลอมในแท็บสถิติ', () => {
+  it('ไม่มีรายวิชา/ตัวเลขสถิติปลอมในเมนูประตู — และแท็บสถิติถูกเอาออกแล้ว (สถิติรายวิชาอยู่ที่ CourseOverviewCards)', () => {
     const src = readSource(FILES.gate);
     expect(src).not.toMatch(/subjectAttendanceList|avgAttendance|Mock subject/);
     expect(src).not.toMatch(/ค32101|ว32202|95\.6/);
-    expect(src).toMatch(/attendanceStatsFromCounts\(student\.studentId, student\.attendanceStats\)/);
+    expect(src).not.toMatch(/attendanceStatsFromCounts/);
   });
 
   it('ไม่มีนักเรียนปลอม (defaultStudent / รูป unsplash / เช็คชื่อ 07:45) ใน 3 โมดูล', () => {

@@ -243,6 +243,8 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - `parent_verification_records` เขียนจาก client ไม่ได้ (rules `write: false`) — เขียนผ่าน callable เท่านั้น: `importParentVerification` (SUPER_ADMIN), `linkParentLine`, `unlinkParentLine`; ผู้ปกครองกลับมาเข้าใหม่ผ่าน `signInParentLine` (ตรวจ `students.parentUid == uid` ทุกครั้ง) — code ใน `functions/src/parentLine.ts`, logic ล้วนใน `parentLineLogic.ts`
 - ⚠️ blocking functions (`beforeCreate`/`beforeSignIn`) **ไม่ถูกเรียกเมื่อ sign in ด้วย custom token** — claims `{roles:['PARENT']}` ของผู้ปกครองจึงออกจาก callable เอง (uid = `line_<LINE sub>`) ห้ามคาดหวังให้ `resolveAccess` ดูแลผู้ปกครอง
 - คู่มือตั้งค่า LINE สำหรับแอดมิน: `docs/line-parent-login.md`
+- ⚠️ `createCustomToken` ต้องมีสิทธิ์ลงนาม: บัญชีบริการ `<project>@appspot.gserviceaccount.com` ต้องมีบทบาท Service Account Token Creator (+ เปิด IAM Credentials API) ไม่งั้น callable ล้มด้วย `iam.serviceAccounts.signBlob denied`
+- พอร์ทัลผู้ปกครอง: ไม่มีปุ่มเช็คอิน GPS; แท็บคัดกรองอารมณ์เป็น "ดูอย่างเดียว" (ระดับ 2Q + รายการที่ครูแจ้งผู้ปกครอง ไม่แสดงคำตอบรายข้อ/หมายเหตุภายใน, ไม่เห็น 9Q/8Q); เมนูประตูไม่มีแท็บสถิติการเข้าเรียน (ผู้ปกครอง+นักเรียน) — สถิติรายวิชาอยู่ที่ `CourseOverviewCards`; ข้อ 13 ในแบบเยี่ยมบ้านเลือก บิดา/มารดา/อื่น ๆ (บิดา/มารดาใช้ข้อมูลข้อ 7/8)
 - `linkedParentUid` ต้องเป็น `null` จนกว่าผู้ปกครองจะเชื่อมบัญชี LINE จริงสำเร็จ ห้าม fabricate
 
 ### บทบาทเริ่มต้นของครู/บุคลากรที่ import

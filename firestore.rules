@@ -86,6 +86,11 @@ service cloud.firestore {
       return isSignedIn() && studentField(sid, 'studentUid', '__none__') == request.auth.uid;
     }
 
+    // ผู้ปกครองตัวจริงของ sid — เทียบผ่านทะเบียน students/{sid}.parentUid (ตั้งโดย Cloud Function linkParentLine เท่านั้น)
+    function isParentOfStudent(sid) {
+      return isSignedIn() && studentField(sid, 'parentUid', '__none__') == request.auth.uid;
+    }
+
     // ครูรับผิดชอบของชุมนุม (elective_activities_config) นี้จริง — เทียบ responsibleTeacherUid
     // ใช้ให้ครูถอนชื่อนักเรียนออกจากชุมนุม/กิจกรรม ELECTIVE ของตัวเองเท่านั้น (activity_enrollments)
     // (เดิมเทียบผ่าน schedules/{scheduleId}.teacherId — ออกแบบใหม่แล้วชุมนุมไม่ผูกกับ schedules อีกต่อไป)
@@ -635,7 +640,8 @@ service cloud.firestore {
     // 2Q: นักเรียนทำเองอิสระได้ (ไม่จำกัดรอบ); ครูแนะแนวและครูที่ปรึกษาของห้องอ่านเต็มเสมอ
     // EXECUTIVE อ่านได้เพื่อสรุปภาพรวมโรงเรียน (นับจำนวน ไม่ระบุตัวบุคคล — ฝั่ง UI ต้องรวมเป็นตัวเลขเท่านั้น)
     match /student_screenings_2q/{studentId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('EXECUTIVE') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId);
+      // ผู้ปกครองอ่านได้อย่างเดียว (เห็นผลของบุตรหลาน ทำแบบคัดกรองเองไม่ได้) — UI แสดงเฉพาะระดับ ไม่แสดงคำตอบรายข้อ
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('EXECUTIVE') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId) || isParentOfStudent(studentId);
       allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId);
     }
 
@@ -706,7 +712,8 @@ service cloud.firestore {
     // บันทึก "แจ้งผู้ปกครองแล้ว" — ไม่ส่งแจ้งเตือนอัตโนมัติ ครูกรอกเองหลังติดต่อจริง; append-only (แก้ไม่ได้)
     // การแจ้งเรื่อง 8Q: ครูแนะแนวเสมอ; ครูที่ปรึกษาเฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่
     match /student_screening_notices/{studentId}/entries/{entryId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId);
+      // ผู้ปกครองอ่านได้ (เห็นว่าครูแจ้งถึงตนเมื่อไร/อย่างไร) — UI ไม่แสดงช่อง note ภายใน
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId) || isParentOfStudent(studentId);
       allow create: if (hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId))
         && request.resource.data.keys().hasOnly(['scope', 'screeningId', 'notifiedByUid', 'notifiedByName', 'notifiedAt', 'method', 'note'])
         && request.resource.data.scope in ['NINE_Q', 'EIGHT_Q']

@@ -352,7 +352,8 @@ export function NavbarWithRoleSwitcher({
           <HeaderRealTimeClock />
         </div>
 
-        {/* GPS Geofence Check-in Button */}
+        {/* GPS Geofence Check-in Button — ผู้ปกครองไม่ต้องเช็คอิน GPS (ใช้กับบุคลากร/นักเรียนเท่านั้น) */}
+        {activeRole !== 'PARENT' && (
         <button
           onClick={() => setIsGPSModalOpen(true)}
           className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-gradient-to-r from-indigo-900/60 to-emerald-950/60 hover:from-indigo-800/80 hover:to-emerald-900/80 border border-emerald-500/30 hover:border-emerald-500/50 text-slate-100 text-xs font-semibold shadow-md transition-all cursor-pointer group"
@@ -365,6 +366,7 @@ export function NavbarWithRoleSwitcher({
           <span className="hidden sm:inline text-slate-200 group-hover:text-white">เช็คอิน GPS</span>
           <span className="sm:hidden text-[10.5px] text-emerald-300">GPS</span>
         </button>
+        )}
         
         {/* กระดิ่งงานค้างตามบทบาทที่ใช้งานอยู่ (ไม่แสดงถ้าบทบาทนี้ไม่มีงานให้ติดตาม) */}
         <StaffTaskBell activeRole={activeRole} />

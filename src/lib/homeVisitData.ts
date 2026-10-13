@@ -37,6 +37,28 @@ export const SIGNING_PURPOSE_TEXT = 'ได้มีการแจ้งวั�
 
 /* ───────── ค่าเริ่มต้น ───────── */
 export const emptyParent = (): ParentInfo => ({ presence: '', title: '', firstName: '', lastName: '', age: null, occupation: '', incomeBracket: '', health: '', phone: '' });
+/** ตัวเลือกข้อ 13 — บิดา/มารดา ใช้ข้อมูลจากข้อ 7/8 ไม่ต้องกรอกซ้ำ, อื่น ๆ กรอกเอง */
+export type GuardianChoice = '' | 'FATHER' | 'MOTHER' | 'OTHER';
+export const GUARDIAN_RELATION = { FATHER: 'บิดา', MOTHER: 'มารดา' } as const;
+
+/** อ่านตัวเลือกจากข้อมูลที่บันทึกไว้ (relation ว่าง = ยังไม่เลือก) */
+export function guardianChoiceOf(g: GuardianInfo): GuardianChoice {
+  const r = (g.relation || '').trim();
+  if (!r) return '';
+  if (r === GUARDIAN_RELATION.FATHER) return 'FATHER';
+  if (r === GUARDIAN_RELATION.MOTHER) return 'MOTHER';
+  return 'OTHER';
+}
+
+/** คัดลอกข้อมูลบิดา/มารดา (ข้อ 7/8) มาเป็นผู้ปกครอง — ฟิลด์ที่บิดา/มารดาไม่มี (การศึกษา โรคประจำตัว ที่อยู่) คงค่าเดิม */
+export function guardianFromParent(parent: ParentInfo, relation: string, prev: GuardianInfo): GuardianInfo {
+  return {
+    ...prev, relation,
+    title: parent.title, firstName: parent.firstName, lastName: parent.lastName, age: parent.age,
+    occupation: parent.occupation, incomeBracket: parent.incomeBracket, health: parent.health, phone: parent.phone,
+  };
+}
+
 export const emptyGuardian = (): GuardianInfo => ({ relation: '', title: '', firstName: '', lastName: '', age: null, occupation: '', incomeBracket: '', health: '', phone: '', education: '', chronicDisease: '', sameAddressAsStudent: true, address: '' });
 export const emptyFriend = (): FriendInfo => ({ title: '', firstName: '', lastName: '', nickname: '', classRoom: '', phone: '' });
 
@@ -142,6 +164,10 @@ export function validateFamilyInfo(f: FamilyHomeVisitInfo): string[] {
   }
   if (!f.parentsStatus) e.push('เลือกสถานภาพของบิดา-มารดา');
   const g = f.guardian;
+  const gc = guardianChoiceOf(g);
+  if ((gc === 'FATHER' && f.father.presence !== 'PRESENT') || (gc === 'MOTHER' && f.mother.presence !== 'PRESENT')) {
+    e.push(`เลือก${g.relation}เป็นผู้ปกครองไม่ได้ เพราะสถานะไม่ใช่ "ปรากฏ/มีชีวิตอยู่" — เลือกผู้ปกครองใหม่`);
+  }
   if (!g.relation.trim()) e.push('ระบุความสัมพันธ์ของผู้ปกครองกับนักเรียน');
   if (!g.firstName.trim() || !g.lastName.trim()) e.push('ระบุชื่อ-นามสกุลผู้ปกครอง');
   if (g.age === null || g.age < 15 || g.age > 110) e.push('ระบุอายุผู้ปกครอง (15-110 ปี)');

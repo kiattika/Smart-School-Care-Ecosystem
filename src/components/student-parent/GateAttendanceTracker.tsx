@@ -16,9 +16,10 @@ import {
   Filter, 
   ArrowRight,
   Sparkles,
-  TrendingUp,
   MapPin,
-  Satellite
+  Satellite,
+  LogOut,
+  CircleDashed
 } from 'lucide-react';
 import { useStore } from '../../store';
 import { GateAttendanceRecord, DetailedLeaveRequest, AttendanceStatus, Student } from '../../types';
@@ -33,7 +34,7 @@ import {
 import { countLeaveDays, canParentAcknowledge, leaveStatusLabel, normalizeLeaveStatus, LEAVE_REASON_MAX, validateLeaveForm } from '../../lib/leaveFlow';
 import { DatePicker } from '../shared/DatePicker';
 import { NoStudentNotice } from './NoStudentNotice';
-import { attendanceStatsFromCounts } from '../../lib/studentAttendanceStats';
+import { format } from 'date-fns';
 
 type GateAttendanceTrackerProps = { studentId: string; student?: Student; isParentView?: boolean };
 
@@ -74,7 +75,7 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
   }, [user?.uid, isParentView]);
   const leaves = allLeaves.filter(l => l.studentId === student.studentId);
 
-  const [activeTab, setActiveTab] = useState<'gate' | 'subject' | 'leave'>('gate');
+  const [activeTab, setActiveTab] = useState<'gate' | 'leave'>('gate');
   const [isGPSModalOpen, setIsGPSModalOpen] = useState(false);
 
   // e-Leave form state — เริ่มว่าง (ไม่เติมวันที่/ไฟล์แนบสมมติ)
@@ -158,9 +159,20 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
     }
   };
 
-  // สถิติการเข้าเรียนสะสมจริงจาก students/{id}.attendanceStats (derived cache ที่ sync คู่กับ attendance_records)
-  // ยังไม่มีสถิติแยกรายวิชา: attendance_records เก็บเป็นเอกสารต่อห้อง/คาบ ผู้ปกครอง-นักเรียนอ่านตรงไม่ได้ตาม rules
-  const attStats = attendanceStatsFromCounts(student.studentId, student.attendanceStats);
+  // ประวัติการผ่านประตูรายวัน — แสดงแบบเดียวกับที่ครูที่ปรึกษาเห็น (AdvisorGateCheckInPanel): เวลาเข้า (+สาย) / เวลาออก
+  // (สถิติการเข้าเรียนสะสมเอาออกจากเมนูนี้ — ทั้งฝั่งผู้ปกครองและนักเรียน)
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const gateDays = (() => {
+    const byDate = new Map<string, { date: string; entry: GateAttendanceRecord | null; exit: GateAttendanceRecord | null }>();
+    const row = (date: string) => { let r = byDate.get(date); if (!r) { r = { date, entry: null, exit: null }; byDate.set(date, r); } return r; };
+    row(todayStr);
+    for (const l of logs) {
+      const r = row(l.date);
+      if (l.type === 'ENTRY') { if (!r.entry || l.timestamp < r.entry.timestamp) r.entry = l; }   // เข้าครั้งแรกของวัน
+      else if (!r.exit || l.timestamp > r.exit.timestamp) r.exit = l;                                // ออกครั้งสุดท้ายของวัน
+    }
+    return [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date));
+  })();
 
   return (
     <div className="space-y-6">
@@ -176,17 +188,6 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
         >
           <Scan className="w-3.5 h-3.5" />
           <span>การเข้า-ออกประตู (Gate)</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('subject')}
-          className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
-            activeTab === 'subject'
-              ? 'bg-gradient-to-r from-indigo-500 to-blue-600 text-white shadow-md'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <TrendingUp className="w-3.5 h-3.5" />
-          <span>สถิติการเข้าเรียน</span>
         </button>
         <button
           onClick={() => setActiveTab('leave')}
@@ -211,129 +212,33 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
                   <Clock className="w-4 h-4 text-indigo-400" />
                   ประวัติการผ่านประตูโรงเรียน (Gate Entry/Exit Logs)
                 </h3>
-                <p className="text-[11px] text-slate-400">บันทึกเวลาจริงจากอุปกรณ์ Smart School Gate</p>
+                <p className="text-[11px] text-slate-400">สถานะการผ่านประตูโรงเรียนจริง — แสดงแบบเดียวกับที่ครูที่ปรึกษาเห็น</p>
               </div>
               <span className="px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 text-[10px] font-medium border border-slate-700">
-                ทั้งหมด {logs.length} รายการ
+                {gateDays.filter(d => d.entry).length} วันที่มีบันทึก
               </span>
             </div>
 
-            <div className="space-y-3 overflow-y-auto max-h-[420px] pr-1">
-              {logs.map((log) => (
-                <div
-                  key={log.id}
-                  className="p-3.5 bg-slate-800/40 hover:bg-slate-800/70 border border-slate-800 hover:border-slate-700 rounded-2xl transition-all flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
-                      log.type === 'ENTRY'
-                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                        : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
-                    }`}>
-                      {log.type === 'ENTRY' ? <Check className="w-5 h-5" /> : <ArrowRight className="w-5 h-5" />}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                          log.type === 'ENTRY' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
-                        }`}>
-                          {log.type === 'ENTRY' ? 'เข้าโรงเรียน' : 'ออกจากโรงเรียน'}
-                        </span>
-                        <span className="text-xs font-bold text-white">{log.timestamp}</span>
-                        {log.status === 'LATE' && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold">
-                            มาสาย
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-slate-400 truncate mt-0.5 flex items-center gap-1">
-                        <MapPin className="w-3 h-3 text-slate-500" />
-                        {log.gateName} • วันที่ {log.date}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="text-right shrink-0">
-                    <span className="text-[10px] px-2 py-1 rounded bg-slate-900/80 text-slate-300 border border-slate-800 font-mono block">
-                      {log.method}
+            <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1" data-testid="gate-day-rows">
+              {gateDays.map(({ date, entry, exit }) => (
+                <div key={date} className="flex items-center gap-3 bg-black/20 rounded-lg px-3 py-2 text-xs flex-wrap">
+                  <span className="text-slate-300 font-medium w-24 shrink-0">{date === todayStr ? 'วันนี้' : date}</span>
+                  {entry ? (
+                    <span className="flex items-center gap-1 text-emerald-400 shrink-0">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <Clock className="w-3 h-3" /> เข้า {entry.timestamp}
+                      {entry.status === 'LATE' && <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 font-bold">สาย</span>}
                     </span>
-                    {log.temperature && (
-                      <span className="text-[9.5px] text-emerald-400 font-mono mt-1 block">
-                        🌡️ {log.temperature}°C ปกติ
-                      </span>
-                    )}
-                  </div>
+                  ) : (
+                    <span className="flex items-center gap-1 text-slate-500 shrink-0"><CircleDashed className="w-3.5 h-3.5" /> ยังไม่เข้าโรงเรียน</span>
+                  )}
+                  {exit && (
+                    <span className="flex items-center gap-1 text-slate-400 shrink-0 ml-auto"><LogOut className="w-3.5 h-3.5" /> ออกแล้ว {exit.timestamp}</span>
+                  )}
                 </div>
               ))}
-
-              {logs.length === 0 && (
-                <div className="py-12 text-center text-slate-500 text-xs">
-                  ยังไม่มีประวัติการผ่านประตูในรอบวันนี้
-                </div>
-              )}
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-              <span className="flex items-center gap-1.5">
-                <Bell className="w-3.5 h-3.5 text-indigo-400" />
-                สถานะการแจ้งเตือนผู้ปกครอง:
-              </span>
-              <span className="text-emerald-400 font-bold flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" /> ซิงค์แจ้งเตือนผ่าน LINE Official แล้ว
-              </span>
             </div>
           </div>
-        </div>
-      )}
-
-      {activeTab === 'subject' && (
-        <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl space-y-5" data-testid="attendance-stats">
-          <div>
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-indigo-400" />
-              สถิติการเข้าเรียนสะสม
-            </h3>
-            <p className="text-[11px] text-slate-400">
-              นับจากการเช็คชื่อจริงทุกครั้งที่ครูบันทึก (ไม่นับ "ลา" ในอัตราการเข้าเรียน) — เกณฑ์เดิมของระบบคือไม่ต่ำกว่า {attStats.threshold}%
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center text-[11px]">
-            <div className="bg-slate-800/50 border border-slate-800 rounded-2xl p-3">
-              <span className="text-slate-400 block">มาเรียน</span>
-              <span className="text-lg font-black text-emerald-400">{attStats.present}</span>
-            </div>
-            <div className="bg-slate-800/50 border border-slate-800 rounded-2xl p-3">
-              <span className="text-slate-400 block">มาสาย</span>
-              <span className="text-lg font-black text-amber-400">{attStats.late}</span>
-            </div>
-            <div className="bg-slate-800/50 border border-slate-800 rounded-2xl p-3">
-              <span className="text-slate-400 block">ลา</span>
-              <span className="text-lg font-black text-blue-400">{attStats.leave}</span>
-            </div>
-            <div className="bg-slate-800/50 border border-slate-800 rounded-2xl p-3">
-              <span className="text-slate-400 block">ขาด</span>
-              <span className="text-lg font-black text-rose-400">{attStats.absent}</span>
-            </div>
-            <div className="col-span-2 sm:col-span-1 bg-slate-800/50 border border-slate-800 rounded-2xl p-3">
-              <span className="text-slate-400 block">อัตราเข้าเรียน</span>
-              <span className={`text-lg font-black ${attStats.isBelowThreshold ? 'text-amber-400' : 'text-emerald-400'}`}>
-                {attStats.attendanceRate !== null ? `${attStats.attendanceRate}%` : '—'}
-              </span>
-            </div>
-          </div>
-
-          {attStats.attendanceRate === null && (
-            <p className="text-[11px] text-slate-400 text-center">ยังไม่มีข้อมูลเช็คชื่อของนักเรียนคนนี้</p>
-          )}
-          {attStats.isBelowThreshold && (
-            <p role="alert" className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
-              อัตราการเข้าเรียนต่ำกว่าเกณฑ์ {attStats.threshold}% — ควรติดตามกับครูที่ปรึกษา
-            </p>
-          )}
-          <p className="text-[11px] text-slate-500">
-            สถิติแยกรายวิชายังไม่เปิดให้ดูในหน้านี้ ขณะนี้แสดงเฉพาะยอดรวมทุกวิชา
-          </p>
         </div>
       )}
 
