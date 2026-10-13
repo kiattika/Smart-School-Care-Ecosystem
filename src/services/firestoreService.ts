@@ -3875,3 +3875,35 @@ export async function fetchInfirmaryDashboardData(academicYear: string) {
     dispenseMovements: movements.docs.map(d => d.data() as InfirmaryStockMovement),
   };
 }
+
+/** สรุปสุขภาพรายคนสำหรับครูที่ปรึกษา — อ่านเฉพาะเอกสารที่ rules อนุญาตให้ครูที่ปรึกษาของห้อง (โปรไฟล์สุขภาพ/หมู่เลือด/ผลตรวจประจำปี/ผู้ติดต่อฉุกเฉิน)
+ *  แต่ละส่วนอ่านไม่ได้ = ไม่ล้มทั้งรายการ (readError) */
+export async function fetchStudentHealthBrief(studentId: string, name: string): Promise<import('../lib/advisorHealthSummary').StudentHealthBrief> {
+  const { emptyBrief } = await import('../lib/advisorHealthSummary');
+  const b = emptyBrief(studentId, name);
+  const [profile, blood, checkups, contacts] = await Promise.allSettled([
+    getDoc(doc(db, 'student_health_profiles', studentId)),
+    getDoc(doc(db, BLOOD_TYPE_COL, studentId)),
+    getDocs(query(collection(db, CHECKUP_COL), where('studentId', '==', studentId))),
+    getDoc(doc(db, EMERGENCY_CONTACTS_COL, studentId)),
+  ]);
+  if (profile.status === 'fulfilled') {
+    if (profile.value.exists()) {
+      const d = profile.value.data() as any;
+      b.hasProfile = true;
+      b.verified = !!d.verifiedAt;
+      b.chronic = d.chronicIllnesses || [];
+      b.allergies = d.allergies || [];
+      b.specialCare = d.specialCare || [];
+    }
+  } else b.readError = true;
+  if (blood.status === 'fulfilled' && blood.value.exists()) b.bloodType = (blood.value.data() as any).bloodType;
+  if (checkups.status === 'fulfilled') {
+    const list = checkups.value.docs.map(x => x.data() as import('../lib/healthRecords').StudentCheckup);
+    const { latestCheckup } = await import('../lib/healthRecords');
+    const last = latestCheckup(list);
+    if (last) { b.visionAbnormal = last.visionResult === 'ABNORMAL'; b.hearingAbnormal = last.hearingResult === 'ABNORMAL'; }
+  }
+  if (contacts.status === 'fulfilled' && contacts.value.exists()) b.emergencyContactCount = ((contacts.value.data() as any).contacts || []).length;
+  return b;
+}

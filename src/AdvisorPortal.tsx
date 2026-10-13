@@ -15,6 +15,7 @@ import {
   , Radar
 } from 'lucide-react';
 import { SkipRadarPanel } from './components/advisor/SkipRadarPanel';
+import { AdvisorHealthSummaryPanel } from './components/advisor/AdvisorHealthSummaryPanel';
 import { ClassChatTeacherView, useRoomChatUnread } from './components/chat/ClassChatPanel';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import clsx from 'clsx';
@@ -63,7 +64,7 @@ export function AdvisorPortal() {
   // store จะมีข้อมูลก็ต่อเมื่อมีคน import ในเซสชันเดียวกันเท่านั้น — เปิดใหม่/ล็อกอินใหม่แล้วว่าง
   const { students, loading: studentsLoading } = useRealStudents();
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq' | 'screening' | 'class-chat' | 'skip-radar'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq' | 'screening' | 'class-chat' | 'skip-radar' | 'health'>('dashboard');
   const [assessmentModalStudent, setAssessmentModalStudent] = useState<Student | null>(null);
   const [assessmentSearch, setAssessmentSearch] = useState('');
   const [assessmentFilter, setAssessmentFilter] = useState<'ALL' | 'COMPLETED' | 'PENDING'>('ALL');
@@ -297,6 +298,7 @@ export function AdvisorPortal() {
             { id: 'visit-planner', label: 'เยี่ยมบ้าน', icon: MapPin },
             { id: 'school-checkin', label: 'เช็คชื่อโฮมรูม', icon: ClipboardList },
             { id: 'skip-radar', label: 'เรดาร์โดดเรียน', icon: Radar },
+            { id: 'health', label: 'สุขภาพนักเรียน', icon: Heart },
             { id: 'analytics', label: 'สถิติวิชาการ', icon: Sparkles },
           ]}
         >
@@ -890,6 +892,9 @@ export function AdvisorPortal() {
           )}
           {activeTab === 'skip-radar' && (
             <SkipRadarPanel room={myRoom || ''} students={myStudents} />
+          )}
+          {activeTab === 'health' && myRoom && (
+            <AdvisorHealthSummaryPanel room={myRoom} students={myStudents.map(s => ({ studentId: s.studentId, name: s.fullName || s.name }))} />
           )}
 
           {activeTab === 'analytics' && (
