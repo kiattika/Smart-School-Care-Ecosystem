@@ -1,4 +1,5 @@
 import { omitUndefined } from '../lib/firestorePayload';
+import { applyStockChange, type DispenseLine, type StockMovementType } from '../lib/infirmaryStock';
 import { chatThreadId, normalizeChatText, senderRoleFor } from '../lib/classChat';
 import type { ChatChannel, ChatSenderRole, ChatSide } from '../lib/classChat';
 import { 
@@ -2912,7 +2913,9 @@ const INFIRMARY_COL = 'infirmary_visits';
 export async function recordInfirmaryVisit(
   data: Pick<InfirmaryVisit,
     'studentId' | 'symptoms' | 'temperature' | 'treatment' | 'medicationGiven' | 'restDurationMinutes' | 'isUrgentAlert'> &
-    { studentUid: string | null; parentUid: string | null; nurseUid: string; nurseName: string; studentName: string },
+    { studentUid: string | null; parentUid: string | null; nurseUid: string; nurseName: string; studentName: string;
+      /** ยาที่เบิกจากคลัง (ตัดสต็อก + บันทึกเคลื่อนไหวใน transaction เดียวกับเคส) */
+      dispensed?: DispenseLine[] },
   firestoreDb: Firestore = db,
 ): Promise<string> {
   const id = `inf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -2937,33 +2940,203 @@ export async function recordInfirmaryVisit(
     parentAcknowledged: false,
     createdAt: now.toISOString(),
   };
+  const dispensed = (data.dispensed || []).filter(l => l.qty > 0);
   try {
     // ระบบแจ้งเตือนรวมศูนย์: เขียนแจ้งเตือนผู้ปกครองคู่กันไปในธุรกรรมเดียวกันเสมอ (ไม่ใช่ 2 การเขียน
     // แยกอิสระที่อาจสำเร็จแค่ฝั่งเดียว) — ถ้าไม่มี parentUid จริง (ยังไม่เชื่อมบัญชี LINE) ข้ามการ
     // แจ้งเตือนไปเงียบๆ ไม่ fabricate ID ปลอม (การบันทึกอาการยังสำเร็จตามปกติ)
-    const batch = writeBatch(firestoreDb);
-    batch.set(doc(firestoreDb, INFIRMARY_COL, id), payload);
-    if (data.parentUid) {
-      const notifRef = doc(collection(firestoreDb, 'parent_notifications'));
-      batch.set(notifRef, {
-        id: notifRef.id,
-        parentUid: data.parentUid,
-        parentId: data.parentUid,
-        studentUid: data.studentUid ?? null,
-        studentId: data.studentId,
-        studentName: data.studentName,
-        title: data.isUrgentAlert ? '🚨 แจ้งเตือนด่วน: นักเรียนเข้าห้องพยาบาล' : '🏥 แจ้งเตือน: นักเรียนเข้าห้องพยาบาล',
-        message: `น้อง${data.studentName} เข้ารับบริการห้องพยาบาลด้วยอาการ "${data.symptoms}" เมื่อเวลา ${payload.visitTime} กรุณากดรับทราบในระบบ`,
-        status: 'unread',
-        createdAt: serverTimestamp(),
-        type: data.isUrgentAlert ? 'critical' : 'warning',
-      });
-    }
-    await batch.commit();
+    // ถ้ามีรายการเบิกยา ใช้ transaction (อ่านยอดสดก่อนตัดสต็อก) — เคส/แจ้งเตือน/ตัดสต็อก/เคลื่อนไหวสำเร็จหรือล้มพร้อมกัน
+    await runTransaction(firestoreDb, async (tx) => {
+      const meds: { ref: ReturnType<typeof doc>; data: InfirmaryMedicine; line: DispenseLine }[] = [];
+      for (const line of dispensed) {
+        const ref = doc(firestoreDb, MEDICINE_COL, line.medicineId);
+        const snap = await tx.get(ref);
+        if (!snap.exists()) throw new Error(`MEDICINE_NOT_FOUND:${line.medicineId}`);
+        meds.push({ ref, data: snap.data() as InfirmaryMedicine, line });
+      }
+      for (const m of meds) {
+        const r = applyStockChange(m.data.stock, 'DISPENSE', -m.line.qty);
+        if (r.ok === false) throw new Error(`${r.error}:${m.line.medicineId}`);
+        const mvRef = doc(collection(firestoreDb, MOVEMENT_COL));
+        tx.set(mvRef, omitUndefined({
+          id: mvRef.id, medicineId: m.line.medicineId, medicineName: m.data.name, unit: m.data.unit,
+          type: 'DISPENSE', delta: -m.line.qty, balanceAfter: r.balanceAfter,
+          note: `จ่ายให้ ${data.studentName}`, visitId: id, studentId: data.studentId,
+          byUid: data.nurseUid, byName: data.nurseName, at: now.toISOString(),
+        }));
+        tx.update(m.ref, { stock: r.balanceAfter, lastMovementId: mvRef.id, updatedAt: now.toISOString() });
+      }
+      tx.set(doc(firestoreDb, INFIRMARY_COL, id), payload);
+      if (data.parentUid) {
+        const notifRef = doc(collection(firestoreDb, 'parent_notifications'));
+        tx.set(notifRef, {
+          id: notifRef.id,
+          parentUid: data.parentUid,
+          parentId: data.parentUid,
+          studentUid: data.studentUid ?? null,
+          studentId: data.studentId,
+          studentName: data.studentName,
+          title: data.isUrgentAlert ? '🚨 แจ้งเตือนด่วน: นักเรียนเข้าห้องพยาบาล' : '🏥 แจ้งเตือน: นักเรียนเข้าห้องพยาบาล',
+          message: `น้อง${data.studentName} เข้ารับบริการห้องพยาบาลด้วยอาการ "${data.symptoms}" เมื่อเวลา ${payload.visitTime} กรุณากดรับทราบในระบบ`,
+          status: 'unread',
+          createdAt: serverTimestamp(),
+          type: data.isUrgentAlert ? 'critical' : 'warning',
+        });
+      }
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `${INFIRMARY_COL}/${id}`);
   }
   return id;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * คลังยา/เวชภัณฑ์ห้องพยาบาล (infirmary_medicines + infirmary_stock_movements) — ดู src/lib/infirmaryStock.ts
+ * ──────────────────────────────────────────────────────────────────────────── */
+const MEDICINE_COL = 'infirmary_medicines';
+const MOVEMENT_COL = 'infirmary_stock_movements';
+
+export interface InfirmaryMedicine {
+  id: string;
+  name: string;
+  category?: string;
+  unit: string;
+  stock: number;
+  minAlert: number;
+  active: boolean;
+  lastMovementId?: string;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface InfirmaryStockMovement {
+  id: string;
+  medicineId: string;
+  medicineName: string;
+  unit: string;
+  type: StockMovementType;
+  delta: number;
+  balanceAfter: number;
+  note?: string;
+  visitId?: string;
+  studentId?: string;
+  byUid: string;
+  byName: string;
+  at: string;
+}
+
+export function subscribeInfirmaryMedicines(onUpdate: (list: InfirmaryMedicine[]) => void): () => void {
+  try {
+    return onSnapshot(collection(db, MEDICINE_COL), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as InfirmaryMedicine));
+      list.sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeInfirmaryMedicines] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeInfirmaryMedicines] setup error:', error);
+    return () => {};
+  }
+}
+
+/** ประวัติเบิกจ่ายของยาหนึ่งรายการ (เรียงใหม่→เก่าฝั่ง client เลี่ยง composite index) */
+export function subscribeStockMovements(medicineId: string, onUpdate: (list: InfirmaryStockMovement[]) => void): () => void {
+  if (!medicineId) { onUpdate([]); return () => {}; }
+  try {
+    return onSnapshot(query(collection(db, MOVEMENT_COL), where('medicineId', '==', medicineId)), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as InfirmaryStockMovement));
+      list.sort((a, b) => (b.at || '').localeCompare(a.at || ''));
+      onUpdate(list);
+    }, (error) => {
+      console.warn('[subscribeStockMovements] listener error:', error.message);
+      onUpdate([]);
+    });
+  } catch (error) {
+    console.warn('[subscribeStockMovements] setup error:', error);
+    return () => {};
+  }
+}
+
+export async function createInfirmaryMedicine(
+  input: { name: string; category?: string; unit: string; initialStock: number; minAlert: number },
+  by: { uid: string; name: string },
+  firestoreDb: Firestore = db,
+): Promise<string> {
+  const name = input.name.trim();
+  const unit = input.unit.trim();
+  if (!name || !unit) throw new Error('INVALID_MEDICINE');
+  if (!Number.isInteger(input.initialStock) || input.initialStock < 0 || !Number.isInteger(input.minAlert) || input.minAlert < 0) {
+    throw new Error('INVALID_MEDICINE');
+  }
+  const ref = doc(collection(firestoreDb, MEDICINE_COL));
+  const nowIso = new Date().toISOString();
+  try {
+    const batch = writeBatch(firestoreDb);
+    let lastMovementId: string | undefined;
+    if (input.initialStock > 0) {
+      const mvRef = doc(collection(firestoreDb, MOVEMENT_COL));
+      lastMovementId = mvRef.id;
+      batch.set(mvRef, {
+        id: mvRef.id, medicineId: ref.id, medicineName: name, unit, type: 'INITIAL',
+        delta: input.initialStock, balanceAfter: input.initialStock, note: 'ยอดตั้งต้น',
+        byUid: by.uid, byName: by.name, at: nowIso,
+      });
+    }
+    batch.set(ref, omitUndefined({
+      id: ref.id, name, category: input.category?.trim() || undefined, unit,
+      stock: input.initialStock, minAlert: input.minAlert, active: true,
+      lastMovementId, createdBy: by.uid, createdAt: nowIso, updatedAt: nowIso,
+    }));
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `${MEDICINE_COL}/${ref.id}`);
+  }
+  return ref.id;
+}
+
+/** รับเข้า/ทิ้ง/ปรับยอด — อ่านยอดสดใน transaction แล้วเขียนยอดใหม่คู่กับรายการเคลื่อนไหว (DISPENSE ผ่าน recordInfirmaryVisit) */
+export async function changeMedicineStock(
+  medicineId: string,
+  type: Exclude<StockMovementType, 'INITIAL' | 'DISPENSE'>,
+  delta: number,
+  note: string,
+  by: { uid: string; name: string },
+  firestoreDb: Firestore = db,
+): Promise<void> {
+  try {
+    await runTransaction(firestoreDb, async (tx) => {
+      const ref = doc(firestoreDb, MEDICINE_COL, medicineId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error('MEDICINE_NOT_FOUND');
+      const med = snap.data() as InfirmaryMedicine;
+      const r = applyStockChange(med.stock, type, delta);
+      if (r.ok === false) throw new Error(r.error);
+      const nowIso = new Date().toISOString();
+      const mvRef = doc(collection(firestoreDb, MOVEMENT_COL));
+      tx.set(mvRef, omitUndefined({
+        id: mvRef.id, medicineId, medicineName: med.name, unit: med.unit, type, delta, balanceAfter: r.balanceAfter,
+        note: note.trim() || undefined, byUid: by.uid, byName: by.name, at: nowIso,
+      }));
+      tx.update(ref, { stock: r.balanceAfter, lastMovementId: mvRef.id, updatedAt: nowIso });
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${MEDICINE_COL}/${medicineId}`);
+  }
+}
+
+/** แก้ชื่อ/หมวด/หน่วย/จุดเตือน/เปิด-ปิดใช้งาน (ไม่แตะยอดคงเหลือ) */
+export async function updateInfirmaryMedicineMeta(
+  medicineId: string,
+  patch: Partial<Pick<InfirmaryMedicine, 'name' | 'category' | 'unit' | 'minAlert' | 'active'>>,
+): Promise<void> {
+  try {
+    await updateDoc(doc(db, MEDICINE_COL, medicineId), omitUndefined({ ...patch, updatedAt: new Date().toISOString() }));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${MEDICINE_COL}/${medicineId}`);
+  }
 }
 
 /** ผู้ปกครองกด "รับทราบ" เอง — rules จำกัดให้แก้ได้แค่ parentAcknowledged/acknowledgedAt เท่านั้น */
