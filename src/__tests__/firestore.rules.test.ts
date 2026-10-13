@@ -3658,7 +3658,8 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       const other = asUser('someone-else', ['STUDENT']).firestore();
       await assertFails(other.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, recordedByUid: 'someone-else' }));
       const studentDb = asUser(STU_UID, ['STUDENT']).firestore();
-      await assertFails(studentDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, term: '1' }));
+      // goodDoc.term เป็น '1' อยู่แล้ว (= ภาคเรียนเดิมของ DOC_ID) จึงต้องใช้ '2' เพื่อทดสอบการเปลี่ยนภาคเรียน
+      await assertFails(studentDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, term: '2' }));
       await assertFails(studentDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, studentUid: 'old-account-uid' }));
       await assertFails(studentDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, recordedByUid: 'old-account-uid' }));
       await assertFails(studentDb.doc(`student_semester_health/${DOC_ID}`).set({ ...goodDoc, recordedByRole: 'INFIRMARY' }));
