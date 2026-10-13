@@ -4,6 +4,9 @@ import { db } from '../../lib/firebase';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { isScheduleInTerm } from '../../lib/scheduleSyncReplace';
 import { Users, Save, Trash2, Loader2, Search, Info, Pencil, X, Lock, Unlock, CalendarClock, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { EnrollmentWindowEditor } from '../elective/EnrollmentWindowEditor';
+import { DeadlineCountdown } from '../shared/DeadlineCountdown';
+import { enrollmentState, formatThaiDateTime } from '../../lib/enrollmentWindow';
 import { useElectiveActivities } from '../../hooks/useElectiveActivities';
 import { createElectiveActivity, updateElectiveActivity, removeElectiveActivityConfig } from '../../services/firestoreService';
 import { useStore } from '../../store';
@@ -70,6 +73,7 @@ export function ElectiveActivityManagerPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<{ id: string; name: string } | null>(null);
+  const [windowEditId, setWindowEditId] = useState<string | null>(null);
 
   // ดึงรายชื่อครูจริงจาก staff collection ให้แอดมินเลือกเป็นครูรับผิดชอบ (ห้ามพิมพ์ชื่อเอง —
   // ผูกด้วย Firebase Auth UID จริงเสมอ ตาม CLAUDE.md)
@@ -454,16 +458,24 @@ export function ElectiveActivityManagerPage() {
             {configs.map(c => {
               const enrolled = counts[c.id] || 0;
               const dayLabel = DAY_OPTIONS.find(d => d.value === c.dayOfWeek)?.label;
-              const isClosed = c.enrollmentStatus === 'CLOSED';
+              const win = enrollmentState(c, Date.now());
+              const isClosed = win.phase === 'CLOSED';
               return (
-                <div key={c.id} className="flex items-center gap-3 bg-slate-900/40 border border-slate-800 rounded-lg px-3 py-2.5">
+                <div key={c.id} className="space-y-1.5">
+                <div className="flex items-center gap-3 bg-slate-900/40 border border-slate-800 rounded-lg px-3 py-2.5">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm text-slate-200">{c.name}</span>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isClosed ? 'bg-rose-500/20 text-rose-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
-                        {isClosed ? 'ปิดรับสมัครแล้ว' : 'เปิดรับสมัคร'}
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isClosed ? 'bg-rose-500/20 text-rose-300' : win.phase === 'NOT_YET' ? 'bg-sky-500/20 text-sky-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
+                        {isClosed ? 'ปิดรับสมัครแล้ว' : win.phase === 'NOT_YET' ? 'ยังไม่ถึงเวลาเปิดรับ' : 'เปิดรับสมัคร'}
                       </span>
+                      {win.deadlineMs !== null && <DeadlineCountdown targetMs={win.deadlineMs} label={win.deadlineKind === 'OPENS' ? 'เปิดรับใน' : 'ปิดรับใน'} />}
                     </div>
+                    {(win.opensAtMs !== null || win.closesAtMs !== null) && (
+                      <p className="text-[10px] text-slate-500">
+                        {win.opensAtMs !== null && `เปิด ${formatThaiDateTime(win.opensAtMs)}`}{win.opensAtMs !== null && win.closesAtMs !== null && ' · '}{win.closesAtMs !== null && `ปิด ${formatThaiDateTime(win.closesAtMs)}`}
+                      </p>
+                    )}
                     <p className="text-[10px] text-slate-500">
                       ครูรับผิดชอบ: {(c.responsibleTeacherNames || []).join(', ') || '— ไม่ได้ระบุ —'}
                       {dayLabel && ` · วัน${dayLabel}`}
@@ -483,6 +495,13 @@ export function ElectiveActivityManagerPage() {
                     {busy === `toggle-${c.id}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : isClosed ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
                   </button>
                   <button
+                    onClick={() => setWindowEditId(windowEditId === c.id ? null : c.id)}
+                    className={`p-1.5 rounded-lg ${windowEditId === c.id ? 'text-indigo-300 bg-indigo-500/10' : 'text-slate-400 hover:text-slate-200'}`}
+                    title="ตั้งช่วงเวลาเปิด–ปิดรับสมัคร"
+                  >
+                    <CalendarClock className="w-3.5 h-3.5" />
+                  </button>
+                  <button
                     onClick={() => startEdit(c.id)}
                     className="text-slate-400 hover:text-slate-200 p-1.5"
                     title="แก้ไขชุมนุม"
@@ -497,6 +516,8 @@ export function ElectiveActivityManagerPage() {
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
+                </div>
+                {windowEditId === c.id && <div key={`${c.id}-${String(c.enrollmentOpensAt?.toMillis?.() ?? '')}-${String(c.enrollmentClosesAt?.toMillis?.() ?? '')}`}><EnrollmentWindowEditor cfg={c} onDone={(m) => { flash(m); setWindowEditId(null); }} /></div>}
                 </div>
               );
             })}

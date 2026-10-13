@@ -11,6 +11,7 @@ import {
   type InfirmaryMedicine,
 } from '../../services/firestoreService';
 import { InfirmaryStockPanel } from './InfirmaryStockPanel';
+import { InfirmaryHealthProfilePanel } from './InfirmaryHealthProfilePanel';
 import { composeMedicationGiven, validateDispenseLines, type DispenseLine, isLowStock } from '../../lib/infirmaryStock';
 import {
   HeartPulse,
@@ -343,47 +344,16 @@ export function InfirmaryPortal() {
         {activeTab === 'profiles' && (
           <div className="space-y-4">
             <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <h3 className="text-base font-bold text-white">ข้อมูลโรคประจำตัว อาการแพ้ยา และภาวะดูแลพิเศษ</h3>
-                  <p className="text-xs text-slate-400">เชื่อมโยงข้อมูลสุขภาพจากฐานข้อมูลนักเรียนเพื่อความปลอดภัยสูงสุดระหว่างอยู่โรงเรียน</p>
+                  <p className="text-xs text-slate-400">ครอบครัว (นักเรียน/ผู้ปกครอง) เป็นผู้กรอก — เจ้าหน้าที่พยาบาลตรวจสอบและกด "ยืนยันข้อมูลถูกต้อง"</p>
                 </div>
                 <div className="w-64">
                   <StudentPicker mode="single" students={students} value={selectedStudentId} onSelect={setSelectedStudentId} />
                 </div>
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-xs font-bold text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <ShieldAlert className="w-4 h-4" /> โรคประจำตัว (Chronic Illness)
-                  </span>
-                  <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 text-xs">
-                    <p className="font-semibold text-white">หอบหืด (Asthma - ระดับปานกลาง)</p>
-                    <p className="text-slate-400 mt-1">พกยาพ่นขยายหลอดลม (Ventolin) ติดตัวตลอดเวลา</p>
-                  </div>
-                </div>
-
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Pill className="w-4 h-4" /> ประวัติแพ้ยา / แพ้อาหาร (Allergies)
-                  </span>
-                  <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 text-xs">
-                    <p className="font-semibold text-white">แพ้ยาเพนิซิลลิน (Penicillin)</p>
-                    <p className="text-slate-400 mt-1">อาการ: ผื่นขึ้น หายใจลำบาก (ห้ามจ่ายยาเด็ดขาด)</p>
-                  </div>
-                </div>
-
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                  <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <User className="w-4 h-4" /> ผู้ติดต่อฉุกเฉิน (Emergency Contact)
-                  </span>
-                  <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 text-xs">
-                    <p className="font-semibold text-white">คุณแม่ สมศรี (มารดา)</p>
-                    <p className="text-indigo-400 font-mono mt-1">📞 โทร: 089-123-4567</p>
-                  </div>
-                </div>
-              </div>
+              {user?.uid && <InfirmaryHealthProfilePanel studentId={selectedStudentId} actor={{ uid: user.uid, name: user.displayName || user.email || 'เจ้าหน้าที่พยาบาล' }} />}
             </div>
           </div>
         )}

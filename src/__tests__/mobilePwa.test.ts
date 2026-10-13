@@ -73,7 +73,7 @@ describe('pwa: ไฟล์ manifest / icons / service worker / hosting', () => 
 describe('mobileMenuFor', () => {
   const ids = (x: ReturnType<typeof mobileMenuFor>) => x.map(i => i.id);
   it('นักเรียน', () => {
-    expect(ids(mobileMenuFor({ appRole: 'student', roles: ['STUDENT'] }))).toEqual(['checkin', 'schedule', 'club', 'homeLocation', 'chat']);
+    expect(ids(mobileMenuFor({ appRole: 'student', roles: ['STUDENT'] }))).toEqual(['checkin', 'schedule', 'homeLocation', 'chat']);
   });
   it('ผู้ปกครอง: ไม่มีเช็คอิน/พิกัดบ้าน; ไม่มีบทบาท PARENT = ไม่มีเมนู', () => {
     expect(ids(mobileMenuFor({ appRole: 'parent', roles: ['PARENT'] }))).toEqual(['childGate', 'schedule', 'leave', 'appointment', 'homeVisit', 'chat']);
@@ -121,12 +121,17 @@ describe('เมนูแบบประเมินบนมือถือ (�
   const ids = (x: ReturnType<typeof mobileMenuFor>) => x.map(i => i.id);
   const student = (due: any) => ids(mobileMenuFor({ appRole: 'student', roles: ['STUDENT'], due }));
   it('นักเรียน: ยังไม่ทำสุขภาพ/SDQ และ 2Q ถึงกำหนด = เห็นครบ', () => {
-    expect(student({ healthDone: false, sdqDone: false, twoQDue: true }))
+    expect(student({ clubOpen: true, healthDone: false, sdqDone: false, twoQDue: true }))
       .toEqual(['checkin', 'schedule', 'club', 'health', 'sdq', 'twoQ', 'homeLocation', 'chat']);
   });
   it('นักเรียน: ทำแล้ว = เมนูหาย; ยังไม่รู้สถานะ = ซ่อนไว้ก่อน', () => {
-    expect(student({ healthDone: true, sdqDone: true, twoQDue: false })).toEqual(['checkin', 'schedule', 'club', 'homeLocation', 'chat']);
-    expect(student({})).toEqual(['checkin', 'schedule', 'club', 'homeLocation', 'chat']);
+    expect(student({ healthDone: true, sdqDone: true, twoQDue: false })).toEqual(['checkin', 'schedule', 'homeLocation', 'chat']);
+    expect(student({})).toEqual(['checkin', 'schedule', 'homeLocation', 'chat']);
+  });
+  it('สมัครชุมนุม: โผล่เฉพาะตอนมีชุมนุมเปิดรับ — ปิดรับหมดหรือยังไม่รู้สถานะ = ซ่อน', () => {
+    expect(student({ clubOpen: true })).toContain('club');
+    expect(student({ clubOpen: false })).not.toContain('club');
+    expect(student({})).not.toContain('club');
   });
   it('ผู้ปกครอง: SDQ หายเมื่อประเมินแล้ว และไม่เห็นเมนูสุขภาพ/2Q ของนักเรียน', () => {
     const p = (due: any) => ids(mobileMenuFor({ appRole: 'parent', roles: ['PARENT'], due }));

@@ -34,6 +34,9 @@ import { computeAttendanceSummary } from './lib/attendanceSummary';
 import { computeStudentAttendanceStats, defaultAttendanceDateRange } from './lib/studentAttendanceStats';
 import { useRoomAttendanceRecords } from './hooks/useRoomAttendanceRecords';
 import { useElectiveActivities } from './hooks/useElectiveActivities';
+import { isEnrollmentClosed } from './lib/enrollmentWindow';
+import { GradeLockCountdownBanner } from './components/shared/GradeLockCountdownBanner';
+import { ResponsibleClubWindowCard } from './components/elective/ResponsibleClubWindowCard';
 import { subscribeActiveEnrollmentsByActivity, withdrawFromActivity } from './services/firestoreService';
 import { ActivityEnrollment } from './types';
 import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } from 'date-fns';
@@ -1035,6 +1038,9 @@ export function TeacherPortal() {
             </div>
 
 
+            <GradeLockCountdownBanner />
+            <ResponsibleClubWindowCard configs={electiveConfigs.filter(cfg => isStaffIn(user, cfg.responsibleTeacherUids))} />
+
             {dashboardTab === 'courses' && (() => {
               // 1. Calculate schedule target day and label
               const dayOfWeek = currentDate.getDay();
@@ -1221,7 +1227,7 @@ export function TeacherPortal() {
               // จะ synth course ให้จาก periodItem นี้เองเมื่อไม่เจอใน myCourses (fallback ที่มีอยู่แล้ว)
               electiveConfigs
                 .filter(cfg =>
-                  cfg.enrollmentStatus === 'CLOSED' &&
+                  isEnrollmentClosed(cfg, Date.now()) &&
                   isStaffIn(user, cfg.responsibleTeacherUids) &&
                   !!cfg.dayOfWeek && DAY_NAME_TO_NUM[cfg.dayOfWeek] === targetDayOfWeek &&
                   cfg.periodNumber !== null && cfg.periodNumber !== undefined

@@ -104,6 +104,19 @@ service cloud.firestore {
         && myStaffId() in get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('responsibleTeacherUids', []);
     }
 
+    // ชุมนุมเปิดรับสมัครอยู่จริง ณ ตอนนี้ (เวลาเซิร์ฟเวอร์): สถานะ OPEN และอยู่ในช่วงเวลา (ถ้ากำหนด)
+    // ต้องตรง src/lib/enrollmentWindow.ts (enrollmentState) — ไม่มี config = ผ่าน (เหมือนเดิม)
+    function activityEnrollmentOpen(activityId) {
+      return !exists(/databases/$(database)/documents/elective_activities_config/$(activityId)) ||
+        (
+          get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('enrollmentStatus', 'OPEN') == 'OPEN' &&
+          (get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('enrollmentOpensAt', null) == null ||
+            request.time >= get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.enrollmentOpensAt) &&
+          (get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('enrollmentClosesAt', null) == null ||
+            request.time < get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.enrollmentClosesAt)
+        );
+    }
+
     // 1. Students Collection
     // อ่านทะเบียนนักเรียนได้: บุคลากรที่ต้องใช้รายชื่อทั้งโรงเรียน (ครู/ผู้บริหาร/แนะแนว/พยาบาล/การเงิน/ศึกษานิเทศก์)
     // + ผู้ปกครองอ่านได้เฉพาะบุตรหลานตัวเอง (ต้อง query where('parentUid','==', uid) เพื่อให้ list ผ่าน)
@@ -1226,6 +1239,12 @@ service cloud.firestore {
     match /elective_activities_config/{configId} {
       allow read: if isSignedIn();
       allow write: if hasRole('SUPER_ADMIN') || hasRole('ACADEMIC_HEAD');
+      // ครูรับผิดชอบชุมนุมนั้น ตั้ง/แก้ "ช่วงเวลารับสมัคร + เปิด/ปิด" ของชุมนุมตัวเองได้เท่านั้น (แตะฟิลด์อื่นไม่ได้)
+      allow update: if isResponsibleTeacherOfActivity(configId)
+                       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['enrollmentStatus', 'enrollmentOpensAt', 'enrollmentClosesAt'])
+                       && request.resource.data.get('enrollmentStatus', 'OPEN') in ['OPEN', 'CLOSED']
+                       && (request.resource.data.get('enrollmentOpensAt', null) == null || request.resource.data.enrollmentOpensAt is timestamp)
+                       && (request.resource.data.get('enrollmentClosesAt', null) == null || request.resource.data.enrollmentClosesAt is timestamp);
     }
 
     // 28. Activity enrollments — การสมัคร/ถอนชุมนุมของนักเรียน (ไม่ลบ doc จริง mark removedAt แทน)
@@ -1243,10 +1262,7 @@ service cloud.firestore {
                        && request.resource.data.removedAt == null
                        && request.resource.data.removedBy == null
                        && studentField(request.resource.data.studentId, 'studentUid', '__none__') == request.auth.uid
-                       && (
-                         !exists(/databases/$(database)/documents/elective_activities_config/$(request.resource.data.activityId)) ||
-                         get(/databases/$(database)/documents/elective_activities_config/$(request.resource.data.activityId)).data.get('enrollmentStatus', 'OPEN') == 'OPEN'
-                       );
+                       && activityEnrollmentOpen(request.resource.data.activityId);
 
       // ถอน: แก้ได้เฉพาะ removedAt/removedBy/removedReason เท่านั้น — นักเรียนถอนตัวเอง
       // (removedBy ต้องเป็น null) หรือครูรับผิดชอบชุมนุมนั้นถอน (removedBy ต้องเป็น uid ตัวเอง)
@@ -1261,10 +1277,7 @@ service cloud.firestore {
                          && request.resource.data.get('removedReason', null) == null
                          && request.resource.data.studentUid == request.auth.uid
                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['enrolledAt', 'removedAt', 'removedBy', 'removedReason'])
-                         && (
-                           !exists(/databases/$(database)/documents/elective_activities_config/$(resource.data.activityId)) ||
-                           get(/databases/$(database)/documents/elective_activities_config/$(resource.data.activityId)).data.get('enrollmentStatus', 'OPEN') == 'OPEN'
-                         )
+                         && activityEnrollmentOpen(resource.data.activityId)
                        ) || (
                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['removedAt', 'removedBy', 'removedReason'])
                        && (
@@ -1433,6 +1446,61 @@ service cloud.firestore {
                        request.resource.data.studentUid == resource.data.studentUid;
 
       allow delete: if hasRole('SUPER_ADMIN');
+    }
+
+    // 33. Student Health Profile — โรคประจำตัว / แพ้ยา-อาหาร / ความต้องการดูแลพิเศษในชั้นเรียน (1 doc ต่อนักเรียน, id = studentId)
+    // ครอบครัว (นักเรียนเจ้าของ หรือผู้ปกครองตัวจริงตามทะเบียน) เป็นคนกรอก/แก้; พยาบาล (INFIRMARY_STAFF) "ยืนยัน" ได้อย่างเดียว
+    // — การแก้ของครอบครัวล้างการยืนยันเสมอ (verifiedAt/By ต้องเป็น null) จึงไม่มีทางที่ข้อมูลใหม่ติดตรา "พยาบาลยืนยันแล้ว"
+    // อ่านได้: แอดมิน/พยาบาล/ครูที่ปรึกษาของห้อง (ต้องรู้ข้อควรระวังในชั้นเรียน)/นักเรียนเจ้าของ/ผู้ปกครอง — ไม่เปิดให้คนอื่น
+    // ⚠️ rules ตรวจรูปร่าง (ฟิลด์ที่อนุญาต, ขนาดรายการ ≤ 20, ตรา/ผู้เขียน/เวลา) แต่วนตรวจฟิลด์ในแต่ละรายการไม่ได้ — ฝั่ง client ตรวจเอง
+    // (src/lib/healthProfile.ts validateHealthProfile)
+    match /student_health_profiles/{sid} {
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') ||
+                     isSelfStudent(sid) || isParentOfStudent(sid) || isHomeroomOfStudent(sid);
+
+      allow create: if (isSelfStudent(sid) || isParentOfStudent(sid))
+                       && request.resource.data.keys().hasOnly(['studentId', 'studentUid', 'parentUid', 'chronicIllnesses', 'allergies', 'specialCare',
+                                                               'updatedAt', 'updatedByUid', 'updatedByRole', 'verifiedAt', 'verifiedByUid', 'verifiedByName'])
+                       && request.resource.data.studentId == sid
+                       && request.resource.data.studentUid == studentField(sid, 'studentUid', '__none__')
+                       && request.resource.data.parentUid == studentField(sid, 'parentUid', null)
+                       && request.resource.data.chronicIllnesses is list && request.resource.data.chronicIllnesses.size() <= 20
+                       && request.resource.data.allergies is list && request.resource.data.allergies.size() <= 20
+                       && request.resource.data.specialCare is list && request.resource.data.specialCare.size() <= 20
+                       && request.resource.data.updatedAt == request.time
+                       && request.resource.data.updatedByUid == request.auth.uid
+                       && request.resource.data.updatedByRole in ['STUDENT', 'PARENT']
+                       && request.resource.data.verifiedAt == null
+                       && request.resource.data.verifiedByUid == null
+                       && request.resource.data.verifiedByName == null;
+
+      allow update: if (
+                         // ครอบครัวแก้รายการ → ล้างตรายืนยัน, เจ้าของ/ทะเบียนห้ามเปลี่ยน
+                         (isSelfStudent(sid) || isParentOfStudent(sid))
+                         && request.resource.data.keys().hasOnly(['studentId', 'studentUid', 'parentUid', 'chronicIllnesses', 'allergies', 'specialCare',
+                                                                 'updatedAt', 'updatedByUid', 'updatedByRole', 'verifiedAt', 'verifiedByUid', 'verifiedByName'])
+                         && request.resource.data.studentId == resource.data.studentId
+                         && request.resource.data.studentUid == studentField(sid, 'studentUid', '__none__')
+                         && request.resource.data.parentUid == studentField(sid, 'parentUid', null)
+                         && request.resource.data.chronicIllnesses is list && request.resource.data.chronicIllnesses.size() <= 20
+                         && request.resource.data.allergies is list && request.resource.data.allergies.size() <= 20
+                         && request.resource.data.specialCare is list && request.resource.data.specialCare.size() <= 20
+                         && request.resource.data.updatedAt == request.time
+                         && request.resource.data.updatedByUid == request.auth.uid
+                         && request.resource.data.updatedByRole in ['STUDENT', 'PARENT']
+                         && request.resource.data.verifiedAt == null
+                         && request.resource.data.verifiedByUid == null
+                         && request.resource.data.verifiedByName == null
+                       ) || (
+                         // พยาบาล/แอดมิน: ยืนยันได้อย่างเดียว (แตะรายการข้อมูลไม่ได้)
+                         (hasRole('INFIRMARY_STAFF') || hasRole('SUPER_ADMIN'))
+                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['verifiedAt', 'verifiedByUid', 'verifiedByName'])
+                         && request.resource.data.verifiedAt == request.time
+                         && request.resource.data.verifiedByUid == request.auth.uid
+                         && request.resource.data.verifiedByName is string
+                       );
+
+      allow delete: if false;
     }
 
     // Default Deny All Catch-All for unknown paths

@@ -107,6 +107,10 @@ export interface ElectiveActivityConfig {
   periodNumberEnd?: number | null; // คาบสิ้นสุด (ถ้าเป็นคาบต่อเนื่องหลายคาบ เช่น นศท 7-9) — ไม่ระบุ = คาบเดียวเท่ากับ periodNumber
   room?: string | null;         // ห้องเรียน (ถ้ามี)
   enrollmentStatus: 'OPEN' | 'CLOSED'; // ปิดรับสมัครแล้วค่อยเข้าตารางสอนให้เช็คชื่อได้
+  // ช่วงเวลารับสมัคร (ไม่ระบุ = ไม่จำกัดด้านนั้น) — แอดมิน/ครูรับผิดชอบตั้ง; rules บังคับด้วยเวลาเซิร์ฟเวอร์ (activityEnrollmentOpen)
+  // ใช้ enrollmentState() ใน src/lib/enrollmentWindow.ts ตัดสินสถานะ ห้ามเทียบ enrollmentStatus อย่างเดียว
+  enrollmentOpensAt?: Timestamp | null;
+  enrollmentClosesAt?: Timestamp | null;
   createdBy: string;
   createdAt: Timestamp;
 }

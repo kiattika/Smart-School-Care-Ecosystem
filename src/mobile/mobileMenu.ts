@@ -21,7 +21,7 @@ export function mobileMenuFor(input: { appRole: string; roles: string[]; due?: M
     return [
       { id: 'checkin', label: 'เช็คอินเข้าโรงเรียน' },
       { id: 'schedule', label: 'ตารางเรียนวันนี้' },
-      { id: 'club', label: 'สมัครชุมนุม' },
+      ...(due.clubOpen === true ? [{ id: 'club' as const, label: 'สมัครชุมนุม' }] : []),
       ...(due.healthDone === false ? [{ id: 'health' as const, label: 'บันทึกข้อมูลสุขภาพ' }] : []),
       ...(due.sdqDone === false ? [{ id: 'sdq' as const, label: 'ประเมิน SDQ' }] : []),
       ...(due.twoQDue === true ? [{ id: 'twoQ' as const, label: 'ประเมิน 2Q (ทุก 2 สัปดาห์)' }] : []),
