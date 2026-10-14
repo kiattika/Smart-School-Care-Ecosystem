@@ -4188,12 +4188,12 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(mSetDoc(mDoc(staffCtx('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'supervision_rounds/2569_2'), ok));
       await assertFails(mSetDoc(mDoc(staffCtx('t1', ['SUBJECT_TEACHER']), 'supervision_rounds/2570_1'), { ...ok, academicYear: '2570', term: '1' }));
       await assertFails(mSetDoc(mDoc(staffCtx('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'supervision_rounds/2569_x'), ok)); // id ผิดรูปแบบ
-      await assertSucceeds(mUpdateDoc(mDoc(staffCtx('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), `supervision_rounds/${RID}`), { status: 'CLOSED' }));
-      await assertFails(mUpdateDoc(mDoc(staffCtx('t1', ['SUBJECT_TEACHER']), `supervision_rounds/${RID}`), { status: 'CLOSED' }));
       const asg = { roundId: RID, teacherStaffId: 't2', supervisorStaffId: 'sup1', createdAt: mServerTimestamp() };
       await assertSucceeds(mSetDoc(mDoc(staffCtx('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), `supervision_assignments/${RID}_t2_sup1`), asg));
       await assertFails(mSetDoc(mDoc(staffCtx('t1', ['SUBJECT_TEACHER']), `supervision_assignments/${RID}_t2_sup1`), asg));
       await assertFails(mSetDoc(mDoc(staffCtx('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), `supervision_assignments/${RID}_t2_t2`), { ...asg, supervisorStaffId: 't2' })); // นิเทศตัวเอง
+      await assertSucceeds(mUpdateDoc(mDoc(staffCtx('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), `supervision_rounds/${RID}`), { status: 'CLOSED' }));
+      await assertFails(mUpdateDoc(mDoc(staffCtx('t1', ['SUBJECT_TEACHER']), `supervision_rounds/${RID}`), { status: 'CLOSED' }));
     });
 
     it('สร้างผล: ครูนิเทศต้องถูกจับคู่; หัวหน้ากลุ่มสาระฯ ทำได้เฉพาะครูในกลุ่มสาระฯ ตนเอง; ห้ามนิเทศตัวเอง', async () => {
@@ -4236,7 +4236,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       const sup = staffCtx('sup1', ['SUPERVISORY_TEACHER']);
       const t1 = staffCtx('t1', ['SUBJECT_TEACHER']);
       await assertFails(mUpdateDoc(mDoc(sup, `supervision_observations/${RID}_t1`), { comment: 'แก้', updatedAt: mServerTimestamp() }));
-      await assertFails(mUpdateDoc(mDoc(t1, `supervision_observations/${RID}_t1`), { total: 100, acknowledged: true, acknowledgedAt: mServerTimestamp(), updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(mDoc(t1, `supervision_observations/${RID}_t1`), { total: 50, acknowledged: true, acknowledgedAt: mServerTimestamp(), updatedAt: mServerTimestamp() }));
       await assertSucceeds(mUpdateDoc(mDoc(t1, `supervision_observations/${RID}_t1`), { acknowledged: true, acknowledgedAt: mServerTimestamp(), teacherReply: 'รับทราบ', updatedAt: mServerTimestamp() }));
       await assertFails(mUpdateDoc(mDoc(t1, `supervision_observations/${RID}_t1`), { acknowledged: true, acknowledgedAt: mServerTimestamp(), teacherReply: 'ซ้ำ', updatedAt: mServerTimestamp() }));
       await assertFails(mUpdateDoc(mDoc(staffCtx('t2', ['SUBJECT_TEACHER']), `supervision_observations/${RID}_t1`), { acknowledged: true, acknowledgedAt: mServerTimestamp(), updatedAt: mServerTimestamp() }));
