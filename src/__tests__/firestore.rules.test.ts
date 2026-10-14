@@ -6,7 +6,7 @@ import {
   assertSucceeds,
   assertFails,
 } from '@firebase/rules-unit-testing';
-import { collection, getDocs, query, where, doc as mDoc, setDoc as mSetDoc, updateDoc as mUpdateDoc, getDoc as mGetDoc, serverTimestamp as mServerTimestamp, writeBatch as mWriteBatch } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc as mDoc, setDoc as mSetDoc, updateDoc as mUpdateDoc, deleteDoc as mDeleteDoc, getDoc as mGetDoc, serverTimestamp as mServerTimestamp, writeBatch as mWriteBatch } from 'firebase/firestore';
 import { enrollInActivity, withdrawFromActivity, createBillingInvoice, createBillingInvoicesBulk, recordInfirmaryVisit, createParentNotification } from '../services/firestoreService';
 import { readSource } from './helpers/readSource';
 
@@ -4267,6 +4267,99 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(submittedAll(staffCtx('hod1', ['HEAD_OF_DEPARTMENT'])));
       await assertFails(submittedAll(staffCtx('sup1', ['SUPERVISORY_TEACHER']))); // ครูนิเทศเห็นเฉพาะที่ตนเองนิเทศ
       await assertSucceeds(getDocs(query(col(staffCtx('sup1', ['SUPERVISORY_TEACHER'])), where('roundId', '==', RID), where('supervisorStaffId', '==', 'sup1'))));
+    });
+  });
+
+  describe('lesson_plan_submissions (นิเทศเฟส 2: แผน/โครงการสอน 2 ขั้น)', () => {
+    const SEM = '2569_1';
+    const ctxOf = (sid: string, roles: string[]) => asUser(`uid-${sid}`, roles, { staffId: sid }).firestore();
+    const CK = Object.fromEntries(['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10'].map(k => [k, 'Y']));
+    const planId = (t: string) => `${SEM}_${t}_ท21101`;
+    const base = (t: string, dept: string, over: any = {}) => ({
+      semesterId: SEM, academicYear: '2569', term: '1', teacherStaffId: t, teacherName: 'ครู', departmentId: dept,
+      courseKey: 'ท21101', courseCode: 'ท21101', courseName: 'ภาษาไทย', level: 'ม.1', kind: 'PLAN',
+      url: 'https://docs.google.com/document/d/abc/edit', note: '', stage: 'SUBMITTED',
+      createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(), ...over,
+    });
+    const review = (sid: string, decision: string, comment = '') => ({ byStaffId: sid, byName: 'ผู้ตรวจ', decision, comment, checks: CK, at: mServerTimestamp() });
+    const seed = async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await db.doc('staff/t1').set({ roles: ['SUBJECT_TEACHER'], assignments: { departmentId: 'D1' } });
+        await db.doc('staff/t2').set({ roles: ['SUBJECT_TEACHER'], assignments: { departmentId: 'D2' } });
+        await db.doc('staff/hod1').set({ roles: ['HEAD_OF_DEPARTMENT'], assignments: { departmentId: 'D1' } });
+        await db.doc('staff/hod2').set({ roles: ['HEAD_OF_DEPARTMENT'], assignments: { departmentId: 'D2' } });
+        await db.doc('staff/sv').set({ roles: ['INSTRUCTIONAL_SUPERVISOR'], assignments: { departmentId: 'D3' } });
+      });
+    };
+    const put = async (id: string, data: any) => testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`lesson_plan_submissions/${id}`).set({ ...data, createdAt: new Date(), updatedAt: new Date() }); });
+    const col = (c: any) => collection(c, 'lesson_plan_submissions');
+
+    it('ครูสร้างของตนเองได้ (id/แผนก/ลิงก์ https ถูกต้อง) แต่ของคนอื่น/ลิงก์ไม่ใช่ https/แผนกผิด/ข้ามขั้นไม่ได้', async () => {
+      await seed();
+      const t1 = ctxOf('t1', ['SUBJECT_TEACHER']);
+      await assertSucceeds(mSetDoc(mDoc(t1, `lesson_plan_submissions/${planId('t1')}`), base('t1', 'D1')));
+      await assertFails(mSetDoc(mDoc(t1, `lesson_plan_submissions/${planId('t2')}`), base('t2', 'D2')));
+      await assertFails(mSetDoc(mDoc(t1, `lesson_plan_submissions/${SEM}_t1_x`), base('t1', 'D1', { courseKey: 'ท21101' }))); // id ไม่ตรง courseKey
+      await assertFails(mSetDoc(mDoc(t1, `lesson_plan_submissions/${SEM}_t1_ว1`), base('t1', 'D1', { courseKey: 'ว1', url: 'http://x.com/a' })));
+      await assertFails(mSetDoc(mDoc(t1, `lesson_plan_submissions/${SEM}_t1_ว2`), base('t1', 'D2', { courseKey: 'ว2' }))); // แผนกไม่ตรงทะเบียน
+      await assertFails(mSetDoc(mDoc(t1, `lesson_plan_submissions/${SEM}_t1_ว3`), base('t1', 'D1', { courseKey: 'ว3', stage: 'APPROVED' })));
+    });
+
+    it('ขั้น 1: หัวหน้า/รองกลุ่มสาระฯ ของแผนกเท่านั้น ผ่านได้ → DEPT_APPROVED; ต่างแผนก/ตัวเอง/ขาด checks ไม่ได้; ขอแก้ไขต้องมีความเห็น', async () => {
+      await seed();
+      await put(planId('t1'), base('t1', 'D1'));
+      const ref = (c: any) => mDoc(c, `lesson_plan_submissions/${planId('t1')}`);
+      const ok = { stage: 'DEPT_APPROVED', deptReview: review('hod1', 'APPROVE'), updatedAt: mServerTimestamp() };
+      await assertFails(mUpdateDoc(ref(ctxOf('hod2', ['HEAD_OF_DEPARTMENT'])), { ...ok, deptReview: review('hod2', 'APPROVE') }));
+      await assertFails(mUpdateDoc(ref(ctxOf('t1', ['SUBJECT_TEACHER'])), ok));
+      await assertFails(mUpdateDoc(ref(ctxOf('hod1', ['HEAD_OF_DEPARTMENT'])), { ...ok, deptReview: { ...review('hod1', 'APPROVE'), checks: { c1: 'Y' } } })); // ตอบไม่ครบ 10 ข้อ
+      await assertFails(mUpdateDoc(ref(ctxOf('hod1', ['HEAD_OF_DEPARTMENT'])), { stage: 'REVISION', deptReview: review('hod1', 'REVISE', ''), updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(ref(ctxOf('hod1', ['HEAD_OF_DEPARTMENT'])), { stage: 'APPROVED', deptReview: review('hod1', 'APPROVE'), updatedAt: mServerTimestamp() })); // ข้ามขั้น
+      await assertSucceeds(mUpdateDoc(ref(ctxOf('hod1', ['HEAD_OF_DEPARTMENT'])), ok));
+    });
+
+    it('ขั้น 2: เฉพาะหัวหน้างานนิเทศ เมื่อผ่านขั้น 1 แล้ว; ขั้น 1 ยังไม่ผ่านห้ามข้าม', async () => {
+      await seed();
+      await put(planId('t1'), base('t1', 'D1', { stage: 'DEPT_APPROVED', deptReview: review('hod1', 'APPROVE') }));
+      const ref = (c: any) => mDoc(c, `lesson_plan_submissions/${planId('t1')}`);
+      const fin = { stage: 'APPROVED', finalReview: review('sv', 'APPROVE'), updatedAt: mServerTimestamp() };
+      await assertFails(mUpdateDoc(ref(ctxOf('hod1', ['HEAD_OF_DEPARTMENT'])), { ...fin, finalReview: review('hod1', 'APPROVE') }));
+      await assertSucceeds(mUpdateDoc(ref(ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR'])), fin));
+      await put(planId('t2'), base('t2', 'D2'));
+      await assertFails(mUpdateDoc(mDoc(ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR']), `lesson_plan_submissions/${planId('t2')}`), fin)); // ยังเป็น SUBMITTED
+    });
+
+    it('ครูแก้ลิงก์/ส่งใหม่ได้เมื่อ SUBMITTED/REVISION เท่านั้น และแก้ผลตรวจเองไม่ได้; ลบได้เฉพาะก่อนผ่านขั้น 1', async () => {
+      await seed();
+      await put(planId('t1'), base('t1', 'D1', { stage: 'REVISION', deptReview: review('hod1', 'REVISE', 'แก้') }));
+      const ref = (c: any) => mDoc(c, `lesson_plan_submissions/${planId('t1')}`);
+      const t1 = ctxOf('t1', ['SUBJECT_TEACHER']);
+      await assertFails(mUpdateDoc(ref(t1), { stage: 'APPROVED', updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(ref(t1), { deptReview: review('t1', 'APPROVE'), stage: 'SUBMITTED', updatedAt: mServerTimestamp() }));
+      await assertSucceeds(mUpdateDoc(ref(t1), { url: 'https://drive.google.com/file/d/xyz/view', stage: 'SUBMITTED', updatedAt: mServerTimestamp() }));
+      await put(planId('t2'), base('t2', 'D2', { stage: 'DEPT_APPROVED', deptReview: review('hod2', 'APPROVE') }));
+      await assertFails(mDeleteDoc(mDoc(ctxOf('t2', ['SUBJECT_TEACHER']), `lesson_plan_submissions/${planId('t2')}`)));
+      await assertSucceeds(mDeleteDoc(ref(t1)));
+    });
+
+    it('การอ่าน: ครูเห็นของตนเอง; หัวหน้ากลุ่มฯ เห็นเฉพาะแผนก; หัวหน้างานนิเทศ/ผอ./รอง ผอ.วิชาการเห็นทั้งหมด; ผู้บริหารอื่น/แอดมินไม่เห็นรายบุคคล', async () => {
+      await seed();
+      await put(planId('t1'), base('t1', 'D1'));
+      await put(planId('t2'), base('t2', 'D2'));
+      const own = (c: any, t: string) => getDocs(query(col(c), where('semesterId', '==', SEM), where('teacherStaffId', '==', t)));
+      const dep = (c: any, d: string) => getDocs(query(col(c), where('semesterId', '==', SEM), where('departmentId', '==', d)));
+      const all = (c: any) => getDocs(query(col(c), where('semesterId', '==', SEM)));
+      await assertSucceeds(own(ctxOf('t1', ['SUBJECT_TEACHER']), 't1'));
+      await assertFails(own(ctxOf('t1', ['SUBJECT_TEACHER']), 't2'));
+      await assertSucceeds(dep(ctxOf('hod1', ['HEAD_OF_DEPARTMENT']), 'D1'));
+      await assertFails(dep(ctxOf('hod1', ['HEAD_OF_DEPARTMENT']), 'D2'));
+      await assertFails(all(ctxOf('hod1', ['HEAD_OF_DEPARTMENT'])));
+      await assertSucceeds(all(ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR'])));
+      await assertSucceeds(all(ctxOf('d1', ['DIRECTOR'])));
+      await assertSucceeds(all(ctxOf('d2', ['DEPUTY_DIRECTOR_ACADEMIC'])));
+      await assertFails(all(ctxOf('ex', ['EXECUTIVE'])));
+      await assertFails(all(ctxOf('adm', ['SUPER_ADMIN'])));
     });
   });
 

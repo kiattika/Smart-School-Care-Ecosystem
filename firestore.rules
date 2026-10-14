@@ -1568,6 +1568,104 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 41. แผนการสอน/โครงการสอน (นิเทศเฟส 2) — lesson_plan_submissions: ครูแปะลิงก์ https ต่อรายวิชา/ภาคเรียน
+    //     (ตรรกะ/ข้อความอยู่ src/lib/lessonPlans.ts) ตรวจ 2 ขั้น: หัวหน้า/รองหัวหน้ากลุ่มสาระฯ (SUBMITTED → DEPT_APPROVED)
+    //     แล้วหัวหน้างานนิเทศ (DEPT_APPROVED → APPROVED); ขอแก้ไข (REVISION) ครูแก้ลิงก์แล้วส่งใหม่ = เริ่มขั้นแรกอีกครั้ง
+    //     อ่าน: เจ้าของ / หัวหน้างานนิเทศ / ผอ. / รองผอ.วิชาการ / หัวหน้า-รองหัวหน้ากลุ่มสาระฯ ของกลุ่มสาระฯ นั้น (EXECUTIVE ไม่เห็นรายบุคคล)
+    //     หัวหน้ากลุ่มสาระฯ ตรวจแผนของตัวเองไม่ได้ — แผนของหัวหน้ากลุ่ม (หรือครูที่ไม่มีกลุ่มสาระฯ) ขั้นแรกให้หัวหน้างานนิเทศตรวจ
+    function lpTeacherIsHead(tid) {
+      return exists(/databases/$(database)/documents/staff/$(tid))
+        && ('HEAD_OF_DEPARTMENT' in get(/databases/$(database)/documents/staff/$(tid)).data.get('roles', []));
+    }
+    function lpDeptStageActor(dept, tid) {
+      return tid != myStaffId() && (supInMyDept(dept) ||
+        (hasRole('INSTRUCTIONAL_SUPERVISOR') && (dept == '' || lpTeacherIsHead(tid))));
+    }
+    // แบบประเมินแผน (checks: ข้อละ Y/N — รายการข้อใน src/lib/lessonPlans.ts PLAN_CHECKLIST ต้องตรง c1–c10) + ความเห็น
+    function lpChecksOk(r) {
+      return r.checks is map && r.checks.size() == 10 && r.checks.keys().hasOnly(['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10']) &&
+        (!('c1' in r.checks) || r.checks.c1 in ['Y', 'N']) &&
+        (!('c2' in r.checks) || r.checks.c2 in ['Y', 'N']) &&
+        (!('c3' in r.checks) || r.checks.c3 in ['Y', 'N']) &&
+        (!('c4' in r.checks) || r.checks.c4 in ['Y', 'N']) &&
+        (!('c5' in r.checks) || r.checks.c5 in ['Y', 'N']) &&
+        (!('c6' in r.checks) || r.checks.c6 in ['Y', 'N']) &&
+        (!('c7' in r.checks) || r.checks.c7 in ['Y', 'N']) &&
+        (!('c8' in r.checks) || r.checks.c8 in ['Y', 'N']) &&
+        (!('c9' in r.checks) || r.checks.c9 in ['Y', 'N']) &&
+        (!('c10' in r.checks) || r.checks.c10 in ['Y', 'N']);
+    }
+    function lpReviewOk(r, stage, approveStage) {
+      return r is map && r.keys().hasOnly(['byStaffId', 'byName', 'decision', 'comment', 'checks', 'at'])
+        && r.keys().hasAll(['byStaffId', 'byName', 'decision', 'comment', 'checks', 'at'])
+        && r.byStaffId == myStaffId() && r.byName is string && r.byName.size() <= 160
+        && r.comment is string && r.comment.size() <= 1000 && r.at == request.time
+        && lpChecksOk(r)
+        && (stage == approveStage ? r.decision == 'APPROVE' : (r.decision == 'REVISE' && r.comment.size() > 0));
+    }
+    function lpContentOk(d) {
+      return d.kind in ['PLAN', 'PROJECT'] && d.url is string && d.url.matches('^https://[^ ]{4,490}$')
+        && d.note is string && d.note.size() <= 500;
+    }
+    function lpDocOk(d) {
+      return d.keys().hasOnly(['semesterId', 'academicYear', 'term', 'teacherStaffId', 'teacherName', 'departmentId', 'courseKey',
+                               'courseCode', 'courseName', 'level', 'kind', 'url', 'note', 'stage', 'deptReview', 'finalReview', 'createdAt', 'updatedAt'])
+        && d.keys().hasAll(['semesterId', 'teacherStaffId', 'departmentId', 'courseKey', 'kind', 'url', 'note', 'stage'])
+        && d.semesterId.matches('^[0-9]{4}_[12]$') && d.academicYear is string && d.term in ['1', '2']
+        && (d.academicYear + '_' + d.term) == d.semesterId
+        && d.teacherStaffId is string && d.teacherName is string && d.teacherName.size() <= 160
+        && d.departmentId is string && d.courseKey is string && d.courseKey.size() > 0 && d.courseKey.size() <= 60
+        && d.courseCode is string && d.courseCode.size() <= 40 && d.courseName is string && d.courseName.size() <= 160
+        && d.level is string && d.level.size() <= 40
+        && lpContentOk(d);
+    }
+
+    match /lesson_plan_submissions/{oid} {
+      allow read: if myStaffId() != '' && (
+        resource.data.teacherStaffId == myStaffId() ||
+        hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
+        supInMyDept(resource.data.departmentId)
+      );
+
+      allow create: if myStaffId() != ''
+                       && lpDocOk(request.resource.data)
+                       && request.resource.data.teacherStaffId == myStaffId()
+                       && oid == request.resource.data.semesterId + '_' + myStaffId() + '_' + request.resource.data.courseKey
+                       && request.resource.data.departmentId == supStaffDept(myStaffId())
+                       && request.resource.data.stage == 'SUBMITTED'
+                       && !('deptReview' in request.resource.data) && !('finalReview' in request.resource.data)
+                       && request.resource.data.createdAt == request.time
+                       && request.resource.data.updatedAt == request.time;
+
+      allow update: if (
+          // ครูเจ้าของ: แก้ลิงก์/ประเภท/หมายเหตุ ได้ตอนรอตรวจขั้นแรกหรือถูกขอแก้ไข แล้วส่งใหม่
+          myStaffId() != '' && resource.data.teacherStaffId == myStaffId()
+          && resource.data.stage in ['SUBMITTED', 'REVISION']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['kind', 'url', 'note', 'stage', 'updatedAt'])
+          && request.resource.data.stage == 'SUBMITTED'
+          && lpContentOk(request.resource.data)
+          && request.resource.data.updatedAt == request.time
+        ) || (
+          // ขั้นที่ 1: หัวหน้า/รองหัวหน้ากลุ่มสาระฯ
+          myStaffId() != '' && lpDeptStageActor(resource.data.departmentId, resource.data.teacherStaffId)
+          && resource.data.stage == 'SUBMITTED'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stage', 'deptReview', 'updatedAt'])
+          && request.resource.data.stage in ['DEPT_APPROVED', 'REVISION']
+          && lpReviewOk(request.resource.data.deptReview, request.resource.data.stage, 'DEPT_APPROVED')
+          && request.resource.data.updatedAt == request.time
+        ) || (
+          // ขั้นที่ 2: หัวหน้างานนิเทศ
+          myStaffId() != '' && hasRole('INSTRUCTIONAL_SUPERVISOR') && resource.data.teacherStaffId != myStaffId()
+          && resource.data.stage == 'DEPT_APPROVED'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stage', 'finalReview', 'updatedAt'])
+          && request.resource.data.stage in ['APPROVED', 'REVISION']
+          && lpReviewOk(request.resource.data.finalReview, request.resource.data.stage, 'APPROVED')
+          && request.resource.data.updatedAt == request.time
+        );
+
+      allow delete: if myStaffId() != '' && resource.data.teacherStaffId == myStaffId() && resource.data.stage in ['SUBMITTED', 'REVISION'];
+    }
+
     // 40. สรุปสารสนเทศโรงเรียนสำหรับหน้าสาธารณะ /info — อ่านได้ทุกคนแม้ไม่ล็อกอิน (เป็นตัวเลขรวมที่ซ่อนช่อง <5 แล้วเท่านั้น
     //     ไม่มีข้อมูลรายบุคคล); client เขียนไม่ได้เด็ดขาด (Cloud Function scheduledPublicSummary/refreshPublicSummary ใช้ Admin SDK)
     //     อ่านได้เฉพาะเอกสาร 'current' เอกสารเดียว — ห้ามเพิ่มข้อมูลละเอียดลงเอกสารนี้
