@@ -364,3 +364,9 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - คำนวณฝั่ง client จาก `substitute_assignments` ที่ APPROVED เท่านั้น (ไม่มี collection ใหม่/ไม่แก้ rules); 1 เอกสาร = 1 คาบ; SWAP นับให้เจ้าของคาบเดิมเท่านั้น
 - ครูเห็นของตนเอง (TeacherPortal), หัวหน้า/รองหัวหน้ากลุ่มสาระฯ เห็นตัวเลขรวมกลุ่มตนเอง, รองผอ./ผอ./Executive เห็นทั้งโรงเรียน+รายกลุ่มสาระฯ — เป็นตัวเลขรวม ไม่แสดงรายชื่อครู
 - หน้า "สารสนเทศโรงเรียน" สาธารณะ (ยังไม่ทำ): ต้องอ่านจาก snapshot ที่ Cloud Function คำนวณ ไม่มีข้อมูลส่วนบุคคล ซ่อนกลุ่มเล็ก
+
+## สารสนเทศโรงเรียนสาธารณะ — `/info` + `public_summary/current`
+- หน้า `/info` (ไม่ต้องล็อกอิน; `main.tsx` แยกออกจาก `App`) อ่านเอกสารเดียว `public_summary/current` ที่ Cloud Function สร้าง (`scheduledPublicSummary` ทุกวัน 03:00 เวลาไทย + callable `refreshPublicSummary` สำหรับ SUPER_ADMIN) — **ห้าม** ให้หน้านี้ query ข้อมูลรายบุคคลหรือเพิ่มข้อมูลละเอียดลงเอกสารนี้
+- ตรรกะ `functions/src/publicSummaryLogic.ts`: ช่องที่นับได้ 1–4 ซ่อนเป็น `null` ("<5") + ซ่อนช่องรองเมื่อซ่อนอยู่ช่องเดียว (กันลบจากยอดรวม); ค่าเฉลี่ยนิเทศแสดงเมื่อ ≥5 คน; ห้ามมีชื่อ/อีเมล/รหัสใด ๆ ในผลลัพธ์ (มี test)
+- rules: `public_summary/{docId}` → `allow get` เฉพาะ `current` ไม่ต้อง auth; list/write ปิด
+- หน้า `ExecutivePortal` (ล็อกอิน) ยังแยกต่างหาก — หน้าสาธารณะไม่แทนที่

@@ -5,10 +5,13 @@ import App from './App.tsx';
 import './index.css';
 import { registerServiceWorker } from './lib/pwa';
 import { notifyUpdateReady } from './mobile/updateBus';
+import { SchoolInfoPage } from './components/publicinfo/SchoolInfoPage';
+import { isPublicInfoPath } from './lib/publicInfo';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {/* /info = หน้าสาธารณะ ไม่ผ่านระบบล็อกอิน/store ของ App */}
+    {isPublicInfoPath(window.location.pathname) ? <SchoolInfoPage /> : <App />}
   </StrictMode>,
 );
 
