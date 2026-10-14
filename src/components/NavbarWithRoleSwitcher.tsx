@@ -134,6 +134,15 @@ export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
     iconColor: 'text-teal-400',
     description: 'ประเมินแผนการสอน นิเทศสังเกตการณ์ชั้นเรียน'
   },
+  STUDENT_AFFAIRS: {
+    label: 'งานกิจการนักเรียน',
+    badgeBg: 'bg-lime-500/10',
+    badgeText: 'text-lime-400',
+    badgeBorder: 'border-lime-500/20',
+    iconBg: 'bg-lime-500/20',
+    iconColor: 'text-lime-400',
+    description: 'พิจารณาคะแนนความประพฤติ กำกับเยี่ยมบ้าน ติดตามนักเรียนที่ยังไม่เข้าโรงเรียน'
+  },
   REGISTRAR: {
     label: 'งานทะเบียนวัดผล',
     badgeBg: 'bg-orange-500/10',
@@ -279,6 +288,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   MANAGE_INFIRMARY: 'จัดการห้องพยาบาลและสถิติสุขภาพ',
   MANAGE_COUNSELING: 'จัดการระบบแนะแนวและให้คำปรึกษา',
   MANAGE_FINANCE: 'จัดการงานการเงินและบัญชีโรงเรียน',
+  MANAGE_STUDENT_AFFAIRS: 'งานกิจการนักเรียน (คะแนนความประพฤติ เยี่ยมบ้าน)',
   MANAGE_REGISTRAR: 'งานทะเบียนวัดผล (แก้ตัว/เรียนซ้ำ จบหลักสูตร)',
   MANAGE_SUPERVISION: 'จัดการงานนิเทศการสอนและตรวจแผน'
 };
@@ -336,6 +346,8 @@ export function NavbarWithRoleSwitcher({
         return count > 0 ? `สอน ${count} รายวิชา` : '';
       case 'SUPERVISORY_TEACHER':
         return 'ผู้นิเทศการสอน';
+      case 'STUDENT_AFFAIRS':
+        return 'งานกิจการนักเรียน';
       case 'REGISTRAR':
       case 'REGISTRAR_ASSISTANT':
         return 'งานทะเบียนวัดผล';

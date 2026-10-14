@@ -4965,4 +4965,136 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(mUpdateDoc(mDoc(reg, 'room_transfers/t1'), { reason: 'แก้ย้อนหลัง', updatedAt: mServerTimestamp() }));
     });
   });
+  describe('conduct_entries / conduct_change_requests (งานกิจการนักเรียน)', () => {
+    const sc = (sid: string, roles: string[]) => asUser(`uid-${sid}`, roles, { staffId: sid }).firestore();
+    const seed = async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await db.doc('students/11111').set({ studentId: '11111', name: 'เด็กหนึ่ง', room: 'ม.3/1', studentUid: 'uid-stu', parentUid: 'uid-par', behaviorScore: 100 });
+        await db.doc('students/22222').set({ studentId: '22222', name: 'เด็กสอง', room: 'ม.4/1', studentUid: 'uid-stu2', parentUid: 'uid-par2', behaviorScore: 100 });
+        await db.doc('staff/hr1').set({ firstName: 'ครู', lastName: 'ประจำชั้น', roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.3/1' } });
+      });
+    };
+    const entry = (staff: string, over: Record<string, unknown> = {}) => ({
+      studentId: '11111', studentName: 'เด็กหนึ่ง', studentUid: 'uid-stu', parentUid: 'uid-par', room: 'ม.3/1', kind: 'DEDUCT', level: 'LIGHT',
+      points: 3, appliedPoints: 3, status: 'APPLIED', reason: 'มาสาย', category: '', date: '2569-11-01',
+      createdByStaffId: staff, createdByName: 'ครู', createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(), ...over,
+    });
+    const cache = (eid: string, o: { added?: number; ded?: number; score?: number; risk?: string } = {}) => ({
+      behaviorScore: o.score ?? 97, riskLevel: o.risk ?? 'NORMAL', conductBase: 100, conductAdded: o.added ?? 0, conductDeducted: o.ded ?? 3,
+      lastConductEntryId: eid, updatedAt: mServerTimestamp(),
+    });
+    const submit = (db: any, eid: string, e: Record<string, unknown>, c: Record<string, unknown>, sid = '11111') => {
+      const b = mWriteBatch(db);
+      b.set(mDoc(db, `conduct_entries/${eid}`), e);
+      b.update(mDoc(db, `students/${sid}`), c);
+      return b.commit();
+    };
+
+    it('ครูหัก/เพิ่ม ≤5 มีผลทันที เมื่อแคชคะแนนตรงเป๊ะ; แคชผิดหรือไม่ปรับแคชไม่ได้', async () => {
+      await seed();
+      const t = sc('hr1', ['HOMEROOM_TEACHER']);
+      await assertSucceeds(submit(t, 'e1', entry('hr1'), cache('e1')));
+      await assertFails(submit(t, 'e2', entry('hr1'), cache('e2', { ded: 3, score: 97 }))); // ไม่สะสมต่อจากแคชเดิม (ควรเป็น 6/94)
+      await assertSucceeds(submit(t, 'e5', entry('hr1'), cache('e5', { ded: 6, score: 94 })));
+      await assertFails(mSetDoc(mDoc(t, 'conduct_entries/e3'), entry('hr1'))); // ไม่ปรับแคชใน batch เดียวกัน
+      const b = mWriteBatch(t); // แคชคะแนนไม่ตรงกับรายการ
+      b.set(mDoc(t, 'conduct_entries/e4'), entry('hr1', { points: 2, appliedPoints: 2 }));
+      b.update(mDoc(t, 'students/11111'), cache('e4', { ded: 2, score: 50 }));
+      await assertFails(b.commit());
+    });
+
+    it('ครูเกิน 5 ต้องเป็น PENDING เท่านั้น; ระดับ/เพดานต้องตรง; สวมรอยผู้บันทึกไม่ได้', async () => {
+      await seed();
+      const t = sc('hr1', ['HOMEROOM_TEACHER']);
+      await assertFails(submit(t, 'e1', entry('hr1', { level: 'MEDIUM', points: 8, appliedPoints: 8 }), cache('e1', { ded: 8, score: 92 })));
+      await assertSucceeds(mSetDoc(mDoc(t, 'conduct_entries/e2'), entry('hr1', { level: 'MEDIUM', points: 8, appliedPoints: 0, status: 'PENDING' })));
+      await assertFails(mSetDoc(mDoc(t, 'conduct_entries/e3'), entry('hr1', { level: 'LIGHT', points: 6, appliedPoints: 0, status: 'PENDING' }))); // เบาเกิน 5
+      await assertFails(mSetDoc(mDoc(t, 'conduct_entries/e4'), entry('hr1', { createdByStaffId: 'other', appliedPoints: 0, status: 'PENDING' }))); // สวมรอย
+      await assertFails(mSetDoc(mDoc(t, 'conduct_entries/e5'), entry('hr1', { room: 'ม.9/9', appliedPoints: 0, status: 'PENDING' }))); // ห้องไม่ตรงทะเบียน
+      await assertFails(mSetDoc(mDoc(sc('x1', ['PARENT']), 'conduct_entries/e6'), entry('x1', { appliedPoints: 0, status: 'PENDING' }))); // ไม่ใช่บุคลากร
+    });
+
+    it('งานกิจการพิจารณารายการที่ส่งมา (อนุมัติปรับแคช/ไม่อนุมัติไม่แตะแคช); ครูพิจารณาเองไม่ได้', async () => {
+      await seed();
+      const t = sc('hr1', ['HOMEROOM_TEACHER']);
+      const a = sc('aff1', ['STUDENT_AFFAIRS']);
+      await assertSucceeds(mSetDoc(mDoc(t, 'conduct_entries/e1'), entry('hr1', { level: 'MEDIUM', points: 8, appliedPoints: 0, status: 'PENDING' })));
+      await assertSucceeds(mSetDoc(mDoc(t, 'conduct_entries/e2'), entry('hr1', { level: 'MEDIUM', points: 8, appliedPoints: 0, status: 'PENDING' })));
+      const decide = (db: any, eid: string, status: string, applied: number, staff = 'aff1') => {
+        const b = mWriteBatch(db);
+        b.update(mDoc(db, `conduct_entries/${eid}`), {
+          status, appliedPoints: applied, level: 'MEDIUM', decidedByStaffId: staff, decidedByName: 'กิจการ', decidedAt: mServerTimestamp(), decisionNote: '', updatedAt: mServerTimestamp(),
+        });
+        if (status === 'APPLIED') b.update(mDoc(db, 'students/11111'), cache(eid, { ded: applied, score: 100 - applied }));
+        return b.commit();
+      };
+      await assertFails(decide(t, 'e1', 'APPLIED', 8, 'hr1')); // ครูไม่มีสิทธิ์
+      await assertSucceeds(decide(a, 'e1', 'APPLIED', 8));
+      await assertFails(decide(a, 'e1', 'REJECTED', 0)); // พิจารณาแล้วเปลี่ยนไม่ได้
+      await assertSucceeds(decide(a, 'e2', 'REJECTED', 0));
+    });
+
+    it('งานกิจการบันทึกเกิน 5 ได้ทันที (ตามเพดานระดับ) แต่ไม่เกินเพดาน', async () => {
+      await seed();
+      const a = sc('aff1', ['STUDENT_AFFAIRS']);
+      await assertSucceeds(submit(a, 'e1', entry('aff1', { level: 'SEVERE', points: 20, appliedPoints: 20 }), cache('e1', { ded: 20, score: 80, risk: 'NORMAL' })));
+      await assertFails(submit(a, 'e2', entry('aff1', { level: 'SEVERE', points: 21, appliedPoints: 21 }), cache('e2', { ded: 41, score: 59, risk: 'CRITICAL' })));
+    });
+
+    it('แก้/ยกเลิกคะแนนผ่านคำร้องเท่านั้น: ผู้บันทึกยื่น งานกิจการอนุมัติ; ลบไม่ได้', async () => {
+      await seed();
+      const t = sc('hr1', ['HOMEROOM_TEACHER']);
+      const a = sc('aff1', ['STUDENT_AFFAIRS']);
+      await assertSucceeds(submit(t, 'e1', entry('hr1'), cache('e1')));
+      const req = (staff: string, over: Record<string, unknown> = {}) => ({
+        entryId: 'e1', studentId: '11111', action: 'DELETE', newPoints: null, beforePoints: 3, reason: 'บันทึกผิดคน', status: 'PENDING',
+        requestedByStaffId: staff, requestedByName: 'ครู', createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(), ...over,
+      });
+      await assertFails(mSetDoc(mDoc(sc('hr2', ['HOMEROOM_TEACHER']), 'conduct_change_requests/r0'), req('hr2'))); // ไม่ใช่ผู้บันทึก
+      await assertFails(mSetDoc(mDoc(t, 'conduct_change_requests/r0'), req('hr1', { reason: '' })));
+      await assertFails(mSetDoc(mDoc(t, 'conduct_change_requests/r0'), req('hr1', { action: 'EDIT', newPoints: 3 }))); // เท่าเดิม
+      await assertSucceeds(mSetDoc(mDoc(t, 'conduct_change_requests/r1'), req('hr1')));
+      // ครูแก้รายการเองตรง ๆ ไม่ได้
+      await assertFails(mUpdateDoc(mDoc(t, 'conduct_entries/e1'), { status: 'REVERSED', updatedAt: mServerTimestamp() }));
+      await assertFails(mDeleteDoc(mDoc(t, 'conduct_entries/e1')));
+      const approve = (db: any, staff: string, over: Record<string, unknown> = {}) => {
+        const b = mWriteBatch(db);
+        b.update(mDoc(db, 'conduct_change_requests/r1'), { status: 'APPROVED', decidedByStaffId: staff, decidedByName: 'กิจการ', decidedAt: mServerTimestamp(), decisionNote: '', updatedAt: mServerTimestamp() });
+        b.update(mDoc(db, 'conduct_entries/e1'), { status: 'REVERSED', lastChangeRequestId: 'r1', updatedAt: mServerTimestamp(), ...over });
+        b.update(mDoc(db, 'students/11111'), cache('e1', { ded: 0, score: 100 }));
+        return b.commit();
+      };
+      await assertFails(approve(t, 'hr1')); // ครูอนุมัติเองไม่ได้
+      await assertSucceeds(approve(a, 'aff1'));
+      await assertFails(mDeleteDoc(mDoc(a, 'conduct_entries/e1')));
+      await assertFails(mDeleteDoc(mDoc(a, 'conduct_change_requests/r1')));
+    });
+
+    it('สิทธิ์อ่าน: งานกิจการทั้งหมด, ครูที่ปรึกษาห้องนั้น, ผู้บันทึก, นักเรียน/ผู้ปกครองเจ้าของ; ห้องอื่นอ่านไม่ได้', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('conduct_entries/e1').set(entry('hr1', { createdAt: new Date(), updatedAt: new Date() }));
+      });
+      const get = (db: any) => mGetDoc(mDoc(db, 'conduct_entries/e1'));
+      await assertSucceeds(get(sc('aff1', ['STUDENT_AFFAIRS'])));
+      await assertSucceeds(get(sc('hr1', ['HOMEROOM_TEACHER'])));
+      await assertSucceeds(get(asUser('uid-stu', ['STUDENT']).firestore()));
+      await assertSucceeds(get(asUser('uid-par', ['PARENT']).firestore()));
+      await assertFails(get(asUser('uid-par2', ['PARENT']).firestore()));
+      await assertFails(get(sc('t9', ['SUBJECT_TEACHER'])));
+    });
+
+    it('งานกิจการอ่านนักเรียน/เช็คอินประตู/เยี่ยมบ้านทั้งโรงเรียนได้ แต่เขียนข้อมูลเหล่านั้นไม่ได้', async () => {
+      await seed();
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('gate_attendance_logs/g1').set({ studentId: '11111', date: '2569-11-01', type: 'IN' });
+      });
+      const a = sc('aff1', ['STUDENT_AFFAIRS']);
+      await assertSucceeds(mGetDoc(mDoc(a, 'students/11111')));
+      await assertSucceeds(mGetDoc(mDoc(a, 'gate_attendance_logs/g1')));
+      await assertFails(mUpdateDoc(mDoc(a, 'students/11111'), { name: 'แก้ชื่อ', updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(mDoc(a, 'gate_attendance_logs/g1'), { type: 'OUT' }));
+    });
+  });
 });
