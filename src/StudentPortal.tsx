@@ -34,12 +34,14 @@ import {
   Zap,
   HelpCircle,
   Users,
+  Landmark,
   MessageSquare
 } from 'lucide-react';
 
 import { NotificationBell } from './components/notifications/NotificationBell';
 import { GateAttendanceTracker } from './components/student-parent/GateAttendanceTracker';
 import { StudentElectiveEnrollment } from './components/student-parent/StudentElectiveEnrollment';
+import { StudentFundsSection } from './components/funds/StudentFundsSection';
 import { HealthMentalWellbeingModule } from './components/student-parent/HealthMentalWellbeingModule';
 import { BehaviorDisciplineModule } from './components/student-parent/BehaviorDisciplineModule';
 import { StudentDaySchedule } from './components/student-parent/StudentDaySchedule';
@@ -68,7 +70,7 @@ export function StudentPortal() {
 
   // 7 Module Tabs + Assessment + Overview
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'gate' | 'health' | 'socio' | 'behavior' | 'electives' | 'portfolio' | 'academic' | 'billing' | 'chat' | 'appointment' | 'assessment'
+    'overview' | 'gate' | 'health' | 'socio' | 'behavior' | 'electives' | 'scholarship' | 'loan' | 'portfolio' | 'academic' | 'billing' | 'chat' | 'appointment' | 'assessment'
   >('overview');
 
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
@@ -218,6 +220,8 @@ export function StudentPortal() {
             { id: 'socio', label: '4. ที่อยู่บ้าน & เยี่ยมบ้าน', icon: MapPin },
             { id: 'behavior', label: '5. คะแนนความประพฤติ', icon: ShieldCheck },
             { id: 'electives', label: 'สมัครชุมนุม', icon: Users },
+            { id: 'scholarship', label: 'ทุนการศึกษา', icon: Award },
+            { id: 'loan', label: 'กองทุนกู้ยืม (กยศ.)', icon: Landmark },
             { id: 'portfolio', label: '6. แฟ้มผลงาน', icon: FolderGit2 },
             { id: 'academic', label: '7. ปพ.6 & การบ้าน & สอบ', icon: BookOpen },
             { id: 'billing', label: '8. ชำระเงิน', icon: CreditCard },
@@ -393,6 +397,10 @@ export function StudentPortal() {
         {/* สมัครชุมนุม (Elective Activities) */}
         {activeTab === 'electives' && (
           <StudentElectiveEnrollment student={student} />
+        )}
+
+        {(activeTab === 'scholarship' || activeTab === 'loan') && (
+          <StudentFundsSection kind={activeTab === 'scholarship' ? 'SCHOLARSHIP' : 'STUDENT_LOAN'} student={{ studentId: student.studentId, name: student.name }} />
         )}
 
         {/* 5. แฟ้มผลงาน — บันทึกผลงานเอง (Firestore + อนุมัติโดยครูที่ปรึกษา) */}

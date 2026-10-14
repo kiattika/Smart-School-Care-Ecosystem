@@ -28,6 +28,7 @@ import {
   Phone,
   AlertTriangle,
   Users,
+  Landmark,
   CalendarDays
 } from 'lucide-react';
 
@@ -38,6 +39,7 @@ import { StudentDaySchedule } from './components/student-parent/StudentDaySchedu
 import { ParentPortfolioView } from './components/portfolio/ParentPortfolioView';
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
+import { StudentFundsSection } from './components/funds/StudentFundsSection';
 import { FamilyHomeVisitInfoForm } from './components/homevisit/FamilyHomeVisitInfoForm';
 import { ClassChatMemberView, useMemberThreads } from './components/chat/ClassChatPanel';
 import { isThreadUnread } from './lib/classChat';
@@ -81,7 +83,7 @@ export function ParentPortal() {
   const bScore = student?.behaviorScore;
   
   const [activeTab, setActiveTab] = useState<
-    'timeline' | 'gate' | 'health' | 'behavior' | 'portfolio' | 'academic' | 'billing' | 'chat' | 'appointment' | 'family'
+    'timeline' | 'gate' | 'health' | 'behavior' | 'portfolio' | 'academic' | 'billing' | 'chat' | 'appointment' | 'family' | 'scholarship' | 'loan'
   >('timeline');
 
 
@@ -182,6 +184,8 @@ export function ParentPortal() {
           { id: 'chat', label: '7. สนทนากับครู', icon: MessageSquare, badge: chatUnread },
           { id: 'appointment', label: '8. นัดพบครู & ปรึกษา', icon: CalendarDays },
           { id: 'family', label: '9. ข้อมูลครอบครัว (เยี่ยมบ้าน)', icon: Users },
+          { id: 'scholarship', label: '10. ทุนการศึกษา', icon: Award },
+          { id: 'loan', label: '11. กองทุนกู้ยืม (กยศ.)', icon: Landmark },
         ]}>
       {/* Main Content View */}
       <div className="transition-all duration-300">
@@ -398,6 +402,10 @@ export function ParentPortal() {
         )}
         {activeTab === 'appointment' && (
           <ParentEngagementServices studentId={student.studentId} student={student} isParentView={true} section="appointment" />
+        )}
+
+        {(activeTab === 'scholarship' || activeTab === 'loan') && (
+          <StudentFundsSection kind={activeTab === 'scholarship' ? 'SCHOLARSHIP' : 'STUDENT_LOAN'} student={{ studentId: student.studentId, name: student.name }} />
         )}
 
         {activeTab === 'family' && user?.uid && (

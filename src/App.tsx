@@ -11,6 +11,7 @@ import { InfirmaryPortal } from './components/infirmary/InfirmaryPortal';
 import { GuidancePortal } from './components/guidance/GuidancePortal';
 import { RegistrarPortal } from './components/registrar/RegistrarPortal';
 import { StudentAffairsPortal } from './components/studentaffairs/StudentAffairsPortal';
+import { FundPortal } from './components/funds/FundPortal';
 import { FinancePortal } from './components/finance/FinancePortal';
 import { SupervisionPortal } from './components/supervision/SupervisionPortal';
 import { ApprovalsPortal } from './ApprovalsPortal';
@@ -153,6 +154,8 @@ export default function App() {
               <GuidancePortal />
             ) : user.activeRole === 'STUDENT_AFFAIRS' ? (
               <StudentAffairsPortal />
+            ) : user.activeRole === 'FUND_SCHOLARSHIP' ? (
+              <FundPortal />
             ) : (user.activeRole === 'REGISTRAR' || user.activeRole === 'REGISTRAR_ASSISTANT') ? (
               <RegistrarPortal />
             ) : (['HEAD_OF_DEPARTMENT', 'DEPUTY_HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'] as const).includes(user.activeRole as any) ? (

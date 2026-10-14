@@ -2532,5 +2532,89 @@ service cloud.firestore {
                                && getAfter(cdPath(resource.data.entryId)).data.get('lastChangeRequestId', '') == rid));
       allow delete: if false;
     }
+
+    // ===== ทุนการศึกษา / กยศ. (src/lib/fundPrograms.ts) — งานกองทุนและทุนการศึกษา (FUND_SCHOLARSHIP) =====
+    // fund_programs: งานกองทุนประกาศ/แก้ (ลบได้เฉพาะฉบับร่าง); นักเรียน/ผู้ปกครองอ่านเฉพาะที่ประกาศแล้ว; แนะแนวอ่านทั้งหมด (ออกหนังสือ)
+    // fund_interests: นักเรียน/ผู้ปกครองตัวจริงลงชื่อสนใจ (ต้องเปิดอยู่ตามเวลาเซิร์ฟเวอร์) ถอนได้เสมอ; งานกองทุนบันทึกผลคัดเลือก; ลบไม่ได้
+    // ลิงก์ใน links ตรวจ https ที่ client เท่านั้น (rules วนลูปไม่ได้) — UI render ผ่าน isHttpsLink เสมอ
+    function fundStaff() { return hasRole('SUPER_ADMIN') || hasRole('FUND_SCHOLARSHIP'); }
+    function fundOpen(pid) {
+      let p = get(/databases/$(database)/documents/fund_programs/$(pid)).data;
+      return p.status == 'PUBLISHED' && p.registrationEnabled == true
+        && (p.get('registrationOpensAt', null) == null || request.time >= p.registrationOpensAt)
+        && (p.get('registrationClosesAt', null) == null || request.time < p.registrationClosesAt);
+    }
+    function fundBodyOk(d) {
+      return d.kind in ['SCHOLARSHIP', 'STUDENT_LOAN']
+        && d.title is string && d.title.size() >= 1 && d.title.size() <= 200
+        && d.funder is string && d.funder.size() <= 200
+        && d.description is string && d.description.size() <= 2000
+        && d.eligibility is string && d.eligibility.size() <= 1000
+        && d.amountText is string && d.amountText.size() <= 200
+        && d.selectionNote is string && d.selectionNote.size() <= 1000
+        && d.links is list && d.links.size() <= 5
+        && d.status in ['DRAFT', 'PUBLISHED', 'CLOSED'] && d.registrationEnabled is bool
+        && (d.registrationOpensAt == null || d.registrationOpensAt is timestamp)
+        && (d.registrationClosesAt == null || d.registrationClosesAt is timestamp)
+        && d.updatedAt == request.time;
+    }
+
+    match /fund_programs/{programId} {
+      allow read: if fundStaff() || hasRole('GUIDANCE_COUNSELOR')
+                  || (resource.data.status == 'PUBLISHED' && (hasRole('STUDENT') || hasRole('PARENT')));
+      allow create: if fundStaff()
+                    && request.resource.data.keys().hasOnly(['id', 'kind', 'title', 'funder', 'description', 'eligibility', 'amountText', 'selectionNote',
+                         'links', 'status', 'registrationEnabled', 'registrationOpensAt', 'registrationClosesAt', 'createdByStaffId', 'createdByName', 'createdAt', 'updatedAt'])
+                    && request.resource.data.keys().hasAll(['id', 'kind', 'title', 'funder', 'description', 'eligibility', 'amountText', 'selectionNote',
+                         'links', 'status', 'registrationEnabled', 'registrationOpensAt', 'registrationClosesAt', 'createdByStaffId', 'createdByName', 'createdAt', 'updatedAt'])
+                    && request.resource.data.id == programId
+                    && request.resource.data.createdByStaffId == myStaffId()
+                    && request.resource.data.createdByName is string && request.resource.data.createdByName.size() <= 160
+                    && request.resource.data.createdAt == request.time
+                    && fundBodyOk(request.resource.data);
+      allow update: if fundStaff()
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'funder', 'description', 'eligibility', 'amountText',
+                         'selectionNote', 'links', 'status', 'registrationEnabled', 'registrationOpensAt', 'registrationClosesAt', 'updatedAt'])
+                    && fundBodyOk(request.resource.data);
+      allow delete: if fundStaff() && resource.data.status == 'DRAFT';
+    }
+
+    match /fund_interests/{interestId} {
+      allow read: if fundStaff() || hasRole('GUIDANCE_COUNSELOR')
+                  || isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId);
+      allow create: if (isSelfStudent(request.resource.data.studentId) || isParentOfStudent(request.resource.data.studentId))
+                    && request.resource.data.keys().hasOnly(['programId', 'studentId', 'studentUid', 'studentName', 'room', 'kind', 'status', 'note', 'createdAt', 'updatedAt'])
+                    && request.resource.data.keys().hasAll(['programId', 'studentId', 'studentUid', 'studentName', 'room', 'kind', 'status', 'note', 'createdAt', 'updatedAt'])
+                    && interestId == request.resource.data.programId + '_' + request.resource.data.studentId
+                    && request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__')
+                    && request.resource.data.room == studentField(request.resource.data.studentId, 'room', '')
+                    && request.resource.data.status == 'INTERESTED'
+                    && request.resource.data.note is string && request.resource.data.note.size() <= 500
+                    && request.resource.data.studentName is string && request.resource.data.studentName.size() <= 160
+                    && exists(/databases/$(database)/documents/fund_programs/$(request.resource.data.programId))
+                    && fundOpen(request.resource.data.programId)
+                    && request.resource.data.kind == get(/databases/$(database)/documents/fund_programs/$(request.resource.data.programId)).data.kind
+                    && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      allow update: if (
+                         // นักเรียน/ผู้ปกครอง: ถอนความสนใจได้เสมอ; ลงชื่อใหม่หลังถอนได้เมื่อโครงการยังเปิดรับ
+                         (isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId))
+                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'note', 'updatedAt'])
+                         && request.resource.data.note is string && request.resource.data.note.size() <= 500
+                         && request.resource.data.updatedAt == request.time
+                         && ((resource.data.status == 'INTERESTED' && request.resource.data.status == 'WITHDRAWN')
+                             || (resource.data.status == 'WITHDRAWN' && request.resource.data.status == 'INTERESTED' && fundOpen(resource.data.programId)))
+                       ) || (
+                         // งานกองทุน: บันทึกผลคัดเลือก
+                         fundStaff()
+                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'staffNote', 'decidedByStaffId', 'decidedByName', 'updatedAt'])
+                         && ((resource.data.status == 'INTERESTED' && request.resource.data.status in ['SHORTLISTED', 'AWARDED', 'NOT_SELECTED'])
+                             || (resource.data.status == 'SHORTLISTED' && request.resource.data.status in ['AWARDED', 'NOT_SELECTED']))
+                         && request.resource.data.decidedByStaffId == myStaffId()
+                         && request.resource.data.decidedByName is string && request.resource.data.decidedByName.size() <= 160
+                         && request.resource.data.staffNote is string && request.resource.data.staffNote.size() <= 500
+                         && request.resource.data.updatedAt == request.time
+                       );
+      allow delete: if false;
+    }
   }
 }

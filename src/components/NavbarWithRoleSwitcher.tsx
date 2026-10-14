@@ -134,6 +134,15 @@ export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
     iconColor: 'text-teal-400',
     description: 'ประเมินแผนการสอน นิเทศสังเกตการณ์ชั้นเรียน'
   },
+  FUND_SCHOLARSHIP: {
+    label: 'งานกองทุนและทุนการศึกษา',
+    badgeBg: 'bg-amber-500/10',
+    badgeText: 'text-amber-400',
+    badgeBorder: 'border-amber-500/20',
+    iconBg: 'bg-amber-500/20',
+    iconColor: 'text-amber-400',
+    description: 'ประกาศทุนการศึกษาและ กยศ. รับลงชื่อสนใจ บันทึกผลคัดเลือก'
+  },
   STUDENT_AFFAIRS: {
     label: 'งานกิจการนักเรียน',
     badgeBg: 'bg-lime-500/10',
@@ -289,6 +298,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   MANAGE_COUNSELING: 'จัดการระบบแนะแนวและให้คำปรึกษา',
   MANAGE_FINANCE: 'จัดการงานการเงินและบัญชีโรงเรียน',
   MANAGE_STUDENT_AFFAIRS: 'งานกิจการนักเรียน (คะแนนความประพฤติ เยี่ยมบ้าน)',
+  MANAGE_FUNDS: 'งานกองทุนและทุนการศึกษา (ทุนการศึกษา กยศ.)',
   MANAGE_REGISTRAR: 'งานทะเบียนวัดผล (แก้ตัว/เรียนซ้ำ จบหลักสูตร)',
   MANAGE_SUPERVISION: 'จัดการงานนิเทศการสอนและตรวจแผน'
 };
@@ -348,6 +358,8 @@ export function NavbarWithRoleSwitcher({
         return 'ผู้นิเทศการสอน';
       case 'STUDENT_AFFAIRS':
         return 'งานกิจการนักเรียน';
+      case 'FUND_SCHOLARSHIP':
+        return 'งานกองทุนและทุนการศึกษา';
       case 'REGISTRAR':
       case 'REGISTRAR_ASSISTANT':
         return 'งานทะเบียนวัดผล';

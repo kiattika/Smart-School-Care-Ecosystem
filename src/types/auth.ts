@@ -16,6 +16,7 @@ export type UserRole =
   | 'FINANCE_STAFF'        // เจ้าหน้าที่งานการเงิน / บัญชี
   | 'INSTRUCTIONAL_SUPERVISOR' // หัวหน้างานนิเทศ (เปิดรอบ จับคู่ผู้นิเทศ ดูผลทั้งโรงเรียน)
   | 'STUDENT_AFFAIRS'      // งานกิจการนักเรียน (คะแนนความประพฤติ กำกับเยี่ยมบ้าน ติดตามนักเรียนที่ยังไม่เข้าโรงเรียน)
+  | 'FUND_SCHOLARSHIP'     // งานกองทุนและทุนการศึกษา (ประกาศทุน/กยศ. รับลงชื่อสนใจ บันทึกผลคัดเลือก)
   | 'REGISTRAR'            // งานทะเบียนวัดผล (บันทึกผลแก้ตัว/เรียนซ้ำ อนุมัติจบหลักสูตร)
   | 'REGISTRAR_ASSISTANT'  // ผู้ช่วยงานทะเบียนวัดผล (บันทึก/แก้ไขได้ ลบไม่ได้ อนุมัติจบไม่ได้)
   | 'PARENT'               // ผู้ปกครองนักเรียน
@@ -34,6 +35,7 @@ export type Permission =
   | 'MANAGE_COUNSELING'    // จัดการระบบแนะแนว เคสให้คำปรึกษา และ SDQ/EQ
   | 'MANAGE_FINANCE'       // จัดการงานการเงิน บัญชี และเบิกจ่ายงบประมาณ
   | 'MANAGE_STUDENT_AFFAIRS' // งานกิจการนักเรียน: พิจารณาคะแนนความประพฤติ กำกับเยี่ยมบ้าน
+  | 'MANAGE_FUNDS'         // งานกองทุนและทุนการศึกษา: ทุนการศึกษา กยศ.
   | 'MANAGE_REGISTRAR'     // งานทะเบียนวัดผล: แก้ตัว/เรียนซ้ำ อนุมัติจบหลักสูตร
   | 'MANAGE_SUPERVISION';  // จัดการงานนิเทศการสอน และตรวจสอบแผนการจัดการเรียนรู้
 
@@ -135,6 +137,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   STUDENT_AFFAIRS: [
     'MANAGE_STUDENT_AFFAIRS'
+  ],
+  FUND_SCHOLARSHIP: [
+    'MANAGE_FUNDS'
   ],
   REGISTRAR: [
     'MANAGE_REGISTRAR',
