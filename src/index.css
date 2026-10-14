@@ -1,5 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Kanit:wght@300;400;500;600&display=swap');
 @import "tailwindcss";
+@import "./theme-light.css";
 
 @theme {
   --color-dark-bg: #0b0d14;
@@ -13,8 +14,13 @@
   }
 }
 
+/* ขนาดตัวอักษรที่ผู้ใช้เลือก (ตั้งค่าส่วนตัว) — Tailwind ใช้ rem ทั้งหมด จึงขยายทั้งหน้าพร้อมกัน */
+html[data-text-scale="large"] { font-size: 112.5%; }
+html[data-text-scale="xlarge"] { font-size: 125%; }
+
 body {
-  @apply bg-[#0b0d14] text-white;
+  background-color: var(--app-body-bg, #0b0d14);
+  color: var(--app-body-fg, #ffffff);
   -webkit-tap-highlight-color: transparent;
 }
 

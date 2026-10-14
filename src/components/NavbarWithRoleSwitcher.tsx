@@ -14,6 +14,7 @@ import {
   Satellite,
   Radio,
   Menu,
+  Settings,
   X
 } from 'lucide-react';
 import { UserRole, Permission, UserProfile, ROLE_PERMISSIONS } from '../types/auth';
@@ -21,6 +22,9 @@ import { useStore } from '../store';
 import { HeaderRealTimeClock } from './HeaderRealTimeClock';
 import { TermIndicator } from './TermIndicator';
 import { GPSGeofenceCheckinModal } from './GPSGeofenceCheckinModal';
+import { UserSettingsModal } from './settings/UserSettingsModal';
+import { useMyPreferences } from '../hooks/useMyPreferences';
+import { applyPreferences, type UserPreferences } from '../lib/userPreferences';
 
 // สีของ Badge และธีมประจำแต่ละบทบาท
 export interface RoleVisualConfig {
@@ -319,6 +323,11 @@ export function NavbarWithRoleSwitcher({
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [isGPSModalOpen, setIsGPSModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const authUid = useStore(s => s.user?.uid);
+  // ตั้งค่าส่วนตัว (ธีม/ขนาดตัวอักษร/รูป) — ใช้กับทุกบทบาท; นักเรียนเปลี่ยนรูปที่หน้านักเรียนเดิม
+  const { prefs } = useMyPreferences(authUid);
+  const previewPrefs = (p: UserPreferences) => applyPreferences(p);
   const roleDropdownRef = useRef<HTMLDivElement>(null);
   const profileDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -526,7 +535,7 @@ export function NavbarWithRoleSwitcher({
             <div className="relative">
               <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500 to-emerald-400 p-0.5 flex items-center justify-center shadow-md">
                 <div className="w-full h-full rounded-[10px] bg-slate-950 overflow-hidden flex items-center justify-center">
-                  <UserIcon className="w-4 h-4 text-slate-300" />
+                  {prefs.photoUrl ? <img src={prefs.photoUrl} alt="" className="w-full h-full object-cover" /> : <UserIcon className="w-4 h-4 text-slate-300" />}
                 </div>
               </div>
               <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border border-slate-950 rounded-full" />
@@ -539,8 +548,8 @@ export function NavbarWithRoleSwitcher({
               
               {/* ข้อมูลโปรไฟล์แบบละเอียด */}
               <div className="flex items-center gap-3 p-2 bg-slate-800/25 rounded-xl border border-slate-800/40 mb-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-sm text-white">
-                  {user.firstName?.[0] || 'U'}
+                <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-sm text-white overflow-hidden">
+                  {prefs.photoUrl ? <img src={prefs.photoUrl} alt="" className="w-full h-full object-cover" /> : (user.firstName?.[0] || 'U')}
                 </div>
                 <div>
                   <h4 className="text-xs font-bold text-slate-100">
@@ -575,6 +584,15 @@ export function NavbarWithRoleSwitcher({
               </div>
 
               <div className="border-t border-slate-800/60 pt-2 space-y-1">
+                {authUid && (
+                  <button
+                    onClick={() => { setIsSettingsOpen(true); setIsProfileDropdownOpen(false); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800/60 rounded-xl transition-all cursor-pointer text-left"
+                  >
+                    <Settings className="w-4 h-4" />
+                    ตั้งค่าส่วนตัว (ธีม / ขนาดตัวอักษร / รูป)
+                  </button>
+                )}
                 {onLogout && (
                   <button
                     onClick={() => {
@@ -594,6 +612,17 @@ export function NavbarWithRoleSwitcher({
 
       </div>
     </nav>
+
+    {isSettingsOpen && authUid && (
+      <UserSettingsModal
+        uid={authUid}
+        prefs={prefs}
+        showPhoto={activeRole !== 'STUDENT'}
+        initial={user.firstName?.[0] || 'U'}
+        onPreview={previewPrefs}
+        onClose={() => setIsSettingsOpen(false)}
+      />
+    )}
 
     {/* GPS Geofence Check-in Modal */}
     <GPSGeofenceCheckinModal

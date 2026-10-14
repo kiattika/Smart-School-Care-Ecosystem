@@ -27,6 +27,7 @@ import { useSubstituteSync } from './hooks/useSubstituteSync';
 import { useAppClock } from './hooks/useAppClock';
 import { MobileApp } from './mobile/MobileApp';
 import { isMobilePath } from './lib/pwa';
+import { useMyPreferences } from './hooks/useMyPreferences';
 
 export default function App() {
   const { user, setUser } = useStore();
@@ -36,6 +37,9 @@ export default function App() {
 
   // เชื่อม Firestore real-time (staff / substitute_assignments / post_teaching_records) เข้ากับ store
   useSubstituteSync(!!user);
+
+  // ธีม/ขนาดตัวอักษรส่วนตัว — ใช้ทั้งหน้า Login (ค่าจากเครื่อง) และหลังล็อกอิน (ค่าจากบัญชี) รวมหน้ามือถือ /m
+  useMyPreferences(user?.uid);
 
   // นาฬิกาของแอป (store.currentDate) เดินตามเวลาจริง — ทุก 30 วินาที + ทันทีเมื่อกลับมาที่แท็บ
   useAppClock();
