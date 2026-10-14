@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readSource } from './helpers/readSource';
 import {
-  courseKindOf, emptyUnit, groupCoursesByCode, isProjectReady, levelLabelOf, parseWeeks, projectCoverage,
+  courseKindOf, emptyUnit, groupCoursesByCode, prefillCreditsHours, isProjectReady, levelLabelOf, parseWeeks, projectCoverage,
   assessmentTotal, unitLabel, validateProject, type TeachingProject,
 } from '../lib/teachingProject';
 
@@ -65,5 +65,23 @@ describe('teaching project wiring guards', () => {
   });
   it('มุมมองผู้ตรวจโครงการสอนอ่านอย่างเดียว (ไม่เรียกฟังก์ชันเขียน)', () => {
     expect(readSource('src/components/teachingproject/TeachingProjectsOverview.tsx')).not.toMatch(/saveTeachingProject|deleteTeachingProject/);
+  });
+});
+
+describe('ค่าเริ่มต้นหน่วยกิต/ชั่วโมงของโครงการสอนจากจำนวนคาบ', () => {
+  it('นับคาบต่อห้อง (ห้องที่คาบมากสุด ไม่รวมข้ามห้อง) และเติม 1 คาบ = 1 ชม. = 0.5 นก.', () => {
+    const g = groupCoursesByCode([
+      { code: 'ว21101', name: 'วิทย์', level: 'ม.2/1', room: 'ม.2/1', schedule: 'จันทร์ คาบ 1' },
+      { code: 'ว21101', name: 'วิทย์', level: 'ม.2/1', room: 'ม.2/1', schedule: 'พุธ คาบ 3' },
+      { code: 'ว21101', name: 'วิทย์', level: 'ม.2/1', room: 'ม.2/1', schedule: 'พุธ คาบ 3' },
+      { code: 'ว21101', name: 'วิทย์', level: 'ม.2/2', room: 'ม.2/2', schedule: 'อังคาร คาบ 2' },
+    ])[0];
+    expect(g.periodsPerWeek).toBe(2);
+    expect(prefillCreditsHours(g)).toEqual({ credits: '1', hoursPerWeek: '2' });
+  });
+  it('วิชากิจกรรมไม่มีหน่วยกิต แต่ใส่ชั่วโมงได้; ไม่รู้คาบ = ว่าง', () => {
+    expect(prefillCreditsHours({ code: 'ก21901', periodsPerWeek: 1 })).toEqual({ credits: '', hoursPerWeek: '1' });
+    expect(prefillCreditsHours({ code: 'ค21101', periodsPerWeek: 0 })).toEqual({ credits: '', hoursPerWeek: '' });
+    expect(prefillCreditsHours({ code: 'ค21101', periodsPerWeek: 3 }).credits).toBe('1.5');
   });
 });
