@@ -132,25 +132,21 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
 
     // นักเรียนห้ามลบถาวร — เปลี่ยนสถานะแทน (students: allow delete: if false)
-    it('ครูที่ปรึกษาแก้ได้เฉพาะโปรไฟล์ทั่วไปของนักเรียนห้องตนเอง — ห้ามแตะ parentUid/คะแนนความประพฤติ/ห้อง/สถานะ/ห้องอื่น', async () => {
+    it('ครูที่ปรึกษาแก้ทะเบียนนักเรียนตรง ๆ ไม่ได้ (parentUid/คะแนนความประพฤติ/ห้อง/สถานะ/โปรไฟล์) — ได้แค่แคชสถิติเช็คชื่อ', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         const db = ctx.firestore();
         await db.doc('students/std-hr1').set({ studentId: 'std-hr1', name: 'ในห้อง', room: 'ม.3/1', behaviorScore: 100, parentUid: 'real-parent' });
-        await db.doc('students/std-hr2').set({ studentId: 'std-hr2', name: 'ห้องอื่น', room: 'ม.3/2', behaviorScore: 100 });
         await db.doc('staff/hr-t1').set({ firstName: 'ครู', lastName: 'ประจำชั้น', roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.3/1' } });
       });
       const hr = asUser('uid-hr-t1', ['HOMEROOM_TEACHER'], { staffId: 'hr-t1' }).firestore();
       const own = () => hr.doc('students/std-hr1');
-      await assertSucceeds(own().update({ nickname: 'หนุ่ม', photoUrl: 'https://x/y.jpg', 'homeLocation.address': '1 หมู่ 2', parentEmail: 'p@example.com', updatedAt: new Date() }));
       await assertFails(own().update({ parentUid: 'attacker-uid', parentId: 'attacker-uid' })); // เชื่อมบัญชีผู้ปกครองเอง = ช่องโหว่เดิม
-      await assertFails(own().update({ nickname: 'x', parentUid: 'attacker-uid' }));
       await assertFails(own().update({ behaviorScore: 0 })); // ต้องผ่านระบบ conduct_entries
       await assertFails(own().update({ riskLevel: 'NORMAL', conductDeducted: 0 }));
       await assertFails(own().update({ room: 'ม.3/2' }));
       await assertFails(own().update({ status: 'INACTIVE', statusReason: 'GRADUATED' }));
-      await assertFails(hr.doc('students/std-hr2').update({ nickname: 'ห้องอื่น' })); // ไม่ใช่ห้องตนเอง
-      // แคชสถิติเช็คชื่อยังเขียนได้ (เช็คชื่อโฮมรูม)
-      await assertSucceeds(hr.doc('students/std-hr2').update({ 'attendanceStats.present': 1, attendanceStatsUpdatedAt: new Date() }));
+      await assertFails(own().update({ nickname: 'x', photoUrl: 'https://x/y.jpg', updatedAt: new Date() })); // นักเรียนกรอกเอง ครูไม่แก้
+      await assertSucceeds(own().update({ 'attendanceStats.present': 1, attendanceStatsUpdatedAt: new Date() })); // เช็คชื่อโฮมรูม
       // SUPER_ADMIN ยังเชื่อมบัญชีผู้ปกครองได้
       await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('students/std-hr1').update({ parentUid: 'linked-by-admin' }));
     });

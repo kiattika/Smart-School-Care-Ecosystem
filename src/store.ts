@@ -41,7 +41,6 @@ import { SUBSTITUTE_STAGE_ROLE, SUBSTITUTE_STAGE_ORDER, SUBSTITUTE_TEACHER_DECLI
 import { DEFAULT_SCHOOL_GEOFENCE } from './utils/geoUtils';
 import { 
   saveSelfAssessmentRecord, 
-  updateStudentProfileFirestore,
   saveGateAttendanceRecordFirestore,
   saveGPSCheckInLogFirestore,
   saveCheckInSelfieFirestore,
@@ -352,37 +351,6 @@ export const useStore = create<StoreState>((set, get) => ({
       }
     };
   }),
-  updateStudentProfile: async (studentId, profile) => {
-    set((state) => ({
-      students: state.students.map(s => {
-        if (s.studentId === studentId) {
-          const updatedStudent: any = {
-            ...s,
-            nickname: profile.nickname,
-            photoUrl: profile.photoUrl,
-            avatar: profile.photoUrl,
-            name: s.name.includes("(") ? `${s.name.split(" ")[0]} ${s.name.split(" ")[1]} ${profile.nickname} (เลขที่ ${s.studentNo})` : s.name,
-            homeLocation: {
-              ...s.homeLocation,
-              address: profile.address
-            }
-          };
-          if (profile.parentUid !== undefined) {
-            updatedStudent.parentUid = profile.parentUid;
-            updatedStudent.parentId = profile.parentUid;
-          }
-          if (profile.parentEmail !== undefined) {
-            updatedStudent.parentEmail = profile.parentEmail;
-          }
-          return updatedStudent;
-        }
-        return s;
-      })
-    }));
-
-    // บันทึกลง Firestore จริง — throw เมื่อไม่สำเร็จ (ผู้เรียกต้องแจ้งข้อผิดพลาด ไม่แสดงสำเร็จก่อน)
-    await updateStudentProfileFirestore(studentId, profile);
-  },
   updateMorningAttendance: (studentId, status, method) => set((state) => ({
     students: state.students.map(s => {
       if (s.studentId === studentId) {

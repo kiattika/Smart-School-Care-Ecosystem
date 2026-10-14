@@ -142,15 +142,9 @@ service cloud.firestore {
       // TASK (รูปโปรไฟล์นักเรียน): นักเรียนแก้รูปของตัวเองได้เท่านั้น — จำกัดให้แตะได้แค่ photoUrl/
       // photoUpdatedAt (ตรวจ "ตัวเอง" ผ่าน isSelfStudent() เดียวกับที่ใช้ที่อื่น: students/{id}.studentUid
       // == auth.uid) ห้ามแก้ field อื่นของทะเบียนนักเรียน
-      // ครูที่ปรึกษา: แก้ได้เฉพาะโปรไฟล์ทั่วไปของนักเรียนในห้องตนเอง (ชื่อเล่น/รูป/ที่อยู่/อีเมลผู้ปกครองเพื่อติดต่อ) — ห้ามแตะ
-      // parentUid/parentId (การเชื่อมบัญชีผู้ปกครองให้สิทธิ์เข้าถึงข้อมูลนักเรียน: ทำผ่าน LINE หรือ SUPER_ADMIN เท่านั้น),
-      // คะแนนความประพฤติ (ต้องผ่าน conduct_entries), สถานะ/ห้อง/คณะสี
+      // ครูที่ปรึกษา (HOMEROOM_TEACHER) แก้ทะเบียนนักเรียนโดยตรงไม่ได้ — ได้เฉพาะแคชสถิติเช็คชื่อด้านล่าง
+      // (รูป/ชื่อเล่น/ที่อยู่ นักเรียนกรอกเอง; parentUid เชื่อมผ่าน LINE หรือ SUPER_ADMIN; คะแนนความประพฤติผ่าน conduct_entries)
       allow update: if hasRole('SUPER_ADMIN') ||
-                       (
-                         isHomeroomTeacherOf(resource.data.get('room', '__none__')) &&
-                         request.resource.data.diff(resource.data).affectedKeys()
-                           .hasOnly(['nickname', 'photoUrl', 'avatar', 'photoUpdatedAt', 'homeLocation', 'parentEmail', 'updatedAt'])
-                       ) ||
                        (
                          hasRole('HOMEROOM_TEACHER') &&
                          request.resource.data.diff(resource.data).affectedKeys()

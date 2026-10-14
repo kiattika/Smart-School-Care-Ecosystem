@@ -904,42 +904,6 @@ export async function linkParentToStudent(
 }
 
 /**
- * Update student profile information in Firestore
- */
-export async function updateStudentProfileFirestore(
-  studentId: string,
-  profile: {
-    nickname?: string;
-    photoUrl?: string;
-    address?: string;
-    parentUid?: string;
-    parentEmail?: string;
-  }
-): Promise<void> {
-  const collectionPath = 'students';
-  try {
-    const ref = doc(db, collectionPath, studentId);
-    const updatePayload: Record<string, any> = {
-      updatedAt: serverTimestamp()
-    };
-    if (profile.nickname !== undefined) updatePayload.nickname = profile.nickname;
-    if (profile.photoUrl !== undefined) updatePayload.photoUrl = profile.photoUrl;
-    if (profile.address !== undefined) updatePayload['homeLocation.address'] = profile.address;
-    if (profile.parentUid !== undefined) {
-      updatePayload.parentUid = profile.parentUid.trim();
-      updatePayload.parentId = profile.parentUid.trim();
-    }
-    if (profile.parentEmail !== undefined) {
-      updatePayload.parentEmail = profile.parentEmail.trim();
-    }
-    await updateDoc(ref, updatePayload);
-  } catch (error) {
-    // ห้ามกลืน error — ผู้เรียกต้องแจ้งผู้ใช้ว่าบันทึกไม่สำเร็จ (เดิมแจ้ง "สำเร็จ" ทั้งที่ rules ปฏิเสธ)
-    handleFirestoreError(error, OperationType.UPDATE, `students/${studentId} (profile)`);
-  }
-}
-
-/**
  * TASK (รูปโปรไฟล์นักเรียน): นักเรียนอัปโหลด/เปลี่ยนรูปโปรไฟล์ของตัวเอง → เขียนกลับเข้า
  * students/{id}.photoUrl. firestore.rules อนุญาตให้ STUDENT แตะได้แค่ photoUrl/photoUpdatedAt
  * (ตรวจ isSelfStudent) — จึงห้ามใส่ updatedAt/serverTimestamp ที่นี่ (จะทำให้ affectedKeys เกิน
