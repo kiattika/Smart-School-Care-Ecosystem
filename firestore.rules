@@ -1212,6 +1212,37 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 25.3.1 ข้อมูลส่วนหัว ปพ.6 ของนักเรียน (ให้งานทะเบียน/ครูที่ปรึกษา/ผู้ปกครองตรวจความถูกต้อง): student_registry_profiles/{studentId}
+    //      ⚠️ มีเลขประจำตัวประชาชน = ข้อมูลอ่อนไหว PDPA — แยกจากแบบเยี่ยมบ้านเพื่อจำกัดผู้อ่านให้น้อยที่สุด
+    //      อ่าน (get รายคน): นักเรียนเจ้าของ / ผู้ปกครองตัวจริง (ตามทะเบียน) / ครูที่ปรึกษาห้องนั้น / SUPER_ADMIN เท่านั้น (EXECUTIVE และครูวิชาอื่นอ่านไม่ได้; list ปิด)
+    //      เขียน: นักเรียนเจ้าของเท่านั้น (studentUid/homeroomClass ตรงทะเบียน), nationalId ว่างหรือ 13 หลัก (checksum ตรวจที่ client); ห้ามลบ
+    match /student_registry_profiles/{studentId} {
+      allow get: if hasRole('SUPER_ADMIN')
+                    || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass))
+                    || isSelfStudent(studentId)
+                    || isParentOfStudent(studentId);
+      allow list: if false;
+      allow create, update: if isSignedIn()
+                       && request.resource.data.keys().hasOnly(['studentId', 'studentUid', 'homeroomClass', 'nationalId', 'fatherName', 'motherName', 'enrolledAt', 'gender', 'birthDate', 'nationality', 'religion', 'prevSchool', 'prevProvince', 'updatedAt'])
+                       && request.resource.data.keys().hasAll(['studentId', 'studentUid', 'homeroomClass', 'nationalId', 'fatherName', 'motherName', 'enrolledAt', 'gender', 'birthDate', 'nationality', 'religion', 'prevSchool', 'prevProvince', 'updatedAt'])
+                       && request.resource.data.studentId == studentId
+                       && request.resource.data.studentUid == request.auth.uid
+                       && request.resource.data.studentUid == studentField(studentId, 'studentUid', '__none__')
+                       && request.resource.data.homeroomClass == studentField(studentId, 'room', '__none__')
+                       && request.resource.data.nationalId is string && request.resource.data.nationalId.matches('^([0-9]{13})?$')
+                       && request.resource.data.fatherName is string && request.resource.data.fatherName.size() <= 120
+                       && request.resource.data.motherName is string && request.resource.data.motherName.size() <= 120
+                       && request.resource.data.enrolledAt is string && request.resource.data.enrolledAt.size() <= 10
+                       && request.resource.data.gender in ['M', 'F', '']
+                       && request.resource.data.birthDate is string && request.resource.data.birthDate.size() <= 10
+                       && request.resource.data.nationality is string && request.resource.data.nationality.size() <= 60
+                       && request.resource.data.religion is string && request.resource.data.religion.size() <= 60
+                       && request.resource.data.prevSchool is string && request.resource.data.prevSchool.size() <= 160
+                       && request.resource.data.prevProvince is string && request.resource.data.prevProvince.size() <= 60
+                       && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
     // 25.4 ข้อมูลอ้างอิงที่แอดมินแก้ไขได้: รายชื่อโรงเรียน (reference_schools) / หมู่บ้าน (reference_villages)
     //      เก็บเฉพาะส่วนที่ต่างจากข้อมูลชุดหลักในแอป (เพิ่มใหม่/แก้/ซ่อน) — ไม่ใช่ข้อมูลอ่อนไหว: ผู้ที่ล็อกอินอ่านได้ (ฟอร์มนักเรียนใช้เลือก)
     //      เขียน/ลบ: SUPER_ADMIN เท่านั้น (ห้าม bare isSignedIn() ที่ write)

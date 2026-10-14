@@ -31,6 +31,8 @@ import { useHomeroomAttendance } from './hooks/useHomeroomAttendance';
 import { useRealStudents } from './hooks/useRealStudents';
 import { useTeacherActivityStudentCount } from './hooks/useCourseActivityPoints';
 import { useLeaveStudentIds } from './hooks/useApprovedLeaveDays';
+import { Pp5Sheet } from './components/teacher/Pp5Sheet';
+import { buildPp5Rows, attendanceForCourse } from './lib/pp5';
 import { rosterLevels, sortRoster, filterRosterByLevel, studentLevelLabel } from './lib/gradebookRoster';
 import { TeacherAttendanceStatsPanel } from './components/attendance/TeacherAttendanceStatsPanel';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests, subscribeHiddenGradebookCourses, hideGradebookCourse, unhideGradebookCourse } from './services/firestoreService';
@@ -488,6 +490,7 @@ export function TeacherPortal() {
   }, [availableDashboardTabs, dashboardTab]);
 
   const [selectedGradebookCourseId, setSelectedGradebookCourseId] = useState<string>('');
+  const [showPp5, setShowPp5] = useState(false);
   const [gradebookLevelFilter, setGradebookLevelFilter] = useState<string>('');
   const [gradebookStudents, setGradebookStudents] = useState<any[]>([]);
   const gradebookLevels = useMemo(() => rosterLevels(gradebookStudents), [gradebookStudents]);
@@ -1665,6 +1668,14 @@ export function TeacherPortal() {
                         ⚙️ ตั้งค่าสัดส่วนคะแนนรายวิชา
                       </button>
                     )}
+                    {selectedGradebookCourseId && !selectedGradebookCourseId.startsWith('elective_') && gradebookStudents.length > 0 && (
+                      <button
+                        onClick={() => setShowPp5(true)}
+                        className="bg-[#1b2a4a] hover:bg-[#23365d] text-emerald-300 border border-emerald-900/50 text-xs font-bold py-2 px-3 rounded-lg transition-colors flex items-center gap-2"
+                      >
+                        🖨️ ใบคะแนน ปพ.5
+                      </button>
+                    )}
                     {/* TASK 3: ซ่อนคาบกิจกรรมที่ไม่ต้องประเมิน (เช่น PLC, พักกลางวัน) ออกจาก dropdown —
                         ไม่ลบข้อมูลจริง แค่ preference ส่วนตัวของครูคนนี้ */}
                     <button
@@ -1686,6 +1697,29 @@ export function TeacherPortal() {
                     </select>
                   </div>
                 </div>
+
+                {showPp5 && (() => {
+                  const sc = gradebookCourses.find(c => c.id === selectedGradebookCourseId);
+                  if (!sc) return null;
+                  const [pTerm, pYear] = (sc.term || '1/2569').split('/');
+                  const rs = courseScoreSettings.find(x => x.courseId === selectedGradebookCourseId);
+                  const max = { pre: rs ? rs.maxPreMidterm : 25, mid: rs ? rs.maxMidterm : 20, post: rs ? rs.maxPostMidterm : 25, final: rs ? rs.maxFinal : 30 };
+                  const isAct = sc.subjectType === 'ACTIVITY';
+                  const rows = buildPp5Rows({
+                    students: sortRoster(gradebookStudents).map((st: any, i: number) => ({
+                      studentId: st.studentId || st.id, studentNo: st.studentNumber ?? st.studentNo ?? st.number ?? (i + 1),
+                      name: st.fullName || st.name || `นักเรียน ${st.studentId || st.id}`, room: studentLevelLabel(st) || '',
+                    })),
+                    scoreOf: (sid) => studentScores.find(x => x.courseId === selectedGradebookCourseId && x.studentId === sid),
+                    max, isActivity: isAct,
+                    attendanceOf: (sid) => attendanceForCourse((gradebookStudents.find((st: any) => (st.studentId || st.id) === sid) as any)?.courseAttendanceStats, sc.code),
+                  });
+                  return <Pp5Sheet onClose={() => setShowPp5(false)} rows={rows} header={{
+                    courseCode: sc.code, courseName: sc.name, credits: typeof sc.credits === 'number' ? sc.credits : null,
+                    level: (sc.level || '').split('/')[0], academicYear: pYear || '', term: pTerm || '',
+                    teacherName: user?.displayName || user?.email || '', isActivity: isAct, max,
+                  }} />;
+                })()}
 
                 {!selectedGradebookCourseId ? (
                   <div className="text-center py-12 text-slate-500">

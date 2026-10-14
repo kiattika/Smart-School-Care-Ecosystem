@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import type { Student, StudentHomeVisitInfo, FriendInfo } from '../../types';
 import { DatePicker } from '../shared/DatePicker';
 import { useStudentHomeVisitInfo } from '../../hooks/useHomeVisitData';
-import { saveStudentHomeVisitInfo, getSelfAssessmentRecord, syncSharedToSelfAssessment, subscribeSemesterHealthLogs } from '../../services/firestoreService';
+import { saveStudentHomeVisitInfo, getSelfAssessmentRecord, syncSharedToSelfAssessment, subscribeSemesterHealthLogs, getRegistryProfile, saveRegistryProfile } from '../../services/firestoreService';
 import { useStudentBloodType } from '../../hooks/useStudentBloodType';
 import { pickHealthPrefill } from '../../lib/homeVisitHealthPrefill';
 import { sharedFromAssessment, sharedFromInfo, fillMissing, emptyShared, type SharedFields, type LegacyHints } from '../../lib/homeVisitShared';
@@ -12,6 +12,8 @@ import {
   normalizeStudentInfo, validateStudentInfo, ageFromBirthDate, bodyShapeFromBmi,
   PREV_EDUCATION_LEVELS, BLOOD_TYPES, CLOSEST_FAMILY, CONSULT_OPTIONS, LIVES_WITH, COMMUTE_MODES, COMMUTE_DURATIONS,
 } from '../../lib/homeVisitData';
+import { isValidThaiNationalId } from '../../lib/nationalId';
+import { emptyRegistryProfile, normalizeRegistryProfile, validateRegistryInput, type RegistryProfile } from '../../lib/registryProfile';
 import { AddressFields } from './AddressFields';
 import { SchoolPicker } from './SchoolPicker';
 import { formatThaiAddress, loadThaiAddressData, type ProvinceRef } from '../../lib/thaiAddress';
@@ -54,6 +56,16 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // ข้อมูลส่วนหัว ปพ.6 (เก็บแยกเอกสาร student_registry_profiles เพราะมีเลขประจำตัวประชาชน — อ่านไม่ได้ = ปล่อยว่าง ไม่เดา)
+  const [reg, setReg] = useState<RegistryProfile>(emptyRegistryProfile);
+  const [regLoaded, setRegLoaded] = useState(false);
+  useEffect(() => {
+    let c = false;
+    getRegistryProfile(student.studentId).then(v => { if (!c) { if (v) setReg({ ...emptyRegistryProfile(), ...v }); setRegLoaded(true); } }).catch(() => { if (!c) setRegLoaded(true); });
+    return () => { c = true; };
+  }, [student.studentId]);
+  const setRegField = <K extends keyof RegistryProfile>(k: K, v: RegistryProfile[K]) => setReg(r => ({ ...r, [k]: v }));
 
   // ค่าร่วมจากแบบประเมินตนเอง (ไม่มี/อ่านไม่ได้ = ไม่เติม) — รอให้อ่านเสร็จก่อนเริ่มฟอร์ม กันเติมช้าทับสิ่งที่พิมพ์
   useEffect(() => {
@@ -99,10 +111,13 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
 
   const save = async () => {
     const errs = validateStudentInfo(form, { centralAddress });
+    errs.push(...validateRegistryInput(reg));
     setErrors(errs); setMsg(null);
     if (errs.length) return;
     setSaving(true);
     try { await saveStudentHomeVisitInfo({ ...form, ...base });
+      // สำเนาข้อมูลส่วนหัว ปพ.6 (เพศ/วันเกิด/สัญชาติ/ศาสนา/โรงเรียนเดิม) เพื่อให้ผู้ปกครองและงานทะเบียนเห็นตรงกับที่นักเรียนกรอก — ล้มเหลวต้องแจ้งผู้ใช้
+      if (regLoaded) await saveRegistryProfile({ ...normalizeRegistryProfile({ ...reg, gender: form.gender, birthDate: form.birthDate, nationality: form.nationality, religion: form.religion, prevSchool: form.prevSchool, prevProvince: form.prevProvince }), ...base });
       // แชร์ค่าร่วมไปเติมแบบประเมินตนเอง (เฉพาะช่องที่ยังว่าง) — ล้มเหลวไม่ทำให้การบันทึกหลักล้ม
       try { await syncSharedToSelfAssessment(base, sharedFromInfo(form)); } catch (e) { console.warn('[StudentHomeVisitInfoForm] sync to self-assessment failed', e); }
       setMsg({ ok: true, text: 'บันทึกข้อมูลแล้ว ครูที่ปรึกษาจะเห็นข้อมูลนี้ตอนเยี่ยมบ้าน' }); }
@@ -199,6 +214,20 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
             <Num label="พี่น้องที่กำลังศึกษา (ไม่นับตัวเอง)" v={form.siblings.studying} on={n => sib('studying', n)} />
           </div>
         )}
+      </Section>
+
+      <Section title="ข้อมูลส่วนหัวเอกสารผลการเรียน (ปพ.6)" hint="ใช้ให้งานทะเบียน ผู้ปกครอง และครูที่ปรึกษาตรวจความถูกต้อง — ไม่บังคับ เห็นเฉพาะตัวนักเรียน ผู้ปกครอง ครูที่ปรึกษา และผู้ดูแลระบบ">
+        <div>
+          <Label>เลขประจำตัวประชาชน 13 หลัก</Label>
+          <input className={inputCls} inputMode="numeric" autoComplete="off" maxLength={17} placeholder={regLoaded ? 'x-xxxx-xxxxx-xx-x' : 'กำลังโหลด…'} disabled={!regLoaded}
+            value={reg.nationalId} onChange={e => setRegField('nationalId', e.target.value.replace(/[^0-9-\s]/g, ''))} />
+          {reg.nationalId.trim() && !isValidThaiNationalId(reg.nationalId) && <div className="text-[10px] text-amber-300 mt-1">เลขยังไม่ครบ 13 หลัก หรือเลขหลักสุดท้ายไม่ตรง กรุณาตรวจอีกครั้ง</div>}
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div><Label>ชื่อ-สกุลบิดา (ตามสูติบัตร)</Label><input className={inputCls} maxLength={120} disabled={!regLoaded} value={reg.fatherName} onChange={e => setRegField('fatherName', e.target.value)} /></div>
+          <div><Label>ชื่อ-สกุลมารดา (ตามสูติบัตร)</Label><input className={inputCls} maxLength={120} disabled={!regLoaded} value={reg.motherName} onChange={e => setRegField('motherName', e.target.value)} /></div>
+        </div>
+        <div><Label>วันที่เข้าเรียน</Label><DatePicker value={reg.enrolledAt} onChange={v => setRegField('enrolledAt', v)} max={todayYmd} clearable /></div>
       </Section>
 
       <Section title="ข้อ 10-11 ความสัมพันธ์ในครอบครัว">

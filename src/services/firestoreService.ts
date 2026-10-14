@@ -3382,6 +3382,16 @@ export async function saveFamilyHomeVisitInfo(info: import('../types').FamilyHom
   await batch.commit();
 }
 
+/** ข้อมูลส่วนหัว ปพ.6 student_registry_profiles/{studentId} — มีเลขประจำตัวประชาชน (PDPA) อ่านรายคนเท่านั้น (rules: นักเรียน/ผู้ปกครอง/ครูที่ปรึกษา/SUPER_ADMIN) */
+const REGISTRY_PROFILE_COL = 'student_registry_profiles';
+export async function getRegistryProfile(studentId: string): Promise<import('../lib/registryProfile').RegistryProfile | null> {
+  const snap = await getDoc(doc(db, REGISTRY_PROFILE_COL, studentId));
+  return snap.exists() ? (snap.data() as import('../lib/registryProfile').RegistryProfile) : null;
+}
+export async function saveRegistryProfile(p: import('../lib/registryProfile').RegistryProfile & { studentId: string; studentUid: string; homeroomClass: string }): Promise<void> {
+  await setDoc(doc(db, REGISTRY_PROFILE_COL, p.studentId), { ...p, updatedAt: serverTimestamp() });
+}
+
 /** สำเนาผู้ติดต่อฉุกเฉิน student_emergency_contacts/{studentId} — ผู้ปกครองตัวจริงเขียนเท่านั้น */
 const EMERGENCY_CONTACTS_COL = 'student_emergency_contacts';
 export interface StudentEmergencyContactsDoc {
