@@ -4564,6 +4564,34 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(mDeleteDoc(mDoc(t1, `teaching_projects/${pid('t1')}`)));
     });
 
+    it('ครูร่วมสอน: เจ้าของตั้งได้; ครูร่วมอ่าน/แก้เนื้อหาฉบับเดียวกันได้ แต่แก้รายชื่อครูร่วม/ชื่อเจ้าของ/ลบไม่ได้; คนนอกอ่านไม่ได้', async () => {
+      await seed();
+      await put(pid('t1'), doc0('t1', 'D1'));
+      const t1 = ctxOf('t1', ['SUBJECT_TEACHER']);
+      const t2 = ctxOf('t2', ['SUBJECT_TEACHER']);
+      const ref = (c: any) => mDoc(c, `teaching_projects/${pid('t1')}`);
+      // ยังไม่ได้เป็นครูร่วม → อ่าน/แก้ไม่ได้
+      await assertFails(mGetDoc(ref(t2)));
+      await assertFails(mUpdateDoc(ref(t2), { description: 'x', updatedAt: mServerTimestamp() }));
+      // ตัวเองเป็นครูร่วมของตัวเองไม่ได้ / ชื่อไม่เรียงคู่ / เกิน 10 คน
+      await assertFails(mUpdateDoc(ref(t1), { coTeacherStaffIds: ['t1'], coTeacherNames: ['ก'], updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(ref(t1), { coTeacherStaffIds: ['t2'], coTeacherNames: [], updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(ref(t1), { coTeacherStaffIds: Array.from({ length: 11 }, (_, i) => `s${i}`), coTeacherNames: Array.from({ length: 11 }, () => 'ก'), updatedAt: mServerTimestamp() }));
+      await assertSucceeds(mUpdateDoc(ref(t1), { coTeacherStaffIds: ['t2'], coTeacherNames: ['ครูสอง'], updatedAt: mServerTimestamp() }));
+      // ครูร่วมอ่าน + แก้เนื้อหาได้ (query array-contains ผ่าน)
+      await assertSucceeds(mGetDoc(ref(t2)));
+      await assertSucceeds(getDocs(query(collection(t2, 'teaching_projects'), where('semesterId', '==', SEM), where('coTeacherStaffIds', 'array-contains', 't2'))));
+      await assertSucceeds(mUpdateDoc(ref(t2), { description: 'ครูร่วมแก้', updatedAt: mServerTimestamp() }));
+      // แต่แก้รายชื่อครูร่วม/ชื่อเจ้าของ/ย้ายเจ้าของ/ลบไม่ได้
+      await assertFails(mUpdateDoc(ref(t2), { coTeacherStaffIds: [], coTeacherNames: [], updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(ref(t2), { coTeacherStaffIds: ['t2', 'hod1'], coTeacherNames: ['ก', 'ข'], updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(ref(t2), { teacherName: 'เปลี่ยนชื่อ', updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(ref(t2), { teacherStaffId: 't2', updatedAt: mServerTimestamp() }));
+      await assertFails(mDeleteDoc(ref(t2)));
+      // ครูคนอื่น (ไม่ใช่ครูร่วม) ยังอ่านไม่ได้
+      await assertFails(mGetDoc(ref(ctxOf('hr3', ['SUBJECT_TEACHER']))));
+    });
+
     it('ครูอื่น/ผู้บริหารอื่น/แอดมินแก้โครงการของครูไม่ได้ (หัวหน้างานนิเทศก็อ่านอย่างเดียว)', async () => {
       await seed();
       await put(pid('t1'), doc0('t1', 'D1'));

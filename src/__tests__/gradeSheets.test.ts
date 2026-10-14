@@ -8,6 +8,7 @@ import { validateRegistryInput, normalizeRegistryProfile, emptyRegistryProfile, 
 import { buildPp5Rows, summarizePp5, attendanceForCourse, attendancePercent } from '../lib/pp5';
 import { groupWithTones, GROUP_TONES, NEUTRAL_TONE } from '../lib/groupTones';
 import { parentFullName, deriveParentNames } from '../lib/parentNames';
+import { projectsForKey, validateCoTeachers } from '../lib/teachingProject';
 import { readSource } from './helpers/readSource';
 
 describe('เลขประจำตัวประชาชน', () => {
@@ -173,5 +174,26 @@ describe('รหัสวิชา → ประเภท/หน่วยกิ�
     expect(rows.find(r => r.code === 'ว21101')!.credits).toBe(1);
     expect(rows.find(r => r.code === 'ก21901')!.credits).toBeNull();
     expect(rows.find(r => r.code === 'ก21901')!.grade).toBe('ผ');
+  });
+});
+
+describe('โครงการสอนร่วมระหว่างครู', () => {
+  it('ตรวจรายชื่อครูร่วม: ซ้ำ/เกิน/ไม่เรียงคู่', () => {
+    expect(validateCoTeachers(['a', 'b'], ['ก', 'ข'])).toBe('');
+    expect(validateCoTeachers(['a', 'a'], ['ก', 'ข'])).toMatch(/ซ้ำ/);
+    expect(validateCoTeachers(['a'], [])).toMatch(/ไม่ครบ/);
+    expect(validateCoTeachers(Array.from({ length: 11 }, (_, i) => `s${i}`), Array.from({ length: 11 }, () => 'ก'))).toMatch(/ไม่เกิน/);
+  });
+  it('projectsForKey: ฉบับของตนมาก่อนฉบับที่ครูอื่นแชร์ให้ และกรองตามรหัสวิชา', () => {
+    const list = [
+      { courseKey: 'ว1', teacherStaffId: 'other' }, { courseKey: 'ว1', teacherStaffId: 'me' }, { courseKey: 'ค1', teacherStaffId: 'me' },
+    ];
+    expect(projectsForKey(list, 'ว1', 'me').map(p => p.teacherStaffId)).toEqual(['me', 'other']);
+    expect(projectsForKey(list, 'ค1', 'me')).toHaveLength(1);
+  });
+  it('service รวม 2 query (เจ้าของ + ครูร่วม) และแผงมีปุ่มครูร่วมสอนเฉพาะเจ้าของ', () => {
+    const svc = readSource('src/services/teachingProjectService.ts');
+    expect(svc).toContain("where('coTeacherStaffIds', 'array-contains'");
+    expect(readSource('src/components/teachingproject/MyTeachingProjectsPanel.tsx')).toMatch(/\{owner && <button[^\n]*>ครูร่วมสอน \(/);
   });
 });
