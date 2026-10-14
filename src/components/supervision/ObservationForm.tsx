@@ -4,12 +4,14 @@ import { DatePicker } from '../shared/DatePicker';
 import { TimePicker } from '../shared/TimePicker';
 import { compressImage } from '../../lib/imageCompression';
 import {
-  SCORE_LABELS, SUPERVISION_ITEM_COUNT, SUPERVISION_ITEMS, SUPERVISION_MAX_PHOTOS, SUPERVISION_SECTIONS,
+  SCORE_LABELS, SUPERVISION_MAX_PHOTOS,
   computeObservation, validateForSubmit,
   type ObservationFormInput, type SupervisionObservation, type SupervisionScore,
 } from '../../lib/supervision';
 import { saveSupervisionObservation, deleteSupervisionDraft } from '../../services/supervisionService';
 import { uploadSupervisionPhoto } from '../../services/storageService';
+import { useEvaluationTemplates } from '../../hooks/useEvaluationTemplates';
+import { numberedLabel, type EvalTemplate } from '../../lib/evaluationTemplate';
 
 interface Props {
   roundId: string;
@@ -23,8 +25,25 @@ interface Props {
 const SCORES: SupervisionScore[] = [5, 4, 3, 2, 1];
 const inputCls = 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500';
 
-/** แบบสังเกตการสอน 20 ข้อ — ใช้บนมือถือได้ (ปุ่มคะแนนใหญ่) บันทึกร่างได้ ส่งผลแล้วล็อกคะแนน */
-export function ObservationForm({ roundId, teacher, supervisor, existing, onClose }: Props) {
+/**
+ * แบบสังเกตการสอน — ใช้บนมือถือได้ (ปุ่มคะแนนใหญ่) บันทึกร่างได้ ส่งผลแล้วล็อกคะแนน
+ * ฉบับร่างเดิมใช้แบบเวอร์ชันที่เริ่มไว้จนส่ง; ฉบับใหม่ใช้แบบเวอร์ชันปัจจุบัน (แอดมินแก้ได้ที่แท็บ "แบบประเมิน")
+ */
+export function ObservationForm(props: Props) {
+  const tpls = useEvaluationTemplates('SUPERVISION');
+  const tpl = props.existing ? tpls.byVersion(props.existing.templateVersion) : tpls.current;
+  if (!tpl) {
+    return (
+      <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 text-sm text-slate-300">
+        {tpls.loading ? 'กำลังโหลดแบบประเมิน…' : (tpls.error ? `โหลดแบบประเมินไม่สำเร็จ: ${tpls.error}` : 'ไม่พบแบบประเมินเวอร์ชันของฉบับร่างนี้')}
+        <button onClick={props.onClose} className="ml-3 underline cursor-pointer">ปิด</button>
+      </div>
+    );
+  }
+  return <ObservationFormBody {...props} tpl={tpl} />;
+}
+
+function ObservationFormBody({ roundId, teacher, supervisor, existing, onClose, tpl }: Props & { tpl: EvalTemplate }) {
   const [courseCode, setCourseCode] = useState(existing?.courseCode || '');
   const [courseName, setCourseName] = useState(existing?.courseName || '');
   const [level, setLevel] = useState(existing?.level || '');
@@ -40,7 +59,7 @@ export function ObservationForm({ roundId, teacher, supervisor, existing, onClos
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const result = useMemo(() => computeObservation(scores), [scores]);
+  const result = useMemo(() => computeObservation(scores, tpl), [scores, tpl]);
 
   useEffect(() => { setError(null); }, [scores, courseName, observedDate]);
 
@@ -54,13 +73,13 @@ export function ObservationForm({ roundId, teacher, supervisor, existing, onClos
   const save = async (submit: boolean) => {
     setError(null);
     if (submit) {
-      const problem = validateForSubmit(input());
+      const problem = validateForSubmit(input(), tpl);
       if (problem) { setError(problem); return; }
       if (!window.confirm('ส่งผลแล้วจะแก้ไขคะแนนไม่ได้ และครูผู้รับการนิเทศจะเห็นผลทันที ยืนยันส่งผล?')) return;
     }
     setBusy(submit ? 'submit' : 'draft');
     try {
-      await saveSupervisionObservation(input(), { submit, exists: !!existing });
+      await saveSupervisionObservation(input(), { submit, exists: !!existing }, tpl);
       if (submit) onClose();
       else setError('บันทึกฉบับร่างแล้ว');
     } catch (e) {
@@ -122,13 +141,13 @@ export function ObservationForm({ roundId, teacher, supervisor, existing, onClos
         </div>
       </div>
 
-      {SUPERVISION_SECTIONS.map(sec => (
+      {tpl.sections.map(sec => (
         <section key={sec.no} className="space-y-3">
           <h4 className="text-sm font-bold text-cyan-300">หมวด {sec.no} {sec.title}</h4>
-          {SUPERVISION_ITEMS.filter(i => i.section === sec.no).map(item => (
+          {tpl.criteria.filter(i => i.section === sec.no).map(item => (
             <div key={item.id} className="bg-slate-900/60 border border-slate-800 rounded-lg p-3">
-              <p className="text-sm text-slate-200 mb-2">{item.label}</p>
-              <div className="grid grid-cols-5 gap-1.5" role="radiogroup" aria-label={item.label}>
+              <p className="text-sm text-slate-200 mb-2">{numberedLabel(tpl, item)}</p>
+              <div className="grid grid-cols-5 gap-1.5" role="radiogroup" aria-label={numberedLabel(tpl, item)}>
                 {SCORES.map(n => (
                   <button
                     key={n}
@@ -146,7 +165,7 @@ export function ObservationForm({ roundId, teacher, supervisor, existing, onClos
                   </button>
                 ))}
               </div>
-              {item.id === 's5_2' && (
+              {item.assessmentMethod && (
                 <input className={`${inputCls} mt-2`} placeholder="ระบุวิธีประเมินผลที่ใช้ (ถ้ามี)" value={assessmentMethod} maxLength={300} onChange={e => setAssessmentMethod(e.target.value)} />
               )}
             </div>
@@ -155,7 +174,7 @@ export function ObservationForm({ roundId, teacher, supervisor, existing, onClos
       ))}
 
       <div className="sticky bottom-0 bg-slate-900/95 border border-cyan-500/30 rounded-lg px-4 py-2 text-sm text-slate-200 flex flex-wrap gap-x-4 gap-y-1">
-        <span>ตอบแล้ว {result.answered}/{SUPERVISION_ITEM_COUNT} ข้อ</span>
+        <span>ตอบแล้ว {result.answered}/{tpl.criteria.length} ข้อ</span>
         <span>คะแนนรวม {result.total}</span>
         {result.complete && <span className="font-bold text-cyan-300">{result.percent}% — {result.band}</span>}
       </div>

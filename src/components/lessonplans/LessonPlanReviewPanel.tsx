@@ -1,13 +1,14 @@
 import { linksOf } from '../../lib/evidenceLinks';
 import { groupWithTones } from '../../lib/groupTones';
 import { useDepartments } from '../../hooks/useDepartments';
+import { useEvaluationTemplates } from '../../hooks/useEvaluationTemplates';
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../../store';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { useLessonPlans } from '../../hooks/useLessonPlans';
 import { reviewLessonPlan } from '../../services/lessonPlanService';
 import {
-  KIND_LABEL, PLAN_CRITERIA, SCORE_LABEL, STAGE_LABEL, averageScore, complianceOf, embedUrlFor,
+  KIND_LABEL, SCORE_LABEL, STAGE_LABEL, averageScore, complianceOf, embedUrlFor,
   planOverviewQuery, reviewStageFor, scoresComplete, semesterIdOf, suitabilityLevel, type LessonPlan, type ScoresMap,
 } from '../../lib/lessonPlans';
 import { PlcReflectionOverview } from '../portfolio/PlcReflectionOverview';
@@ -99,8 +100,10 @@ export function LessonPlanReviewPanel() {
 function ReviewDetail({ plan, stage, reviewer, onBack }: {
   plan: LessonPlan; stage: 'DEPT' | 'FINAL' | null; reviewer: { staffId: string; name: string }; onBack: () => void;
 }) {
+  const tpls = useEvaluationTemplates('LESSON_PLAN');
+  const tpl = tpls.current; // ตรวจใหม่ใช้แบบเวอร์ชันปัจจุบันเสมอ
   const [scores, setScores] = useState<ScoresMap>({});
-  const avg = averageScore(scores);
+  const avg = averageScore(scores, tpl ?? undefined);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -113,7 +116,7 @@ function ReviewDetail({ plan, stage, reviewer, onBack }: {
   const decide = async (decision: 'APPROVE' | 'REVISE') => {
     if (!stage) return;
     setBusy(true); setMsg('');
-    try { await reviewLessonPlan({ id: plan.id, stage, decision, comment, scores, reviewer }); onBack(); }
+    try { await reviewLessonPlan({ id: plan.id, stage, decision, comment, scores, tpl: tpl ?? undefined, reviewer }); onBack(); }
     catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); }
   };
   return (
@@ -142,11 +145,11 @@ function ReviewDetail({ plan, stage, reviewer, onBack }: {
           {prior.map(([label, r]) => (
             <p key={label} className="text-xs text-slate-400">{label} ({r.byName}): {r.decision === 'APPROVE' ? 'ผ่าน' : 'ขอแก้ไข'}{r.comment ? ` — ${r.comment}` : ''}</p>
           ))}
-          {!stage ? <p className="text-sm text-slate-400">ท่านดูได้อย่างเดียว (ไม่ใช่ผู้ตรวจในขั้นนี้)</p> : (
+          {!stage ? <p className="text-sm text-slate-400">ท่านดูได้อย่างเดียว (ไม่ใช่ผู้ตรวจในขั้นนี้)</p> : !tpl ? <p className="text-sm text-slate-400">{tpls.loading ? 'กำลังโหลดแบบประเมิน…' : `โหลดแบบประเมินไม่สำเร็จ${tpls.error ? `: ${tpls.error}` : ''}`}</p> : (
             <>
               <p className="text-sm text-white font-medium">แบบประเมิน — {stage === 'DEPT' ? 'ขั้นที่ 1 หัวหน้ากลุ่มสาระฯ' : 'ขั้นที่ 2 หัวหน้างานนิเทศ'}</p>
               <ul className="space-y-2">
-                {PLAN_CRITERIA.map((c, i) => (
+                {tpl.criteria.map((c, i) => (
                   <li key={c.id} className="text-sm text-slate-200 space-y-1">
                     <p>{i + 1}. {c.label}</p>
                     <span className="flex gap-1" role="radiogroup" aria-label={c.label}>
@@ -161,8 +164,8 @@ function ReviewDetail({ plan, stage, reviewer, onBack }: {
               <p className="text-xs text-slate-300" role="status">ค่าเฉลี่ย {avg === null ? '-' : avg.toFixed(2)} · ระดับความเหมาะสม: {suitabilityLevel(avg)} (5 = มากที่สุด … 1 = น้อยที่สุด)</p>
               <textarea className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" rows={3} maxLength={1000} placeholder="ความเห็น/สิ่งที่ต้องแก้ (จำเป็นเมื่อขอให้แก้ไข)" value={comment} onChange={e => setComment(e.target.value)} />
               <div className="flex gap-2">
-                <button disabled={busy || !scoresComplete(scores)} className="px-3 py-1.5 rounded-lg text-xs bg-emerald-600 text-white disabled:opacity-40 cursor-pointer" onClick={() => void decide('APPROVE')}>{stage === 'DEPT' ? 'ผ่าน — ส่งต่อหัวหน้างานนิเทศ' : 'ผ่านการตรวจ'}</button>
-                <button disabled={busy || !scoresComplete(scores) || !comment.trim()} className="px-3 py-1.5 rounded-lg text-xs bg-rose-600 text-white disabled:opacity-40 cursor-pointer" onClick={() => void decide('REVISE')}>ขอให้แก้ไข</button>
+                <button disabled={busy || !scoresComplete(scores, tpl)} className="px-3 py-1.5 rounded-lg text-xs bg-emerald-600 text-white disabled:opacity-40 cursor-pointer" onClick={() => void decide('APPROVE')}>{stage === 'DEPT' ? 'ผ่าน — ส่งต่อหัวหน้างานนิเทศ' : 'ผ่านการตรวจ'}</button>
+                <button disabled={busy || !scoresComplete(scores, tpl) || !comment.trim()} className="px-3 py-1.5 rounded-lg text-xs bg-rose-600 text-white disabled:opacity-40 cursor-pointer" onClick={() => void decide('REVISE')}>ขอให้แก้ไข</button>
               </div>
               {msg && <p role="alert" className="text-xs text-amber-300">{msg}</p>}
             </>

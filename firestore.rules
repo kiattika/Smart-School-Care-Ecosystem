@@ -1651,12 +1651,26 @@ service cloud.firestore {
         r.scores.q14 in [1, 2, 3, 4, 5] &&
         r.scores.q15 in [1, 2, 3, 4, 5];
     }
+    // แบบประเมินที่แอดมินแก้ได้ (เวอร์ชัน ≥ 2): รายการข้ออยู่ใน evaluation_template_versions/LESSON_PLAN_{n}.ids — เวอร์ชัน 1 = 15 ข้อด้านบน (ไม่มีเอกสาร)
+    // ผลที่บันทึกใหม่ต้องใช้เวอร์ชันปัจจุบันเท่านั้น (ตัวชี้ evaluation_templates/LESSON_PLAN); review ที่ไม่มี templateVersion = เวอร์ชัน 1
+    function lpTplCurrent() {
+      return exists(/databases/$(database)/documents/evaluation_templates/LESSON_PLAN)
+        ? get(/databases/$(database)/documents/evaluation_templates/LESSON_PLAN).data.currentVersion : 1;
+    }
+    function lpScoresTplOk(r) {
+      let ids = get(/databases/$(database)/documents/evaluation_template_versions/$('LESSON_PLAN_' + string(r.templateVersion))).data.ids;
+      return r.scores is map && r.scores.size() == ids.size() && r.scores.keys().hasOnly(ids) && r.scores.values().hasOnly([1, 2, 3, 4, 5]);
+    }
+    function lpScoresAnyOk(r) {
+      return r.get('templateVersion', 1) == lpTplCurrent() && (r.get('templateVersion', 1) == 1 ? lpScoresOk(r) : lpScoresTplOk(r));
+    }
     function lpReviewOk(r, stage, approveStage) {
-      return r is map && r.keys().hasOnly(['byStaffId', 'byName', 'decision', 'comment', 'scores', 'at'])
+      return r is map && r.keys().hasOnly(['byStaffId', 'byName', 'decision', 'comment', 'scores', 'at', 'templateVersion'])
         && r.keys().hasAll(['byStaffId', 'byName', 'decision', 'comment', 'scores', 'at'])
+        && r.get('templateVersion', 1) is int && r.get('templateVersion', 1) >= 1
         && r.byStaffId == myStaffId() && r.byName is string && r.byName.size() <= 160
         && r.comment is string && r.comment.size() <= 1000 && r.at == request.time
-        && lpScoresOk(r)
+        && lpScoresAnyOk(r)
         && (stage == approveStage ? r.decision == 'APPROVE' : (r.decision == 'REVISE' && r.comment.size() > 0));
     }
     function lpContentOk(d) {
@@ -2017,12 +2031,36 @@ service cloud.firestore {
     // รูปทรงคะแนน (ใช้ทั้งฉบับร่างและส่งแล้ว): เป็น map และมีเฉพาะ key ของแบบ 20 ข้อ
     // ค่าคะแนนรายข้อตรวจตอน "ส่งแล้ว" เท่านั้น (supSubmittedOk) — ฉบับร่างไม่ถูกใช้คำนวณ/แสดงต่อใคร และการกดส่งตรวจครบอีกครั้ง
     // (แยกเพื่อไม่ให้เกินเพดาน 1,000 expressions ต่อการประเมิน rules)
+    // แบบนิเทศที่แอดมินแก้ได้ (เวอร์ชัน ≥ 2): รายการข้ออยู่ใน evaluation_template_versions/SUPERVISION_{n}.ids — เวอร์ชัน 1 = 20 ข้อด้านล่าง (ไม่มีเอกสาร)
+    // ผลสร้างใหม่ต้องใช้เวอร์ชันปัจจุบัน (ตัวชี้ evaluation_templates/SUPERVISION); ฉบับร่างที่ค้างอยู่แก้ต่อด้วยเวอร์ชันเดิมได้จนส่ง
+    function supTplCurrent() {
+      return exists(/databases/$(database)/documents/evaluation_templates/SUPERVISION)
+        ? get(/databases/$(database)/documents/evaluation_templates/SUPERVISION).data.currentVersion : 1;
+    }
+    function supTplIds(v) {
+      return get(/databases/$(database)/documents/evaluation_template_versions/$('SUPERVISION_' + string(v))).data.ids;
+    }
     function supScoresShapeOk(sc) {
       return sc is map && sc.keys().hasOnly(['s1_1', 's1_2', 's1_3', 's1_4', 's2_1', 's2_2', 's2_3', 's2_4', 's3_1', 's3_2', 's3_3', 's3_4', 's3_5', 's3_6', 's3_7', 's4_1', 's4_2', 's4_3', 's5_1', 's5_2']);
+    }
+    function supScoresShapeAnyOk(d) {
+      return d.templateVersion == 1 ? supScoresShapeOk(d.scores)
+        : (d.scores is map && d.scores.keys().hasOnly(supTplIds(d.templateVersion)));
+    }
+    // เวอร์ชัน ≥ 2 ส่งแล้ว: ครบทุกข้อ ค่า 1–5; คะแนนรวมรวมใน rules ไม่ได้ (วนลูปไม่ได้) จึงตรวจเฉพาะช่วงที่เป็นไปได้ + percent สอดคล้อง total + ผลสรุปตรง percent
+    function supSubmittedTplOk(d) {
+      let n = supTplIds(d.templateVersion).size();
+      return d.scores.size() == n && d.scores.values().hasOnly([1, 2, 3, 4, 5])
+        && d.total >= n && d.total <= n * 5
+        && d.percent is number && math.abs(d.percent * (n * 5) - d.total * 100) <= n * 5 * 0.01
+        && d.band == (d.percent >= 91 ? 'ดีมาก' : (d.percent >= 81 ? 'ดี' : (d.percent >= 71 ? 'พอใช้' : (d.percent >= 61 ? 'ควรปรับปรุง' : 'ไม่ผ่าน'))));
     }
     // ส่งแล้ว: ตอบครบ 20 ข้อ (key ครบ + ค่าเป็น 1–5) + คะแนนรวม/เปอร์เซ็นต์/ผลสรุปต้องตรงกับคะแนนรายข้อ
     // (เกณฑ์ ≥91 ดีมาก, ≥81 ดี, ≥71 พอใช้, ≥61 ควรปรับปรุง, ต่ำกว่านั้น ไม่ผ่าน)
     function supSubmittedOk(d) {
+      return d.templateVersion == 1 ? supSubmittedV1Ok(d) : supSubmittedTplOk(d);
+    }
+    function supSubmittedV1Ok(d) {
       let sc = d.scores;
       return sc.size() == 20
         && sc.s1_1 in [1, 2, 3, 4, 5]
@@ -2055,7 +2093,7 @@ service cloud.firestore {
                                'scores', 'total', 'percent', 'band', 'assessmentMethod', 'strengths', 'improvements', 'comment', 'photos',
                                'submitted', 'submittedAt', 'acknowledged', 'acknowledgedAt', 'teacherReply', 'createdAt', 'updatedAt'])
         && d.keys().hasAll(['roundId', 'teacherStaffId', 'supervisorStaffId', 'departmentId', 'scores', 'submitted', 'acknowledged', 'templateVersion'])
-        && d.templateVersion == 1
+        && d.templateVersion is int && d.templateVersion >= 1
         && d.roundId is string && d.academicYear is string && d.term in ['1', '2'] && (d.academicYear + '_' + d.term) == d.roundId
         && d.teacherStaffId is string && d.teacherStaffId != '' && d.supervisorStaffId is string
         && d.departmentId is string
@@ -2063,8 +2101,8 @@ service cloud.firestore {
         && d.courseCode is string && d.courseCode.size() <= 40 && d.courseName is string && d.courseName.size() <= 160
         && d.level is string && d.level.size() <= 40
         && d.observedDate is string && d.observedDate.size() <= 10 && d.observedTime is string && d.observedTime.size() <= 20
-        && supScoresShapeOk(d.scores)
-        && d.total is int && d.total >= 0 && d.total <= 100
+        && supScoresShapeAnyOk(d)
+        && d.total is int && d.total >= 0 && d.total <= 200
         && (d.percent == null || (d.percent is number && d.percent >= 0 && d.percent <= 100))
         && (d.band == null || d.band in ['ดีมาก', 'ดี', 'พอใช้', 'ควรปรับปรุง', 'ไม่ผ่าน'])
         && d.assessmentMethod is string && d.assessmentMethod.size() <= 300
@@ -2074,6 +2112,41 @@ service cloud.firestore {
         && d.photos is list && d.photos.size() <= 6
         && d.submitted is bool && d.acknowledged is bool
         && d.teacherReply is string && d.teacherReply.size() <= 1000;
+    }
+
+    // แบบประเมินที่แก้ได้ (แบบนิเทศ SUPERVISION / แบบประเมินแผนการสอน LESSON_PLAN) — ดู src/lib/evaluationTemplate.ts
+    // เวอร์ชันเป็นเอกสารสร้างครั้งเดียวห้ามแก้/ลบ (ผลเก่าอ้างเวอร์ชันนี้); ตัวชี้เวอร์ชันปัจจุบันขยับได้ทีละ +1 พร้อมสร้างเวอร์ชันนั้นในคำขอเดียวกัน
+    // รายละเอียดรายข้อ (id/ข้อความ/หมวด) ตรวจที่ client (validateTemplateDraft) — rules คุมเฉพาะ id ที่ใช้เป็นคีย์คะแนน
+    function etKind(k) { return k in ['SUPERVISION', 'LESSON_PLAN']; }
+    match /evaluation_template_versions/{vid} {
+      allow read: if myStaffId() != '';
+      allow create: if supManage() && myStaffId() != ''
+                       && request.resource.data.keys().hasOnly(['kind', 'version', 'ids', 'criteria', 'sections', 'createdAt', 'createdByStaffId'])
+                       && request.resource.data.keys().hasAll(['kind', 'version', 'ids', 'criteria', 'sections', 'createdAt', 'createdByStaffId'])
+                       && etKind(request.resource.data.kind)
+                       && request.resource.data.version is int && request.resource.data.version >= 2
+                       && vid == request.resource.data.kind + '_' + string(request.resource.data.version)
+                       && request.resource.data.version == (exists(/databases/$(database)/documents/evaluation_templates/$(request.resource.data.kind))
+                            ? get(/databases/$(database)/documents/evaluation_templates/$(request.resource.data.kind)).data.currentVersion + 1 : 2)
+                       && request.resource.data.ids is list && request.resource.data.ids.size() >= 1 && request.resource.data.ids.size() <= 40
+                       && request.resource.data.criteria is list && request.resource.data.criteria.size() == request.resource.data.ids.size()
+                       && request.resource.data.sections is list && request.resource.data.sections.size() <= 10
+                       && (request.resource.data.kind == 'SUPERVISION' ? request.resource.data.sections.size() >= 1 : request.resource.data.sections.size() == 0)
+                       && request.resource.data.createdByStaffId == myStaffId()
+                       && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+    match /evaluation_templates/{kind} {
+      allow read: if myStaffId() != '';
+      allow create, update: if supManage() && etKind(kind)
+                       && request.resource.data.keys().hasOnly(['kind', 'currentVersion', 'updatedAt', 'updatedByStaffId'])
+                       && request.resource.data.kind == kind
+                       && request.resource.data.currentVersion is int
+                       && request.resource.data.currentVersion == (resource == null ? 2 : resource.data.currentVersion + 1)
+                       && existsAfter(/databases/$(database)/documents/evaluation_template_versions/$(kind + '_' + string(request.resource.data.currentVersion)))
+                       && request.resource.data.updatedByStaffId == myStaffId()
+                       && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
     }
 
     match /supervision_rounds/{rid} {
@@ -2120,6 +2193,7 @@ service cloud.firestore {
                        && (hasRole('SUPERVISORY_TEACHER') || hasRole('INSTRUCTIONAL_SUPERVISOR') || supExOfficio())
                        && supObsBaseOk(request.resource.data)
                        && request.resource.data.supervisorStaffId == myStaffId()
+                       && request.resource.data.templateVersion == supTplCurrent()
                        && request.resource.data.teacherStaffId != myStaffId()
                        && oid == request.resource.data.roundId + '_' + request.resource.data.teacherStaffId
                        && supRoundOpen(request.resource.data.roundId)
@@ -2144,6 +2218,7 @@ service cloud.firestore {
           && request.resource.data.roundId == resource.data.roundId
           && request.resource.data.teacherStaffId == resource.data.teacherStaffId
           && request.resource.data.supervisorStaffId == resource.data.supervisorStaffId
+          && request.resource.data.templateVersion == resource.data.templateVersion
           && request.resource.data.departmentId == resource.data.departmentId
           && request.resource.data.createdAt == resource.data.createdAt
           && request.resource.data.acknowledged == false

@@ -7,6 +7,9 @@
  * - ตัวตนบุคลากรเป็น staff doc id (claim staffId) เสมอ ไม่ใช่ Auth UID — ดู staffIdentity.ts
  */
 
+import type { EvalTemplate } from './evaluationTemplate';
+import { numberedLabel } from './evaluationTemplate';
+
 export const SUPERVISION_TEMPLATE_VERSION = 1;
 
 export type SupervisionScore = 1 | 2 | 3 | 4 | 5;
@@ -46,7 +49,15 @@ export const SUPERVISION_ITEMS: readonly SupervisionItem[] = [
   { id: 's5_2', section: 5, label: '5.2 การประเมินผลตามสภาพจริง (ปรนัย อัตนัย ปฏิบัติ รายงาน มอบหมายงาน แบบฝึกหัด สังเกตพฤติกรรม ฯลฯ)' },
 ];
 
-export const SUPERVISION_ITEM_COUNT = SUPERVISION_ITEMS.length; // 20
+/** แบบตั้งต้น (เวอร์ชัน 1) — แอดมินแก้เป็นเวอร์ชันใหม่ได้ ดู lib/evaluationTemplate.ts */
+export const DEFAULT_SUPERVISION_TEMPLATE: EvalTemplate = {
+  kind: 'SUPERVISION',
+  version: SUPERVISION_TEMPLATE_VERSION,
+  criteria: SUPERVISION_ITEMS.map(i => ({ id: i.id, label: i.label.replace(/^\d+\.\d+\s+/, ''), section: i.section, ...(i.id === 's5_2' ? { assessmentMethod: true } : {}) })),
+  sections: SUPERVISION_SECTIONS.map(s => ({ no: s.no, title: s.title })),
+};
+
+export const SUPERVISION_ITEM_COUNT = SUPERVISION_ITEMS.length; // 20 (แบบเวอร์ชัน 1)
 export const SUPERVISION_MAX_SCORE = SUPERVISION_ITEM_COUNT * 5; // 100
 export const SUPERVISION_MAX_PHOTOS = 6;
 
@@ -78,22 +89,23 @@ export interface ObservationResult {
   answered: number;
   complete: boolean;
   total: number;
-  /** total × 100 ÷ 100 (เต็ม) — ยังตอบไม่ครบ = null (ไม่คิดเปอร์เซ็นต์จากข้อที่ตอบบางส่วน) */
+  /** total × 100 ÷ (จำนวนข้อ × 5) — ยังตอบไม่ครบ = null (ไม่คิดเปอร์เซ็นต์จากข้อที่ตอบบางส่วน) */
   percent: number | null;
   band: SupervisionBand | null;
 }
 
-/** คิดคะแนน — ต้องตอบครบ 20 ข้อด้วยคะแนน 1–5 ถึงจะได้เปอร์เซ็นต์/ผลสรุป */
-export function computeObservation(scores: ScoreMap | null | undefined): ObservationResult {
+/** คิดคะแนน — ต้องตอบครบทุกข้อของแบบ (เวอร์ชัน 1 = 20 ข้อ) ด้วยคะแนน 1–5 ถึงจะได้เปอร์เซ็นต์/ผลสรุป */
+export function computeObservation(scores: ScoreMap | null | undefined, tpl: EvalTemplate = DEFAULT_SUPERVISION_TEMPLATE): ObservationResult {
   const s = scores || {};
   let answered = 0;
   let total = 0;
-  for (const item of SUPERVISION_ITEMS) {
+  for (const item of tpl.criteria) {
     const v = s[item.id];
     if (isScore(v)) { answered += 1; total += v; }
   }
-  const complete = answered === SUPERVISION_ITEM_COUNT;
-  const percent = complete ? Math.round((total * 100 / SUPERVISION_MAX_SCORE) * 100) / 100 : null;
+  const count = tpl.criteria.length;
+  const complete = count > 0 && answered === count;
+  const percent = complete ? Math.round((total * 100 / (count * 5)) * 100) / 100 : null;
   return { answered, complete, total, percent, band: percent === null ? null : supervisionBand(percent) };
 }
 
@@ -229,9 +241,9 @@ export interface SupervisionOverview {
   lowestItems: { id: string; label: string; average: number }[];
 }
 
-type OverviewInput = Pick<SupervisionObservation, 'submitted' | 'acknowledged' | 'percent' | 'band' | 'scores'>;
+type OverviewInput = Pick<SupervisionObservation, 'submitted' | 'acknowledged' | 'percent' | 'band' | 'scores'> & { templateVersion?: number };
 
-export function summarizeObservations(list: readonly OverviewInput[]): SupervisionOverview {
+export function summarizeObservations(list: readonly OverviewInput[], tpl: EvalTemplate = DEFAULT_SUPERVISION_TEMPLATE): SupervisionOverview {
   const done = list.filter(o => o.submitted);
   const bands: Record<SupervisionBand, number> = { 'ดีมาก': 0, 'ดี': 0, 'พอใช้': 0, 'ควรปรับปรุง': 0, 'ไม่ผ่าน': 0 };
   let pctSum = 0;
@@ -240,7 +252,9 @@ export function summarizeObservations(list: readonly OverviewInput[]): Supervisi
   for (const o of done) {
     if (o.band) bands[o.band] += 1;
     if (typeof o.percent === 'number') { pctSum += o.percent; pctN += 1; }
-    for (const item of SUPERVISION_ITEMS) {
+    // รายข้อ/รายหมวดนับเฉพาะผลที่ใช้แบบเวอร์ชันเดียวกับ tpl (รหัสข้อเดียวกันอาจเปลี่ยนความหมายข้ามเวอร์ชัน)
+    if ((o.templateVersion ?? 1) !== tpl.version) continue;
+    for (const item of tpl.criteria) {
       const v = o.scores?.[item.id];
       if (isScore(v)) {
         const cur = itemSum[item.id] || { sum: 0, n: 0 };
@@ -249,12 +263,12 @@ export function summarizeObservations(list: readonly OverviewInput[]): Supervisi
     }
   }
   const avg = (id: string) => (itemSum[id] && itemSum[id].n > 0 ? itemSum[id].sum / itemSum[id].n : null);
-  const sectionAverages = SUPERVISION_SECTIONS.map(sec => {
-    const vals = SUPERVISION_ITEMS.filter(i => i.section === sec.no).map(i => avg(i.id)).filter((v): v is number => v !== null);
+  const sectionAverages = tpl.sections.map(sec => {
+    const vals = tpl.criteria.filter(i => i.section === sec.no).map(i => avg(i.id)).filter((v): v is number => v !== null);
     return { no: sec.no, title: sec.title, average: vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100 : null };
   });
-  const lowestItems = SUPERVISION_ITEMS
-    .map(i => ({ id: i.id, label: i.label, average: avg(i.id) }))
+  const lowestItems = tpl.criteria
+    .map(i => ({ id: i.id, label: numberedLabel(tpl, i), average: avg(i.id) }))
     .filter((i): i is { id: string; label: string; average: number } => i.average !== null)
     .sort((a, b) => a.average - b.average)
     .slice(0, 3)
@@ -289,9 +303,9 @@ export interface ObservationFormInput {
 }
 
 /** ข้อความผิดพลาดที่ผู้ใช้อ่านรู้เรื่อง — null = ส่งได้ (ใช้กับปุ่ม "ส่งผล" เท่านั้น; ฉบับร่างไม่บังคับ) */
-export function validateForSubmit(input: ObservationFormInput): string | null {
-  const r = computeObservation(input.scores);
-  if (!r.complete) return `ยังให้คะแนนไม่ครบ (${r.answered}/${SUPERVISION_ITEM_COUNT} ข้อ)`;
+export function validateForSubmit(input: ObservationFormInput, tpl: EvalTemplate = DEFAULT_SUPERVISION_TEMPLATE): string | null {
+  const r = computeObservation(input.scores, tpl);
+  if (!r.complete) return `ยังให้คะแนนไม่ครบ (${r.answered}/${tpl.criteria.length} ข้อ)`;
   if (!input.courseName.trim()) return 'กรุณาระบุรายวิชาที่สังเกตการสอน';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.observedDate)) return 'กรุณาเลือกวันที่สังเกตการสอน';
   return null;
@@ -303,19 +317,19 @@ const clip = (v: string, n: number) => (v || '').trim().slice(0, n);
  * ฟิลด์ของเอกสาร supervision_observations (ยังไม่รวม createdAt/updatedAt/submittedAt ซึ่ง service ใส่ serverTimestamp ให้)
  * คะแนนรวม/เปอร์เซ็นต์/ผลสรุปคำนวณจากคะแนนรายข้อเสมอ — ไม่รับค่าจากภายนอก (rules ตรวจซ้ำตอนส่ง)
  */
-export function buildObservationFields(input: ObservationFormInput, submit: boolean) {
+export function buildObservationFields(input: ObservationFormInput, submit: boolean, tpl: EvalTemplate = DEFAULT_SUPERVISION_TEMPLATE) {
   const scores: Record<string, number> = {};
-  for (const item of SUPERVISION_ITEMS) {
+  for (const item of tpl.criteria) {
     const v = input.scores[item.id];
     if (isScore(v)) scores[item.id] = v;
   }
-  const r = computeObservation(scores);
+  const r = computeObservation(scores, tpl);
   const [academicYear, term] = input.roundId.split('_');
   return {
     roundId: input.roundId,
     academicYear,
     term,
-    templateVersion: SUPERVISION_TEMPLATE_VERSION,
+    templateVersion: tpl.version,
     teacherStaffId: input.teacher.staffId,
     teacherName: clip(input.teacher.name, 160),
     departmentId: input.teacher.departmentId,

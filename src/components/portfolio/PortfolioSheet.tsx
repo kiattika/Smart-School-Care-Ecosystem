@@ -6,6 +6,7 @@ import { REFLECTION_FIELDS, type Reflection } from '../../lib/reflection';
 import { pct, type PostTeachingSummary } from '../../lib/portfolio';
 import { isProjectReady, totalHours, type TeachingProject } from '../../lib/teachingProject';
 import type { SupervisionObservation } from '../../lib/supervision';
+import { useEvaluationTemplates } from '../../hooks/useEvaluationTemplates';
 
 export interface PortfolioData {
   schoolName: string;
@@ -27,6 +28,7 @@ const H = ({ n, t }: { n: number; t: string }) => <h2 className="font-bold text-
 export function PortfolioSheet({ data, onClose }: { data: PortfolioData; onClose: () => void }) {
   const pt = data.postTeaching;
   const o = data.observation;
+  const obsTpl = useEvaluationTemplates('SUPERVISION').byVersion(o?.templateVersion);
   const cycles = groupPlcCycles(data.plc);
   return (
     <div className="fixed inset-0 bg-black/70 z-[70] overflow-y-auto p-2 sm:p-6" id="pf-overlay">
@@ -75,7 +77,7 @@ export function PortfolioSheet({ data, onClose }: { data: PortfolioData; onClose
           {!o ? <p>ยังไม่มีผลการนิเทศที่ส่งแล้วในภาคเรียนนี้</p> : (
             <div className="pf-avoid space-y-1">
               <p>วิชา {o.courseCode} {o.courseName} ({o.level}) · วันที่นิเทศ {thDate(o.observedDate)} · ผู้นิเทศ {o.supervisorName}</p>
-              <p>คะแนน {o.total}/100 {o.percent !== null && `(${o.percent}%)`} · ระดับ <b>{o.band || '-'}</b> · {o.acknowledged ? 'ครูรับทราบแล้ว' : 'ครูยังไม่กดรับทราบ'}</p>
+              <p>คะแนน {o.total}/{(obsTpl?.criteria.length ?? 20) * 5} {o.percent !== null && `(${o.percent}%)`} · ระดับ <b>{o.band || '-'}</b> · {o.acknowledged ? 'ครูรับทราบแล้ว' : 'ครูยังไม่กดรับทราบ'}</p>
               {o.strengths && <p><b>จุดเด่น:</b> {o.strengths}</p>}
               {o.improvements && <p><b>ข้อเสนอแนะเพื่อพัฒนา:</b> {o.improvements}</p>}
             </div>

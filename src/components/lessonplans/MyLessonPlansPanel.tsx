@@ -4,9 +4,10 @@ import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { useLessonPlans } from '../../hooks/useLessonPlans';
 import { deleteLessonPlan, submitLessonPlan } from '../../services/lessonPlanService';
 import {
-  COMPLIANCE_LABEL, KIND_LABEL, PLAN_CRITERIA, STAGE_LABEL, complianceOf, courseKeyOf, planDocId, semesterIdOf,
+  COMPLIANCE_LABEL, KIND_LABEL, STAGE_LABEL, complianceOf, courseKeyOf, planDocId, semesterIdOf,
   type LessonPlan, type LessonPlanKind,
 } from '../../lib/lessonPlans';
+import { useEvaluationTemplates } from '../../hooks/useEvaluationTemplates';
 import { LinkListInput } from '../shared/LinkListInput';
 import { MAX_PLAN_LINKS, linksOf } from '../../lib/evidenceLinks';
 import { staffDepartmentId, type StaffRow } from '../../lib/supervisionView';
@@ -63,6 +64,7 @@ function CourseRow({ course, plan, onSubmit, onDelete }: {
 }) {
   const locked = !!plan && (plan.stage === 'DEPT_APPROVED' || plan.stage === 'APPROVED');
   const [open, setOpen] = useState(false);
+  const lpTpls = useEvaluationTemplates('LESSON_PLAN');
   const [kind, setKind] = useState<LessonPlanKind>(plan?.kind || 'PLAN');
   const [urls, setUrls] = useState<string[]>(plan ? linksOf(plan) : []);
   const [pending, setPending] = useState(false);
@@ -74,6 +76,7 @@ function CourseRow({ course, plan, onSubmit, onDelete }: {
     try { await fn(); setMsg(ok); setOpen(false); } catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); }
   };
   const review = plan?.stage === 'REVISION' ? (plan.finalReview || plan.deptReview) : undefined;
+  const reviewTpl = review ? lpTpls.byVersion(review.templateVersion) : null;
   return (
     <div className="rounded-xl border border-slate-700 bg-slate-900/40 p-4 space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -84,7 +87,7 @@ function CourseRow({ course, plan, onSubmit, onDelete }: {
       {review && (
         <div className="text-xs rounded-lg bg-amber-500/10 border border-amber-500/30 p-2 text-amber-200">
           <p>ผู้ตรวจ ({review.byName}) ขอให้แก้ไข: {review.comment}</p>
-          <p className="mt-1 text-amber-300/80">ข้อที่ได้คะแนนต่ำ (≤ 2): {PLAN_CRITERIA.filter(c => (review.scores?.[c.id] ?? 5) <= 2).map(c => c.label).join(' · ') || '-'}</p>
+          <p className="mt-1 text-amber-300/80">ข้อที่ได้คะแนนต่ำ (≤ 2): {(reviewTpl?.criteria ?? []).filter(c => (review.scores?.[c.id] ?? 5) <= 2).map(c => c.label).join(' · ') || '-'}</p>
         </div>
       )}
       {!locked && !open && (

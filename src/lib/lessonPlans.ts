@@ -6,6 +6,8 @@
  * - ตรวจ 2 ขั้น: หัวหน้า/รองหัวหน้ากลุ่มสาระฯ → หัวหน้างานนิเทศ; ขอแก้ไข (REVISION) ครูส่งใหม่ = เริ่มขั้นแรกอีกครั้ง
  */
 
+import type { EvalTemplate } from './evaluationTemplate';
+
 export type LessonPlanKind = 'PLAN' | 'PROJECT';
 export type LessonPlanStage = 'SUBMITTED' | 'DEPT_APPROVED' | 'APPROVED' | 'REVISION';
 
@@ -40,13 +42,23 @@ export const PLAN_CRITERIA = [
   { id: 'q15', label: 'การวัดและประเมินผลสนองต่อการส่งเสริมผลสัมฤทธิ์ทางการเรียน' },
 ] as const;
 export type CriterionId = typeof PLAN_CRITERIA[number]['id'];
-export type ScoresMap = Partial<Record<CriterionId, number>>;
+export type ScoresMap = Partial<Record<string, number>>;
+
+/** แบบตั้งต้น (เวอร์ชัน 1) — แอดมินแก้เป็นเวอร์ชันใหม่ได้ ดู lib/evaluationTemplate.ts */
+export const LESSON_PLAN_TEMPLATE_VERSION = 1;
+export const DEFAULT_LESSON_PLAN_TEMPLATE: EvalTemplate = {
+  kind: 'LESSON_PLAN',
+  version: LESSON_PLAN_TEMPLATE_VERSION,
+  criteria: PLAN_CRITERIA.map(c => ({ id: c.id, label: c.label })),
+  sections: [],
+};
 
 export const SCORE_LABEL: Record<number, string> = { 5: 'มากที่สุด', 4: 'มาก', 3: 'ปานกลาง', 2: 'น้อย', 1: 'น้อยที่สุด' };
 
 /** ค่าเฉลี่ยของข้อที่ให้คะแนนแล้ว (ยังไม่ให้เลย = null) ปัด 2 ตำแหน่ง */
-export function averageScore(scores: ScoresMap): number | null {
-  const v = PLAN_CRITERIA.map(c => scores[c.id]).filter((n): n is number => typeof n === 'number');
+export function averageScore(scores: Partial<Record<string, number>>, tpl?: EvalTemplate): number | null {
+  // ไม่ระบุแบบ = เฉลี่ยทุกข้อที่มีใน scores (ใช้กับผลที่บันทึกไว้ ไม่ว่าเวอร์ชันไหน)
+  const v = (tpl ? tpl.criteria.map(c => scores[c.id]) : Object.values(scores)).filter((n): n is number => typeof n === 'number');
   return v.length === 0 ? null : Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 100) / 100;
 }
 /** เกณฑ์ระดับความเหมาะสมตามแบบ: 4.50–5.00 มากที่สุด, 3.50–4.49 มาก, 2.50–3.49 ปานกลาง, 1.50–2.49 น้อย, <1.50 น้อยที่สุด */
@@ -58,8 +70,8 @@ export function suitabilityLevel(avg: number | null): string {
   if (avg >= 1.5) return 'น้อย';
   return 'น้อยที่สุด';
 }
-export function scoresComplete(scores: ScoresMap): boolean {
-  return PLAN_CRITERIA.every(c => Number.isInteger(scores[c.id]) && (scores[c.id] as number) >= 1 && (scores[c.id] as number) <= 5);
+export function scoresComplete(scores: Partial<Record<string, number>>, tpl: EvalTemplate = DEFAULT_LESSON_PLAN_TEMPLATE): boolean {
+  return tpl.criteria.length > 0 && tpl.criteria.every(c => Number.isInteger(scores[c.id]) && (scores[c.id] as number) >= 1 && (scores[c.id] as number) <= 5);
 }
 
 export interface LessonPlanReview {
@@ -68,6 +80,8 @@ export interface LessonPlanReview {
   decision: 'APPROVE' | 'REVISE';
   comment: string;
   scores: ScoresMap;
+  /** เวอร์ชันแบบประเมินที่ใช้ — ไม่มี = เวอร์ชัน 1 (15 ข้อตั้งต้น) ดู lib/evaluationTemplate.ts */
+  templateVersion?: number;
   at?: unknown;
 }
 

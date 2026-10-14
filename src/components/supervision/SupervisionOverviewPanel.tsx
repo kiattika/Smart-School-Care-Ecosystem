@@ -1,4 +1,5 @@
 import React from 'react';
+import { useEvaluationTemplates } from '../../hooks/useEvaluationTemplates';
 import { SUPERVISION_BANDS, summarizeObservations, supervisionBand, type SupervisionObservation } from '../../lib/supervision';
 
 /** ภาพรวมผลนิเทศ — ไม่แสดงชื่อ/คะแนนรายบุคคล (ผู้บริหารเห็นเฉพาะภาพรวม) */
@@ -8,7 +9,12 @@ export function SupervisionOverviewPanel({ observations, totalTeachers, title }:
   totalTeachers?: number;
   title: string;
 }) {
-  const o = summarizeObservations(observations);
+  const tpls = useEvaluationTemplates('SUPERVISION');
+  // รายข้อ/หมวดใช้แบบเวอร์ชันล่าสุดที่มีผลส่งแล้ว (ผลต่างเวอร์ชันนับเฉพาะคะแนนรวม/ระดับ)
+  const latest = Math.max(1, ...observations.filter(x => x.submitted).map(x => x.templateVersion ?? 1));
+  const tpl = tpls.byVersion(latest) ?? undefined;
+  const o = summarizeObservations(observations, tpl);
+  const mixed = observations.some(x => x.submitted && (x.templateVersion ?? 1) !== latest);
   if (o.submitted === 0) {
     return <div className="bg-[#161f30] border border-slate-800/80 rounded-xl p-6 text-sm text-slate-400">{title}: ยังไม่มีผลการนิเทศที่ส่งแล้วในรอบนี้</div>;
   }
@@ -38,6 +44,7 @@ export function SupervisionOverviewPanel({ observations, totalTeachers, title }:
           </div>
         ))}
       </div>
+      {mixed && <p className="text-xs text-amber-300">รอบนี้มีผลที่ใช้แบบประเมินต่างเวอร์ชัน — คะแนนรวม/ระดับนับทุกผล ส่วนค่าเฉลี่ยรายหมวด/รายข้อนับเฉพาะผลที่ใช้แบบเวอร์ชัน {latest}</p>}
       <div className="space-y-1.5">
         <p className="text-xs text-slate-400">ค่าเฉลี่ยรายหมวด (เต็ม 5)</p>
         {o.sectionAverages.map(s => (

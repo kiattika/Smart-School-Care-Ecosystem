@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { CheckCircle, Loader2 } from 'lucide-react';
 import {
-  SCORE_LABELS, SUPERVISION_ITEMS, SUPERVISION_SECTIONS, type SupervisionObservation, type SupervisionScore,
+  SCORE_LABELS, type SupervisionObservation, type SupervisionScore,
 } from '../../lib/supervision';
+import { useEvaluationTemplates } from '../../hooks/useEvaluationTemplates';
+import { numberedLabel } from '../../lib/evaluationTemplate';
 import { OBS_STATUS_LABEL, observationStatus } from '../../lib/supervisionView';
 import { acknowledgeSupervisionObservation } from '../../services/supervisionService';
 
@@ -18,6 +20,10 @@ export function ObservationResultView({ obs, asTeacher, onClose }: Props) {
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // แสดงด้วยแบบเวอร์ชันที่ใช้ตอนประเมินเสมอ (แอดมินแก้แบบทีหลังไม่กระทบผลเก่า)
+  const tpls = useEvaluationTemplates('SUPERVISION');
+  const tpl = tpls.byVersion(obs.templateVersion);
+  const maxScore = (tpl?.criteria.length ?? 20) * 5;
 
   const acknowledge = async () => {
     setBusy(true); setError(null);
@@ -38,19 +44,20 @@ export function ObservationResultView({ obs, asTeacher, onClose }: Props) {
         </div>
         <div className="text-right shrink-0">
           <p className="text-2xl font-black text-cyan-300">{obs.percent ?? '-'}{obs.percent !== null && '%'}</p>
-          <p className="text-xs text-slate-300">{obs.band || 'ยังไม่ครบ'} · {obs.total}/100</p>
+          <p className="text-xs text-slate-300">{obs.band || 'ยังไม่ครบ'} · {obs.total}/{maxScore}</p>
         </div>
       </div>
 
-      {SUPERVISION_SECTIONS.map(sec => (
+      {!tpl && <p className="text-sm text-amber-300">{tpls.loading ? 'กำลังโหลดแบบประเมิน…' : 'ไม่พบแบบประเมินเวอร์ชันของผลนี้'}</p>}
+      {tpl?.sections.map(sec => (
         <div key={sec.no}>
           <h4 className="text-sm font-bold text-cyan-300 mb-1">หมวด {sec.no} {sec.title}</h4>
           <ul className="divide-y divide-slate-800">
-            {SUPERVISION_ITEMS.filter(i => i.section === sec.no).map(item => {
+            {tpl.criteria.filter(i => i.section === sec.no).map(item => {
               const v = obs.scores?.[item.id] as SupervisionScore | undefined;
               return (
                 <li key={item.id} className="flex items-start justify-between gap-3 py-1.5 text-sm">
-                  <span className="text-slate-300">{item.label}</span>
+                  <span className="text-slate-300">{numberedLabel(tpl, item)}</span>
                   <span className="shrink-0 text-slate-100 font-semibold">{v ?? '-'}{v ? <span className="text-[10px] text-slate-400 font-normal"> {SCORE_LABELS[v]}</span> : null}</span>
                 </li>
               );

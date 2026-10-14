@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { BarChart3, ClipboardList, FileText, Plus, Settings2, Trash2 } from 'lucide-react';
+import { BarChart3, ClipboardList, FileText, ListChecks, Plus, Settings2, Trash2 } from 'lucide-react';
 import { useStore } from '../../store';
 import { isStaffActive } from '../../lib/staffStatus';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
@@ -21,8 +21,9 @@ import { ObservationResultView } from './ObservationResultView';
 import { LessonPlanReviewPanel } from '../lessonplans/LessonPlanReviewPanel';
 import { planOverviewQuery } from '../../lib/lessonPlans';
 import { SupervisionOverviewPanel } from './SupervisionOverviewPanel';
+import { EvaluationTemplateEditor } from './EvaluationTemplateEditor';
 
-export type Tab = 'observe' | 'results' | 'overview' | 'plans' | 'manage';
+export type Tab = 'observe' | 'results' | 'overview' | 'plans' | 'manage' | 'templates';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'ดำเนินการไม่สำเร็จ');
 
@@ -40,6 +41,7 @@ export function useSupervisionTabs(): SupervisionTabItem[] {
     ...(overviewQuery(roles) ? [{ id: 'overview' as Tab, label: 'ภาพรวม', icon: BarChart3 }] : []),
     ...(planOverviewQuery(roles, myDept) ? [{ id: 'plans' as Tab, label: 'ตรวจแผนการสอน', icon: FileText }] : []),
     ...(canManageSupervision(roles) ? [{ id: 'manage' as Tab, label: 'จัดการรอบ/จับคู่', icon: Settings2 }] : []),
+    ...(canManageSupervision(roles) ? [{ id: 'templates' as Tab, label: 'แบบประเมิน', icon: ListChecks }] : []),
   ], [roles, staffId, myDept]);
 }
 
@@ -59,6 +61,7 @@ export function SupervisionWorkspace({ tab }: { tab: Tab }) {
   const round = rounds.find(r => r.id === roundId) || null;
 
   if (tab === 'plans') return <LessonPlanReviewPanel />;
+  if (tab === 'templates') return canManage ? <EvaluationTemplateEditor /> : null;
   if (!user || !staffId) return <p className="text-sm text-slate-400">บัญชีนี้ไม่ได้เชื่อมกับทะเบียนบุคลากร จึงใช้งานระบบนิเทศไม่ได้</p>;
 
   return (

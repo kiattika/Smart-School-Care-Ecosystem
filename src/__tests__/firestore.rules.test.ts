@@ -4742,4 +4742,102 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(mSetDoc(mDoc(asAnonymous().firestore() as any, 'public_summary/current'), { schemaVersion: 2 }));
     });
   });
+  describe('evaluation_template* (แบบประเมินที่แอดมินแก้ได้เป็นเวอร์ชัน)', () => {
+    const RID = '2569_1';
+    const sc = (sid: string, roles: string[]) => asUser(`uid-${sid}`, roles, { staffId: sid }).firestore();
+    const verDoc = (kind: string, version: number, ids: string[], sections: unknown[] = []) => ({
+      kind, version, ids, criteria: ids.map(id => ({ id, label: `ข้อ ${id}`, ...(kind === 'SUPERVISION' ? { section: 1 } : {}) })), sections,
+      createdAt: mServerTimestamp(), createdByStaffId: 'sup-head',
+    });
+    const publish = (db: any, kind: string, version: number, ids: string[], sections: unknown[] = []) => {
+      const b = mWriteBatch(db);
+      b.set(mDoc(db, `evaluation_template_versions/${kind}_${version}`), verDoc(kind, version, ids, sections));
+      b.set(mDoc(db, `evaluation_templates/${kind}`), { kind, currentVersion: version, updatedAt: mServerTimestamp(), updatedByStaffId: 'sup-head' });
+      return b.commit();
+    };
+    const seed = async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await db.doc('staff/t1').set({ firstName: 'ครู', lastName: 'หนึ่ง', roles: ['SUBJECT_TEACHER'], assignments: { departmentId: 'D1' } });
+        await db.doc('staff/sup1').set({ firstName: 'นิเทศ', lastName: 'หนึ่ง', roles: ['SUPERVISORY_TEACHER'], assignments: { departmentId: 'D3' } });
+        await db.doc(`supervision_rounds/${RID}`).set({ academicYear: '2569', term: '1', status: 'OPEN' });
+        await db.doc(`supervision_assignments/${RID}_t1_sup1`).set({ roundId: RID, teacherStaffId: 't1', supervisorStaffId: 'sup1' });
+      });
+    };
+
+    it('เผยแพร่เวอร์ชัน: หัวหน้างานนิเทศ/SUPER_ADMIN ทำได้ ครูทั่วไปทำไม่ได้; ต้องเริ่มที่ 2 และเพิ่มทีละ 1', async () => {
+      await seed();
+      await assertFails(publish(sc('t1', ['SUBJECT_TEACHER']), 'LESSON_PLAN', 2, ['c1', 'c2']));
+      await assertFails(publish(sc('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'LESSON_PLAN', 3, ['c1'])); // ข้ามเวอร์ชัน
+      await assertSucceeds(publish(sc('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'LESSON_PLAN', 2, ['c1', 'c2']));
+      await assertFails(publish(sc('admin', ['SUPER_ADMIN']), 'LESSON_PLAN', 2, ['c1'])); // เวอร์ชันซ้ำ
+      await assertSucceeds(publish(sc('admin', ['SUPER_ADMIN']), 'LESSON_PLAN', 3, ['c1', 'c2', 'c3']));
+      // เวอร์ชันที่เผยแพร่แล้วแก้/ลบไม่ได้
+      const db = sc('sup-head', ['INSTRUCTIONAL_SUPERVISOR']);
+      await assertFails(mUpdateDoc(mDoc(db, 'evaluation_template_versions/LESSON_PLAN_2'), { ids: ['c1'] }));
+      await assertFails(mDeleteDoc(mDoc(db, 'evaluation_template_versions/LESSON_PLAN_2')));
+      // ตัวชี้ย้อนกลับ/ขยับโดยไม่สร้างเวอร์ชันไม่ได้
+      await assertFails(mSetDoc(mDoc(db, 'evaluation_templates/LESSON_PLAN'), { kind: 'LESSON_PLAN', currentVersion: 2, updatedAt: mServerTimestamp(), updatedByStaffId: 'sup-head' }));
+      await assertFails(mSetDoc(mDoc(db, 'evaluation_templates/LESSON_PLAN'), { kind: 'LESSON_PLAN', currentVersion: 4, updatedAt: mServerTimestamp(), updatedByStaffId: 'sup-head' }));
+      // บุคลากรอ่านได้
+      await assertSucceeds(mGetDoc(mDoc(sc('t1', ['SUBJECT_TEACHER']), 'evaluation_templates/LESSON_PLAN')));
+    });
+
+    it('แบบนิเทศเวอร์ชัน 2: ฉบับใหม่ต้องใช้เวอร์ชันปัจจุบัน; คะแนนต้องตรง id ของแบบและครบเมื่อส่ง', async () => {
+      await seed();
+      await assertSucceeds(publish(sc('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'SUPERVISION', 2, ['a1', 'a2', 'a3'], [{ no: 1, title: 'หมวด' }]));
+      const sup = sc('sup1', ['SUPERVISORY_TEACHER']);
+      const base = (over: Record<string, unknown>) => ({
+        roundId: RID, academicYear: '2569', term: '1', templateVersion: 2,
+        teacherStaffId: 't1', teacherName: 'ครู', departmentId: 'D1', supervisorStaffId: 'sup1', supervisorName: 'ผู้นิเทศ',
+        courseCode: '', courseName: 'ไทย', level: '', observedDate: '2026-09-01', observedTime: '',
+        scores: { a1: 4 }, total: 4, percent: null, band: null,
+        assessmentMethod: '', strengths: '', improvements: '', comment: '', photos: [],
+        submitted: false, acknowledged: false, teacherReply: '',
+        createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(), ...over,
+      });
+      const ref = () => mDoc(sup, `supervision_observations/${RID}_t1`);
+      await assertFails(mSetDoc(ref(), base({ templateVersion: 1, scores: { s1_1: 4 } }))); // เวอร์ชันเก่าเริ่มฉบับใหม่ไม่ได้
+      await assertFails(mSetDoc(ref(), base({ scores: { s1_1: 4 } }))); // id ไม่อยู่ในแบบ
+      await assertSucceeds(mSetDoc(ref(), base({})));
+      const full = { scores: { a1: 5, a2: 4, a3: 3 }, total: 12, percent: 80, band: 'พอใช้', submitted: true, submittedAt: mServerTimestamp(), createdAt: undefined };
+      const { createdAt: _c, ...fullNoCreated } = full as any;
+      const keepCreated = async () => (await mGetDoc(ref())).data()!.createdAt;
+      const upd = async (over: Record<string, unknown>) => mSetDoc(ref(), { ...base({}), createdAt: await keepCreated(), ...over });
+      await assertFails(upd({ ...fullNoCreated, scores: { a1: 5, a2: 4 }, total: 9, percent: 60, band: 'ไม่ผ่าน' })); // ไม่ครบ
+      await assertFails(upd({ ...fullNoCreated, scores: { a1: 5, a2: 4, a3: 9 }, total: 18, percent: 120 })); // นอกช่วง 1–5
+      await assertFails(upd({ ...fullNoCreated, percent: 95, band: 'ดีมาก' })); // percent ไม่ตรง total
+      await assertFails(upd({ ...fullNoCreated, band: 'ดีมาก' })); // ผลสรุปไม่ตรง percent
+      await assertFails(upd({ ...fullNoCreated, templateVersion: 1 })); // เปลี่ยนเวอร์ชันของฉบับร่างไม่ได้
+      await assertSucceeds(upd(fullNoCreated));
+    });
+
+    it('ตรวจแผนการสอน: review ใหม่ต้องใช้เวอร์ชันปัจจุบัน (ไม่มี templateVersion = v1 ใช้ได้เมื่อยังไม่เคยเผยแพร่เวอร์ชันใหม่)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await db.doc('staff/t1').set({ firstName: 'ครู', lastName: 'หนึ่ง', roles: ['SUBJECT_TEACHER'], assignments: { departmentId: 'D1' } });
+        await db.doc('staff/hod1').set({ firstName: 'หัวหน้า', lastName: 'D1', roles: ['HEAD_OF_DEPARTMENT'], assignments: { departmentId: 'D1' } });
+        for (const id of ['p1', 'p2']) {
+          await db.doc(`lesson_plan_submissions/${id}`).set({
+            semesterId: '2569_1', academicYear: '2569', term: '1', teacherStaffId: 't1', teacherName: 'ครู', departmentId: 'D1', courseKey: id,
+            courseCode: id, courseName: id, level: 'ม.1', kind: 'PLAN', url: 'https://example.com/plan', note: '', stage: 'SUBMITTED',
+            createdAt: new Date(), updatedAt: new Date(),
+          });
+        }
+      });
+      const hod = sc('hod1', ['HEAD_OF_DEPARTMENT']);
+      const q15 = Object.fromEntries(Array.from({ length: 15 }, (_, i) => [`q${i + 1}`, 4]));
+      const review = (scores: Record<string, number>, extra: Record<string, unknown> = {}) => ({
+        stage: 'DEPT_APPROVED', updatedAt: mServerTimestamp(),
+        deptReview: { byStaffId: 'hod1', byName: 'หัวหน้า', decision: 'APPROVE', comment: '', scores, at: mServerTimestamp(), ...extra },
+      });
+      await assertSucceeds(mUpdateDoc(mDoc(hod, 'lesson_plan_submissions/p1'), review(q15))); // v1 ปกติ
+      await assertSucceeds(publish(sc('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'LESSON_PLAN', 2, ['c1', 'c2']));
+      await assertFails(mUpdateDoc(mDoc(hod, 'lesson_plan_submissions/p2'), review(q15))); // v1 หลังมี v2 ไม่ได้
+      await assertFails(mUpdateDoc(mDoc(hod, 'lesson_plan_submissions/p2'), review({ c1: 4 }, { templateVersion: 2 }))); // ไม่ครบ
+      await assertFails(mUpdateDoc(mDoc(hod, 'lesson_plan_submissions/p2'), review({ c1: 4, q2: 4 }, { templateVersion: 2 }))); // id ผิด
+      await assertFails(mUpdateDoc(mDoc(hod, 'lesson_plan_submissions/p2'), review({ c1: 4, c2: 6 }, { templateVersion: 2 }))); // นอกช่วง
+      await assertSucceeds(mUpdateDoc(mDoc(hod, 'lesson_plan_submissions/p2'), review({ c1: 4, c2: 5 }, { templateVersion: 2 })));
+    });
+  });
 });

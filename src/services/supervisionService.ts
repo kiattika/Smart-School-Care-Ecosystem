@@ -9,10 +9,11 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import {
-  assignmentId, buildObservationFields, observationId, supervisionRoundId, validateForSubmit,
+  DEFAULT_SUPERVISION_TEMPLATE, assignmentId, buildObservationFields, observationId, supervisionRoundId, validateForSubmit,
   type ObservationFormInput, type SupervisionAssignment, type SupervisionObservation, type SupervisionRound,
   type SupervisionReadScope, type SupervisionTerm,
 } from '../lib/supervision';
+import type { EvalTemplate } from '../lib/evaluationTemplate';
 
 type Unsub = () => void;
 
@@ -116,13 +117,13 @@ export function subscribeSupervisionObservations(
  * บันทึกฉบับร่าง (submit=false) หรือส่งผล (submit=true; ล็อกคะแนน) — 1 ผลต่อครู 1 คนต่อรอบ (doc id ตายตัว)
  * ส่งผลโดยคะแนนไม่ครบ/ไม่ระบุวิชา/วันที่ = throw ก่อนเขียน
  */
-export async function saveSupervisionObservation(input: ObservationFormInput, opts: { submit: boolean; exists: boolean }): Promise<string> {
+export async function saveSupervisionObservation(input: ObservationFormInput, opts: { submit: boolean; exists: boolean }, tpl: EvalTemplate = DEFAULT_SUPERVISION_TEMPLATE): Promise<string> {
   if (opts.submit) {
-    const problem = validateForSubmit(input);
+    const problem = validateForSubmit(input, tpl);
     if (problem) throw new Error(problem);
   }
   const id = observationId(input.roundId, input.teacher.staffId);
-  const fields = buildObservationFields(input, opts.submit);
+  const fields = buildObservationFields(input, opts.submit, tpl);
   const ref = doc(db, 'supervision_observations', id);
   const stamps: Record<string, unknown> = { updatedAt: serverTimestamp() };
   if (opts.submit) stamps.submittedAt = serverTimestamp();
