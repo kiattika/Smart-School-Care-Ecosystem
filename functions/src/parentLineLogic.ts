@@ -74,3 +74,11 @@ export function nextFailedState(state: AttemptState | null | undefined, nowMs: n
 /** อัตลักษณ์ Firebase ของผู้ปกครอง — 1 บัญชี LINE = 1 uid */
 export const parentUidForLine = (sub: string) => `line_${sub}`;
 export const PARENT_CLAIMS = { roles: ['PARENT'], primaryRole: 'PARENT' } as const;
+
+/** ความสัมพันธ์ผู้ปกครอง (สำเนาของ src/lib/parentRelationship.ts) — เก็บที่ students.parentRelationship ให้ผู้ปกครองอ่านเอง */
+export const PARENT_RELATIONSHIPS = ['บิดา', 'มารดา', 'ผู้ปกครอง'] as const;
+/** ค่าที่รู้จักเท่านั้น; ไม่รู้จัก/ว่าง = null (ไม่เดา) */
+export function normalizeRelationship(raw: unknown): string | null {
+  const v = typeof raw === 'string' ? raw.trim() : '';
+  return (PARENT_RELATIONSHIPS as readonly string[]).includes(v) ? v : null;
+}
