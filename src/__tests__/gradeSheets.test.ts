@@ -1,3 +1,4 @@
+import { isValidScoreSetting, scoreSettingDocId, scoreSettingToForm } from '../lib/scoreSettings';
 import { describe, it, expect } from 'vitest';
 import { isValidThaiNationalId, normalizeNationalId, formatNationalId } from '../lib/nationalId';
 import { validateRegistryInput, normalizeRegistryProfile, emptyRegistryProfile, REGISTRY_VERIFY_NOTICE } from '../lib/registryProfile';
@@ -102,5 +103,23 @@ describe('ภาคเรียนของสมุดคะแนน', () => {
     expect(svc).not.toMatch(/'1\/2569'/);
     expect(svc).toMatch(/data\.studentId && data\.term === term/);
     expect(readSource('src/TeacherPortal.tsx')).toMatch(/useCurrentSemester\(\)/);
+  });
+});
+
+describe('สัดส่วนคะแนนรายวิชา (บันทึกถาวร)', () => {
+  it('ตรวจรวม 100 / จำนวนเต็ม / ไม่ติดลบ', () => {
+    expect(isValidScoreSetting({ maxPreMidterm: 25, maxMidterm: 20, maxPostMidterm: 25, maxFinal: 30 })).toBe(true);
+    expect(isValidScoreSetting({ maxPreMidterm: 25, maxMidterm: 20, maxPostMidterm: 25, maxFinal: 31 })).toBe(false);
+    expect(isValidScoreSetting({ maxPreMidterm: -5, maxMidterm: 30, maxPostMidterm: 35, maxFinal: 40 })).toBe(false);
+  });
+  it('doc id ต่อครู+วิชา และแปลงเป็นฟอร์มถูกคีย์ (เดิมส่ง maxXxx เข้าฟอร์มทำช่องเพี้ยน)', () => {
+    expect(scoreSettingDocId('t1', 'ว1/2')).toBe('t1__ว1_2');
+    expect(scoreSettingToForm({ courseId: 'c', maxPreMidterm: 30, maxMidterm: 20, maxPostMidterm: 20, maxFinal: 30 })).toEqual({ preMidterm: 30, midterm: 20, postMidterm: 20, final: 30 });
+    expect(scoreSettingToForm(undefined)).toEqual({ preMidterm: 25, midterm: 20, postMidterm: 25, final: 30 });
+  });
+  it('พอร์ทัลบันทึกลง Firestore ก่อนปิดหน้าต่าง และโหลดกลับด้วย subscribe', () => {
+    const src = readSource('src/TeacherPortal.tsx');
+    expect(src).toContain('saveCourseScoreSetting(sid');
+    expect(src).toContain('subscribeCourseScoreSettings(sid');
   });
 });

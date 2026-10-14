@@ -4097,6 +4097,32 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // 16b-4. course_score_settings — สัดส่วนคะแนนรายวิชา (ต่อครู+วิชา)
+  describe('course_score_settings', () => {
+    const cs = (over: Record<string, unknown> = {}) => ({ ownerStaffId: 't1', courseId: 'ว21101_ม.2/1', maxPreMidterm: 30, maxMidterm: 20, maxPostMidterm: 20, maxFinal: 30, updatedAt: mServerTimestamp(), ...over });
+    const T = () => asUser('u-t1', ['SUBJECT_TEACHER'], { staffId: 't1' }).firestore();
+    const ref = (db: any, id = 't1__ว21101_ม.2_1') => mDoc(db, `course_score_settings/${id}`);
+    it('เจ้าของบันทึก/ตั้งใหม่ทับได้ และอ่านกลับได้ (query ตาม ownerStaffId)', async () => {
+      await assertSucceeds(mSetDoc(ref(T()), cs()));
+      await assertSucceeds(mSetDoc(ref(T()), cs({ maxPreMidterm: 25, maxMidterm: 25 })));
+      await assertSucceeds(mGetDoc(ref(T())));
+      await assertSucceeds(getDocs(query(collection(T(), 'course_score_settings'), where('ownerStaffId', '==', 't1'))));
+      await assertSucceeds(mGetDoc(ref(asUser('adm', ['SUPER_ADMIN']).firestore())));
+    });
+    it('ปฏิเสธ: รวมไม่ครบ 100/ติดลบ/ไม่ใช่จำนวนเต็ม/field เกิน/ไม่ใช่เจ้าของ/เวลาไม่ใช่เซิร์ฟเวอร์/ลบ/ครูอื่นอ่าน', async () => {
+      await assertFails(mSetDoc(ref(T()), cs({ maxFinal: 31 })));
+      await assertFails(mSetDoc(ref(T()), cs({ maxPreMidterm: -10, maxFinal: 70 })));
+      await assertFails(mSetDoc(ref(T()), cs({ maxPreMidterm: 30.5, maxFinal: 29.5 })));
+      await assertFails(mSetDoc(ref(T()), cs({ extra: 1 })));
+      await assertFails(mSetDoc(ref(T()), cs({ ownerStaffId: 't2' })));
+      await assertFails(mSetDoc(ref(T()), cs({ updatedAt: new Date('2020-01-01') })));
+      await assertFails(mSetDoc(ref(asUser('u-st', ['STUDENT'], { staffId: 't1' }).firestore()), cs()));
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('course_score_settings/t1__x').set({ ...cs(), updatedAt: new Date() }); });
+      await assertFails(mDeleteDoc(ref(T(), 't1__x')));
+      await assertFails(mGetDoc(ref(asUser('u-t2', ['SUBJECT_TEACHER'], { staffId: 't2' }).firestore(), 't1__x')));
+    });
+  });
+
   // 16. home_visit_records — บันทึกเยี่ยมบ้าน (แบบ สพฐ.) เฉพาะครูที่ปรึกษาห้องนั้น/SUPER_ADMIN (+ EXECUTIVE อ่าน)
   describe('home_visit_records', () => {
     const ROOM = 'ม.5/8';
