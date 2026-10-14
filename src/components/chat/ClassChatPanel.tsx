@@ -5,6 +5,7 @@ import {
   sendClassMessage,
   subscribeClassChatThreads,
   subscribeClassMessages,
+  subscribeStaffList,
   type ClassChatMessage,
   type ClassChatThread,
 } from '../../services/firestoreService';
@@ -12,10 +13,13 @@ import {
   CHANNEL_LABEL,
   CHAT_TEXT_MAX,
   chatThreadId,
+  isThreadForTeacher,
   isThreadUnread,
   type ChatChannel,
   type ChatSide,
 } from '../../lib/classChat';
+import { advisorsOfRoom } from '../../lib/advisors';
+import type { UserProfile } from '../../types/auth';
 
 interface ChatTarget {
   studentId: string;
@@ -24,6 +28,10 @@ interface ChatTarget {
   channel: ChatChannel;
   /** uid ของสมาชิกช่องนั้น (ผู้ปกครอง/นักเรียน) — ว่าง = ยังไม่ได้เชื่อมบัญชี */
   memberUid: string;
+  /** ครูที่ปรึกษาที่เลือกคุยด้วย ('' = ท่านใดก็ได้) */
+  targetStaffId?: string;
+  /** ชื่อครูที่เลือก (แสดงหัวห้องสนทนาฝั่งสมาชิก) */
+  targetName?: string;
 }
 
 interface ThreadViewProps {
@@ -54,15 +62,15 @@ export function ChatThreadView({ target, side, viewerUid, viewerName, scope, hei
 
   useEffect(() => {
     setMessages([]);
-    return subscribeClassMessages(setMessages, { studentId: target.studentId, channel: target.channel, ...scope });
-  }, [target.studentId, target.channel, scope.memberUid, scope.room]);
+    return subscribeClassMessages(setMessages, { studentId: target.studentId, channel: target.channel, targetStaffId: target.targetStaffId || '', ...scope });
+  }, [target.studentId, target.channel, target.targetStaffId, scope.memberUid, scope.room]);
 
   // เปิดดู/มีข้อความใหม่เข้ามาระหว่างเปิดอยู่ = อ่านแล้ว
   const lastId = messages.length ? messages[messages.length - 1].id : '';
   useEffect(() => {
     bottomRef.current?.scrollIntoView?.({ block: 'end' });
-    if (lastId) void markClassThreadRead(target.studentId, target.channel, side);
-  }, [lastId, target.studentId, target.channel, side]);
+    if (lastId) void markClassThreadRead(target.studentId, target.channel, side, target.targetStaffId || '');
+  }, [lastId, target.studentId, target.channel, target.targetStaffId, side]);
 
   const mySenderRole = side === 'TEACHER' ? 'TEACHER' : target.channel;
   const canSend = !!target.memberUid;
@@ -80,6 +88,7 @@ export function ChatThreadView({ target, side, viewerUid, viewerName, scope, hei
         room: target.room,
         memberUid: target.memberUid,
         side,
+        targetStaffId: target.targetStaffId || '',
         senderUid: viewerUid,
         senderName: viewerName,
         text,
@@ -100,11 +109,11 @@ export function ChatThreadView({ target, side, viewerUid, viewerName, scope, hei
         <div>
           <h3 className="text-sm font-bold text-white">
             {side === 'TEACHER'
-              ? `${target.studentName} — ช่อง${CHANNEL_LABEL[target.channel]}`
-              : `สนทนากับครูประจำชั้น (${target.room || '-'})`}
+              ? `${target.studentName} — ช่อง${CHANNEL_LABEL[target.channel]}${target.targetStaffId ? ' (ถึงครูท่านนี้โดยเฉพาะ)' : ' (ถึงครูที่ปรึกษาท่านใดก็ได้)'}`
+              : `สนทนากับ${target.targetStaffId ? (target.targetName || 'ครูที่ปรึกษาที่เลือก') : `ครูที่ปรึกษา (${target.room || '-'}) ท่านใดก็ได้`}`}
           </h3>
           <p className="text-[11px] text-slate-400">
-            ช่องส่วนตัว: เห็นเฉพาะครูประจำชั้นและ{CHANNEL_LABEL[target.channel]}ของ {target.studentName} เท่านั้น
+            ช่องส่วนตัว: เห็นเฉพาะครูที่ปรึกษาของห้องและ{CHANNEL_LABEL[target.channel]}ของ {target.studentName} เท่านั้น{target.targetStaffId ? ' (เลือกครูเฉพาะท่าน — ครูท่านอื่นไม่ถูกแจ้งเตือน)' : ''}
           </p>
         </div>
       </div>
@@ -172,15 +181,38 @@ interface MemberProps {
 
 /** ฝั่งผู้ปกครอง (channel=PARENT) / นักเรียน (channel=STUDENT): ช่องเดียวกับครูประจำชั้น */
 export function ClassChatMemberView({ channel, student, viewerUid, viewerName }: MemberProps) {
+  const [staffList, setStaffList] = useState<UserProfile[]>([]);
+  useEffect(() => subscribeStaffList(setStaffList), []);
+  const advisors = useMemo(() => advisorsOfRoom(staffList, student.room), [staffList, student.room]);
+  const [targetStaffId, setTargetStaffId] = useState('');
+  useEffect(() => { setTargetStaffId(''); }, [student.studentId]);
   const target = useMemo<ChatTarget>(() => ({
     studentId: student.studentId,
     studentName: student.name,
     room: student.room || '',
     channel,
     memberUid: viewerUid,
-  }), [student.studentId, student.name, student.room, channel, viewerUid]);
+    targetStaffId,
+    targetName: advisors.find(a => a.staffId === targetStaffId)?.name,
+  }), [student.studentId, student.name, student.room, channel, viewerUid, targetStaffId, advisors]);
   const scope = useMemo(() => ({ memberUid: viewerUid }), [viewerUid]);
-  return <ChatThreadView target={target} side="MEMBER" viewerUid={viewerUid} viewerName={viewerName} scope={scope} />;
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <label htmlFor="chat-target" className="text-slate-300">สนทนากับ:</label>
+        <select
+          id="chat-target"
+          value={targetStaffId}
+          onChange={(e) => setTargetStaffId(e.target.value)}
+          className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200"
+        >
+          <option value="">ครูที่ปรึกษาท่านใดก็ได้</option>
+          {advisors.map(a => <option key={a.staffId} value={a.staffId}>{a.name}</option>)}
+        </select>
+      </div>
+      <ChatThreadView target={target} side="MEMBER" viewerUid={viewerUid} viewerName={viewerName} scope={scope} />
+    </div>
+  );
 }
 
 interface TeacherProps {
@@ -188,13 +220,15 @@ interface TeacherProps {
   students: { studentId: string; name: string; parentUid?: string; studentUid?: string }[];
   viewerUid: string;
   viewerName: string;
+  /** staffId ของครูที่ล็อกอิน — ใช้แยกห้องสนทนาที่ผู้ปกครอง/นักเรียนเลือกครูท่านอื่น */
+  myStaffId?: string;
 }
 
 /** ฝั่งครูประจำชั้น: เลือกช่อง (ผู้ปกครอง/นักเรียน) → เลือกนักเรียน → สนทนา, จุดแดง = ยังไม่ได้อ่าน */
-export function ClassChatTeacherView({ room, students, viewerUid, viewerName }: TeacherProps) {
+export function ClassChatTeacherView({ room, students, viewerUid, viewerName, myStaffId }: TeacherProps) {
   const [channel, setChannel] = useState<ChatChannel>('PARENT');
-  const [selectedId, setSelectedId] = useState('');
-  const [threads, setThreads] = useState<ClassChatThread[]>([]);
+  const [selectedKey, setSelectedKey] = useState(''); // `${studentId}|${targetStaffId}`
+  const [allThreads, setThreads] = useState<ClassChatThread[]>([]);
   const [search, setSearch] = useState('');
 
   useEffect(() => {
@@ -202,18 +236,26 @@ export function ClassChatTeacherView({ room, students, viewerUid, viewerName }: 
     return subscribeClassChatThreads(setThreads, { room });
   }, [room]);
 
+  // เห็นเฉพาะห้องสนทนาที่ส่งถึงเรา (เลือกเราโดยเฉพาะ หรือ "ท่านใดก็ได้")
+  const threads = useMemo(() => allThreads.filter(t => isThreadForTeacher(t, myStaffId)), [allThreads, myStaffId]);
   const threadMap = useMemo(() => new Map(threads.map(t => [t.id, t])), [threads]);
   const channelUnread = (c: ChatChannel) => threads.filter(t => t.channel === c && isThreadUnread(t, 'TEACHER')).length;
 
+  // แถวต่อ (นักเรียน, ห้องสนทนา): มีห้องสนทนาที่ส่งถึงเรา → แสดงตามจริง, ไม่มีเลย → แถวเริ่มคุยแบบ "ท่านใดก็ได้"
   const list = useMemo(() => {
     const q = search.trim();
     return students
       .filter(s => !q || s.name.includes(q) || s.studentId.includes(q))
-      .map(s => ({ s, t: threadMap.get(chatThreadId(s.studentId, channel)) }))
+      .flatMap(s => {
+        const mine = threads.filter(t => t.studentId === s.studentId && t.channel === channel);
+        const rows = mine.length ? mine : [undefined];
+        return rows.map(t => ({ s, t, targetStaffId: t?.targetStaffId || '' }));
+      })
       .sort((a, b) => (b.t?.lastAt || '').localeCompare(a.t?.lastAt || '') || a.s.studentId.localeCompare(b.s.studentId));
-  }, [students, search, threadMap, channel]);
+  }, [students, search, threads, channel]);
 
-  const selected = students.find(s => s.studentId === selectedId);
+  const [selStudentId, selTarget] = selectedKey.split('|');
+  const selected = students.find(s => s.studentId === selStudentId);
   const target: ChatTarget | null = selected
     ? {
         studentId: selected.studentId,
@@ -221,6 +263,7 @@ export function ClassChatTeacherView({ room, students, viewerUid, viewerName }: 
         room,
         channel,
         memberUid: (channel === 'PARENT' ? selected.parentUid : selected.studentUid) || '',
+        targetStaffId: selTarget || '',
       }
     : null;
   const scope = useMemo(() => ({ room }), [room]);
@@ -254,19 +297,20 @@ export function ClassChatTeacherView({ room, students, viewerUid, viewerName }: 
           className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
         />
         <ul className="max-h-[420px] overflow-y-auto space-y-1">
-          {list.map(({ s, t }) => {
+          {list.map(({ s, t, targetStaffId }) => {
             const unread = isThreadUnread(t, 'TEACHER');
             const linked = !!(channel === 'PARENT' ? s.parentUid : s.studentUid);
+            const rowKey = `${s.studentId}|${targetStaffId}`;
             return (
-              <li key={s.studentId}>
+              <li key={rowKey}>
                 <button
-                  onClick={() => setSelectedId(s.studentId)}
+                  onClick={() => setSelectedKey(rowKey)}
                   className={`w-full text-left px-3 py-2 rounded-xl border text-xs cursor-pointer ${
-                    selectedId === s.studentId ? 'bg-indigo-500/15 border-indigo-500/40' : 'border-transparent hover:bg-slate-800/60'
+                    selectedKey === rowKey ? 'bg-indigo-500/15 border-indigo-500/40' : 'border-transparent hover:bg-slate-800/60'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className={`font-semibold truncate ${unread ? 'text-white' : 'text-slate-300'}`}>{s.name}</span>
+                    <span className={`font-semibold truncate ${unread ? 'text-white' : 'text-slate-300'}`}>{s.name}{targetStaffId ? ' · ถึงคุณโดยเฉพาะ' : ''}</span>
                     {unread && <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" aria-label="ยังไม่ได้อ่าน" />}
                   </div>
                   <div className="text-[10px] text-slate-500 truncate">
@@ -281,7 +325,7 @@ export function ClassChatTeacherView({ room, students, viewerUid, viewerName }: 
       </div>
       <div className="lg:col-span-8">
         {target ? (
-          <div key={`${target.studentId}_${channel}`}>
+          <div key={`${target.studentId}_${channel}_${target.targetStaffId || ''}`}>
             <ChatThreadView target={target} side="TEACHER" viewerUid={viewerUid} viewerName={viewerName} scope={scope} />
           </div>
         ) : (
@@ -306,11 +350,11 @@ export function useMemberThreads(memberUid: string | undefined): ClassChatThread
 }
 
 /** จำนวนห้องสนทนาที่ครูประจำชั้นยังไม่ได้อ่าน (ทั้งสองช่อง) — ทำ badge เมนู "ข้อความ" */
-export function useRoomChatUnread(room: string | undefined): number {
+export function useRoomChatUnread(room: string | undefined, myStaffId?: string): number {
   const [threads, setThreads] = useState<ClassChatThread[]>([]);
   useEffect(() => {
     if (!room) { setThreads([]); return; }
     return subscribeClassChatThreads(setThreads, { room });
   }, [room]);
-  return threads.filter(t => isThreadUnread(t, 'TEACHER')).length;
+  return threads.filter(t => isThreadForTeacher(t, myStaffId) && isThreadUnread(t, 'TEACHER')).length;
 }

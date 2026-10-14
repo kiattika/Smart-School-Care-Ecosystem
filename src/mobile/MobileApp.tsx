@@ -104,7 +104,7 @@ export function MobileApp({ onLogout }: Props) {
   // badge ข้อความ
   const memberThreads = useMemberThreads(isStudent || isParent ? user.uid : undefined);
   const memberUnread = memberThreads.filter(t => t.channel === (isParent ? 'PARENT' : 'STUDENT') && isThreadUnread(t, 'MEMBER')).length;
-  const roomUnread = useRoomChatUnread(myRoom || undefined);
+  const roomUnread = useRoomChatUnread(myRoom || undefined, user.staffId);
   const badge = (id: MobileMenuId) => (id === 'chat' ? (isStudent || isParent ? memberUnread : roomUnread) : 0);
 
   const open = (id: MobileMenuId) => {
@@ -189,7 +189,7 @@ export function MobileApp({ onLogout }: Props) {
         {view === 'chat' && (
           isStudent || isParent
             ? (child ? <ClassChatMemberView channel={isParent ? 'PARENT' : 'STUDENT'} student={child} viewerUid={user.uid} viewerName={isParent ? `ผู้ปกครอง ${child.name}` : child.name} /> : <EmptyNotice loading={own.loading} text="ยังไม่ได้ผูกกับทะเบียนนักเรียน" />)
-            : <TeacherChat room={myRoom} uid={user.uid} name={user.displayName || 'ครูประจำชั้น'} />
+            : <TeacherChat room={myRoom} uid={user.uid} name={user.displayName || 'ครูประจำชั้น'} staffId={user.staffId} />
         )}
       </main>
 
@@ -211,10 +211,10 @@ function EmptyNotice({ loading, text }: { loading: boolean; text: string }) {
   return <p className="text-sm text-slate-400 p-4 bg-slate-900/60 border border-slate-800 rounded-2xl">{loading ? 'กำลังโหลด…' : text}</p>;
 }
 
-function TeacherChat({ room, uid, name }: { room: string; uid: string; name: string }) {
+function TeacherChat({ room, uid, name, staffId }: { room: string; uid: string; name: string; staffId?: string }) {
   const { students } = useRealStudents();
   const roomStudents = useMemo(() => students.filter(s => s.room === room), [students, room]);
-  return <ClassChatTeacherView room={room} students={roomStudents} viewerUid={uid} viewerName={name} />;
+  return <ClassChatTeacherView room={room} students={roomStudents} viewerUid={uid} viewerName={name} myStaffId={staffId} />;
 }
 
 function TeacherToday() {

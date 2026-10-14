@@ -73,7 +73,7 @@ export function AdvisorPortal() {
   const [attendanceOverrides, setAttendanceOverrides] = useState<Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>>({});
 
   const myRoom = user?.profile?.assignments?.homeroomClass;
-  const chatUnread = useRoomChatUnread(myRoom);
+  const chatUnread = useRoomChatUnread(myRoom, user?.staffId);
 
   // ใบลานักเรียนห้องที่ฉันเป็นครูที่ปรึกษา — real-time จาก Firestore (rules: isHomeroomTeacherOf(homeroomClass))
   const [roomLeaves, setRoomLeaves] = useState<import('./types').DetailedLeaveRequest[]>([]);
@@ -456,6 +456,7 @@ export function AdvisorPortal() {
               students={myStudents}
               viewerUid={user.uid}
               viewerName={user.displayName || 'ครูประจำชั้น'}
+              myStaffId={user.staffId}
             />
           )}
 

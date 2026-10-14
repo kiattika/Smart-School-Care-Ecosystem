@@ -926,22 +926,36 @@ service cloud.firestore {
         && d.room == studentField(d.studentId, 'room', '__none__');
     }
 
+    // ครูที่ปรึกษาที่เลือกคุยด้วย: '' / ไม่มีฟิลด์ = ท่านใดก็ได้ (แบบเดิม); ระบุ = ต้องเป็นครูที่ปรึกษาของห้องนั้นจริง
+    function chatTargetOk(d) {
+      let t = d.get('targetStaffId', '');
+      return t is string && (t == '' || (
+        exists(/databases/$(database)/documents/staff/$(t))
+        && get(/databases/$(database)/documents/staff/$(t)).data.get('roles', []).hasAny(['HOMEROOM_TEACHER'])
+        && get(/databases/$(database)/documents/staff/$(t)).data.get('assignments', {}).get('homeroomClass', '') == d.room));
+    }
+    // ครูคนนี้เป็นผู้รับห้องสนทนานี้ได้ไหม (อ่านได้ทั้งห้อง แต่ส่ง/ตอบได้เฉพาะครูที่ถูกเลือก หรือเมื่อเลือก "ใครก็ได้")
+    function chatTeacherMayReply(d) {
+      return isHomeroomTeacherOf(d.room) && (d.get('targetStaffId', '') == '' || d.get('targetStaffId', '') == myStaffId());
+    }
+
     match /class_messages/{messageId} {
       allow read: if isSignedIn() && (resource.data.memberUid == request.auth.uid || isHomeroomTeacherOf(resource.data.room));
       allow create: if isSignedIn()
                     && request.resource.data.keys().hasOnly([
-                         'id', 'studentId', 'channel', 'room', 'memberUid', 'senderUid', 'senderRole', 'senderName', 'text', 'sentAt', 'createdAt'])
+                         'id', 'studentId', 'channel', 'room', 'memberUid', 'senderUid', 'senderRole', 'senderName', 'text', 'sentAt', 'createdAt', 'targetStaffId'])
                     && request.resource.data.keys().hasAll([
                          'id', 'studentId', 'channel', 'room', 'memberUid', 'senderUid', 'senderRole', 'senderName', 'text', 'sentAt', 'createdAt'])
                     && request.resource.data.id == messageId
                     && chatIdentityOk(request.resource.data)
+                    && chatTargetOk(request.resource.data)
                     && request.resource.data.senderUid == request.auth.uid
                     && request.resource.data.text is string
                     && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 1000
                     && request.resource.data.senderName is string && request.resource.data.senderName.size() <= 200
                     && request.resource.data.sentAt is string
                     && request.resource.data.createdAt == request.time
-                    && ((request.resource.data.senderRole == 'TEACHER' && isHomeroomTeacherOf(request.resource.data.room))
+                    && ((request.resource.data.senderRole == 'TEACHER' && chatTeacherMayReply(request.resource.data))
                         || (request.resource.data.senderRole == request.resource.data.channel
                             && request.auth.uid == request.resource.data.memberUid));
       allow update, delete: if false;
@@ -953,18 +967,20 @@ service cloud.firestore {
       allow create: if isSignedIn()
                     && request.resource.data.keys().hasOnly([
                          'id', 'studentId', 'studentName', 'channel', 'room', 'memberUid',
-                         'lastText', 'lastSenderRole', 'lastAt', 'memberLastReadAt', 'teacherLastReadAt', 'updatedAt'])
+                         'lastText', 'lastSenderRole', 'lastAt', 'memberLastReadAt', 'teacherLastReadAt', 'updatedAt', 'targetStaffId'])
                     && request.resource.data.keys().hasAll(['id', 'studentId', 'channel', 'room', 'memberUid', 'lastAt'])
                     && request.resource.data.id == threadId
                     && threadId == request.resource.data.studentId + '_' + request.resource.data.channel
+                                   + (request.resource.data.get('targetStaffId', '') == '' ? '' : '_' + request.resource.data.get('targetStaffId', ''))
                     && chatIdentityOk(request.resource.data)
-                    && (isHomeroomTeacherOf(request.resource.data.room) || request.auth.uid == request.resource.data.memberUid);
+                    && chatTargetOk(request.resource.data)
+                    && (chatTeacherMayReply(request.resource.data) || request.auth.uid == request.resource.data.memberUid);
       // แก้ได้เฉพาะ: ข้อความล่าสุด + เวลาอ่านของ "ฝั่งตัวเอง" (ฝั่งสมาชิกแตะ teacherLastReadAt ไม่ได้ และกลับกัน)
       allow update: if isSignedIn()
                     && ((request.auth.uid == resource.data.memberUid
                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
                                ['studentName', 'lastText', 'lastSenderRole', 'lastAt', 'memberLastReadAt', 'updatedAt']))
-                        || (isHomeroomTeacherOf(resource.data.room)
+                        || (chatTeacherMayReply(resource.data)
                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
                                ['studentName', 'lastText', 'lastSenderRole', 'lastAt', 'teacherLastReadAt', 'updatedAt'])));
       allow delete: if false;
@@ -974,7 +990,7 @@ service cloud.firestore {
     //   ผู้ปกครองขอนัด → REQUESTED → (ครูผู้รับ) CONFIRMED | DECLINED ; CONFIRMED → (ครูผู้รับ) COMPLETED ; REQUESTED|CONFIRMED → (ผู้ปกครอง) CANCELLED
     // ผู้รับ: HOMEROOM = ครูที่ปรึกษาของ homeroomClass นั้น, GUIDANCE = ครูแนะแนว. ข้อความส่วนตัว → อ่านได้เฉพาะเจ้าของ (parentUid/studentUid) + ผู้รับ + SUPER_ADMIN
     // query ต้องกรองด้วย parentUid / studentUid / (homeroomClass + recipient=='HOMEROOM') / (recipient=='GUIDANCE') ตามผู้ดู
-    // อ่าน: ครูแนะแนวทุกคนเห็นนัด GUIDANCE (query เดิมใช้ได้); ตอบ/ปิดงาน: เฉพาะครูที่ผู้ปกครองระบุ (targetStaffId) — '' / ไม่มี = ใครก็ได้
+    // อ่าน: ครูแนะแนวทุกคนเห็นนัด GUIDANCE และครูที่ปรึกษาทุกคนของห้องเห็นนัด HOMEROOM (query เดิมใช้ได้); ตอบ/ปิดงาน: เฉพาะครูที่ผู้ปกครองระบุ (targetStaffId) — '' / ไม่มี = ใครก็ได้
     function canReadAppointment(d) {
       return hasRole('SUPER_ADMIN')
         || (d.recipient == 'HOMEROOM' && isHomeroomTeacherOf(d.homeroomClass))
@@ -982,15 +998,19 @@ service cloud.firestore {
     }
     function canHandleAppointment(d) {
       return hasRole('SUPER_ADMIN')
-        || (d.recipient == 'HOMEROOM' && isHomeroomTeacherOf(d.homeroomClass))
+        || (d.recipient == 'HOMEROOM' && isHomeroomTeacherOf(d.homeroomClass)
+            && (d.get('targetStaffId', '') == '' || d.get('targetStaffId', '') == myStaffId()))
         || (d.recipient == 'GUIDANCE' && hasRole('GUIDANCE_COUNSELOR')
             && (d.get('targetStaffId', '') == '' || d.get('targetStaffId', '') == myStaffId()));
     }
     function validAppointmentTarget(d) {
       let t = d.get('targetStaffId', '');
-      return t is string && (t == '' || (d.recipient == 'GUIDANCE'
-        && exists(/databases/$(database)/documents/staff/$(t))
-        && get(/databases/$(database)/documents/staff/$(t)).data.get('roles', []).hasAny(['GUIDANCE_COUNSELOR'])));
+      return t is string && (t == '' || (
+        exists(/databases/$(database)/documents/staff/$(t))
+        && (d.recipient == 'GUIDANCE'
+              ? get(/databases/$(database)/documents/staff/$(t)).data.get('roles', []).hasAny(['GUIDANCE_COUNSELOR'])
+              : (get(/databases/$(database)/documents/staff/$(t)).data.get('roles', []).hasAny(['HOMEROOM_TEACHER'])
+                 && get(/databases/$(database)/documents/staff/$(t)).data.get('assignments', {}).get('homeroomClass', '') == d.homeroomClass))));
     }
 
     match /parent_appointments/{appointmentId} {
@@ -2582,7 +2602,7 @@ service cloud.firestore {
     match /fund_interests/{interestId} {
       allow read: if fundStaff() || hasRole('GUIDANCE_COUNSELOR')
                   || isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId);
-      allow create: if (isSelfStudent(request.resource.data.studentId) || isParentOfStudent(request.resource.data.studentId))
+      allow create: if isSelfStudent(request.resource.data.studentId)
                     && request.resource.data.keys().hasOnly(['programId', 'studentId', 'studentUid', 'studentName', 'room', 'kind', 'status', 'note', 'createdAt', 'updatedAt'])
                     && request.resource.data.keys().hasAll(['programId', 'studentId', 'studentUid', 'studentName', 'room', 'kind', 'status', 'note', 'createdAt', 'updatedAt'])
                     && interestId == request.resource.data.programId + '_' + request.resource.data.studentId
@@ -2596,8 +2616,8 @@ service cloud.firestore {
                     && request.resource.data.kind == get(/databases/$(database)/documents/fund_programs/$(request.resource.data.programId)).data.kind
                     && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
       allow update: if (
-                         // นักเรียน/ผู้ปกครอง: ถอนความสนใจได้เสมอ; ลงชื่อใหม่หลังถอนได้เมื่อโครงการยังเปิดรับ
-                         (isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId))
+                         // นักเรียนเท่านั้น (ผู้ปกครองอ่านอย่างเดียว): ถอนความสนใจได้เสมอ; ลงชื่อใหม่หลังถอนได้เมื่อโครงการยังเปิดรับ
+                         isSelfStudent(resource.data.studentId)
                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'note', 'updatedAt'])
                          && request.resource.data.note is string && request.resource.data.note.size() <= 500
                          && request.resource.data.updatedAt == request.time

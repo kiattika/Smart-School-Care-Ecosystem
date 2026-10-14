@@ -60,8 +60,9 @@ export function subscribeInterestsForStudent(studentId: string, cb: (l: FundInte
   return onSnapshot(query(collection(db, INTERESTS), where('studentId', '==', studentId)), snap => cb(snap.docs.map(d => interestFrom(d.id, d.data()))), e => onError?.(e));
 }
 
-/** นักเรียน/ผู้ปกครองลงชื่อสนใจ (หรือกลับมาลงใหม่หลังถอน) — ห้อง/uid ประทับจากทะเบียนนักเรียนจริง */
-export async function expressInterest(program: FundProgram, student: { studentId: string; name: string }, note: string): Promise<void> {
+/** นักเรียนลงชื่อสนใจ (หรือกลับมาลงใหม่หลังถอน) — ห้อง/uid ประทับจากทะเบียนนักเรียนจริง */
+/** hadPrevious = มีเอกสารลงชื่อเดิม (ถอนไปแล้ว) — ห้าม getDoc เอกสารที่ยังไม่มี: rules อ่านจาก resource.data ซึ่งเป็น null ตอนยังไม่มีเอกสาร → permission-denied */
+export async function expressInterest(program: FundProgram, student: { studentId: string; name: string }, note: string, hadPrevious: boolean): Promise<void> {
   if (!canExpressInterest(program, Date.now())) throw new Error('โครงการนี้ไม่ได้เปิดให้ลงชื่อสนใจในขณะนี้');
   if (note.length > INTEREST_NOTE_MAX) throw new Error(`หมายเหตุยาวเกิน ${INTEREST_NOTE_MAX} ตัวอักษร`);
   const reg = await getDoc(doc(db, 'students', student.studentId));
@@ -69,12 +70,11 @@ export async function expressInterest(program: FundProgram, student: { studentId
   const s = reg.data();
   if (!s.studentUid) throw new Error('ยังไม่มีบัญชีนักเรียนที่เชื่อมกับรหัสนี้ — ติดต่อโรงเรียน');
   const ref = doc(db, INTERESTS, fundInterestId(program.id, student.studentId));
-  const prev = await getDoc(ref);
   const body = {
     programId: program.id, studentId: student.studentId, studentUid: s.studentUid, studentName: student.name.slice(0, 160),
     room: String(s.room || ''), kind: program.kind, status: 'INTERESTED' as InterestStatus, note: note.trim(), updatedAt: serverTimestamp(),
   };
-  if (prev.exists()) await updateDoc(ref, { status: 'INTERESTED' as InterestStatus, note: note.trim(), updatedAt: serverTimestamp() }); // rules: แก้ได้เฉพาะ status/note
+  if (hadPrevious) await updateDoc(ref, { status: 'INTERESTED' as InterestStatus, note: note.trim(), updatedAt: serverTimestamp() }); // rules: แก้ได้เฉพาะ status/note
   else await setDoc(ref, { ...body, createdAt: serverTimestamp() });
 }
 

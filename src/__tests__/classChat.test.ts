@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readSource } from './helpers/readSource';
 import {
-  chatThreadId, normalizeChatText, isThreadUnread, countUnread, senderRoleFor, CHAT_TEXT_MAX,
+  chatThreadId, isThreadForTeacher, normalizeChatText, isThreadUnread, countUnread, senderRoleFor, CHAT_TEXT_MAX,
 } from '../lib/classChat';
 
 describe('classChat logic', () => {
@@ -32,6 +32,29 @@ describe('classChat logic', () => {
     expect(countUnread([
       { lastAt: 'b', lastSenderRole: 'STUDENT' }, { lastAt: 'b', lastSenderRole: 'TEACHER' },
     ], 'TEACHER')).toBe(1);
+  });
+});
+
+describe('เลือกครูที่ปรึกษา (targetStaffId)', () => {
+  it('threadId: ไม่ระบุครู = แบบเดิม, ระบุครู = ต่อท้าย _staffId', () => {
+    expect(chatThreadId('10001', 'PARENT', '')).toBe('10001_PARENT');
+    expect(chatThreadId('10001', 'STUDENT', 'T9')).toBe('10001_STUDENT_T9');
+  });
+  it('isThreadForTeacher: ไม่ระบุ = ครูที่ปรึกษาทุกคน, ระบุ = เฉพาะคนนั้น', () => {
+    expect(isThreadForTeacher({}, 'a')).toBe(true);
+    expect(isThreadForTeacher({ targetStaffId: '' }, undefined)).toBe(true);
+    expect(isThreadForTeacher({ targetStaffId: 'a' }, 'a')).toBe(true);
+    expect(isThreadForTeacher({ targetStaffId: 'a' }, 'b')).toBe(false);
+    expect(isThreadForTeacher({ targetStaffId: 'a' }, undefined)).toBe(false);
+  });
+  it('ไม่เขียน targetStaffId เมื่อ "ท่านใดก็ได้" (ห้องเดิมที่ไม่มีฟิลด์ยังอัปเดตตาม rules ได้)', () => {
+    const svc = readSource('src/services/firestoreService.ts');
+    expect(svc).toMatch(/const targetField = targetStaffId \? \{ targetStaffId \} : \{\}/);
+  });
+  it('ผู้ปกครอง/นักเรียนเลือกครูได้ (select) และครูกรองห้องสนทนาด้วย staffId', () => {
+    const ui = readSource('src/components/chat/ClassChatPanel.tsx');
+    expect(ui).toContain('id="chat-target"');
+    expect(ui).toMatch(/isThreadForTeacher\(t, myStaffId\)/);
   });
 });
 

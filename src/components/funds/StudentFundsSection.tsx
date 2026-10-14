@@ -10,7 +10,7 @@ const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'ดำเน�
 const host = (u: string) => { try { return new URL(u).hostname; } catch { return u; } };
 
 /** นักเรียน/ผู้ปกครอง: ดูประกาศทุนการศึกษา หรือ กยศ. และลงชื่อสนใจ (เมื่อโครงการเปิด) */
-export function StudentFundsSection({ kind, student }: { kind: FundKind; student: { studentId: string; name: string } }) {
+export function StudentFundsSection({ kind, student, readOnly = false }: { kind: FundKind; student: { studentId: string; name: string }; readOnly?: boolean }) {
   const [programs, setPrograms] = useState<FundProgram[]>([]);
   const [mine, setMine] = useState<FundInterest[]>([]);
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -23,12 +23,13 @@ export function StudentFundsSection({ kind, student }: { kind: FundKind; student
   return (
     <div className="space-y-3 animate-in fade-in duration-300">
       <h3 className="text-base font-bold text-white">{FUND_KIND_LABEL[kind]}</h3>
+      {readOnly && <p className="text-xs text-amber-300">ผู้ปกครองดูประกาศและสถานะของบุตรหลานได้อย่างเดียว — การลงชื่อสนใจให้นักเรียนทำเองในบัญชีนักเรียน</p>}
       <p className="text-xs text-slate-400">ลงชื่อสนใจเป็นการแจ้งความจำนงเบื้องต้นเท่านั้น — การยื่นขอจริงทำผ่านงานแนะแนว (ครูจะจัดทำหนังสือราชการให้)</p>
       {error && <p role="alert" className="text-xs text-rose-400">{error}</p>}
       {programs.length === 0 && <p className="text-sm text-slate-500">ยังไม่มีประกาศ</p>}
       {programs.map(p => {
         const my = mine.find(i => i.id === fundInterestId(p.id, student.studentId));
-        const canJoin = canExpressInterest(p, nowMs) && (!my || my.status === 'WITHDRAWN');
+        const canJoin = !readOnly && canExpressInterest(p, nowMs) && (!my || my.status === 'WITHDRAWN');
         return (
           <div key={p.id} className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 space-y-2 text-sm">
             <div className="font-bold text-white">{p.title}</div>
@@ -49,10 +50,10 @@ export function StudentFundsSection({ kind, student }: { kind: FundKind; student
             {canJoin && (
               <div className="flex flex-wrap gap-2 items-center">
                 <input className="flex-1 min-w-[10rem] bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-xs" maxLength={INTEREST_NOTE_MAX} placeholder="หมายเหตุ (ถ้ามี)" value={notes[p.id] || ''} onChange={e => setNotes(n => ({ ...n, [p.id]: e.target.value }))} aria-label="หมายเหตุ" />
-                <button disabled={busy === p.id} className="px-3 py-1.5 rounded-lg text-xs bg-cyan-600 text-white disabled:opacity-40 cursor-pointer" onClick={() => void run(p.id, () => expressInterest(p, student, notes[p.id] || ''))}>ลงชื่อสนใจ</button>
+                <button disabled={busy === p.id} className="px-3 py-1.5 rounded-lg text-xs bg-cyan-600 text-white disabled:opacity-40 cursor-pointer" onClick={() => void run(p.id, () => expressInterest(p, student, notes[p.id] || '', !!my))}>ลงชื่อสนใจ</button>
               </div>
             )}
-            {my?.status === 'INTERESTED' && (
+            {!readOnly && my?.status === 'INTERESTED' && (
               <button disabled={busy === p.id} className="px-3 py-1.5 rounded-lg text-xs border border-slate-600 text-slate-300 disabled:opacity-40 cursor-pointer" onClick={() => void run(p.id, () => withdrawInterest(p.id, student.studentId))}>ถอนความสนใจ</button>
             )}
           </div>

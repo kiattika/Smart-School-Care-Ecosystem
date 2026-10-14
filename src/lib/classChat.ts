@@ -15,8 +15,18 @@ export const CHANNEL_LABEL: Record<ChatChannel, string> = {
   STUDENT: 'นักเรียน',
 };
 
-export function chatThreadId(studentId: string, channel: ChatChannel): string {
-  return `${studentId}_${channel}`;
+/**
+ * id ห้องสนทนา: `{studentId}_{channel}` = "ครูที่ปรึกษาท่านใดก็ได้" (แบบเดิม),
+ * `{studentId}_{channel}_{staffId}` = สนทนากับครูที่ปรึกษาท่านนั้นโดยเฉพาะ (ต้องตรง firestore.rules)
+ */
+export function chatThreadId(studentId: string, channel: ChatChannel, targetStaffId = ''): string {
+  return targetStaffId ? `${studentId}_${channel}_${targetStaffId}` : `${studentId}_${channel}`;
+}
+
+/** ครูคนนี้เป็นผู้รับห้องสนทนานี้ไหม — ตรงกับ rules: ไม่ระบุครู = ครูที่ปรึกษาทุกคนของห้อง, ระบุ = เฉพาะคนนั้น */
+export function isThreadForTeacher(t: { targetStaffId?: string } | undefined | null, myStaffId: string | undefined): boolean {
+  const target = t?.targetStaffId || '';
+  return target === '' || (!!myStaffId && target === myStaffId);
 }
 
 /** ข้อความที่ส่งได้ → คืนข้อความที่ trim แล้ว หรือ null ถ้าว่าง/ยาวเกิน */
@@ -31,6 +41,7 @@ export interface ChatThreadLike {
   lastSenderRole?: ChatSenderRole | '';
   memberLastReadAt?: string;
   teacherLastReadAt?: string;
+  targetStaffId?: string;
 }
 
 /** ยังไม่ได้อ่าน = ข้อความล่าสุดมาจากอีกฝั่ง และใหม่กว่าเวลาที่ฝั่งเราอ่านล่าสุด */

@@ -78,5 +78,11 @@ describe('guard: โครงสร้างโค้ด', () => {
     expect(readSource('src/ParentPortal.tsx')).toContain('StudentFundsSection');
     expect(readSource('src/components/funds/StudentFundsSection.tsx')).toContain('isHttpsLink');
   });
+  it('ผู้ปกครองอ่านอย่างเดียว + ไม่ getDoc เอกสารที่ยังไม่มี (rules อ่าน resource.data)', () => {
+    expect(readSource('src/ParentPortal.tsx')).toMatch(/<StudentFundsSection readOnly/);
+    const svc = readSource('src/services/fundService.ts');
+    const fn = svc.slice(svc.indexOf('export async function expressInterest'), svc.indexOf('export async function withdrawInterest'));
+    expect(fn).not.toMatch(/getDoc\(ref\)/);
+  });
   it('App.tsx มี route ของ FUND_SCHOLARSHIP', () => expect(readSource('src/App.tsx')).toContain("'FUND_SCHOLARSHIP'"));
 });

@@ -405,7 +405,7 @@ export function ParentPortal() {
         )}
 
         {(activeTab === 'scholarship' || activeTab === 'loan') && (
-          <StudentFundsSection kind={activeTab === 'scholarship' ? 'SCHOLARSHIP' : 'STUDENT_LOAN'} student={{ studentId: student.studentId, name: student.name }} />
+          <StudentFundsSection readOnly kind={activeTab === 'scholarship' ? 'SCHOLARSHIP' : 'STUDENT_LOAN'} student={{ studentId: student.studentId, name: student.name }} />
         )}
 
         {activeTab === 'family' && user?.uid && (
