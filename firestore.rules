@@ -1610,11 +1610,12 @@ service cloud.firestore {
     }
     function lpContentOk(d) {
       return d.kind in ['PLAN', 'PROJECT'] && d.url is string && d.url.matches('^https://[^ ]{4,490}$')
+        && (!('urls' in d) || (httpsListOk(d.urls, 5) && d.urls.size() > 0 && d.urls[0] == d.url))
         && d.note is string && d.note.size() <= 500;
     }
     function lpDocOk(d) {
       return d.keys().hasOnly(['semesterId', 'academicYear', 'term', 'teacherStaffId', 'teacherName', 'departmentId', 'courseKey',
-                               'courseCode', 'courseName', 'level', 'kind', 'url', 'note', 'stage', 'deptReview', 'finalReview', 'createdAt', 'updatedAt'])
+                               'courseCode', 'courseName', 'level', 'kind', 'url', 'urls', 'note', 'stage', 'deptReview', 'finalReview', 'createdAt', 'updatedAt'])
         && d.keys().hasAll(['semesterId', 'teacherStaffId', 'departmentId', 'courseKey', 'kind', 'url', 'note', 'stage'])
         && d.semesterId.matches('^[0-9]{4}_[12]$') && d.academicYear is string && d.term in ['1', '2']
         && (d.academicYear + '_' + d.term) == d.semesterId
@@ -1646,7 +1647,7 @@ service cloud.firestore {
           // ครูเจ้าของ: แก้ลิงก์/ประเภท/หมายเหตุ ได้ตอนรอตรวจขั้นแรกหรือถูกขอแก้ไข แล้วส่งใหม่
           myStaffId() != '' && resource.data.teacherStaffId == myStaffId()
           && resource.data.stage in ['SUBMITTED', 'REVISION']
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['kind', 'url', 'note', 'stage', 'updatedAt'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['kind', 'url', 'urls', 'note', 'stage', 'updatedAt'])
           && request.resource.data.stage == 'SUBMITTED'
           && lpContentOk(request.resource.data)
           && request.resource.data.updatedAt == request.time
@@ -1719,10 +1720,19 @@ service cloud.firestore {
 
     // 43. บันทึก PLC (นิเทศเฟส 3) — 1 เอกสาร = 1 ครั้งที่พบกัน; ครูผู้บันทึกเขียน/แก้/ลบของตนเอง
     // อ่านได้: เจ้าของ, หัวหน้า/รองกลุ่มสาระฯ (แผนกตน), หัวหน้างานนิเทศ, ผอ., รอง ผอ.วิชาการ (EXECUTIVE/SUPER_ADMIN ไม่เห็นรายบุคคล)
+    // รายการลิงก์ https (ตรวจทีละตำแหน่งถึง 10 — ขนาดจำกัดด้วย size() <= max จึงไม่มีตำแหน่งเกิน)
+    function httpsAt(l, i) { return l.size() <= i || (l[i] is string && l[i].matches('^https://[^ ]{4,490}$')); }
+    function httpsListOk(l, max) {
+      return l is list && l.size() <= max
+        && httpsAt(l, 0) && httpsAt(l, 1) && httpsAt(l, 2) && httpsAt(l, 3) && httpsAt(l, 4)
+        && httpsAt(l, 5) && httpsAt(l, 6) && httpsAt(l, 7) && httpsAt(l, 8) && httpsAt(l, 9);
+    }
+    function photoAt(l, i) { return l.size() <= i || (l[i] is string && l[i].matches('^https://firebasestorage[.]googleapis[.]com/[^ ]{4,600}$')); }
     function plcDocOk(d) {
       return d.keys().hasOnly(['semesterId', 'academicYear', 'term', 'authorStaffId', 'authorName', 'departmentId', 'groupName', 'topic',
-                               'meetingDate', 'step', 'members', 'summary', 'outcome', 'nextAction', 'evidenceUrl', 'createdAt', 'updatedAt'])
-        && d.keys().hasAll(['semesterId', 'authorStaffId', 'departmentId', 'groupName', 'topic', 'meetingDate', 'step', 'members', 'summary', 'evidenceUrl'])
+                               'meetingDate', 'step', 'members', 'memberStaffIds', 'summary', 'outcome', 'nextAction',
+                               'evidenceUrl', 'evidenceUrls', 'photos', 'createdAt', 'updatedAt'])
+        && d.keys().hasAll(['semesterId', 'authorStaffId', 'departmentId', 'groupName', 'topic', 'meetingDate', 'step', 'members', 'memberStaffIds', 'summary', 'evidenceUrls', 'photos'])
         && d.semesterId.matches('^[0-9]{4}_[12]$') && d.academicYear is string && d.term in ['1', '2']
         && (d.academicYear + '_' + d.term) == d.semesterId
         && d.authorStaffId is string && d.authorName is string && d.authorName.size() <= 160 && d.departmentId is string
@@ -1731,15 +1741,20 @@ service cloud.firestore {
         && d.meetingDate is string && d.meetingDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && d.step in ['PLAN', 'DO', 'CHECK', 'ACT']
         && d.members is list && d.members.size() <= 20
+        && d.memberStaffIds is list && d.memberStaffIds.size() <= 20
         && d.summary is string && d.summary.size() > 0 && d.summary.size() <= 2000
         && (!('outcome' in d) || (d.outcome is string && d.outcome.size() <= 1500))
         && (!('nextAction' in d) || (d.nextAction is string && d.nextAction.size() <= 1000))
-        && d.evidenceUrl is string && (d.evidenceUrl == '' || d.evidenceUrl.matches('^https://[^ ]{4,490}$'));
+        && (!('evidenceUrl' in d) || (d.evidenceUrl is string && (d.evidenceUrl == '' || d.evidenceUrl.matches('^https://[^ ]{4,490}$'))))
+        && httpsListOk(d.evidenceUrls, 10)
+        && d.photos is list && d.photos.size() <= 4 && photoAt(d.photos, 0) && photoAt(d.photos, 1) && photoAt(d.photos, 2) && photoAt(d.photos, 3);
     }
 
     match /plc_logs/{lid} {
       allow read: if myStaffId() != '' && (
         resource.data.authorStaffId == myStaffId() ||
+        // สมาชิกที่ผู้บันทึกเลือกจากทะเบียนบุคลากร เห็นบันทึกเดียวกัน (อ่านอย่างเดียว — แก้/ลบได้เฉพาะผู้บันทึก)
+        ('memberStaffIds' in resource.data && myStaffId() in resource.data.memberStaffIds) ||
         hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
         supInMyDept(resource.data.departmentId)
       );

@@ -7,6 +7,8 @@ import {
   COMPLIANCE_LABEL, KIND_LABEL, PLAN_CRITERIA, STAGE_LABEL, complianceOf, courseKeyOf, planDocId, semesterIdOf,
   type LessonPlan, type LessonPlanKind,
 } from '../../lib/lessonPlans';
+import { LinkListInput } from '../shared/LinkListInput';
+import { MAX_PLAN_LINKS, linksOf } from '../../lib/evidenceLinks';
 import { staffDepartmentId, type StaffRow } from '../../lib/supervisionView';
 
 export interface PlanCourse { code: string; name: string; level: string }
@@ -44,10 +46,10 @@ export function MyLessonPlansPanel({ courses }: { courses: PlanCourse[] }) {
         : uniq.length === 0 ? <p className="text-sm text-slate-400">ไม่พบรายวิชาที่ท่านสอนในภาคเรียนนี้</p>
           : uniq.map(([key, c]) => (
             <div key={key}><CourseRow course={c} plan={byKey.get(key)}
-              onSubmit={(kind, url, note) => submitLessonPlan({
+              onSubmit={(kind, urls, note) => submitLessonPlan({
                 semester: { academicYear: sem.academicYear, term: sem.term },
                 teacher: { staffId, name: user?.displayName || '', departmentId: dept },
-                course: c, kind, url, note, exists: byKey.has(key),
+                course: c, kind, urls, note, exists: byKey.has(key),
               })}
               onDelete={() => deleteLessonPlan(planDocId(semesterId, staffId, key))} /></div>
           ))}
@@ -57,12 +59,13 @@ export function MyLessonPlansPanel({ courses }: { courses: PlanCourse[] }) {
 
 function CourseRow({ course, plan, onSubmit, onDelete }: {
   course: PlanCourse; plan?: LessonPlan;
-  onSubmit: (k: LessonPlanKind, url: string, note: string) => Promise<unknown>; onDelete: () => Promise<unknown>;
+  onSubmit: (k: LessonPlanKind, urls: string[], note: string) => Promise<unknown>; onDelete: () => Promise<unknown>;
 }) {
   const locked = !!plan && (plan.stage === 'DEPT_APPROVED' || plan.stage === 'APPROVED');
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<LessonPlanKind>(plan?.kind || 'PLAN');
-  const [url, setUrl] = useState(plan?.url || '');
+  const [urls, setUrls] = useState<string[]>(plan ? linksOf(plan) : []);
+  const [pending, setPending] = useState(false);
   const [note, setNote] = useState(plan?.note || '');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -77,7 +80,7 @@ function CourseRow({ course, plan, onSubmit, onDelete }: {
         <div><p className="text-white text-sm font-medium">{course.code} {course.name}</p><p className="text-xs text-slate-400">{course.level}</p></div>
         <span className="text-xs px-2 py-1 rounded-full bg-slate-800 text-slate-200">{plan ? `${KIND_LABEL[plan.kind]} · ${STAGE_LABEL[plan.stage]}` : 'ยังไม่ส่ง'}</span>
       </div>
-      {plan && <a href={plan.url} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-300 underline break-all">{plan.url}</a>}
+      {plan && <ul className="space-y-0.5">{linksOf(plan).map((u, i) => <li key={u}><a href={u} target="_blank" rel="noopener noreferrer" className="text-xs text-cyan-300 underline break-all">{i + 1}. {u}</a></li>)}</ul>}
       {review && (
         <div className="text-xs rounded-lg bg-amber-500/10 border border-amber-500/30 p-2 text-amber-200">
           <p>ผู้ตรวจ ({review.byName}) ขอให้แก้ไข: {review.comment}</p>
@@ -98,10 +101,10 @@ function CourseRow({ course, plan, onSubmit, onDelete }: {
               <label key={k} className="flex items-center gap-1"><input type="radio" checked={kind === k} onChange={() => setKind(k)} />{KIND_LABEL[k]}</label>
             ))}
           </div>
-          <input className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" placeholder="https://..." value={url} onChange={e => setUrl(e.target.value)} />
+          <LinkListInput links={urls} onChange={setUrls} max={MAX_PLAN_LINKS} onPendingChange={setPending} />
           <textarea className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" rows={2} maxLength={500} placeholder="หมายเหตุ (ถ้ามี)" value={note} onChange={e => setNote(e.target.value)} />
           <div className="flex gap-2">
-            <button disabled={busy} className="px-3 py-1.5 rounded-lg text-xs bg-cyan-600 text-white cursor-pointer" onClick={() => void run(() => onSubmit(kind, url, note), 'ส่งแล้ว — รอหัวหน้ากลุ่มสาระฯ ตรวจ')}>ส่ง</button>
+            <button disabled={busy || pending || urls.length === 0} className="px-3 py-1.5 rounded-lg text-xs bg-cyan-600 text-white disabled:opacity-40 cursor-pointer" onClick={() => void run(() => onSubmit(kind, urls, note), 'ส่งแล้ว — รอหัวหน้ากลุ่มสาระฯ ตรวจ')}>ส่ง</button>
             <button className="px-3 py-1.5 rounded-lg text-xs border border-slate-600 text-slate-300 cursor-pointer" onClick={() => setOpen(false)}>ยกเลิก</button>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import { collection, deleteDoc, doc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, type Query } from 'firebase/firestore';
+import { collection, deleteDoc, deleteField, doc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, type Query } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { PlanQuery } from '../lib/lessonPlans';
 import { validatePlc, type PlcContent, type PlcLog } from '../lib/plc';
@@ -8,11 +8,22 @@ const col = () => collection(db, 'plc_logs');
 /** q ต้องตรงสิทธิ์ (planOverviewQuery ของ lessonPlans.ts หรือ SELF — ใช้ฟิลด์ authorStaffId สำหรับ SELF) */
 export function subscribePlcLogs(semesterId: string, q: PlanQuery, cb: (list: PlcLog[]) => void, onError?: (e: Error) => void): () => void {
   const base = where('semesterId', '==', semesterId);
-  const built: Query =
-    q.scope === 'ALL' ? query(col(), base)
-      : q.scope === 'DEPARTMENT' ? query(col(), base, where('departmentId', '==', q.departmentId))
-        : query(col(), base, where('authorStaffId', '==', q.staffId));
-  return onSnapshot(built, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PlcLog, 'id'>) }))), (err) => onError?.(err));
+  const toList = (snap: { docs: { id: string; data: () => unknown }[] }) => snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<PlcLog, 'id'>) }));
+  if (q.scope === 'SELF') {
+    // ของตนเอง = ที่ตนบันทึก + ที่ผู้อื่นบันทึกแล้วเลือกตนเป็นสมาชิก (2 query ที่ตรง rules ทั้งคู่ แล้วรวมตาม id)
+    let mine: PlcLog[] | null = null; let asMember: PlcLog[] | null = null;
+    const emit = () => {
+      if (!mine || !asMember) return; // รอทั้งสอง query ก่อนแจ้งผล
+      const m = new Map<string, PlcLog>();
+      [...mine, ...asMember].forEach(l => m.set(l.id, l));
+      cb([...m.values()]);
+    };
+    const u1 = onSnapshot(query(col(), base, where('authorStaffId', '==', q.staffId)), (snap) => { mine = toList(snap); emit(); }, (err) => onError?.(err));
+    const u2 = onSnapshot(query(col(), base, where('memberStaffIds', 'array-contains', q.staffId)), (snap) => { asMember = toList(snap); emit(); }, (err) => onError?.(err));
+    return () => { u1(); u2(); };
+  }
+  const built: Query = q.scope === 'ALL' ? query(col(), base) : query(col(), base, where('departmentId', '==', q.departmentId));
+  return onSnapshot(built, (snap) => cb(toList(snap)), (err) => onError?.(err));
 }
 
 export interface SavePlcInput {
@@ -29,10 +40,13 @@ export async function savePlcLog(input: SavePlcInput): Promise<string> {
   const c = input.content;
   const content = {
     groupName: c.groupName.trim(), topic: c.topic.trim(), meetingDate: c.meetingDate, step: c.step,
-    members: c.members.map(m => m.trim()).filter(Boolean), summary: c.summary, outcome: c.outcome, nextAction: c.nextAction, evidenceUrl: c.evidenceUrl.trim(),
+    memberStaffIds: c.memberStaffIds, members: c.members.map(m => m.trim().slice(0, 80)),
+    summary: c.summary, outcome: c.outcome, nextAction: c.nextAction,
+    evidenceUrls: c.evidenceUrls.map(u => u.trim()), photos: c.photos,
   };
   if (input.id) {
-    await updateDoc(doc(db, 'plc_logs', input.id), { ...content, updatedAt: serverTimestamp() });
+    // evidenceUrl (ฟิลด์เดี่ยวของเอกสารเก่า) ถูกแทนที่ด้วย evidenceUrls
+    await updateDoc(doc(db, 'plc_logs', input.id), { ...content, evidenceUrl: deleteField(), updatedAt: serverTimestamp() });
     return input.id;
   }
   const ref = doc(col());

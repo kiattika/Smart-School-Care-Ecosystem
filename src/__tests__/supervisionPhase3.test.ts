@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readSource } from './helpers/readSource';
-import { emptyPlc, groupPlcCycles, isCycleComplete, validatePlc, type PlcContent } from '../lib/plc';
+import { addLink, linksOf } from '../lib/evidenceLinks';
+import { emptyPlc, groupPlcCycles, isCycleComplete, participantIds, validatePlc, type PlcContent } from '../lib/plc';
 import { emptyReflection, isReflectionComplete, validateReflection } from '../lib/reflection';
 import { pct, semesterRange, summarizePostTeaching } from '../lib/portfolio';
 import type { PostTeachingRecord } from '../types';
@@ -14,9 +15,29 @@ describe('PLC', () => {
     expect(validatePlc({ ...ok, topic: '' })[0]).toMatch(/ประเด็น/);
     expect(validatePlc({ ...ok, meetingDate: '' })[0]).toMatch(/วันที่/);
     expect(validatePlc({ ...ok, summary: '' })[0]).toMatch(/สรุป/);
-    expect(validatePlc({ ...ok, evidenceUrl: 'http://x.co/a' })[0]).toMatch(/https/);
-    expect(validatePlc({ ...ok, evidenceUrl: 'https://x.co/a' })).toEqual([]);
-    expect(validatePlc({ ...ok, members: Array(21).fill('ก') })[0]).toMatch(/สมาชิก/);
+    expect(validatePlc({ ...ok, evidenceUrls: ['http://x.co/a'] })[0]).toMatch(/https/);
+    expect(validatePlc({ ...ok, evidenceUrls: ['https://x.co/a', 'https://x.co/b'] })).toEqual([]);
+    expect(validatePlc({ ...ok, evidenceUrls: Array.from({ length: 11 }, (_, i) => `https://x.co/${i}`) })[0]).toMatch(/ไม่เกิน 10/);
+    expect(validatePlc({ ...ok, memberStaffIds: Array.from({ length: 21 }, (_, i) => `s${i}`) })[0]).toMatch(/สมาชิก/);
+    expect(validatePlc({ ...ok, memberStaffIds: ['s1', 's1'] })[0]).toMatch(/ซ้ำ/);
+    const ph = (n: number) => Array.from({ length: n }, (_, i) => `https://firebasestorage.googleapis.com/v0/b/x/o/p${i}?alt=media&token=t`);
+    expect(validatePlc({ ...ok, photos: ph(4) })).toEqual([]);
+    expect(validatePlc({ ...ok, photos: ph(5) })[0]).toMatch(/ไม่เกิน 4/);
+    expect(validatePlc({ ...ok, photos: ['https://evil.example/x.jpg'] })[0]).toMatch(/รูป/);
+  });
+  it('participantIds รวมผู้บันทึกและสมาชิก; linksOf รองรับเอกสารเก่า', () => {
+    expect(participantIds({ authorStaffId: 'a', memberStaffIds: ['b', 'c'] })).toEqual(['a', 'b', 'c']);
+    expect(participantIds({ authorStaffId: 'a' })).toEqual(['a']);
+    expect(linksOf({ evidenceUrl: 'https://x.co/old' })).toEqual(['https://x.co/old']);
+    expect(linksOf({ evidenceUrl: '' })).toEqual([]);
+    expect(linksOf({ evidenceUrls: ['https://x.co/1', 'javascript:alert(1)'], evidenceUrl: 'https://x.co/old' })).toEqual(['https://x.co/1']);
+    expect(linksOf({ url: 'https://x.co/p', urls: ['https://x.co/p', 'https://x.co/q'] })).toEqual(['https://x.co/p', 'https://x.co/q']);
+  });
+  it('addLink: https เท่านั้น ไม่ซ้ำ ไม่เกินจำนวน', () => {
+    expect(addLink([], ' https://x.co/a ', 2).list).toEqual(['https://x.co/a']);
+    expect(addLink([], 'http://x.co/a', 2).error).toMatch(/https/);
+    expect(addLink(['https://x.co/a'], 'https://x.co/a', 2).error).toMatch(/แล้ว/);
+    expect(addLink(['https://x.co/a', 'https://x.co/b'], 'https://x.co/c', 2).error).toMatch(/ไม่เกิน 2/);
   });
   it('จัดวงจรตามกลุ่ม+ประเด็น เรียงวันที่ และครบ PDCA', () => {
     const mk = (g: string, t: string, d: string, step: 'PLAN' | 'DO' | 'CHECK' | 'ACT') => ({ groupName: g, topic: t, meetingDate: d, step });

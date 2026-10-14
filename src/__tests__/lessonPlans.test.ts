@@ -14,8 +14,11 @@ describe('lessonPlans lib', () => {
     expect(isHttpsUrl('https://a.co/x')).toBe(true);
     expect(isHttpsUrl('http://a.co/x')).toBe(false);
     expect(isHttpsUrl('https://a b')).toBe(false);
-    expect(validateSubmission({ kind: 'X', url: 'https://a.co/x', note: '' })).toBeTruthy();
-    expect(validateSubmission({ kind: 'PLAN', url: 'https://a.co/x', note: '' })).toBeNull();
+    expect(validateSubmission({ kind: 'X', urls: ['https://a.co/x'], note: '' })).toBeTruthy();
+    expect(validateSubmission({ kind: 'PLAN', urls: ['https://a.co/x'], note: '' })).toBeNull();
+    expect(validateSubmission({ kind: 'PLAN', urls: [], note: '' })).toMatch(/อย่างน้อย 1/);
+    expect(validateSubmission({ kind: 'PLAN', urls: ['https://a.co/1', 'http://a.co/2'], note: '' })).toMatch(/https/);
+    expect(validateSubmission({ kind: 'PLAN', urls: Array.from({ length: 6 }, (_, i) => `https://a.co/${i}`), note: '' })).toMatch(/ไม่เกิน 5/);
   });
   it('embedUrlFor: Google Docs/Drive → preview, อื่นๆ null', () => {
     expect(embedUrlFor('https://docs.google.com/document/d/abc_1/edit?usp=sharing')).toBe('https://docs.google.com/document/d/abc_1/preview');
