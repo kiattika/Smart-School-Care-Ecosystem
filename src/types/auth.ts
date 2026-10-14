@@ -4,16 +4,17 @@ export type UserRole =
   | 'SUPER_ADMIN'          // แอดมินดูแลระบบ
   | 'EXECUTIVE'            // ผู้อำนวยการ / รองผู้อำนวยการ
   | 'HEAD_OF_DEPARTMENT'   // หัวหน้ากลุ่มสาระการเรียนรู้ (Stage 1)
+  | 'DEPUTY_HEAD_OF_DEPARTMENT' // รองหัวหน้ากลุ่มสาระการเรียนรู้ (ผู้นิเทศโดยตำแหน่งของกลุ่มสาระฯ)
   | 'ACADEMIC_HEAD'        // หัวหน้าฝ่ายวิชาการและหลักสูตร (Stage 2)
   | 'DEPUTY_DIRECTOR_ACADEMIC' // รองผู้อำนวยการฝ่ายวิชาการ (Stage 3)
   | 'DIRECTOR'             // ผู้อำนวยการโรงเรียน (Stage 4)
   | 'HOMEROOM_TEACHER'     // ครูประจำชั้น
   | 'SUBJECT_TEACHER'      // ครูผู้สอน / ครูประจำวิชา
-  | 'SUPERVISORY_TEACHER'  // ครูนิเทศ
+  | 'SUPERVISORY_TEACHER'  // ครูนิเทศ (ผู้ลงสังเกตการสอนตามที่หัวหน้างานนิเทศจับคู่)
   | 'INFIRMARY_STAFF'      // ครูพยาบาล / เจ้าหน้าที่ห้องพยาบาล
   | 'GUIDANCE_COUNSELOR'   // ครูแนะแนว / ให้คำปรึกษา
   | 'FINANCE_STAFF'        // เจ้าหน้าที่งานการเงิน / บัญชี
-  | 'INSTRUCTIONAL_SUPERVISOR' // ครูผู้นิเทศ / หัวหน้าฝ่ายวิชาการ
+  | 'INSTRUCTIONAL_SUPERVISOR' // หัวหน้างานนิเทศ (เปิดรอบ จับคู่ผู้นิเทศ ดูผลทั้งโรงเรียน)
   | 'PARENT'               // ผู้ปกครองนักเรียน
   | 'STUDENT';             // นักเรียน
 
@@ -106,6 +107,10 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'EDIT_GRADES'
   ],
   SUPERVISORY_TEACHER: [
+    'EVALUATE_TEACHERS'
+  ],
+  DEPUTY_HEAD_OF_DEPARTMENT: [
+    'VIEW_DEPT_REPORTS',
     'EVALUATE_TEACHERS'
   ],
   INFIRMARY_STAFF: [

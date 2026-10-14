@@ -143,13 +143,13 @@ export default function App() {
           >
             {user.activeRole === 'FINANCE_STAFF' ? (
               <FinancePortal />
-            ) : user.activeRole === 'INSTRUCTIONAL_SUPERVISOR' ? (
+            ) : (user.activeRole === 'INSTRUCTIONAL_SUPERVISOR' || user.activeRole === 'SUPERVISORY_TEACHER') ? (
               <SupervisionPortal />
             ) : user.activeRole === 'INFIRMARY_STAFF' ? (
               <InfirmaryPortal />
             ) : user.activeRole === 'GUIDANCE_COUNSELOR' ? (
               <GuidancePortal />
-            ) : (['HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'] as const).includes(user.activeRole as any) ? (
+            ) : (['HEAD_OF_DEPARTMENT', 'DEPUTY_HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'] as const).includes(user.activeRole as any) ? (
               // role ระดับบริหารที่ทำหน้าที่อนุมัติ (สอนแทน 4 ขั้น + เช็คชื่อย้อนหลัง) — เดิมตกไป TeacherPortal
               <ApprovalsPortal />
             ) : user.role === 'teacher' ? (

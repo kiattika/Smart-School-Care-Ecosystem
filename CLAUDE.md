@@ -350,3 +350,12 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 
 ## เรดาร์โดดเรียน (ครูประจำชั้น)
 - คำนวณสดจาก `attendance_records` รายคาบ ไม่มีที่เก็บข้อมูลใหม่ (`src/lib/skipRadar.ts`): โดด = วันเดียวกันมี PRESENT/LATE ในเอกสารอื่น แต่ ABSENT ในคาบ ≥ 1; ขาดทั้งวัน/ลาไม่นับ; เกณฑ์ เฝ้าระวัง ≥2 / ควรติดตาม ≥4 ครั้ง เป็นค่าเริ่มต้นที่ยังไม่ยืนยันจากโรงเรียน
+
+## ระบบนิเทศการสอน (Phase 1) — supervision_rounds / supervision_assignments / supervision_observations
+- ตรรกะกลาง `src/lib/supervision.ts` (แบบ 20 ข้อ เต็ม 100: ≥91 ดีมาก, 81–90 ดี, 71–80 พอใช้, 61–70 ควรปรับปรุง, ≤60 ไม่ผ่าน; ต้องตรง `firestore.rules` บล็อก 39 — มี test เทียบ key 20 ข้อ); ตรรกะหน้าจอ `src/lib/supervisionView.ts`; service `supervisionService.ts`
+- 1 รอบ/ภาคเรียน (`roundId = ปี_ภาค`), 1 ผลต่อครู 1 คนต่อรอบ (id `${roundId}_${teacherStaffId}`); ฉบับร่าง (`submitted:false`) เห็นเฉพาะผู้นิเทศ+หัวหน้างานนิเทศ; ส่งแล้วล็อกคะแนน ครูแตะได้แค่ "รับทราบ"
+- บทบาท: หัวหน้างานนิเทศ = `INSTRUCTIONAL_SUPERVISOR` (เปิดรอบ/จับคู่/เห็นทุกคน), ครูนิเทศ = `SUPERVISORY_TEACHER` (ต้องถูกจับคู่รายรอบใน `supervision_assignments` ไม่เก็บ mentee ใน staff อีก), หัวหน้า/รองหัวหน้ากลุ่มสาระฯ (`HEAD_OF_DEPARTMENT` / `DEPUTY_HEAD_OF_DEPARTMENT` ใหม่) = ผู้นิเทศโดยตำแหน่งของกลุ่มสาระฯ ตนเอง (department ตรงเป๊ะ ไม่สืบทอดกลุ่มย่อย)
+- การเห็นรายบุคคล: ผอ./รองผอ.วิชาการ = ทั้งหมด (ที่ส่งแล้ว), หัวหน้างานนิเทศ = ทั้งหมดรวมร่าง, หัวหน้ากลุ่มสาระฯ = กลุ่มตนเอง, ครูนิเทศ = ที่ตนนิเทศ; หน้า Executive = ภาพรวมเท่านั้น; SUPER_ADMIN อ่านรายบุคคลไม่ได้โดยตั้งใจ
+- query ต้องมีเงื่อนไขตรงกับ rules (`resultsQuery` / `overviewQuery`) ไม่งั้น permission-denied; **ห้ามใส่ข้อมูลตัวอย่างใน SupervisionPortal** (มี guard test)
+- รูปภาพ: `supervision_photos/{uid}/…` (บีบอัดก่อนอัปโหลด ≤6 รูป) — เตือนผู้ใช้เรื่องใบหน้านักเรียน (PDPA)
+- ยังไม่ทำ (Phase 2–3): ส่งแผนการสอน/โครงการสอน + ตรวจ, PLC, บันทึกสะท้อนคิด, แฟ้มสะสมงาน PDF, แบบประเมินที่แก้ไขในระบบได้ (ตอนนี้เป็นค่าคงที่ใน code `templateVersion: 1`)

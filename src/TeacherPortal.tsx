@@ -6,6 +6,7 @@ import { isStaffAssigned, isStaffIn, staffIdOf } from './lib/staffIdentity';
 import { canViewPostTeachingRecord, postTeachingAuthorNote } from './lib/postTeachingVisibility';
 import { useDepartments } from './hooks/useDepartments';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
+import { MySupervisionPanel } from './components/supervision/MySupervisionPanel';
 import { visibleSidebarItems, resolveActiveSidebarId } from './components/shared/portalSidebarLogic';
 import {
   BookOpen as NavCoursesIcon,
@@ -414,7 +415,7 @@ export function TeacherPortal() {
   const [viewingRecord, setViewingRecord] = useState<PostTeachingRecord | null>(null);
 
   // New States for Dashboard Navigation
-  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats'>('courses');
+  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision'>('courses');
   const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
   // ขอลากิจ/ไปราชการด้วยตนเอง — reuse SubstituteTeachingModule เต็มรูปแบบ (ไม่สร้างฟอร์มซ้ำ)
   const [showSubSelfService, setShowSubSelfService] = useState(false);
@@ -431,7 +432,7 @@ export function TeacherPortal() {
   const activityStudentCount = useTeacherActivityStudentCount();
   const availableDashboardTabs = useMemo(() => {
     const rawTabs: Array<{
-      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats';
+      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision';
       label: string;
       icon: React.ComponentType<{ className?: string }>;
       count: number;
@@ -451,7 +452,8 @@ export function TeacherPortal() {
           + substituteAssignments.filter(sa => sa.substituteTeacherEmail === user?.email && sa.status === 'PENDING_TEACHER_CONFIRMATION' && sa.proposedByEmail !== user?.email).length,
       },
       { id: 'records', label: 'ประวัติบันทึกหลังสอนทั้งหมด', icon: NavRecordsIcon, count: visiblePostTeachingRecords.length },
-      { id: 'gradebook', label: 'สมุดบันทึกคะแนน (Gradebook)', icon: NavGradebookIcon, count: 0 }
+      { id: 'gradebook', label: 'สมุดบันทึกคะแนน (Gradebook)', icon: NavGradebookIcon, count: 0 },
+      { id: 'my-supervision', label: 'ผลการนิเทศของฉัน', icon: BookOpen, count: 0 },
     ];
 
     // ซ่อนตามบทบาท (hideForRoles) — ตรรกะกลางของแถบเมนู (portalSidebarLogic.ts) ค่าเริ่มต้นบทบาทเหมือนเดิม
@@ -1903,6 +1905,8 @@ export function TeacherPortal() {
                 </div>
               </div>
             )}
+
+            {dashboardTab === 'my-supervision' && <MySupervisionPanel />}
 
             {dashboardTab === 'leaderboard' && (
               <ClassroomLeaderboard />

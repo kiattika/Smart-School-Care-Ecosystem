@@ -4145,4 +4145,128 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+
+  describe('supervision_* (ระบบนิเทศการสอน)', () => {
+    const RID = '2569_1';
+    const SC = (n: number) => Object.fromEntries(['s1_1', 's1_2', 's1_3', 's1_4', 's2_1', 's2_2', 's2_3', 's2_4', 's3_1', 's3_2', 's3_3', 's3_4', 's3_5', 's3_6', 's3_7', 's4_1', 's4_2', 's4_3', 's5_1', 's5_2'].map(k => [k, n]));
+    const staffCtx = (sid: string, roles: string[]) => asUser(`uid-${sid}`, roles, { staffId: sid }).firestore();
+    const seedSup = async (roundStatus: 'OPEN' | 'CLOSED' = 'OPEN') => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await db.doc('staff/t1').set({ firstName: 'ครู', lastName: 'หนึ่ง', roles: ['SUBJECT_TEACHER'], assignments: { departmentId: 'D1' } });
+        await db.doc('staff/t3').set({ firstName: 'ครู', lastName: 'สาม', roles: ['SUBJECT_TEACHER'], assignments: { departmentId: 'D1' } });
+        await db.doc('staff/t2').set({ firstName: 'ครู', lastName: 'สอง', roles: ['SUBJECT_TEACHER'], assignments: { departmentId: 'D2' } });
+        await db.doc('staff/sup1').set({ firstName: 'นิเทศ', lastName: 'หนึ่ง', roles: ['SUPERVISORY_TEACHER'], assignments: { departmentId: 'D3' } });
+        await db.doc('staff/hod1').set({ firstName: 'หัวหน้า', lastName: 'D1', roles: ['HEAD_OF_DEPARTMENT'], assignments: { departmentId: 'D1' } });
+        await db.doc('staff/hod2').set({ firstName: 'หัวหน้า', lastName: 'D2', roles: ['HEAD_OF_DEPARTMENT'], assignments: { departmentId: 'D2' } });
+        await db.doc(`supervision_rounds/${RID}`).set({ academicYear: '2569', term: '1', status: roundStatus });
+        await db.doc(`supervision_assignments/${RID}_t1_sup1`).set({ roundId: RID, teacherStaffId: 't1', supervisorStaffId: 'sup1' });
+        await db.doc(`supervision_assignments/${RID}_t3_sup1`).set({ roundId: RID, teacherStaffId: 't3', supervisorStaffId: 'sup1' });
+      });
+    };
+    const obsDoc = (teacher: string, dept: string, supervisor: string, submit: boolean, n = 5, over: Record<string, unknown> = {}) => ({
+      roundId: RID, academicYear: '2569', term: '1', templateVersion: 1,
+      teacherStaffId: teacher, teacherName: 'ครู', departmentId: dept, supervisorStaffId: supervisor, supervisorName: 'ผู้นิเทศ',
+      courseCode: 'ท21101', courseName: 'ภาษาไทย', level: 'ม.1/1', observedDate: '2026-09-01', observedTime: '09:00',
+      scores: submit ? SC(n) : { s1_1: 4 }, total: submit ? n * 20 : 4, percent: submit ? n * 20 : null,
+      band: submit ? (n * 20 >= 91 ? 'ดีมาก' : n * 20 >= 81 ? 'ดี' : n * 20 >= 71 ? 'พอใช้' : n * 20 >= 61 ? 'ควรปรับปรุง' : 'ไม่ผ่าน') : null,
+      assessmentMethod: '', strengths: '', improvements: '', comment: '', photos: [],
+      submitted: submit, acknowledged: false, teacherReply: '',
+      createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(),
+      ...(submit ? { submittedAt: mServerTimestamp() } : {}),
+      ...over,
+    });
+    const seedObs = async (id: string, teacher: string, dept: string, supervisor: string, submit: boolean) => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`supervision_observations/${id}`).set({ ...obsDoc(teacher, dept, supervisor, submit), createdAt: new Date(), updatedAt: new Date(), ...(submit ? { submittedAt: new Date() } : {}) });
+      });
+    };
+
+    it('รอบ/จับคู่: หัวหน้างานนิเทศและ SUPER_ADMIN จัดการได้; ครูทั่วไปทำไม่ได้', async () => {
+      await seedSup();
+      const ok = { academicYear: '2569', term: '2', status: 'OPEN', openedByStaffId: 'x', createdAt: mServerTimestamp() };
+      await assertSucceeds(mSetDoc(mDoc(staffCtx('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'supervision_rounds/2569_2'), ok));
+      await assertFails(mSetDoc(mDoc(staffCtx('t1', ['SUBJECT_TEACHER']), 'supervision_rounds/2570_1'), { ...ok, academicYear: '2570', term: '1' }));
+      await assertFails(mSetDoc(mDoc(staffCtx('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'supervision_rounds/2569_x'), ok)); // id ผิดรูปแบบ
+      await assertSucceeds(mUpdateDoc(mDoc(staffCtx('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), `supervision_rounds/${RID}`), { status: 'CLOSED' }));
+      await assertFails(mUpdateDoc(mDoc(staffCtx('t1', ['SUBJECT_TEACHER']), `supervision_rounds/${RID}`), { status: 'CLOSED' }));
+      const asg = { roundId: RID, teacherStaffId: 't2', supervisorStaffId: 'sup1', createdAt: mServerTimestamp() };
+      await assertSucceeds(mSetDoc(mDoc(staffCtx('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), `supervision_assignments/${RID}_t2_sup1`), asg));
+      await assertFails(mSetDoc(mDoc(staffCtx('t1', ['SUBJECT_TEACHER']), `supervision_assignments/${RID}_t2_sup1`), asg));
+      await assertFails(mSetDoc(mDoc(staffCtx('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), `supervision_assignments/${RID}_t2_t2`), { ...asg, supervisorStaffId: 't2' })); // นิเทศตัวเอง
+    });
+
+    it('สร้างผล: ครูนิเทศต้องถูกจับคู่; หัวหน้ากลุ่มสาระฯ ทำได้เฉพาะครูในกลุ่มสาระฯ ตนเอง; ห้ามนิเทศตัวเอง', async () => {
+      await seedSup();
+      const sup = staffCtx('sup1', ['SUPERVISORY_TEACHER']);
+      await assertSucceeds(mSetDoc(mDoc(sup, `supervision_observations/${RID}_t3`), obsDoc('t3', 'D1', 'sup1', false)));
+      await assertFails(mSetDoc(mDoc(sup, `supervision_observations/${RID}_t2`), obsDoc('t2', 'D2', 'sup1', false))); // ไม่ได้จับคู่
+      const hod = staffCtx('hod1', ['HEAD_OF_DEPARTMENT']);
+      await assertSucceeds(mSetDoc(mDoc(hod, `supervision_observations/${RID}_t1`), obsDoc('t1', 'D1', 'hod1', false))); // กลุ่มสาระฯ เดียวกัน ไม่ต้องจับคู่
+      await assertFails(mSetDoc(mDoc(hod, `supervision_observations/${RID}_t2`), obsDoc('t2', 'D2', 'hod1', false))); // กลุ่มสาระฯ อื่น
+      await assertFails(mSetDoc(mDoc(hod, `supervision_observations/${RID}_hod1`), obsDoc('hod1', 'D1', 'hod1', false))); // นิเทศตัวเอง
+      await assertFails(mSetDoc(mDoc(staffCtx('t1', ['SUBJECT_TEACHER']), `supervision_observations/${RID}_t2`), obsDoc('t2', 'D2', 't1', false))); // ครูทั่วไป
+    });
+
+    it('สร้างผล: รอบปิด / departmentId ไม่ตรง staff / ผู้นิเทศไม่ใช่ตัวเอง / รหัสเอกสารผิด ถูกปฏิเสธ', async () => {
+      await seedSup('CLOSED');
+      const sup = staffCtx('sup1', ['SUPERVISORY_TEACHER']);
+      await assertFails(mSetDoc(mDoc(sup, `supervision_observations/${RID}_t1`), obsDoc('t1', 'D1', 'sup1', false)));
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`supervision_rounds/${RID}`).update({ status: 'OPEN' }); });
+      await assertFails(mSetDoc(mDoc(sup, `supervision_observations/${RID}_t1`), obsDoc('t1', 'D2', 'sup1', false))); // dept ปลอม
+      await assertFails(mSetDoc(mDoc(sup, `supervision_observations/${RID}_t1`), obsDoc('t1', 'D1', 'hod1', false))); // สวมรอยผู้นิเทศ
+      await assertFails(mSetDoc(mDoc(sup, `supervision_observations/${RID}_wrong`), obsDoc('t1', 'D1', 'sup1', false)));
+      await assertSucceeds(mSetDoc(mDoc(sup, `supervision_observations/${RID}_t1`), obsDoc('t1', 'D1', 'sup1', false)));
+    });
+
+    it('ส่งผล: คะแนนรวม/เปอร์เซ็นต์/ผลสรุปต้องตรงกับคะแนนรายข้อ และตอบครบ 20 ข้อ', async () => {
+      await seedSup();
+      const sup = staffCtx('sup1', ['SUPERVISORY_TEACHER']);
+      const ref = (c: any) => mDoc(c, `supervision_observations/${RID}_t1`);
+      await assertFails(mSetDoc(ref(sup), obsDoc('t1', 'D1', 'sup1', true, 5, { total: 99 })));
+      await assertFails(mSetDoc(ref(sup), obsDoc('t1', 'D1', 'sup1', true, 5, { band: 'ดี' })));
+      await assertFails(mSetDoc(ref(sup), obsDoc('t1', 'D1', 'sup1', true, 5, { scores: { ...SC(5), s1_1: 6 } })));
+      await assertFails(mSetDoc(ref(sup), obsDoc('t1', 'D1', 'sup1', true, 5, { scores: { s1_1: 5 }, total: 5, percent: 5, band: 'ไม่ผ่าน' }))); // ไม่ครบ
+      await assertSucceeds(mSetDoc(ref(sup), obsDoc('t1', 'D1', 'sup1', true, 4))); // 80 = พอใช้ (71–80) ตรงกับตรรกะ client
+    });
+
+    it('ส่งแล้วล็อก: ผู้นิเทศแก้ไม่ได้; ครูกดรับทราบได้ครั้งเดียวและแก้ฟิลด์อื่นไม่ได้; ฉบับร่างลบได้เฉพาะผู้นิเทศ', async () => {
+      await seedSup();
+      await seedObs(`${RID}_t1`, 't1', 'D1', 'sup1', true);
+      const sup = staffCtx('sup1', ['SUPERVISORY_TEACHER']);
+      const t1 = staffCtx('t1', ['SUBJECT_TEACHER']);
+      await assertFails(mUpdateDoc(mDoc(sup, `supervision_observations/${RID}_t1`), { comment: 'แก้', updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(mDoc(t1, `supervision_observations/${RID}_t1`), { total: 100, acknowledged: true, acknowledgedAt: mServerTimestamp(), updatedAt: mServerTimestamp() }));
+      await assertSucceeds(mUpdateDoc(mDoc(t1, `supervision_observations/${RID}_t1`), { acknowledged: true, acknowledgedAt: mServerTimestamp(), teacherReply: 'รับทราบ', updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(mDoc(t1, `supervision_observations/${RID}_t1`), { acknowledged: true, acknowledgedAt: mServerTimestamp(), teacherReply: 'ซ้ำ', updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(mDoc(staffCtx('t2', ['SUBJECT_TEACHER']), `supervision_observations/${RID}_t1`), { acknowledged: true, acknowledgedAt: mServerTimestamp(), updatedAt: mServerTimestamp() }));
+      await assertFails((sup as any).doc(`supervision_observations/${RID}_t1`).delete()); // ส่งแล้วลบไม่ได้
+      await seedObs(`${RID}_t2`, 't2', 'D2', 'sup1', false);
+      await assertFails((staffCtx('hod2', ['HEAD_OF_DEPARTMENT']) as any).doc(`supervision_observations/${RID}_t2`).delete());
+      await assertSucceeds((sup as any).doc(`supervision_observations/${RID}_t2`).delete());
+    });
+
+    it('อ่าน: ครูเห็นเฉพาะที่ส่งแล้วของตน; ฉบับร่างเห็นเฉพาะผู้นิเทศ+หัวหน้างานนิเทศ; ผอ./รองผอ./EXECUTIVE เห็นที่ส่งแล้วทั้งหมด; หัวหน้ากลุ่มสาระฯ เห็นเฉพาะกลุ่มตนเอง; SUPER_ADMIN เห็นรายบุคคลไม่ได้', async () => {
+      await seedSup();
+      await seedObs(`${RID}_t1`, 't1', 'D1', 'sup1', true);
+      await seedObs(`${RID}_t2`, 't2', 'D2', 'sup1', false);
+      const col = (c: any) => collection(c, 'supervision_observations');
+      const self = (c: any, sid: string) => getDocs(query(col(c), where('roundId', '==', RID), where('teacherStaffId', '==', sid), where('submitted', '==', true)));
+      await assertSucceeds(self(staffCtx('t1', ['SUBJECT_TEACHER']), 't1'));
+      await assertFails(self(staffCtx('t1', ['SUBJECT_TEACHER']), 't2'));
+      await assertFails((staffCtx('t2', ['SUBJECT_TEACHER']) as any).doc(`supervision_observations/${RID}_t2`).get()); // ร่างของตน — ครูยังไม่เห็น
+      await assertSucceeds((staffCtx('sup1', ['SUPERVISORY_TEACHER']) as any).doc(`supervision_observations/${RID}_t2`).get());
+      await assertSucceeds(getDocs(query(col(staffCtx('sup-head', ['INSTRUCTIONAL_SUPERVISOR'])), where('roundId', '==', RID))));
+      const submittedAll = (c: any) => getDocs(query(col(c), where('roundId', '==', RID), where('submitted', '==', true)));
+      for (const r of ['DIRECTOR', 'DEPUTY_DIRECTOR_ACADEMIC', 'EXECUTIVE']) await assertSucceeds(submittedAll(staffCtx(`x-${r}`, [r])));
+      await assertFails(getDocs(query(col(staffCtx('x-dir', ['DIRECTOR'])), where('roundId', '==', RID)))); // รวมร่าง = ไม่ได้
+      await assertFails(submittedAll(staffCtx('adm', ['SUPER_ADMIN'])));
+      const dept = (c: any, d: string) => getDocs(query(col(c), where('roundId', '==', RID), where('departmentId', '==', d), where('submitted', '==', true)));
+      await assertSucceeds(dept(staffCtx('hod1', ['HEAD_OF_DEPARTMENT']), 'D1'));
+      await assertFails(dept(staffCtx('hod1', ['HEAD_OF_DEPARTMENT']), 'D2'));
+      await assertFails(submittedAll(staffCtx('hod1', ['HEAD_OF_DEPARTMENT'])));
+      await assertFails(submittedAll(staffCtx('sup1', ['SUPERVISORY_TEACHER']))); // ครูนิเทศเห็นเฉพาะที่ตนเองนิเทศ
+      await assertSucceeds(getDocs(query(col(staffCtx('sup1', ['SUPERVISORY_TEACHER'])), where('roundId', '==', RID), where('supervisorStaffId', '==', 'sup1'))));
+    });
+  });
 });

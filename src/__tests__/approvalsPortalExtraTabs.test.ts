@@ -40,9 +40,9 @@ describe('ApprovalsPortal: แท็บเพิ่มเติมต้อง�
     expect(approvalsPortalSrc).toContain("import { HouseManagerPage } from './components/admin/HouseManagerPage';");
   });
 
-  it('App.tsx: 4 role งานอนุมัติยังคง route ไป ApprovalsPortal เสมอ (ไม่เปลี่ยนไป AdminPortal เต็มรูปแบบ)', () => {
+  it('App.tsx: 5 role งานอนุมัติยังคง route ไป ApprovalsPortal เสมอ (ไม่เปลี่ยนไป AdminPortal เต็มรูปแบบ)', () => {
     expect(appSrc).toContain(
-      "(['HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'] as const).includes(user.activeRole as any)"
+      "(['HEAD_OF_DEPARTMENT', 'DEPUTY_HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'] as const).includes(user.activeRole as any)"
     );
     expect(appSrc).toContain('<ApprovalsPortal />');
   });

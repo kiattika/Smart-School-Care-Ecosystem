@@ -1656,5 +1656,184 @@ service cloud.firestore {
                        && request.resource.data.get('staffId', '') == resource.data.get('staffId', '');
       allow delete: if hasRole('SUPER_ADMIN');
     }
+    // ──────────────────────────────────────────────────────────────────────────────
+    // 39. ระบบนิเทศการสอน — supervision_rounds / supervision_assignments / supervision_observations
+    //     (ตรรกะ/เกณฑ์อยู่ src/lib/supervision.ts — แบบสังเกตการสอน 20 ข้อ เต็ม 100, ต้องตรงกัน)
+    //     สิทธิ์อ่านผลสังเกตการสอน (รายบุคคล):
+    //       • ผู้นิเทศเจ้าของผล (supervisorStaffId) — รวมฉบับร่าง
+    //       • ครูผู้รับการนิเทศ — เฉพาะที่ส่งแล้ว (submitted == true)
+    //       • หัวหน้างานนิเทศ (INSTRUCTIONAL_SUPERVISOR) — ทั้งหมดรวมฉบับร่าง (ติดตามความคืบหน้า)
+    //       • ผอ./รองผอ.วิชาการ/EXECUTIVE — ที่ส่งแล้วทั้งหมด
+    //       • หัวหน้า/รองหัวหน้ากลุ่มสาระฯ — ที่ส่งแล้วของกลุ่มสาระฯ ตนเอง (departmentId ตรง staff ของตนเอง)
+    //     ❌ SUPER_ADMIN อ่านผลรายบุคคลไม่ได้โดยตั้งใจ (จัดการรอบ/จับคู่ได้อย่างเดียว)
+    //     ผู้นิเทศ = ครูนิเทศที่ถูกจับคู่ หรือหัวหน้า/รองหัวหน้ากลุ่มสาระฯ ของกลุ่มสาระฯ เดียวกับครู (โดยตำแหน่ง)
+    //     ส่งแล้วแก้ไม่ได้ (ล็อกคะแนน) — ครูผู้รับการนิเทศแตะได้แค่รับทราบ/ความเห็นตอบกลับ; ลบได้เฉพาะฉบับร่างของผู้นิเทศเอง
+    function supExOfficio() {
+      return hasRole('HEAD_OF_DEPARTMENT') || hasRole('DEPUTY_HEAD_OF_DEPARTMENT');
+    }
+    function supManage() {
+      return hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('SUPER_ADMIN');
+    }
+    // departmentId ของ staff ที่ระบุ (ไม่มี = '')
+    function supStaffDept(sid) {
+      return exists(/databases/$(database)/documents/staff/$(sid))
+        ? get(/databases/$(database)/documents/staff/$(sid)).data.get('assignments', {}).get('departmentId', '')
+        : '';
+    }
+    // หัวหน้า/รองหัวหน้ากลุ่มสาระฯ ที่สังกัดกลุ่มสาระฯ นี้จริง
+    function supInMyDept(dept) {
+      return supExOfficio() && myStaffId() != '' && dept is string && dept != '' && supStaffDept(myStaffId()) == dept;
+    }
+    function supRoundOpen(rid) {
+      return exists(/databases/$(database)/documents/supervision_rounds/$(rid))
+        && get(/databases/$(database)/documents/supervision_rounds/$(rid)).data.status == 'OPEN';
+    }
+    function supScoresShapeOk(sc) {
+      return sc is map && sc.keys().hasOnly(['s1_1', 's1_2', 's1_3', 's1_4', 's2_1', 's2_2', 's2_3', 's2_4', 's3_1', 's3_2', 's3_3', 's3_4', 's3_5', 's3_6', 's3_7', 's4_1', 's4_2', 's4_3', 's5_1', 's5_2']) &&
+        (!('s1_1' in sc) || (sc.s1_1 is int && sc.s1_1 >= 1 && sc.s1_1 <= 5)) &&
+        (!('s1_2' in sc) || (sc.s1_2 is int && sc.s1_2 >= 1 && sc.s1_2 <= 5)) &&
+        (!('s1_3' in sc) || (sc.s1_3 is int && sc.s1_3 >= 1 && sc.s1_3 <= 5)) &&
+        (!('s1_4' in sc) || (sc.s1_4 is int && sc.s1_4 >= 1 && sc.s1_4 <= 5)) &&
+        (!('s2_1' in sc) || (sc.s2_1 is int && sc.s2_1 >= 1 && sc.s2_1 <= 5)) &&
+        (!('s2_2' in sc) || (sc.s2_2 is int && sc.s2_2 >= 1 && sc.s2_2 <= 5)) &&
+        (!('s2_3' in sc) || (sc.s2_3 is int && sc.s2_3 >= 1 && sc.s2_3 <= 5)) &&
+        (!('s2_4' in sc) || (sc.s2_4 is int && sc.s2_4 >= 1 && sc.s2_4 <= 5)) &&
+        (!('s3_1' in sc) || (sc.s3_1 is int && sc.s3_1 >= 1 && sc.s3_1 <= 5)) &&
+        (!('s3_2' in sc) || (sc.s3_2 is int && sc.s3_2 >= 1 && sc.s3_2 <= 5)) &&
+        (!('s3_3' in sc) || (sc.s3_3 is int && sc.s3_3 >= 1 && sc.s3_3 <= 5)) &&
+        (!('s3_4' in sc) || (sc.s3_4 is int && sc.s3_4 >= 1 && sc.s3_4 <= 5)) &&
+        (!('s3_5' in sc) || (sc.s3_5 is int && sc.s3_5 >= 1 && sc.s3_5 <= 5)) &&
+        (!('s3_6' in sc) || (sc.s3_6 is int && sc.s3_6 >= 1 && sc.s3_6 <= 5)) &&
+        (!('s3_7' in sc) || (sc.s3_7 is int && sc.s3_7 >= 1 && sc.s3_7 <= 5)) &&
+        (!('s4_1' in sc) || (sc.s4_1 is int && sc.s4_1 >= 1 && sc.s4_1 <= 5)) &&
+        (!('s4_2' in sc) || (sc.s4_2 is int && sc.s4_2 >= 1 && sc.s4_2 <= 5)) &&
+        (!('s4_3' in sc) || (sc.s4_3 is int && sc.s4_3 >= 1 && sc.s4_3 <= 5)) &&
+        (!('s5_1' in sc) || (sc.s5_1 is int && sc.s5_1 >= 1 && sc.s5_1 <= 5)) &&
+        (!('s5_2' in sc) || (sc.s5_2 is int && sc.s5_2 >= 1 && sc.s5_2 <= 5));
+    }
+    // ส่งแล้ว: ตอบครบ 20 ข้อ + คะแนนรวม/เปอร์เซ็นต์/ผลสรุปต้องตรงกับคะแนนรายข้อ (เกณฑ์ ≥91 ดีมาก, ≥81 ดี, ≥71 พอใช้, ≥61 ควรปรับปรุง, ต่ำกว่านั้น ไม่ผ่าน)
+    function supSubmittedOk(d) {
+      let sc = d.scores;
+      return sc.keys().hasAll(['s1_1', 's1_2', 's1_3', 's1_4', 's2_1', 's2_2', 's2_3', 's2_4', 's3_1', 's3_2', 's3_3', 's3_4', 's3_5', 's3_6', 's3_7', 's4_1', 's4_2', 's4_3', 's5_1', 's5_2'])
+        && d.total == (sc.s1_1 + sc.s1_2 + sc.s1_3 + sc.s1_4 + sc.s2_1 + sc.s2_2 + sc.s2_3 + sc.s2_4 + sc.s3_1 + sc.s3_2 + sc.s3_3 + sc.s3_4 + sc.s3_5 + sc.s3_6 + sc.s3_7 + sc.s4_1 + sc.s4_2 + sc.s4_3 + sc.s5_1 + sc.s5_2)
+        && d.percent == d.total
+        && d.band == (d.total >= 91 ? 'ดีมาก' : (d.total >= 81 ? 'ดี' : (d.total >= 71 ? 'พอใช้' : (d.total >= 61 ? 'ควรปรับปรุง' : 'ไม่ผ่าน'))));
+    }
+    function supObsBaseOk(d) {
+      return d.keys().hasOnly(['roundId', 'academicYear', 'term', 'templateVersion', 'teacherStaffId', 'teacherName', 'departmentId',
+                               'supervisorStaffId', 'supervisorName', 'courseCode', 'courseName', 'level', 'observedDate', 'observedTime',
+                               'scores', 'total', 'percent', 'band', 'assessmentMethod', 'strengths', 'improvements', 'comment', 'photos',
+                               'submitted', 'submittedAt', 'acknowledged', 'acknowledgedAt', 'teacherReply', 'createdAt', 'updatedAt'])
+        && d.keys().hasAll(['roundId', 'teacherStaffId', 'supervisorStaffId', 'departmentId', 'scores', 'submitted', 'acknowledged', 'templateVersion'])
+        && d.templateVersion == 1
+        && d.roundId is string && d.academicYear is string && d.term in ['1', '2'] && (d.academicYear + '_' + d.term) == d.roundId
+        && d.teacherStaffId is string && d.teacherStaffId != '' && d.supervisorStaffId is string
+        && d.departmentId is string
+        && d.teacherName is string && d.teacherName.size() <= 160 && d.supervisorName is string && d.supervisorName.size() <= 160
+        && d.courseCode is string && d.courseCode.size() <= 40 && d.courseName is string && d.courseName.size() <= 160
+        && d.level is string && d.level.size() <= 40
+        && d.observedDate is string && d.observedDate.size() <= 10 && d.observedTime is string && d.observedTime.size() <= 20
+        && supScoresShapeOk(d.scores)
+        && d.total is int && d.total >= 0 && d.total <= 100
+        && (d.percent == null || (d.percent is number && d.percent >= 0 && d.percent <= 100))
+        && (d.band == null || d.band in ['ดีมาก', 'ดี', 'พอใช้', 'ควรปรับปรุง', 'ไม่ผ่าน'])
+        && d.assessmentMethod is string && d.assessmentMethod.size() <= 300
+        && d.strengths is string && d.strengths.size() <= 2000
+        && d.improvements is string && d.improvements.size() <= 2000
+        && d.comment is string && d.comment.size() <= 2000
+        && d.photos is list && d.photos.size() <= 6
+        && d.submitted is bool && d.acknowledged is bool
+        && d.teacherReply is string && d.teacherReply.size() <= 1000;
+    }
+
+    match /supervision_rounds/{rid} {
+      allow read: if myStaffId() != '';
+      allow create: if supManage() && rid.matches('^[0-9]{4}_[12]$')
+                       && request.resource.data.keys().hasOnly(['academicYear', 'term', 'status', 'openedByStaffId', 'createdAt'])
+                       && request.resource.data.academicYear is string && request.resource.data.term in ['1', '2']
+                       && (request.resource.data.academicYear + '_' + request.resource.data.term) == rid
+                       && request.resource.data.status == 'OPEN'
+                       && request.resource.data.createdAt == request.time;
+      allow update: if supManage()
+                       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+                       && request.resource.data.status in ['OPEN', 'CLOSED'];
+      allow delete: if false;
+    }
+
+    match /supervision_assignments/{aid} {
+      allow read: if supManage() ||
+                     (myStaffId() != '' && (resource.data.supervisorStaffId == myStaffId() || resource.data.teacherStaffId == myStaffId()));
+      allow create: if supManage()
+                       && request.resource.data.keys().hasOnly(['roundId', 'teacherStaffId', 'supervisorStaffId', 'createdAt'])
+                       && request.resource.data.roundId is string && request.resource.data.teacherStaffId is string
+                       && request.resource.data.supervisorStaffId is string
+                       && request.resource.data.teacherStaffId != request.resource.data.supervisorStaffId
+                       && aid == request.resource.data.roundId + '_' + request.resource.data.teacherStaffId + '_' + request.resource.data.supervisorStaffId
+                       && supRoundOpen(request.resource.data.roundId)
+                       && exists(/databases/$(database)/documents/staff/$(request.resource.data.teacherStaffId))
+                       && exists(/databases/$(database)/documents/staff/$(request.resource.data.supervisorStaffId))
+                       && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if supManage();
+    }
+
+    match /supervision_observations/{oid} {
+      allow read: if myStaffId() != '' && (
+        resource.data.supervisorStaffId == myStaffId() ||
+        (resource.data.teacherStaffId == myStaffId() && resource.data.submitted == true) ||
+        hasRole('INSTRUCTIONAL_SUPERVISOR') ||
+        ((hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('EXECUTIVE')) && resource.data.submitted == true) ||
+        (resource.data.submitted == true && supInMyDept(resource.data.departmentId))
+      );
+
+      allow create: if myStaffId() != ''
+                       && (hasRole('SUPERVISORY_TEACHER') || hasRole('INSTRUCTIONAL_SUPERVISOR') || supExOfficio())
+                       && supObsBaseOk(request.resource.data)
+                       && request.resource.data.supervisorStaffId == myStaffId()
+                       && request.resource.data.teacherStaffId != myStaffId()
+                       && oid == request.resource.data.roundId + '_' + request.resource.data.teacherStaffId
+                       && supRoundOpen(request.resource.data.roundId)
+                       && request.resource.data.departmentId == supStaffDept(request.resource.data.teacherStaffId)
+                       && (exists(/databases/$(database)/documents/supervision_assignments/$(request.resource.data.roundId + '_' + request.resource.data.teacherStaffId + '_' + myStaffId()))
+                           || supInMyDept(request.resource.data.departmentId))
+                       && request.resource.data.acknowledged == false
+                       && !('acknowledgedAt' in request.resource.data)
+                       && request.resource.data.teacherReply == ''
+                       && request.resource.data.createdAt == request.time
+                       && request.resource.data.updatedAt == request.time
+                       && (request.resource.data.submitted == false
+                           ? !('submittedAt' in request.resource.data)
+                           : (supSubmittedOk(request.resource.data) && request.resource.data.submittedAt == request.time));
+
+      // ผู้นิเทศแก้ฉบับร่างของตนเอง / กดส่ง (ส่งแล้วล็อก)
+      allow update: if (
+          myStaffId() != '' && resource.data.supervisorStaffId == myStaffId()
+          && resource.data.submitted == false
+          && supRoundOpen(resource.data.roundId)
+          && supObsBaseOk(request.resource.data)
+          && request.resource.data.roundId == resource.data.roundId
+          && request.resource.data.teacherStaffId == resource.data.teacherStaffId
+          && request.resource.data.supervisorStaffId == resource.data.supervisorStaffId
+          && request.resource.data.departmentId == resource.data.departmentId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.acknowledged == false
+          && request.resource.data.teacherReply == ''
+          && request.resource.data.updatedAt == request.time
+          && (request.resource.data.submitted == false
+              ? !('submittedAt' in request.resource.data)
+              : (supSubmittedOk(request.resource.data) && request.resource.data.submittedAt == request.time))
+        ) || (
+          // ครูผู้รับการนิเทศ: กดรับทราบ + ความเห็นตอบกลับ (ครั้งเดียว หลังส่งแล้ว)
+          myStaffId() != '' && resource.data.teacherStaffId == myStaffId()
+          && resource.data.submitted == true && resource.data.acknowledged == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acknowledged', 'acknowledgedAt', 'teacherReply', 'updatedAt'])
+          && request.resource.data.acknowledged == true
+          && request.resource.data.acknowledgedAt == request.time
+          && request.resource.data.teacherReply is string && request.resource.data.teacherReply.size() <= 1000
+          && request.resource.data.updatedAt == request.time
+        );
+
+      allow delete: if myStaffId() != '' && resource.data.supervisorStaffId == myStaffId() && resource.data.submitted == false;
+    }
   }
 }
