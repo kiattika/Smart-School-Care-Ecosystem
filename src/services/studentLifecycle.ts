@@ -3,7 +3,7 @@
  * ทุกการเขียนเป็น transaction เดียว (students + student_id_registry ไปด้วยกัน) logic ล้วนอยู่ที่
  * src/lib/studentStatus.ts / studentIdRegistry.ts
  */
-import { doc, getDoc, runTransaction, serverTimestamp, Timestamp, type DocumentData } from 'firebase/firestore';
+import { doc, getDoc, runTransaction, serverTimestamp, Timestamp, writeBatch, type DocumentData } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import {
   statusFieldsFor, validateStatusChange, currentStatusReason, isStudentActive, type StudentStatusReason,
@@ -11,6 +11,8 @@ import {
 import {
   applyStatusChange, assignId, detectIdConflict, todayISO, type IdConflict, type RegistryEntry, type RegistryDoc,
 } from '../lib/studentIdRegistry';
+
+import { graduationDocId, validateGraduation } from '../lib/gradeRetake';
 
 const REGISTRY = 'student_id_registry';
 
@@ -119,4 +121,47 @@ export async function createStudentWithRegistry(args: { studentId: string; paylo
     }
     return { reassigned: reassign };
   });
+}
+
+/**
+ * งานทะเบียนวัดผล: อนุมัติจบหลักสูตรทั้งชั้นในครั้งเดียว — ต่อนักเรียน 1 คน เขียน 3 เอกสารในชุดเดียวกัน
+ * (graduation_approvals + students.status=GRADUATED + student_id_registry) นักเรียนที่จบจึงถูกซ่อนจากรายชื่อ (useRealStudents) ทันที
+ * ข้ามคนที่ไม่ได้ศึกษาอยู่แล้ว; แบ่งชุดละ ≤100 คน (300 เอกสาร < ขีดจำกัด 500)
+ */
+export async function graduateStudents(
+  items: Array<{ studentId: string; room: string }>,
+  meta: { level: string; academicYear: string; note: string },
+  by: { staffId: string; name: string },
+): Promise<{ graduated: number; skipped: number }> {
+  const uid = requireUid();
+  if (!by.staffId) throw new Error('บัญชีนี้ไม่ได้เชื่อมกับทะเบียนบุคลากร');
+  const err = validateGraduation({ studentId: items[0]?.studentId || '', level: meta.level, academicYear: meta.academicYear, note: meta.note });
+  if (err) throw new Error(err);
+  let graduated = 0, skipped = 0;
+  for (let i = 0; i < items.length; i += 100) {
+    const chunk = items.slice(i, i + 100);
+    const snaps = await Promise.all(chunk.map(async it => {
+      const [st, reg] = await Promise.all([getDoc(doc(db, 'students', it.studentId)), getDoc(doc(db, REGISTRY, it.studentId))]);
+      return { it, st, reg };
+    }));
+    const b = writeBatch(db);
+    for (const { it, st, reg } of snaps) {
+      if (!st.exists() || !isStudentActive(st.data())) { skipped++; continue; }
+      const data = st.data();
+      const note = `จบหลักสูตร ${meta.level} ปีการศึกษา ${meta.academicYear}`;
+      const entries = applyStatusChange(entriesOf(reg.data()), {
+        heldBy: holderName(data), previous: data, target: 'GRADUATED', at: todayISO(), knownFrom: toISODate(data.createdAt),
+      });
+      b.set(doc(db, 'graduation_approvals', graduationDocId(it.studentId, meta.level)), {
+        studentId: it.studentId, studentUid: typeof data.studentUid === 'string' ? data.studentUid : '', parentUid: typeof data.parentUid === 'string' && data.parentUid ? data.parentUid : null,
+        room: String(data.room || ''), level: meta.level, academicYear: meta.academicYear, note: meta.note.trim(),
+        approvedByStaffId: by.staffId, approvedByName: by.name.slice(0, 160), approvedAt: serverTimestamp(),
+      });
+      b.update(doc(db, 'students', it.studentId), { ...statusFieldsFor('GRADUATED', note, uid), statusChangedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      b.set(doc(db, REGISTRY, it.studentId), { studentId: it.studentId, entries, updatedAt: serverTimestamp() }, { merge: true });
+      graduated++;
+    }
+    if (snaps.some(x => x.st.exists() && isStudentActive(x.st.data()))) await b.commit();
+  }
+  return { graduated, skipped };
 }

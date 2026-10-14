@@ -152,6 +152,29 @@ service cloud.firestore {
                        (
                          isSelfStudent(studentId) &&
                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['photoUrl', 'photoUpdatedAt'])
+                       ) ||
+                       // งานทะเบียนวัดผล (ตัวจริง): ซ่อนนักเรียนที่จบ — แตะได้เฉพาะฟิลด์สถานะ และต้องมี graduation_approvals ของนักเรียนคนนี้ในชุดเขียนเดียวกัน
+                       (
+                         hasRole('REGISTRAR') &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusReason', 'statusNote', 'statusChangedAt', 'statusChangedBy', 'updatedAt']) &&
+                         request.resource.data.status == 'INACTIVE' && request.resource.data.statusReason == 'GRADUATED' &&
+                         request.resource.data.statusChangedBy == request.auth.uid &&
+                         request.resource.data.statusChangedAt == request.time &&
+                         existsAfter(/databases/$(database)/documents/graduation_approvals/$(studentId + '_' + resource.data.get('room', '')[0:3]))
+                       ) ||
+                       // งานทะเบียนวัดผล/ผู้ช่วย: ดำเนินการย้ายห้องที่คณะกรรมการอนุมัติแล้ว (room_transfers.status APPROVED → APPLIED ในชุดเขียนเดียวกัน)
+                       (
+                         regAny() &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['room', 'houseId', 'roomTransferId', 'updatedAt']) &&
+                         request.resource.data.roomTransferId is string &&
+                         exists(/databases/$(database)/documents/room_transfers/$(request.resource.data.roomTransferId)) &&
+                         get(/databases/$(database)/documents/room_transfers/$(request.resource.data.roomTransferId)).data.status == 'APPROVED' &&
+                         existsAfter(/databases/$(database)/documents/room_transfers/$(request.resource.data.roomTransferId)) &&
+                         getAfter(/databases/$(database)/documents/room_transfers/$(request.resource.data.roomTransferId)).data.status == 'APPLIED' &&
+                         get(/databases/$(database)/documents/room_transfers/$(request.resource.data.roomTransferId)).data.studentId == studentId &&
+                         resource.data.get('room', '') == get(/databases/$(database)/documents/room_transfers/$(request.resource.data.roomTransferId)).data.fromRoom &&
+                         request.resource.data.room == get(/databases/$(database)/documents/room_transfers/$(request.resource.data.roomTransferId)).data.toRoom &&
+                         request.resource.data.get('houseId', null) == get(/databases/$(database)/documents/room_transfers/$(request.resource.data.roomTransferId)).data.toHouseId
                        );
     }
 
@@ -159,11 +182,11 @@ service cloud.firestore {
     // ประวัติผู้ถือเลข — เขียนโดยแอดมิน/ครูประจำชั้นผ่านการเปลี่ยนสถานะ/เพิ่มนักเรียนเท่านั้น; ห้ามลบ และห้ามทำให้ประวัติสั้นลง
     // (ข้อมูลระบุตัวบุคคล → อ่านได้เฉพาะ SUPER_ADMIN/HOMEROOM_TEACHER ไม่เปิด bare isSignedIn())
     match /student_id_registry/{registryId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
-      allow create: if (hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER')) &&
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('REGISTRAR');
+      allow create: if ((hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER')) || regGraduating(registryId)) &&
                        request.resource.data.studentId == registryId &&
                        request.resource.data.entries is list;
-      allow update: if (hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER')) &&
+      allow update: if ((hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER')) || regGraduating(registryId)) &&
                        request.resource.data.studentId == resource.data.studentId &&
                        request.resource.data.entries is list &&
                        request.resource.data.entries.size() >= resource.data.entries.size();
@@ -2250,6 +2273,10 @@ service cloud.firestore {
     // ไม่ทับ/ไม่แก้ gradebook_scores ของครู — แสดงคู่กัน และเกรดเฉลี่ยใช้เกรดใหม่ (คำนวณฝั่งหน้าเว็บ)
     function regAny() { return hasRole('SUPER_ADMIN') || hasRole('REGISTRAR') || hasRole('REGISTRAR_ASSISTANT'); }
     function regFull() { return hasRole('SUPER_ADMIN') || hasRole('REGISTRAR'); }
+    // งานทะเบียน (ตัวจริง) อัปเดตทะเบียนเลขประจำตัวได้เฉพาะตอนอนุมัติจบของนักเรียนคนนั้นในชุดเขียนเดียวกัน
+    function regGraduating(sid) {
+      return hasRole('REGISTRAR') && existsAfter(/databases/$(database)/documents/graduation_approvals/$(sid + '_' + studentField(sid, 'room', '')[0:3]));
+    }
     function regReadScope(sid, room) {
       return regAny() || hasRole('EXECUTIVE') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('ACADEMIC_HEAD')
         || isHomeroomTeacherOf(room) || isSelfStudent(sid) || isParentOfStudent(sid);
@@ -2305,6 +2332,52 @@ service cloud.firestore {
                        && request.resource.data.approvedByName is string && request.resource.data.approvedByName.size() <= 160
                        && request.resource.data.approvedAt == request.time;
       allow update, delete: if false;
+    }
+
+    // ย้ายห้อง: ยื่นคำขอ (งานทะเบียน/ผู้ช่วย) → บันทึกมติคณะกรรมการ (งานทะเบียนตัวจริง) → ดำเนินการย้าย (อัปเดต students ในชุดเขียนเดียวกัน)
+    // ประวัติห้อง/คณะสีเดิมเก็บในเอกสารนี้ — ไม่ลบ/ไม่แก้ย้อนหลัง
+    match /room_transfers/{tid} {
+      allow read: if regAny() || hasRole('EXECUTIVE') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('ACADEMIC_HEAD')
+                     || isHomeroomTeacherOf(resource.data.fromRoom) || isHomeroomTeacherOf(resource.data.toRoom);
+      allow create: if regAny() && myStaffId() != ''
+                       && request.resource.data.keys().hasOnly(['studentId','studentName','fromRoom','toRoom','fromHouseId','toHouseId','reason','status','requestedByStaffId','requestedByName','createdAt','updatedAt'])
+                       && request.resource.data.studentId is string
+                       && exists(/databases/$(database)/documents/students/$(request.resource.data.studentId))
+                       && request.resource.data.fromRoom == studentField(request.resource.data.studentId, 'room', '')
+                       && request.resource.data.fromHouseId == studentField(request.resource.data.studentId, 'houseId', null)
+                       && request.resource.data.toRoom is string && request.resource.data.toRoom.size() > 0 && request.resource.data.toRoom != request.resource.data.fromRoom
+                       && (request.resource.data.toHouseId == null || request.resource.data.toHouseId is string)
+                       && request.resource.data.studentName is string && request.resource.data.studentName.size() <= 160
+                       && request.resource.data.reason is string && request.resource.data.reason.size() > 0 && request.resource.data.reason.size() <= 500
+                       && request.resource.data.status == 'PENDING'
+                       && request.resource.data.requestedByStaffId == myStaffId()
+                       && request.resource.data.requestedByName is string && request.resource.data.requestedByName.size() <= 160
+                       && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      allow update: if myStaffId() != '' && (
+        // บันทึกมติคณะกรรมการ (ตัวจริงเท่านั้น)
+        (regFull() && resource.data.status == 'PENDING'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','decisionCommittee','decisionDate','decisionNote','decidedByStaffId','decidedByName','decidedAt','updatedAt'])
+          && request.resource.data.status in ['APPROVED', 'REJECTED']
+          && request.resource.data.decisionCommittee is string && request.resource.data.decisionCommittee.size() > 0 && request.resource.data.decisionCommittee.size() <= 300
+          && request.resource.data.decisionDate is string && request.resource.data.decisionDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.decisionNote is string && request.resource.data.decisionNote.size() <= 500
+          && request.resource.data.decidedByStaffId == myStaffId()
+          && request.resource.data.decidedByName is string && request.resource.data.decidedByName.size() <= 160
+          && request.resource.data.decidedAt == request.time && request.resource.data.updatedAt == request.time)
+        ||
+        // ดำเนินการย้าย (ต้องย้ายนักเรียนจริงในชุดเขียนเดียวกัน)
+        (regAny() && resource.data.status == 'APPROVED'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','effectiveDate','appliedByStaffId','appliedByName','appliedAt','updatedAt'])
+          && request.resource.data.status == 'APPLIED'
+          && request.resource.data.effectiveDate is string && request.resource.data.effectiveDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          && request.resource.data.appliedByStaffId == myStaffId()
+          && request.resource.data.appliedByName is string && request.resource.data.appliedByName.size() <= 160
+          && request.resource.data.appliedAt == request.time && request.resource.data.updatedAt == request.time
+          && existsAfter(/databases/$(database)/documents/students/$(resource.data.studentId))
+          && getAfter(/databases/$(database)/documents/students/$(resource.data.studentId)).data.room == resource.data.toRoom
+          && getAfter(/databases/$(database)/documents/students/$(resource.data.studentId)).data.roomTransferId == tid)
+      );
+      allow delete: if false;
     }
   }
 }
