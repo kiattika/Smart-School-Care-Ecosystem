@@ -1,3 +1,4 @@
+import { countPeriodsPerWeek } from '../../lib/subjectCode';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Printer, Info } from 'lucide-react';
 import { useTeacherFirestoreSchedule } from '../../hooks/useTeacherFirestoreSchedule';
@@ -35,10 +36,16 @@ export function StudentGradeReport({ studentId, studentName, room }: { studentId
 
   const terms = useMemo(() => termOptions(scores, sem.loading ? undefined : currentTerm), [scores, sem.loading, currentTerm]);
   const term = terms.includes(picked) ? picked : terms[0] || '';
-  const courses: CourseInfo[] = useMemo(() => (schedules as any[])
-    .filter(s => isScheduleForRoom(s, room))
-    .map(s => ({ code: String(s.subjectCode || s.courseCode || ''), name: String(s.subjectName || s.courseName || ''), credits: typeof s.credits === 'number' ? s.credits : undefined, subjectType: s.subjectType || s.type })),
-  [schedules, room]);
+  const courses: CourseInfo[] = useMemo(() => {
+    const mine = (schedules as any[]).filter(s => isScheduleForRoom(s, room));
+    const slotsByCode = new Map<string, any[]>();
+    for (const s of mine) { const k = String(s.subjectCode || s.courseCode || '').trim(); if (k) slotsByCode.set(k, [...(slotsByCode.get(k) || []), s]); }
+    return mine.map(s => {
+      const code = String(s.subjectCode || s.courseCode || '');
+      const periods = countPeriodsPerWeek(slotsByCode.get(code.trim()) || []);
+      return { code, name: String(s.subjectName || s.courseName || ''), credits: typeof s.credits === 'number' ? s.credits : undefined, subjectType: s.subjectType || s.type, periods: periods || undefined };
+    });
+  }, [schedules, room]);
   const rows = useMemo(() => buildGradeRows({ term, scores, courses, includeSchedule: term === currentTerm }), [term, scores, courses, currentTerm]);
   const sum = useMemo(() => summarizeGrades(rows), [rows]);
 

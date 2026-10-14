@@ -446,7 +446,7 @@ describe('Teacher Load Report Parser (รายงานภาระงานส
         subjectName: 'คณิตศาสตร์เพิ่มเติม',
         room: '943',
         level: 'M.5/8',
-        credits: 1.5,
+        credits: 2, // 4 คาบ/สัปดาห์ × 0.5
         teacherIds: ['teacher-kiattisak-uid'],
         teacherId: 'teacher-kiattisak-uid',
         teacherEmail: 'kiattisak@utd.ac.th',

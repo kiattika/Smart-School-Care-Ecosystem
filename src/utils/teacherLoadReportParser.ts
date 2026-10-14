@@ -1,3 +1,4 @@
+import { importCredits } from '../lib/subjectCode';
 import { scheduleDocIdFor, primaryTeacherKey, type ScheduleSemester } from '../lib/scheduleSyncReplace';
 
 export type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
@@ -590,7 +591,7 @@ export function generateScheduleDocuments(
         subjectName: row.subjectName,
         room: row.room || '',
         level: row.level || '',
-        credits: 1.5,
+        credits: importCredits(row.subjectCode, row.subjectType, row.slots),
         teacherIds: newTeacherId ? [newTeacherId] : [],
         teacherId: newTeacherId,
         teacherEmail: row.matchedTeacherEmail || row.teacherEmail || null,

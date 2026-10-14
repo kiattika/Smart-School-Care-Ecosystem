@@ -3,6 +3,7 @@
  * ⚠️ คะแนนยังไม่ผ่านการอนุมัติ — คะแนนทางการให้ติดตามผ่านโปรแกรม SGS ของโรงเรียน (ข้อความ GRADE_REPORT_DISCLAIMER ต้องแสดงทุกที่ที่แสดงรายงานนี้)
  */
 import { courseKindOf } from './teachingProject';
+import { effectiveCredits } from './subjectCode';
 
 export const GRADE_REPORT_DISCLAIMER =
   'หมายเหตุ: รายงานนี้เป็นคะแนนอย่างไม่เป็นทางการที่ยังไม่ได้รับการอนุมัติ — คะแนนอย่างเป็นทางการให้ติดตามผ่านโปรแกรม SGS ของโรงเรียน';
@@ -37,7 +38,7 @@ export interface ScoreDoc {
 }
 
 /** วิชาในตารางเรียนของห้อง (จาก schedules) ใช้เติมชื่อ/หน่วยกิตและแสดงวิชาที่ยังไม่มีคะแนน */
-export interface CourseInfo { code: string; name: string; credits?: number; subjectType?: string }
+export interface CourseInfo { code: string; name: string; credits?: number; subjectType?: string; /** คาบรวม/สัปดาห์ของรหัสนี้ในห้อง — ใช้คำนวณหน่วยกิต (1 คาบ = 0.5) */ periods?: number }
 
 export interface GradeRow {
   code: string;
@@ -95,7 +96,8 @@ export function buildGradeRows(input: {
     const name = s?.courseName || c?.name || code;
     if (courseKindOf({ code, name }) === 'EXEMPT') continue;
     const isActivity = s?.passFailResult != null || s?.subjectType === 'ACTIVITY' || courseKindOf({ code, name, subjectType: c?.subjectType }) === 'ACTIVITY';
-    const credits = num(s?.credits) ?? num(c?.credits);
+    // วิชากิจกรรม (ก)/เฉพาะกิจไม่มีหน่วยกิต; วิชาปกติคำนวณจากคาบ/สัปดาห์ ไม่รู้ค่อยใช้ค่าที่เก็บไว้
+    const credits = isActivity ? null : effectiveCredits({ code, subjectType: c?.subjectType, periodsPerWeek: c?.periods, stored: num(s?.credits) ?? num(c?.credits) });
     const max = { pre: num(s?.maxPreMidterm), mid: num(s?.maxMidterm), post: num(s?.maxPostMidterm), final: num(s?.maxFinal) };
     const maxKnown = max.pre !== null && max.mid !== null && max.post !== null && max.final !== null;
     const maxTotal = maxKnown ? max.pre! + max.mid! + max.post! + max.final! : null;

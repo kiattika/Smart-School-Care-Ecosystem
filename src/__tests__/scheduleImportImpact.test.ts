@@ -37,7 +37,7 @@ const existingMain = (teacherIds: string[], over: Record<string, any> = {}) => (
   data: {
     academicYear: '2569', term: '1',
     subjectCode: 'ค32101', subjectName: 'คณิตศาสตร์พื้นฐาน', room: '943', level: 'M.5/8', department: 'คณิตศาสตร์',
-    subjectType: 'MAIN', dayOfWeek: 'monday', periodNumber: 6, credits: 1.5,
+    subjectType: 'MAIN', dayOfWeek: 'monday', periodNumber: 6, credits: 0.5,
     teacherId: teacherIds[0] ?? null, teacherIds, ...over,
   },
 });
