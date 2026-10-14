@@ -5354,4 +5354,99 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(mDeleteDoc(mDoc(fund(), 'fund_interests/p1_11111')));
     });
   });
+
+  describe('internship_settings / internship_requests (คำร้องขอฝึกงาน)', () => {
+    const gc = () => asUser('gc-1', ['GUIDANCE_COUNSELOR'], { staffId: 'gc-1' }).firestore();
+    const stu = () => asUser('uid-stu', ['STUDENT']).firestore();
+    const stuOther = () => asUser('uid-stu2', ['STUDENT']).firestore();
+    const par = () => asUser('uid-par', ['PARENT']).firestore();
+    const teacher = () => asUser('t-1', ['SUBJECT_TEACHER'], { staffId: 't-1' }).firestore();
+    const PERIOD = { id: 'p1', label: 'ปิดภาคเรียนที่ 1', startYmd: '2026-10-01', endYmd: '2026-10-20' };
+    const settings = (o: Record<string, unknown> = {}) => ({
+      periods: [PERIOD], purposeText: 'เพื่อเรียนรู้การทำงานจริง', acceptanceFormText: 'แบบตอบรับ', signerName: 'ผอ.', signerPosition: 'ผู้อำนวยการ',
+      registrationEnabled: true, registrationOpensAt: null, registrationClosesAt: new Date(Date.now() + 7 * 86400000),
+      updatedByStaffId: 'gc-1', updatedAt: mServerTimestamp(), ...o,
+    });
+    const req = (o: Record<string, unknown> = {}) => ({
+      studentId: '11111', studentUid: 'uid-stu', studentName: 'เด็กหนึ่ง', room: 'ม.5/1', companyName: 'บริษัท ก', companyAddress: '1 ถ.หลัก',
+      headName: 'นายผู้จัดการ', headPosition: 'กรรมการผู้จัดการ', periodId: 'p1', periodLabel: PERIOD.label, startYmd: PERIOD.startYmd, endYmd: PERIOD.endYmd,
+      status: 'SUBMITTED', createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(), ...o,
+    });
+    async function seed(settingsDoc: Record<string, unknown> | null = { ...settings(), updatedAt: new Date() }, requests: Record<string, Record<string, unknown>> = {}) {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await db.doc('students/11111').set({ studentId: '11111', name: 'เด็กหนึ่ง', room: 'ม.5/1', studentUid: 'uid-stu', parentUid: 'uid-par' });
+        await db.doc('students/22222').set({ studentId: '22222', name: 'เด็กสอง', room: 'ม.5/2', studentUid: 'uid-stu2' });
+        if (settingsDoc) await db.doc('internship_settings/current').set(settingsDoc);
+        for (const [id, r] of Object.entries(requests)) await db.doc(`internship_requests/${id}`).set(r);
+      });
+    }
+    const stored = (o: Record<string, unknown> = {}) => ({ ...req({ createdAt: new Date(), updatedAt: new Date() }), ...o });
+
+    it('งานแนะแนวตั้งค่าได้ — ครูอื่น/นักเรียนเขียนไม่ได้ และ id ต้องเป็น current', async () => {
+      await seed(null);
+      await assertSucceeds(mSetDoc(mDoc(gc(), 'internship_settings/current'), settings()));
+      await assertFails(mSetDoc(mDoc(teacher(), 'internship_settings/current'), settings()));
+      await assertFails(mSetDoc(mDoc(stu(), 'internship_settings/current'), settings()));
+      await assertFails(mSetDoc(mDoc(gc(), 'internship_settings/other'), settings()));
+    });
+
+    it('นักเรียน/ผู้ปกครองอ่านการตั้งค่าได้ แต่ครูวิชาอื่นอ่านไม่ได้', async () => {
+      await seed();
+      await assertSucceeds(mGetDoc(mDoc(stu(), 'internship_settings/current')));
+      await assertSucceeds(mGetDoc(mDoc(par(), 'internship_settings/current')));
+      await assertFails(mGetDoc(mDoc(teacher(), 'internship_settings/current')));
+    });
+
+    it('นักเรียนยื่นคำร้องของตนได้ขณะเปิดรับ — ยื่นแทนคนอื่น/ช่วงที่ไม่มีในตั้งค่า/ตอนปิดรับไม่ได้', async () => {
+      await seed();
+      await assertSucceeds(mSetDoc(mDoc(stu(), 'internship_requests/11111'), req()));
+      await assertFails(mSetDoc(mDoc(stuOther(), 'internship_requests/11111'), req()));
+      await assertFails(mSetDoc(mDoc(stuOther(), 'internship_requests/22222'), req({ studentId: '22222', studentUid: 'uid-stu2', periodLabel: 'ช่วงปลอม' })));
+      await assertFails(mSetDoc(mDoc(par(), 'internship_requests/11111'), req()));
+    });
+
+    it('ปิดรับคำร้องแล้วยื่นไม่ได้', async () => {
+      await seed({ ...settings(), updatedAt: new Date(), registrationEnabled: false });
+      await assertFails(mSetDoc(mDoc(stu(), 'internship_requests/11111'), req()));
+    });
+
+    it('นักเรียนแก้/ยกเลิกคำร้องที่รอพิจารณาได้ และยื่นใหม่หลังถูกปฏิเสธ — แต่แก้คำร้องที่อนุมัติแล้วไม่ได้', async () => {
+      await seed(undefined, { '11111': stored(), '22222': stored({ studentId: '22222', studentUid: 'uid-stu2', status: 'APPROVED' }) });
+      await assertSucceeds(mUpdateDoc(mDoc(stu(), 'internship_requests/11111'), { companyName: 'บริษัท ข', status: 'SUBMITTED', updatedAt: mServerTimestamp() }));
+      await assertSucceeds(mUpdateDoc(mDoc(stu(), 'internship_requests/11111'), { status: 'CANCELLED', updatedAt: mServerTimestamp() }));
+      await assertSucceeds(mUpdateDoc(mDoc(stu(), 'internship_requests/11111'), { companyName: 'บริษัท ค', status: 'SUBMITTED', updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(mDoc(stuOther(), 'internship_requests/22222'), { companyName: 'แก้', status: 'SUBMITTED', updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(mDoc(stuOther(), 'internship_requests/22222'), { status: 'CANCELLED', updatedAt: mServerTimestamp() }));
+    });
+
+    it('นักเรียนอนุมัติตัวเองไม่ได้ และแก้ฟิลด์ของงานแนะแนวไม่ได้', async () => {
+      await seed(undefined, { '11111': stored() });
+      await assertFails(mUpdateDoc(mDoc(stu(), 'internship_requests/11111'), { status: 'APPROVED', updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(mDoc(stu(), 'internship_requests/11111'), { letterNo: 'ศธ 1', status: 'SUBMITTED', updatedAt: mServerTimestamp() }));
+    });
+
+    it('งานแนะแนวอนุมัติ/ไม่อนุมัติได้ และอนุมัติแล้วแก้เลขที่หนังสือได้ — ครูอื่นทำไม่ได้', async () => {
+      await seed(undefined, { '11111': stored(), '22222': stored({ studentId: '22222', studentUid: 'uid-stu2' }) });
+      const dec = (status: string, o: Record<string, unknown> = {}) => ({ status, staffNote: '', letterNo: 'ศธ 1/2569', letterDateYmd: '2026-10-15', decidedByStaffId: 'gc-1', decidedByName: 'ครูแนะแนว', updatedAt: mServerTimestamp(), ...o });
+      await assertFails(mUpdateDoc(mDoc(teacher(), 'internship_requests/11111'), dec('APPROVED', { decidedByStaffId: 't-1' })));
+      await assertFails(mUpdateDoc(mDoc(gc(), 'internship_requests/11111'), dec('APPROVED', { decidedByStaffId: 'someone-else' })));
+      await assertSucceeds(mUpdateDoc(mDoc(gc(), 'internship_requests/11111'), dec('APPROVED')));
+      await assertSucceeds(mUpdateDoc(mDoc(gc(), 'internship_requests/11111'), dec('APPROVED', { letterNo: 'ศธ 2/2569' })));
+      await assertFails(mUpdateDoc(mDoc(gc(), 'internship_requests/11111'), dec('REJECTED')));
+      await assertSucceeds(mUpdateDoc(mDoc(gc(), 'internship_requests/22222'), dec('REJECTED', { staffNote: 'ช่วงไม่เหมาะสม' })));
+      await assertFails(mUpdateDoc(mDoc(gc(), 'internship_requests/22222'), dec('APPROVED')));
+    });
+
+    it('อ่านได้เฉพาะเจ้าของ/ผู้ปกครอง/งานแนะแนว — ลบไม่ได้', async () => {
+      await seed(undefined, { '11111': stored() });
+      await assertSucceeds(mGetDoc(mDoc(stu(), 'internship_requests/11111')));
+      await assertSucceeds(mGetDoc(mDoc(par(), 'internship_requests/11111')));
+      await assertSucceeds(mGetDoc(mDoc(gc(), 'internship_requests/11111')));
+      await assertFails(mGetDoc(mDoc(stuOther(), 'internship_requests/11111')));
+      await assertFails(mGetDoc(mDoc(teacher(), 'internship_requests/11111')));
+      await assertFails(mDeleteDoc(mDoc(gc(), 'internship_requests/11111')));
+      await assertFails(mDeleteDoc(mDoc(stu(), 'internship_requests/11111')));
+    });
+  });
 });

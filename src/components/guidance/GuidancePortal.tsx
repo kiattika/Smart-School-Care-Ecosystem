@@ -4,6 +4,7 @@ import { useRealStudents } from '../../hooks/useRealStudents';
 import { useGuidanceScreenings } from '../../hooks/useGuidanceScreenings';
 import { StudentPicker } from '../shared/StudentPicker';
 import { AppointmentInbox } from '../appointments/AppointmentInbox';
+import { GuidanceInternshipSection } from '../internship/GuidanceInternshipSection';
 import { SdqTrendSection } from './SdqTrendSection';
 import { isLegacySdqCriteria } from '../../lib/sdq';
 import { filterSdqByYear, buildSdqTrend } from '../../lib/sdqTrend';
@@ -42,7 +43,7 @@ export function GuidancePortal() {
   // 9Q/8Q (คัดกรองซึมเศร้า/ฆ่าตัวตาย — แทน PHQ-9 สากลเดิม) สด real-time + สถานะ "มีครูแนะแนวที่ใช้งานอยู่"
   const { records: screeningRecords, loading: depressionLoading, error: depressionError } = useGuidanceScreeningRecords();
   const guidanceStatus = useGuidanceStatus();
-  const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'depression' | 'appointments' | 'tcas'>('cases');
+  const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'depression' | 'appointments' | 'internship' | 'tcas'>('cases');
   // คำขอนัดพบจากผู้ปกครองที่ขอพบ "ครูแนะแนว" — real-time (rules: GUIDANCE_COUNSELOR + recipient == GUIDANCE)
   const [guidanceAppointments, setGuidanceAppointments] = useState<import('../../types').ParentAppointment[]>([]);
   useEffect(() => {
@@ -235,6 +236,7 @@ export function GuidancePortal() {
             { id: 'sdq', label: 'ผลประเมิน SDQ และ EQ นักเรียน', icon: ShieldAlert },
             { id: 'depression', label: 'คัดกรองซึมเศร้า 2Q/9Q/8Q', icon: HeartHandshake },
             { id: 'appointments', label: `นัดพบผู้ปกครอง (${guidanceAppointments.filter(a => a.status === 'REQUESTED').length})`, icon: Calendar },
+            { id: 'internship', label: 'คำร้องขอฝึกงานและหนังสือราชการ', icon: FileText },
             { id: 'tcas', label: 'ระบบแนะแนวอาชีพและ TCAS พอร์ตโฟลิโอ', icon: Award },
           ]}
         >
@@ -478,6 +480,8 @@ export function GuidancePortal() {
         {activeTab === 'appointments' && (
           <AppointmentInbox appointments={guidanceAppointments} students={students} />
         )}
+
+        {activeTab === 'internship' && <GuidanceInternshipSection />}
 
         {activeTab === 'tcas' && (
           <div className="space-y-4">

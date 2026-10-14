@@ -29,6 +29,7 @@ import {
   AlertTriangle,
   Users,
   Landmark,
+  Briefcase,
   CalendarDays
 } from 'lucide-react';
 
@@ -40,6 +41,7 @@ import { ParentPortfolioView } from './components/portfolio/ParentPortfolioView'
 import { AcademicHomeworkModule } from './components/student-parent/AcademicHomeworkModule';
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
 import { StudentFundsSection } from './components/funds/StudentFundsSection';
+import { StudentInternshipSection } from './components/internship/StudentInternshipSection';
 import { FamilyHomeVisitInfoForm } from './components/homevisit/FamilyHomeVisitInfoForm';
 import { ClassChatMemberView, useMemberThreads } from './components/chat/ClassChatPanel';
 import { isThreadUnread } from './lib/classChat';
@@ -83,7 +85,7 @@ export function ParentPortal() {
   const bScore = student?.behaviorScore;
   
   const [activeTab, setActiveTab] = useState<
-    'timeline' | 'gate' | 'health' | 'behavior' | 'portfolio' | 'academic' | 'billing' | 'chat' | 'appointment' | 'family' | 'scholarship' | 'loan'
+    'timeline' | 'gate' | 'health' | 'behavior' | 'portfolio' | 'academic' | 'billing' | 'chat' | 'appointment' | 'family' | 'scholarship' | 'loan' | 'internship'
   >('timeline');
 
 
@@ -186,6 +188,7 @@ export function ParentPortal() {
           { id: 'family', label: '9. ข้อมูลครอบครัว (เยี่ยมบ้าน)', icon: Users },
           { id: 'scholarship', label: '10. ทุนการศึกษา', icon: Award },
           { id: 'loan', label: '11. กองทุนกู้ยืม (กยศ.)', icon: Landmark },
+          { id: 'internship', label: '12. คำร้องขอฝึกงาน (ดูสถานะ)', icon: Briefcase },
         ]}>
       {/* Main Content View */}
       <div className="transition-all duration-300">
@@ -406,6 +409,10 @@ export function ParentPortal() {
 
         {(activeTab === 'scholarship' || activeTab === 'loan') && (
           <StudentFundsSection readOnly kind={activeTab === 'scholarship' ? 'SCHOLARSHIP' : 'STUDENT_LOAN'} student={{ studentId: student.studentId, name: student.name }} />
+        )}
+
+        {activeTab === 'internship' && (
+          <StudentInternshipSection readOnly student={{ studentId: student.studentId, name: student.name }} />
         )}
 
         {activeTab === 'family' && user?.uid && (

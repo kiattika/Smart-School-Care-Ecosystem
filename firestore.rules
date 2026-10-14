@@ -2643,5 +2643,88 @@ service cloud.firestore {
                        );
       allow delete: if false;
     }
+    // ===== คำร้องขอฝึกงาน (src/lib/internship.ts) — งานแนะแนวตั้งค่า/อนุมัติ, นักเรียนยื่นเอง =====
+    // internship_settings/current: ช่วงฝึกงาน, ข้อความเหตุผล, แบบหนังสือตอบรับ, ช่วงเวลารับคำร้อง (เขียนได้เฉพาะแนะแนว/แอดมิน)
+    // internship_requests/{studentId}: 1 คำร้องต่อนักเรียน; ช่วงฝึกงานต้องตรง (id,label,startYmd,endYmd) กับที่ตั้งไว้ใน settings
+    function guidanceStaff() { return hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR'); }
+    function internshipSettings() { return get(/databases/$(database)/documents/internship_settings/current).data; }
+    function internshipOpen() {
+      let s = internshipSettings();
+      return s.registrationEnabled == true
+        && (s.get('registrationOpensAt', null) == null || request.time >= s.registrationOpensAt)
+        && (s.get('registrationClosesAt', null) == null || request.time < s.registrationClosesAt);
+    }
+    function internshipBodyOk(d) {
+      return d.companyName is string && d.companyName.size() >= 1 && d.companyName.size() <= 200
+        && d.companyAddress is string && d.companyAddress.size() >= 1 && d.companyAddress.size() <= 500
+        && d.headName is string && d.headName.size() >= 1 && d.headName.size() <= 160
+        && d.headPosition is string && d.headPosition.size() >= 1 && d.headPosition.size() <= 160
+        && {'id': d.periodId, 'label': d.periodLabel, 'startYmd': d.startYmd, 'endYmd': d.endYmd} in internshipSettings().periods;
+    }
+
+    match /internship_settings/{sid} {
+      allow read: if guidanceStaff() || hasRole('STUDENT') || hasRole('PARENT');
+      allow create, update: if guidanceStaff() && sid == 'current'
+        && request.resource.data.keys().hasOnly(['periods', 'purposeText', 'acceptanceFormText', 'signerName', 'signerPosition',
+             'registrationEnabled', 'registrationOpensAt', 'registrationClosesAt', 'updatedByStaffId', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['periods', 'purposeText', 'acceptanceFormText', 'signerName', 'signerPosition',
+             'registrationEnabled', 'registrationOpensAt', 'registrationClosesAt', 'updatedByStaffId', 'updatedAt'])
+        && request.resource.data.periods is list && request.resource.data.periods.size() <= 10
+        && request.resource.data.purposeText is string && request.resource.data.purposeText.size() <= 1000
+        && request.resource.data.acceptanceFormText is string && request.resource.data.acceptanceFormText.size() <= 2000
+        && request.resource.data.signerName is string && request.resource.data.signerName.size() <= 160
+        && request.resource.data.signerPosition is string && request.resource.data.signerPosition.size() <= 160
+        && request.resource.data.registrationEnabled is bool
+        && (request.resource.data.registrationOpensAt == null || request.resource.data.registrationOpensAt is timestamp)
+        && (request.resource.data.registrationClosesAt == null || request.resource.data.registrationClosesAt is timestamp)
+        && request.resource.data.updatedByStaffId == myStaffId()
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /internship_requests/{studentId} {
+      allow read: if guidanceStaff() || isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId);
+      allow create: if isSelfStudent(studentId)
+        && request.resource.data.keys().hasOnly(['studentId', 'studentUid', 'studentName', 'room', 'companyName', 'companyAddress', 'headName', 'headPosition',
+             'periodId', 'periodLabel', 'startYmd', 'endYmd', 'status', 'createdAt', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['studentId', 'studentUid', 'studentName', 'room', 'companyName', 'companyAddress', 'headName', 'headPosition',
+             'periodId', 'periodLabel', 'startYmd', 'endYmd', 'status', 'createdAt', 'updatedAt'])
+        && request.resource.data.studentId == studentId
+        && request.resource.data.studentUid == studentField(studentId, 'studentUid', '__none__')
+        && request.resource.data.room == studentField(studentId, 'room', '')
+        && request.resource.data.studentName is string && request.resource.data.studentName.size() <= 160
+        && request.resource.data.status == 'SUBMITTED'
+        && internshipOpen() && internshipBodyOk(request.resource.data)
+        && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      allow update: if (
+          // นักเรียนยกเลิกคำร้องที่ยังรอพิจารณา
+          isSelfStudent(resource.data.studentId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          && resource.data.status == 'SUBMITTED' && request.resource.data.status == 'CANCELLED'
+          && request.resource.data.updatedAt == request.time
+        ) || (
+          // นักเรียนแก้คำร้องที่รอพิจารณา หรือยื่นใหม่หลังถูกปฏิเสธ/ยกเลิก (เฉพาะช่วงที่เปิดรับ)
+          isSelfStudent(resource.data.studentId)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['companyName', 'companyAddress', 'headName', 'headPosition',
+               'periodId', 'periodLabel', 'startYmd', 'endYmd', 'status', 'updatedAt'])
+          && ((resource.data.status == 'SUBMITTED' && request.resource.data.status == 'SUBMITTED')
+              || (resource.data.status in ['REJECTED', 'CANCELLED'] && request.resource.data.status == 'SUBMITTED'))
+          && internshipOpen() && internshipBodyOk(request.resource.data)
+          && request.resource.data.updatedAt == request.time
+        ) || (
+          // งานแนะแนว: อนุมัติ/ไม่อนุมัติ และบันทึกเลขที่/วันที่หนังสือ (อนุมัติแล้วแก้ได้เฉพาะเลขที่/วันที่/หมายเหตุ)
+          guidanceStaff()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'staffNote', 'letterNo', 'letterDateYmd', 'decidedByStaffId', 'decidedByName', 'updatedAt'])
+          && ((resource.data.status == 'SUBMITTED' && request.resource.data.status in ['APPROVED', 'REJECTED'])
+              || (resource.data.status == 'APPROVED' && request.resource.data.status == 'APPROVED'))
+          && request.resource.data.decidedByStaffId == myStaffId()
+          && request.resource.data.decidedByName is string && request.resource.data.decidedByName.size() <= 160
+          && request.resource.data.staffNote is string && request.resource.data.staffNote.size() <= 500
+          && request.resource.data.letterNo is string && request.resource.data.letterNo.size() <= 60
+          && request.resource.data.letterDateYmd is string && (request.resource.data.letterDateYmd.size() == 0 || request.resource.data.letterDateYmd.size() == 10)
+          && request.resource.data.updatedAt == request.time
+        );
+      allow delete: if false;
+    }
   }
 }
