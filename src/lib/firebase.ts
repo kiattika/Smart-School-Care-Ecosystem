@@ -3,7 +3,13 @@ import { getAuth, connectAuthEmulator, setPersistence, browserSessionPersistence
 import { initializeFirestore, getFirestore, connectFirestoreEmulator, setLogLevel } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
-import firebaseConfig from '../../firebase-applet-config.json';
+import rawFirebaseConfig from '../../firebase-applet-config.json';
+import { resolveAuthDomain } from './authDomain';
+
+const firebaseConfig = {
+  ...rawFirebaseConfig,
+  authDomain: resolveAuthDomain(rawFirebaseConfig, typeof window !== 'undefined' ? window.location.hostname : undefined),
+};
 
 // Keep real errors visible while suppressing noisy info/warn logs
 setLogLevel('error');
