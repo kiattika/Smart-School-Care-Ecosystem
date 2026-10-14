@@ -34,6 +34,8 @@ import { useTeacherActivityStudentCount } from './hooks/useCourseActivityPoints'
 import { useLeaveStudentIds } from './hooks/useApprovedLeaveDays';
 import { Pp5Sheet } from './components/teacher/Pp5Sheet';
 import { buildPp5Rows, attendanceForCourse } from './lib/pp5';
+import { scoreSettingToForm } from './lib/scoreSettings';
+import { subscribeCourseScoreSettings, saveCourseScoreSetting } from './services/courseScoreSettingService';
 import { rosterLevels, sortRoster, filterRosterByLevel, studentLevelLabel } from './lib/gradebookRoster';
 import { TeacherAttendanceStatsPanel } from './components/attendance/TeacherAttendanceStatsPanel';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests, subscribeHiddenGradebookCourses, hideGradebookCourse, unhideGradebookCourse } from './services/firestoreService';
@@ -506,6 +508,12 @@ export function TeacherPortal() {
   const [showScoreSettingModal, setShowScoreSettingModal] = useState(false);
   const [scoreSettingForm, setScoreSettingForm] = useState({ preMidterm: 25, midterm: 20, postMidterm: 25, final: 30 });
   const [scoreSettingError, setScoreSettingError] = useState('');
+  // โหลดสัดส่วนคะแนนที่ครูเคยตั้งไว้จาก Firestore (ทุกครั้งที่เปิดพอร์ทัล)
+  useEffect(() => {
+    const sid = staffIdOf(user);
+    if (!sid) return;
+    return subscribeCourseScoreSettings(sid, list => list.forEach(x => updateCourseScoreSetting(x)), e => console.error('โหลดสัดส่วนคะแนนไม่สำเร็จ', e));
+  }, [user]);
   const [isCopyMode, setIsCopyMode] = useState(false);
   const [copyTargetCourses, setCopyTargetCourses] = useState<string[]>([]);
   const [isEarlyWarningDrawerOpen, setIsEarlyWarningDrawerOpen] = useState(false);
@@ -1663,7 +1671,7 @@ export function TeacherPortal() {
                       <button
                         onClick={() => {
                           const existing = courseScoreSettings.find(s => s.courseId === selectedGradebookCourseId);
-                          setScoreSettingForm(existing || { preMidterm: 25, midterm: 20, postMidterm: 25, final: 30 });
+                          setScoreSettingForm(scoreSettingToForm(existing));
                           setScoreSettingError('');
                           setShowScoreSettingModal(true);
                         }}
@@ -2155,25 +2163,24 @@ export function TeacherPortal() {
                       return;
                     }
                     if (selectedGradebookCourseId) {
-                      updateCourseScoreSetting({
-                        courseId: selectedGradebookCourseId,
+                      const sid = staffIdOf(user);
+                      if (!sid) { setScoreSettingError('ไม่พบรหัสครูในบัญชีนี้ จึงบันทึกไม่ได้'); return; }
+                      const ids = [selectedGradebookCourseId, ...(isCopyMode ? copyTargetCourses : [])];
+                      const mk = (courseId: string) => ({
+                        courseId,
                         maxPreMidterm: scoreSettingForm.preMidterm,
                         maxMidterm: scoreSettingForm.midterm,
                         maxPostMidterm: scoreSettingForm.postMidterm,
                         maxFinal: scoreSettingForm.final
                       });
-
-                      if (isCopyMode) {
-                        copyTargetCourses.forEach(id => {
-                          updateCourseScoreSetting({
-                            courseId: id,
-                            maxPreMidterm: scoreSettingForm.preMidterm,
-                            maxMidterm: scoreSettingForm.midterm,
-                            maxPostMidterm: scoreSettingForm.postMidterm,
-                            maxFinal: scoreSettingForm.final
-                          });
-                        });
-                      }
+                      // บันทึกลง Firestore ก่อน แล้วค่อยปิดหน้าต่าง/อัปเดต store (เดิมเก็บแค่ใน store จึงหายทุกครั้งที่รีโหลด)
+                      void Promise.all(ids.map(id => saveCourseScoreSetting(sid, mk(id)))).then(() => {
+                        ids.forEach(id => updateCourseScoreSetting(mk(id)));
+                        setShowScoreSettingModal(false);
+                        setIsCopyMode(false);
+                        setCopyTargetCourses([]);
+                      }).catch((e: Error) => setScoreSettingError(`บันทึกไม่สำเร็จ: ${e.message}`));
+                      return;
                     }
                     setShowScoreSettingModal(false);
                     setIsCopyMode(false);

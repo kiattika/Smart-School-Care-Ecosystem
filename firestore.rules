@@ -1746,6 +1746,25 @@ service cloud.firestore {
         && d.assessment is list && d.assessment.size() <= 20;
     }
 
+    // สัดส่วนคะแนนรายวิชา (เต็ม 4 ช่อง รวม 100) — เก็บต่อครู+วิชา id = {staffId}__{courseId}
+    // เจ้าของเท่านั้นอ่าน/เขียน (แอดมินอ่านได้); ไม่ลบ (ตั้งใหม่ทับ)
+    match /course_score_settings/{sid} {
+      function csOk(d) {
+        return d.keys().hasOnly(['ownerStaffId','courseId','maxPreMidterm','maxMidterm','maxPostMidterm','maxFinal','updatedAt'])
+          && d.keys().hasAll(['ownerStaffId','courseId','maxPreMidterm','maxMidterm','maxPostMidterm','maxFinal','updatedAt'])
+          && d.ownerStaffId is string && d.courseId is string && d.courseId.size() > 0 && d.courseId.size() <= 100
+          && d.maxPreMidterm is int && d.maxMidterm is int && d.maxPostMidterm is int && d.maxFinal is int
+          && d.maxPreMidterm >= 0 && d.maxMidterm >= 0 && d.maxPostMidterm >= 0 && d.maxFinal >= 0
+          && d.maxPreMidterm + d.maxMidterm + d.maxPostMidterm + d.maxFinal == 100
+          && d.updatedAt == request.time;
+      }
+      allow read: if hasRole('SUPER_ADMIN') || (myStaffId() != '' && resource.data.ownerStaffId == myStaffId());
+      allow create, update: if hasRole('SUBJECT_TEACHER') && myStaffId() != ''
+        && request.resource.data.ownerStaffId == myStaffId()
+        && csOk(request.resource.data);
+      allow delete: if false;
+    }
+
     match /teaching_projects/{pid} {
       allow read: if myStaffId() != '' && (
         resource.data.teacherStaffId == myStaffId() ||
