@@ -30,7 +30,8 @@ export interface SubmitPlanInput {
   teacher: { staffId: string; name: string; departmentId: string };
   course: { code: string; name: string; level: string };
   kind: LessonPlanKind;
-  url: string;
+  /** ลิงก์ทั้งหมด (≥1, ≤5) — ลิงก์แรกเป็นลิงก์หลัก */
+  urls: string[];
   note: string;
   /** มีเอกสารอยู่แล้ว (แก้/ส่งใหม่) */
   exists: boolean;
@@ -45,7 +46,8 @@ export async function submitLessonPlan(input: SubmitPlanInput): Promise<string> 
   const semesterId = `${input.semester.academicYear}_${input.semester.term}`;
   const id = planDocId(semesterId, input.teacher.staffId, key);
   const ref = doc(db, 'lesson_plan_submissions', id);
-  const content = { kind: input.kind, url: input.url.trim(), note: (input.note || '').trim() };
+  const urls = input.urls.map(u => u.trim());
+  const content = { kind: input.kind, url: urls[0], urls, note: (input.note || '').trim() };
   if (input.exists) {
     await updateDoc(ref, { ...content, stage: 'SUBMITTED', updatedAt: serverTimestamp() });
   } else {

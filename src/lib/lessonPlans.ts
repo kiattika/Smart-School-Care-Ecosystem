@@ -84,7 +84,10 @@ export interface LessonPlan {
   courseName: string;
   level: string;
   kind: LessonPlanKind;
+  /** ลิงก์แรก (คงไว้เพื่อความเข้ากันได้กับเอกสารเก่า) */
   url: string;
+  /** ลิงก์ทั้งหมด ≤ 5 (urls[0] == url) — เอกสารเก่าไม่มีฟิลด์นี้ ใช้ linksOf() */
+  urls?: string[];
   note: string;
   stage: LessonPlanStage;
   deptReview?: LessonPlanReview;
@@ -98,9 +101,11 @@ export const planDocId = (semesterId: string, teacherStaffId: string, courseKey:
 
 export const isHttpsUrl = (u: string) => /^https:\/\/[^ ]{4,490}$/.test((u || '').trim());
 
-export function validateSubmission(input: { kind: string; url: string; note: string }): string | null {
+export function validateSubmission(input: { kind: string; urls: string[]; note: string }): string | null {
   if (input.kind !== 'PLAN' && input.kind !== 'PROJECT') return 'กรุณาเลือกประเภทที่ส่ง';
-  if (!isHttpsUrl(input.url)) return 'ลิงก์ต้องขึ้นต้นด้วย https:// และไม่มีช่องว่าง';
+  if (input.urls.length === 0) return 'กรุณาแนบลิงก์อย่างน้อย 1 ลิงก์ (กด “เพิ่มลิงก์” ก่อนส่ง)';
+  if (input.urls.length > 5) return 'แนบลิงก์ได้ไม่เกิน 5 ลิงก์';
+  if (input.urls.some(u => !isHttpsUrl(u))) return 'ลิงก์ต้องขึ้นต้นด้วย https:// และไม่มีช่องว่าง';
   if ((input.note || '').length > 500) return 'หมายเหตุยาวเกิน 500 ตัวอักษร';
   return null;
 }

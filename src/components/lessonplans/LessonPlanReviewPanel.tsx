@@ -1,3 +1,4 @@
+import { linksOf } from '../../lib/evidenceLinks';
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../../store';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
@@ -92,7 +93,10 @@ function ReviewDetail({ plan, stage, reviewer, onBack }: {
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
-  const embed = embedUrlFor(plan.url);
+  const links = linksOf(plan);
+  const [active, setActive] = useState(0);
+  const activeUrl = links[Math.min(active, links.length - 1)] || plan.url;
+  const embed = embedUrlFor(activeUrl);
   const prior = [plan.deptReview && ['หัวหน้ากลุ่มสาระฯ', plan.deptReview] as const, plan.finalReview && ['หัวหน้างานนิเทศ', plan.finalReview] as const].filter(Boolean) as (readonly [string, NonNullable<LessonPlan['deptReview']>])[];
 
   const decide = async (decision: 'APPROVE' | 'REVISE') => {
@@ -110,7 +114,15 @@ function ReviewDetail({ plan, stage, reviewer, onBack }: {
           {embed ? <iframe title="แผนการสอน" src={embed} className="w-full h-[70vh] bg-white" sandbox="allow-scripts allow-same-origin allow-popups" referrerPolicy="no-referrer" />
             : <div className="p-4 text-sm text-slate-300 space-y-2"><p>ลิงก์นี้แสดงฝังในหน้านี้ไม่ได้ — เปิดในแท็บใหม่แล้วตรวจควบคู่กับแบบประเมินด้านขวา</p></div>}
           <div className="p-3 border-t border-slate-700 text-xs">
-            <a href={plan.url} target="_blank" rel="noopener noreferrer" className="text-cyan-300 underline break-all">เปิดในแท็บใหม่: {plan.url}</a>
+            {links.length > 1 && (
+              <div className="flex flex-wrap gap-1.5 mb-2" role="tablist" aria-label="ลิงก์ที่ครูแนบ">
+                {links.map((u, i) => (
+                  <button key={u} role="tab" aria-selected={i === active} onClick={() => setActive(i)}
+                    className={`px-2.5 py-1 rounded-lg border text-xs cursor-pointer ${i === active ? 'bg-cyan-600 border-cyan-400 text-white' : 'bg-slate-950 border-slate-700 text-slate-300'}`}>ลิงก์ {i + 1}</button>
+                ))}
+              </div>
+            )}
+            <a href={activeUrl} target="_blank" rel="noopener noreferrer" className="text-cyan-300 underline break-all">เปิดในแท็บใหม่: {activeUrl}</a>
             {plan.note && <p className="mt-1 text-slate-400">หมายเหตุครู: {plan.note}</p>}
             {embed && <p className="mt-1 text-slate-500">หากไม่แสดง แปลว่าลิงก์ยังไม่ตั้งสิทธิ์ให้ผู้ตรวจเปิดดูได้</p>}
           </div>

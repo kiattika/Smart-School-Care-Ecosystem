@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { usePlcLogs, useReflections } from '../../hooks/usePlcAndReflections';
-import { PLC_STEP_LABEL, groupPlcCycles, isCycleComplete } from '../../lib/plc';
+import { PLC_STEP_LABEL, groupPlcCycles, isCycleComplete, participantIds } from '../../lib/plc';
 import { REFLECTION_FIELDS, isReflectionComplete } from '../../lib/reflection';
 import { semesterIdOf, type PlanQuery } from '../../lib/lessonPlans';
 
@@ -19,7 +19,14 @@ export function PlcReflectionOverview({ q }: { q: PlanQuery }) {
   if (plc.loading || refl.loading) return <p className="text-sm text-slate-400">กำลังโหลด…</p>;
 
   const byTeacher = new Map<string, { name: string; plc: typeof plc.data; refl?: (typeof refl.data)[number] }>();
-  plc.data.forEach(l => { const e = byTeacher.get(l.authorStaffId) || { name: l.authorName, plc: [] }; e.plc.push(l); byTeacher.set(l.authorStaffId, e); });
+  // 1 บันทึกนับให้ทั้งผู้บันทึกและสมาชิกที่เลือกจากทะเบียน (ชื่อสมาชิกอ้างจากสำเนาที่เก็บคู่กับ memberStaffIds)
+  plc.data.forEach(l => {
+    participantIds(l).forEach((sid, idx) => {
+      const name = idx === 0 ? l.authorName : (l.members[idx - 1] || sid);
+      const e = byTeacher.get(sid) || { name, plc: [] };
+      e.plc.push(l); byTeacher.set(sid, e);
+    });
+  });
   refl.data.forEach(r => { const e = byTeacher.get(r.teacherStaffId) || { name: r.teacherName, plc: [] }; e.refl = r; byTeacher.set(r.teacherStaffId, e); });
   const rows = [...byTeacher.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name, 'th'));
   if (rows.length === 0) return <p className="text-sm text-slate-400">ยังไม่มีบันทึก PLC หรือสะท้อนคิดในภาคเรียนนี้</p>;

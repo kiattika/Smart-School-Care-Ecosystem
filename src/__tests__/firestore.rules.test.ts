@@ -6,7 +6,7 @@ import {
   assertSucceeds,
   assertFails,
 } from '@firebase/rules-unit-testing';
-import { collection, getDocs, query, where, doc as mDoc, setDoc as mSetDoc, updateDoc as mUpdateDoc, deleteDoc as mDeleteDoc, getDoc as mGetDoc, serverTimestamp as mServerTimestamp, writeBatch as mWriteBatch } from 'firebase/firestore';
+import { collection, deleteField, getDocs, query, where, doc as mDoc, setDoc as mSetDoc, updateDoc as mUpdateDoc, deleteDoc as mDeleteDoc, getDoc as mGetDoc, serverTimestamp as mServerTimestamp, writeBatch as mWriteBatch } from 'firebase/firestore';
 import { enrollInActivity, withdrawFromActivity, createBillingInvoice, createBillingInvoicesBulk, recordInfirmaryVisit, createParentNotification } from '../services/firestoreService';
 import { readSource } from './helpers/readSource';
 
@@ -4295,6 +4295,19 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     const put = async (id: string, data: any) => testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`lesson_plan_submissions/${id}`).set({ ...data, createdAt: new Date(), updatedAt: new Date() }); });
     const col = (c: any) => collection(c, 'lesson_plan_submissions');
 
+    it('หลายลิงก์: urls ≤ 5, https ทุกตัว, urls[0] ต้องเท่ากับ url; เอกสารเก่าที่มีแต่ url ยังแก้เป็น urls ได้', async () => {
+      await seed();
+      const t1 = ctxOf('t1', ['SUBJECT_TEACHER']);
+      const two = ['https://docs.google.com/document/d/abc/edit', 'https://drive.google.com/file/d/xyz/view'];
+      await assertSucceeds(mSetDoc(mDoc(t1, `lesson_plan_submissions/${planId('t1')}`), base('t1', 'D1', { urls: two })));
+      await assertFails(mSetDoc(mDoc(t1, `lesson_plan_submissions/${SEM}_t1_ค11111`), base('t1', 'D1', { courseKey: 'ค11111', urls: [...two, ...two, 'https://a.co/1', 'https://a.co/2'] }))); // > 5
+      await assertFails(mSetDoc(mDoc(t1, `lesson_plan_submissions/${SEM}_t1_ค22222`), base('t1', 'D1', { courseKey: 'ค22222', urls: ['http://a.co/1'] })));
+      await assertFails(mSetDoc(mDoc(t1, `lesson_plan_submissions/${SEM}_t1_ค33333`), base('t1', 'D1', { courseKey: 'ค33333', urls: [two[1], two[0]] }))); // urls[0] != url
+      await assertSucceeds(mUpdateDoc(mDoc(t1, `lesson_plan_submissions/${planId('t1')}`), { urls: [two[0]], updatedAt: mServerTimestamp() }));
+      await put(`${SEM}_t1_ว11111`, base('t1', 'D1', { courseKey: 'ว11111' })); // เอกสารเก่า: ไม่มี urls
+      await assertSucceeds(mUpdateDoc(mDoc(t1, `lesson_plan_submissions/${SEM}_t1_ว11111`), { urls: two, stage: 'SUBMITTED', updatedAt: mServerTimestamp() }));
+    });
+
     it('ครูสร้างของตนเองได้ (id/แผนก/ลิงก์ https ถูกต้อง) แต่ของคนอื่น/ลิงก์ไม่ใช่ https/แผนกผิด/ข้ามขั้นไม่ได้', async () => {
       await seed();
       const t1 = ctxOf('t1', ['SUBJECT_TEACHER']);
@@ -4435,8 +4448,8 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     const ctxOf = (sid: string, roles: string[]) => asUser(`uid-${sid}`, roles, { staffId: sid }).firestore();
     const plc = (t: string, dept: string, over: any = {}) => ({
       semesterId: SEM, academicYear: '2569', term: '1', authorStaffId: t, authorName: 'ครู', departmentId: dept,
-      groupName: 'PLC คณิต', topic: 'การคิดวิเคราะห์', meetingDate: '2026-09-01', step: 'PLAN', members: ['ก', 'ข'],
-      summary: 'ประชุม', outcome: '', nextAction: '', evidenceUrl: '', createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(), ...over,
+      groupName: 'PLC คณิต', topic: 'การคิดวิเคราะห์', meetingDate: '2026-09-01', step: 'PLAN', members: ['ก', 'ข'], memberStaffIds: ['t2', 't3'],
+      summary: 'ประชุม', outcome: '', nextAction: '', evidenceUrls: [], photos: [], createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(), ...over,
     });
     const refl = (t: string, dept: string, over: any = {}) => ({
       semesterId: SEM, academicYear: '2569', term: '1', teacherStaffId: t, teacherName: 'ครู', departmentId: dept,
@@ -4460,11 +4473,38 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(mSetDoc(mDoc(t1, 'plc_logs/a2'), plc('t2', 'D2')));
       await assertFails(mSetDoc(mDoc(t1, 'plc_logs/a3'), plc('t1', 'D2')));
       await assertFails(mSetDoc(mDoc(t1, 'plc_logs/a4'), plc('t1', 'D1', { step: 'DONE' })));
-      await assertFails(mSetDoc(mDoc(t1, 'plc_logs/a5'), plc('t1', 'D1', { evidenceUrl: 'http://x.co/a' })));
+      await assertFails(mSetDoc(mDoc(t1, 'plc_logs/a5'), plc('t1', 'D1', { evidenceUrls: ['http://x.co/a'] })));
       await assertFails(mSetDoc(mDoc(t1, 'plc_logs/a6'), plc('t1', 'D1', { meetingDate: '1/9/2569' })));
       await assertSucceeds(mUpdateDoc(mDoc(t1, 'plc_logs/a1'), { step: 'DO', summary: 'ปฏิบัติ', updatedAt: mServerTimestamp() }));
       await assertFails(mUpdateDoc(mDoc(t1, 'plc_logs/a1'), { authorStaffId: 't2', updatedAt: mServerTimestamp() }));
       await assertSucceeds(mDeleteDoc(mDoc(t1, 'plc_logs/a1')));
+    });
+
+    it('PLC: สมาชิกที่ถูกเลือกอ่านได้ (แต่แก้/ลบไม่ได้); คนนอกรายชื่ออ่านไม่ได้; รองรับหลายลิงก์/รูป ≤ 4 และเอกสารเก่าที่ไม่มี memberStaffIds', async () => {
+      await seed();
+      const FB = (n: number) => `https://firebasestorage.googleapis.com/v0/b/p/o/supervision_photos%2Fu%2F${n}.jpg?alt=media&token=t`;
+      const t1 = ctxOf('t1', ['SUBJECT_TEACHER']);
+      await assertSucceeds(mSetDoc(mDoc(t1, 'plc_logs/m1'), plc('t1', 'D1', {
+        evidenceUrls: ['https://x.co/1', 'https://x.co/2'], photos: [FB(1), FB(2), FB(3), FB(4)],
+      })));
+      await assertFails(mSetDoc(mDoc(t1, 'plc_logs/m2'), plc('t1', 'D1', { photos: [FB(1), FB(2), FB(3), FB(4), FB(5)] })));
+      await assertFails(mSetDoc(mDoc(t1, 'plc_logs/m3'), plc('t1', 'D1', { photos: ['https://evil.example/a.jpg'] })));
+      await assertFails(mSetDoc(mDoc(t1, 'plc_logs/m4'), plc('t1', 'D1', { evidenceUrls: Array.from({ length: 11 }, (_, i) => `https://x.co/${i}`) })));
+      await assertFails(mSetDoc(mDoc(t1, 'plc_logs/m5'), plc('t1', 'D1', { memberStaffIds: Array.from({ length: 21 }, (_, i) => `s${i}`) })));
+      await assertFails(mSetDoc(mDoc(t1, 'plc_logs/m6'), plc('t1', 'D1', { evidenceUrls: ['javascript:alert(1)'] })));
+      const t2 = ctxOf('t2', ['SUBJECT_TEACHER']);
+      await assertSucceeds(mGetDoc(mDoc(t2, 'plc_logs/m1')));
+      await assertFails(mUpdateDoc(mDoc(t2, 'plc_logs/m1'), { summary: 'hack', updatedAt: mServerTimestamp() }));
+      await assertFails(mDeleteDoc(mDoc(t2, 'plc_logs/m1')));
+      await assertSucceeds(getDocs(query(collection(t2, 'plc_logs'), where('semesterId', '==', SEM), where('memberStaffIds', 'array-contains', 't2'))));
+      const t4 = ctxOf('t4', ['SUBJECT_TEACHER']);
+      await assertFails(mGetDoc(mDoc(t4, 'plc_logs/m1')));
+      // เอกสารเก่า (ไม่มี memberStaffIds/evidenceUrls) ผู้เขียนยังอ่านได้ และคนอื่นอ่านไม่ได้โดยไม่ error ของ rules
+      await put('plc_logs/old1', { semesterId: SEM, academicYear: '2569', term: '1', authorStaffId: 't1', authorName: 'ครู', departmentId: 'D1', groupName: 'g', topic: 't', meetingDate: '2026-09-01', step: 'PLAN', members: ['ก'], summary: 's', evidenceUrl: 'https://x.co/old' });
+      await assertSucceeds(mGetDoc(mDoc(t1, 'plc_logs/old1')));
+      await assertFails(mGetDoc(mDoc(t2, 'plc_logs/old1')));
+      // ผู้เขียนแก้เอกสารเก่าให้เป็นรูปแบบใหม่ได้
+      await assertSucceeds(mUpdateDoc(mDoc(t1, 'plc_logs/old1'), { memberStaffIds: ['t2'], evidenceUrls: ['https://x.co/old'], photos: [], evidenceUrl: deleteField(), updatedAt: mServerTimestamp() }));
     });
 
     it('PLC: ผู้อื่น (รวมหัวหน้า/หัวหน้างานนิเทศ/แอดมิน) แก้หรือลบของครูไม่ได้', async () => {
