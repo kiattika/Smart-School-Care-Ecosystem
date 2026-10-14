@@ -1,4 +1,4 @@
-import { isActivityCode, isSchoolSpecificCode } from './subjectCode';
+import { effectiveCredits, isActivityCode, isSchoolSpecificCode } from './subjectCode';
 /**
  * โครงการสอนรายสัปดาห์ (teaching_projects) — ตรรกะกลาง (ต้องตรง firestore.rules บล็อก "teaching_projects")
  *
@@ -116,25 +116,40 @@ export function isProjectReady(p: Pick<TeachingProject, 'description' | 'indicat
 /** ชั่วโมงรวมของแถวหัวข้อ (ไว้เทียบกับหน่วยกิต × 40 ชม./หน่วยกิตโดยผู้ใช้เอง ไม่บังคับ) */
 export const totalHours = (units: readonly ProjectUnit[]) => units.reduce((a, u) => a + (u.hours || 0), 0);
 
-export interface CourseLike { code: string; name: string; level: string; room?: string; subjectType?: string }
+export interface CourseLike { code: string; name: string; level: string; room?: string; subjectType?: string; /** ข้อความวัน-คาบของแถวนี้ (1 แถว = 1 คาบ) — ใช้นับคาบ/สัปดาห์ */ schedule?: string }
 export interface CourseGroup {
   key: string; code: string; name: string; kind: CourseKind;
   /** ห้อง/ระดับชั้นทั้งหมดที่ครูสอนรหัสนี้ — ใช้แสดงว่าโครงการสอนจะใช้กับห้องใดบ้าง */
   levels: string[];
+  /** คาบ/สัปดาห์ของรหัสนี้ (ห้องที่คาบมากที่สุด — รหัสเดียวกันหลายห้องไม่รวมกัน); 0 = ไม่รู้ */
+  periodsPerWeek: number;
 }
 /** จัดกลุ่มรายวิชาของครูตามรหัสวิชา (รหัสเดียวกันหลายห้อง = 1 โครงการ) */
 export function groupCoursesByCode(courses: readonly CourseLike[]): CourseGroup[] {
   const m = new Map<string, CourseGroup>();
+  const slotsByRoom = new Map<string, Map<string, Set<string>>>();
   for (const c of courses) {
     const key = courseKeyOf(c.code);
     if (!key) continue;
-    const g = m.get(key) || { key, code: c.code.trim(), name: c.name, kind: courseKindOf(c), levels: [] };
+    if (c.schedule) {
+      const rooms = slotsByRoom.get(key) || new Map<string, Set<string>>();
+      const rk = (c.room || c.level || '').trim();
+      rooms.set(rk, (rooms.get(rk) || new Set<string>()).add(c.schedule));
+      slotsByRoom.set(key, rooms);
+    }
+    const g = m.get(key) || { key, code: c.code.trim(), name: c.name, kind: courseKindOf(c), levels: [], periodsPerWeek: 0 };
     const lv = (c.level || '').trim();
     if (lv && !g.levels.includes(lv)) g.levels.push(lv);
     m.set(key, g);
   }
-  return [...m.values()].map(g => ({ ...g, levels: g.levels.sort((a, b) => a.localeCompare(b, 'th', { numeric: true })) }))
+  return [...m.values()].map(g => ({ ...g, periodsPerWeek: Math.max(0, ...[...(slotsByRoom.get(g.key)?.values() ?? [])].map(s => s.size)), levels: g.levels.sort((a, b) => a.localeCompare(b, 'th', { numeric: true })) }))
     .sort((a, b) => a.code.localeCompare(b.code, 'th'));
+}
+
+/** ค่าเริ่มต้นหน่วยกิต/ชั่วโมงต่อสัปดาห์ของโครงการใหม่ จากจำนวนคาบ (1 คาบ = 1 ชม. = 0.5 หน่วยกิต); ก/เฉพาะกิจไม่มีหน่วยกิต; ไม่รู้ = ว่าง */
+export function prefillCreditsHours(g: Pick<CourseGroup, 'code' | 'periodsPerWeek'>): { credits: string; hoursPerWeek: string } {
+  const c = effectiveCredits({ code: g.code, periodsPerWeek: g.periodsPerWeek });
+  return { credits: c === null ? '' : String(c), hoursPerWeek: g.periodsPerWeek > 0 ? String(g.periodsPerWeek) : '' };
 }
 
 /** "ม.4/1" → "ม.4" (ระดับชั้นของโครงการ) */

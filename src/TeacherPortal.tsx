@@ -453,7 +453,7 @@ export function TeacherPortal() {
   // ประวัติบันทึกหลังสอนที่ครูคนนี้เห็นได้: คาบที่สอนอยู่ตอนนี้ + บันทึกที่ตัวเองเป็นผู้บันทึก/ครูคนเดิมของคาบ
   // (ดู lib/postTeachingVisibility.ts — เดิมกรองด้วยคาบปัจจุบันอย่างเดียว ทำให้ครูคนเก่าเสียประวัติเมื่อมีการเปลี่ยนครู)
   // รายวิชาที่ส่งแผนได้ = วิชาที่ตนสอนจริง (ไม่รวมแถวสอนแทน) — ซ้ำรหัสวิชารวมเป็นรายการเดียวในแผงเอง
-  const lessonPlanCourses = useMemo(() => myCourses.filter(c => !(c as any).roleLabel && courseKindOf({ code: c.code || '', name: c.name || '' }) !== 'EXEMPT').map(c => ({ code: c.code || '', name: c.name || '', level: c.level || '', room: c.room, subjectType: c.subjectType })), [myCourses]);
+  const lessonPlanCourses = useMemo(() => myCourses.filter(c => !(c as any).roleLabel && courseKindOf({ code: c.code || '', name: c.name || '' }) !== 'EXEMPT').map(c => ({ code: c.code || '', name: c.name || '', level: c.level || '', room: c.room, subjectType: c.subjectType, schedule: c.schedule })), [myCourses]);
   const myCourseIdSet = useMemo(() => new Set(myCourses.map(c => c.id)), [myCourses]);
   const visiblePostTeachingRecords = useMemo(
     () => postTeachingRecords.filter(r => canViewPostTeachingRecord(user, r, myCourseIdSet)),

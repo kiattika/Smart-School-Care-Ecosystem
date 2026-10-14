@@ -6,8 +6,7 @@ import { deleteTeachingProject, saveTeachingProject, setProjectCoTeachers, type 
 import { semesterIdOf } from '../../lib/lessonPlans';
 import {
   COURSE_KIND_LABEL, MAX_CO_TEACHERS, groupCoursesByCode, isProjectReady, levelLabelOf, projectCoverage, projectsForKey,
-  type CourseGroup, type CourseLike, type TeachingProject,
-} from '../../lib/teachingProject';
+  type CourseGroup, type CourseLike, type TeachingProject, prefillCreditsHours } from '../../lib/teachingProject';
 import { staffDepartmentId, staffFullName, type StaffRow } from '../../lib/supervisionView';
 import { StaffMultiPicker } from '../shared/StaffMultiPicker';
 import { useDepartments } from '../../hooks/useDepartments';
@@ -40,7 +39,7 @@ export function MyTeachingProjectsPanel({ courses }: { courses: CourseLike[] }) 
   });
   const initOf = (g: CourseGroup, p?: TeachingProject) => p
     ? { kind: p.kind, levelLabel: p.levelLabel, credits: p.credits, hoursPerWeek: p.hoursPerWeek, courseType: p.courseType, description: p.description, indicators: p.indicators, units: p.units, assessment: p.assessment, assessmentNote: p.assessmentNote }
-    : { kind: (g.kind === 'ACTIVITY' ? 'ACTIVITY' : 'NORMAL') as 'ACTIVITY' | 'NORMAL', levelLabel: levelLabelOf(g.levels), credits: '', hoursPerWeek: '', courseType: g.kind === 'ACTIVITY' ? 'กิจกรรมพัฒนาผู้เรียน' : '', description: '', indicators: [], units: [], assessment: [], assessmentNote: '' };
+    : { kind: (g.kind === 'ACTIVITY' ? 'ACTIVITY' : 'NORMAL') as 'ACTIVITY' | 'NORMAL', levelLabel: levelLabelOf(g.levels), ...prefillCreditsHours(g), courseType: g.kind === 'ACTIVITY' ? 'กิจกรรมพัฒนาผู้เรียน' : '', description: '', indicators: [], units: [], assessment: [], assessmentNote: '' };
 
   return (
     <div className="space-y-4">
