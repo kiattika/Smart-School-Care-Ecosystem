@@ -1,4 +1,7 @@
 import { isValidScoreSetting, scoreSettingDocId, scoreSettingToForm } from '../lib/scoreSettings';
+import { countPeriodsPerWeek, creditsFromPeriods, effectiveCredits, importCredits, isActivityCode, isSchoolSpecificCode, subjectGroupOf } from '../lib/subjectCode';
+import { buildGradeRows as buildGradeRowsSC } from '../lib/gradeReport';
+import { courseKindOf as courseKindSC } from '../lib/teachingProject';
 import { describe, it, expect } from 'vitest';
 import { isValidThaiNationalId, normalizeNationalId, formatNationalId } from '../lib/nationalId';
 import { validateRegistryInput, normalizeRegistryProfile, emptyRegistryProfile, REGISTRY_VERIFY_NOTICE } from '../lib/registryProfile';
@@ -121,5 +124,54 @@ describe('สัดส่วนคะแนนรายวิชา (บัน�
     const src = readSource('src/TeacherPortal.tsx');
     expect(src).toContain('saveCourseScoreSetting(sid');
     expect(src).toContain('subscribeCourseScoreSettings(sid');
+  });
+});
+
+describe('รหัสวิชา → ประเภท/หน่วยกิต', () => {
+  it('อักษรตัวแรกบอกกลุ่มสาระฯ; ก = กิจกรรม; HR/CZ = เฉพาะกิจ', () => {
+    expect(subjectGroupOf('ว21101')).toBe('วิทยาศาสตร์และเทคโนโลยี');
+    expect(subjectGroupOf('จ31201')).toBe('ภาษาจีน');
+    expect(subjectGroupOf('ก21901')).toBe('กิจกรรมพัฒนาผู้เรียน');
+    expect(subjectGroupOf('HR')).toBeNull();
+    expect(isActivityCode('ก21901')).toBe(true);
+    expect(isSchoolSpecificCode('HR')).toBe(true);
+    expect(isSchoolSpecificCode('CZ')).toBe(true);
+    expect(isSchoolSpecificCode('ว21101')).toBe(false);
+    expect(isSchoolSpecificCode('ก21901')).toBe(false);
+    expect(isSchoolSpecificCode('')).toBe(false);
+  });
+  it('courseKindOf: HR/CZ = EXEMPT, ก = ACTIVITY, อื่น = NORMAL', () => {
+    expect(courseKindSC({ code: 'HR', name: 'โฮมรูม' })).toBe('EXEMPT');
+    expect(courseKindSC({ code: 'CZ', name: 'x' })).toBe('EXEMPT');
+    expect(courseKindSC({ code: 'ก21901', name: 'ลูกเสือ' })).toBe('ACTIVITY');
+    expect(courseKindSC({ code: 'ค21101', name: 'คณิตศาสตร์' })).toBe('NORMAL');
+  });
+  it('1 คาบ/สัปดาห์ = 0.5 หน่วยกิต; กิจกรรม/เฉพาะกิจไม่มี; ไม่รู้คาบใช้ค่าที่เก็บ; ไม่มีเลย = null', () => {
+    expect(creditsFromPeriods(3)).toBe(1.5);
+    expect(creditsFromPeriods(0)).toBeNull();
+    expect(effectiveCredits({ code: 'ว21101', periodsPerWeek: 2, stored: 1.5 })).toBe(1);
+    expect(effectiveCredits({ code: 'ก21901', periodsPerWeek: 2, stored: 1.5 })).toBeNull();
+    expect(effectiveCredits({ code: 'HR', periodsPerWeek: 1 })).toBeNull();
+    expect(effectiveCredits({ code: 'ว21101', subjectType: 'ACTIVITY', periodsPerWeek: 2 })).toBeNull();
+    expect(effectiveCredits({ code: 'ว21101', stored: 1 })).toBe(1);
+    expect(effectiveCredits({ code: 'ว21101' })).toBeNull();
+  });
+  it('นับคาบ/สัปดาห์: วัน+คาบซ้ำนับครั้งเดียว; นำเข้าไม่ใส่ 1.5 ปลอมอีก', () => {
+    const slots = [{ dayOfWeek: 'monday', periodNumber: 1 }, { dayOfWeek: 'monday', periodNumber: 1 }, { dayOfWeek: 'tuesday', periodNumber: 4 }, { dayOfWeek: 'friday', periodNumber: 2 }];
+    expect(countPeriodsPerWeek(slots)).toBe(3);
+    expect(importCredits('ท21101', 'MAIN', slots)).toBe(1.5);
+    expect(importCredits('ก21901', 'ACTIVITY', slots)).toBe(0);
+    expect(importCredits('HR', 'ACTIVITY', slots)).toBe(0);
+  });
+  it('ปพ.6: หน่วยกิตคำนวณจากคาบ, กิจกรรม ผ/มผ ไม่มีหน่วยกิต, HR/CZ ไม่แสดง', () => {
+    const rows = buildGradeRowsSC({
+      term: '1/2569',
+      scores: [{ courseCode: 'ว21101', term: '1/2569', preMidterm: 20, midterm: 15, postMidterm: 20, final: 25 }, { courseCode: 'ก21901', term: '1/2569', passFailResult: 'PASS' }, { courseCode: 'HR', term: '1/2569' }] as any,
+      courses: [{ code: 'ว21101', name: 'วิทย์', credits: 1.5, periods: 2 }, { code: 'ก21901', name: 'ลูกเสือ', credits: 1.5, periods: 1 }, { code: 'HR', name: 'โฮมรูม', periods: 1 }],
+    });
+    expect(rows.map(r => r.code).sort()).toEqual(['ก21901', 'ว21101']);
+    expect(rows.find(r => r.code === 'ว21101')!.credits).toBe(1);
+    expect(rows.find(r => r.code === 'ก21901')!.credits).toBeNull();
+    expect(rows.find(r => r.code === 'ก21901')!.grade).toBe('ผ');
   });
 });

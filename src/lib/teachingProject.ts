@@ -1,3 +1,4 @@
+import { isActivityCode, isSchoolSpecificCode } from './subjectCode';
 /**
  * โครงการสอนรายสัปดาห์ (teaching_projects) — ตรรกะกลาง (ต้องตรง firestore.rules บล็อก "teaching_projects")
  *
@@ -20,8 +21,9 @@ export const COURSE_KIND_LABEL: Record<CourseKind, string> = {
 const EXEMPT_NAME = /PLC|\bCZ\b|cleaning\s*zone|ชุมชนแห่งการเรียนรู้ทางวิชาชีพ|ทำความสะอาด/i;
 
 export function courseKindOf(c: { code: string; name: string; subjectType?: string }): CourseKind {
-  if (EXEMPT_NAME.test(c.name || '') || EXEMPT_NAME.test(c.code || '')) return 'EXEMPT';
-  if ((c.code || '').trim().startsWith('ก') || c.subjectType === 'ACTIVITY') return 'ACTIVITY';
+  // รหัสเฉพาะกิจของโรงเรียน (HR, CZ ฯลฯ ที่ไม่ขึ้นต้นด้วยอักษรกลุ่มสาระฯ/ก) ไม่ต้องทำแผน/โครงการสอน
+  if (isSchoolSpecificCode(c.code) || EXEMPT_NAME.test(c.name || '') || EXEMPT_NAME.test(c.code || '')) return 'EXEMPT';
+  if (isActivityCode(c.code) || c.subjectType === 'ACTIVITY') return 'ACTIVITY';
   return 'NORMAL';
 }
 

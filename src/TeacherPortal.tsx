@@ -36,6 +36,8 @@ import { Pp5Sheet } from './components/teacher/Pp5Sheet';
 import { buildPp5Rows, attendanceForCourse } from './lib/pp5';
 import { scoreSettingToForm } from './lib/scoreSettings';
 import { subscribeCourseScoreSettings, saveCourseScoreSetting } from './services/courseScoreSettingService';
+import { effectiveCredits } from './lib/subjectCode';
+import { courseKindOf } from './lib/teachingProject';
 import { rosterLevels, sortRoster, filterRosterByLevel, studentLevelLabel } from './lib/gradebookRoster';
 import { TeacherAttendanceStatsPanel } from './components/attendance/TeacherAttendanceStatsPanel';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests, subscribeHiddenGradebookCourses, hideGradebookCourse, unhideGradebookCourse } from './services/firestoreService';
@@ -362,14 +364,23 @@ export function TeacherPortal() {
   const gradebookCourses: Course[] = useMemo(() => {
     const seen = new Set<string>();
     const out: Course[] = [];
+    // คาบรวม/สัปดาห์ของแต่ละ (รหัส+ห้อง) — ใช้คำนวณหน่วยกิต (1 คาบ = 0.5)
+    const periodsOf = new Map<string, Set<string>>();
+    for (const c of myCourses) {
+      if (c.roleLabel || !c.schedule) continue;
+      const k = `${c.code}__${(c.room || '').replace(/^M\./i, 'ม.')}`;
+      periodsOf.set(k, (periodsOf.get(k) || new Set<string>()).add(c.schedule));
+    }
     for (const c of myCourses) {
       if (c.roleLabel) continue; // สอนแทน / สลับคาบเรียน — ข้าม
+      // รหัสเฉพาะกิจ (HR, CZ ฯลฯ) / PLC ไม่ตัดสินผล — ไม่แสดงในสมุดบันทึกคะแนน
+      if (courseKindOf({ code: c.code || '', name: c.name || '' }) === 'EXEMPT') continue;
       // คาบ "กิจกรรมชุมนุม" จากตารางสอน (ห้อง Non-Student) ไม่มีรายชื่อนักเรียน — แทนด้วยชุมนุมจริงที่ครูรับผิดชอบด้านล่าง
       if (/ชุมนุม/.test(c.name || '') && /^non-student$/i.test((c.room || '').trim())) continue;
       const key = `${c.code}__${(c.room || '').replace(/^M\./i, 'ม.')}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push(c);
+      out.push({ ...c, credits: effectiveCredits({ code: c.code || '', subjectType: c.subjectType, periodsPerWeek: periodsOf.get(key)?.size, stored: c.credits }) ?? undefined });
     }
     // ชุมนุมที่ครูคนนี้รับผิดชอบจริง (elective_activities_config.responsibleTeacherUids = staff doc id)
     // id `elective_<configId>` เหมือนที่หน้าเช็คชื่อใช้ — className ใช้ id เดียวกันเป็นรหัสห้อง (ไม่มี level/room)
@@ -442,7 +453,7 @@ export function TeacherPortal() {
   // ประวัติบันทึกหลังสอนที่ครูคนนี้เห็นได้: คาบที่สอนอยู่ตอนนี้ + บันทึกที่ตัวเองเป็นผู้บันทึก/ครูคนเดิมของคาบ
   // (ดู lib/postTeachingVisibility.ts — เดิมกรองด้วยคาบปัจจุบันอย่างเดียว ทำให้ครูคนเก่าเสียประวัติเมื่อมีการเปลี่ยนครู)
   // รายวิชาที่ส่งแผนได้ = วิชาที่ตนสอนจริง (ไม่รวมแถวสอนแทน) — ซ้ำรหัสวิชารวมเป็นรายการเดียวในแผงเอง
-  const lessonPlanCourses = useMemo(() => myCourses.filter(c => !(c as any).roleLabel).map(c => ({ code: c.code || '', name: c.name || '', level: c.level || '', room: c.room, subjectType: c.subjectType })), [myCourses]);
+  const lessonPlanCourses = useMemo(() => myCourses.filter(c => !(c as any).roleLabel && courseKindOf({ code: c.code || '', name: c.name || '' }) !== 'EXEMPT').map(c => ({ code: c.code || '', name: c.name || '', level: c.level || '', room: c.room, subjectType: c.subjectType })), [myCourses]);
   const myCourseIdSet = useMemo(() => new Set(myCourses.map(c => c.id)), [myCourses]);
   const visiblePostTeachingRecords = useMemo(
     () => postTeachingRecords.filter(r => canViewPostTeachingRecord(user, r, myCourseIdSet)),

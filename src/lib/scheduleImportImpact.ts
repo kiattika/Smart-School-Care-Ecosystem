@@ -1,3 +1,4 @@
+import { importCredits } from './subjectCode';
 /**
  * ผลกระทบของการ "นำเข้าภาระงานสอนซ้ำ" (Bulk Import COURSE / Teacher Load Report) — ตรรกะบริสุทธิ์ (test ได้)
  *
@@ -109,7 +110,7 @@ export function buildTargetSlots(
       const t = targets.get(id) || {
         id,
         subjectCode: p.subjectCode, subjectName: p.subjectName || '', room: p.room || '', level: p.level || '',
-        department: p.department || '', credits: Number(p.credits || 1.5), subjectType: p.subjectType || 'MAIN',
+        department: p.department || '', credits: Number(p.credits ?? importCredits(p.subjectCode, p.subjectType, p.slots || [])), subjectType: p.subjectType || 'MAIN',
         dayOfWeek: slot.dayOfWeek, periodNumber: slot.periodNumber, teacherIds: [],
       };
       if (p.matchedTeacherId && !t.teacherIds.includes(p.matchedTeacherId)) t.teacherIds.push(p.matchedTeacherId);
@@ -162,7 +163,7 @@ export function computeImportImpact(
     const differs =
       String(d.subjectName || '') !== t.subjectName ||
       String(d.department || '') !== t.department ||
-      Number(d.credits ?? 1.5) !== t.credits ||
+      Number(d.credits ?? 0) !== t.credits ||
       String(d.subjectType || 'MAIN') !== t.subjectType;
     if (differs) detailsChanged++; else unchanged++;
   }

@@ -1,3 +1,4 @@
+import { importCredits, isActivityCode, isSchoolSpecificCode } from '../lib/subjectCode';
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
   Upload, 
@@ -310,7 +311,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           subjectName: row.subjectName,
           room: row.room,
           level: row.level,
-          credits: 1.5,
+          credits: importCredits(row.subjectCode, row.subjectType, row.slots),
           slots: row.slots,
           subjectType: row.subjectType,
           teacherName: row.teacherName,
@@ -605,7 +606,9 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           errors.push('ขาดการระบุระดับชั้นหรือห้องเรียน');
         }
 
-        if (!creditsStr || isNaN(credits) || credits < 0.5 || credits > 5.0) {
+        // วิชากิจกรรม (ก)/รหัสเฉพาะกิจ ไม่มีหน่วยกิต — ไม่บังคับกรอก
+        const noCredit = isActivityCode(courseCode) || isSchoolSpecificCode(courseCode);
+        if (!noCredit && (!creditsStr || isNaN(credits) || credits < 0.5 || credits > 5.0)) {
           isValid = false;
           errors.push('จำนวนหน่วยกิตอยู่นอกเกณฑ์มาตรฐาน (0.5 - 5.0)');
         }
@@ -623,7 +626,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             courseName,
             level: level || (room.includes('/') ? room.split('/')[0] : room),
             room: room || level,
-            credits: isNaN(credits) ? 1.5 : credits,
+            credits: isNaN(credits) ? 0 : credits,
             instructorId
           }
         };
@@ -988,7 +991,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                   subjectName: parsedData.subjectName,
                   room: parsedData.room || '',
                   level: parsedData.level || '',
-                  credits: parsedData.credits || 1.5,
+                  credits: parsedData.credits ?? 0,
                   teacherIds,
                   teacherId: primaryTeacherId,
                   teacherEmail: primaryTeacherEmail || (primaryTeacherId ? `${primaryTeacherId}@utd.ac.th` : null),
