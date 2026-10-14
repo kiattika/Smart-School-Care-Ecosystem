@@ -223,10 +223,7 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
             value={reg.nationalId} onChange={e => setRegField('nationalId', e.target.value.replace(/[^0-9-\s]/g, ''))} />
           {reg.nationalId.trim() && !isValidThaiNationalId(reg.nationalId) && <div className="text-[10px] text-amber-300 mt-1">เลขยังไม่ครบ 13 หลัก หรือเลขหลักสุดท้ายไม่ตรง กรุณาตรวจอีกครั้ง</div>}
         </div>
-        <div className="grid sm:grid-cols-2 gap-3">
-          <div><Label>ชื่อ-สกุลบิดา (ตามสูติบัตร)</Label><input className={inputCls} maxLength={120} disabled={!regLoaded} value={reg.fatherName} onChange={e => setRegField('fatherName', e.target.value)} /></div>
-          <div><Label>ชื่อ-สกุลมารดา (ตามสูติบัตร)</Label><input className={inputCls} maxLength={120} disabled={!regLoaded} value={reg.motherName} onChange={e => setRegField('motherName', e.target.value)} /></div>
-        </div>
+        <p className="text-[11px] text-slate-500">ชื่อบิดา/มารดาในเอกสารผลการเรียนดึงจากที่ผู้ปกครองกรอกในข้อมูลเยี่ยมบ้านฝั่งผู้ปกครอง ไม่ต้องกรอกซ้ำ</p>
         <div><Label>วันที่เข้าเรียน</Label><DatePicker value={reg.enrolledAt} onChange={v => setRegField('enrolledAt', v)} max={todayYmd} clearable /></div>
       </Section>
 

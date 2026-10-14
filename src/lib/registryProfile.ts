@@ -13,11 +13,9 @@ export const SCHOOL_HEADER = {
 export const REGISTRY_VERIFY_NOTICE =
   'กรุณาตรวจสอบความถูกต้องของข้อมูลส่วนตัวด้านบน หากพบข้อผิดพลาด ให้แจ้งแก้ไขที่งานทะเบียนของโรงเรียน';
 
-/** ข้อมูลส่วนหัว ปพ.6 ที่นักเรียนกรอก/ระบบคัดลอกจากแบบเยี่ยมบ้าน (ไม่เก็บ studentId/uid ในรูปแบบนี้) */
+/** ข้อมูลส่วนหัว ปพ.6 ที่นักเรียนกรอก/ระบบคัดลอกจากแบบเยี่ยมบ้าน (ชื่อบิดา/มารดาอยู่ student_parent_names — ผู้ปกครองกรอกที่เดียว) */
 export interface RegistryProfile {
   nationalId: string;     // '' หรือ 13 หลักไม่มีขีด
-  fatherName: string;
-  motherName: string;
   enrolledAt: string;     // YYYY-MM-DD หรือ ''
   gender: 'M' | 'F' | '';
   birthDate: string;
@@ -29,7 +27,7 @@ export interface RegistryProfile {
 }
 
 export const emptyRegistryProfile = (): RegistryProfile => ({
-  nationalId: '', fatherName: '', motherName: '', enrolledAt: '', gender: '', birthDate: '',
+  nationalId: '', enrolledAt: '', gender: '', birthDate: '',
   nationality: '', religion: '', prevSchool: '', prevProvince: '',
 });
 
@@ -44,7 +42,6 @@ export function normalizeRegistryProfile(p: RegistryProfile): RegistryProfile {
   const cut = (v: string, n: number) => (v || '').trim().slice(0, n);
   return {
     nationalId: normalizeNationalId(p.nationalId || ''),
-    fatherName: cut(p.fatherName, 120), motherName: cut(p.motherName, 120),
     enrolledAt: cut(p.enrolledAt, 10), gender: p.gender === 'M' || p.gender === 'F' ? p.gender : '',
     birthDate: cut(p.birthDate, 10), nationality: cut(p.nationality, 60), religion: cut(p.religion, 60),
     prevSchool: cut(p.prevSchool, 160), prevProvince: cut(p.prevProvince, 60),

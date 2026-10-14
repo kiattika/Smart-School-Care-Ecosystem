@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { getRegistryProfile } from '../../services/firestoreService';
+import { getRegistryProfile, getParentNames } from '../../services/firestoreService';
 import { SCHOOL_HEADER, REGISTRY_VERIFY_NOTICE, type RegistryProfile } from '../../lib/registryProfile';
 import { formatNationalId } from '../../lib/nationalId';
+import type { ParentNames } from '../../lib/parentNames';
 
 const MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 export const thLongDate = (ymd: string): string => {
@@ -12,21 +13,22 @@ const GENDER: Record<string, string> = { M: 'ชาย', F: 'หญิง' };
 
 /** อ่านข้อมูลส่วนหัว ปพ.6 (ผู้อ่านต้องมีสิทธิ์ตาม rules; อ่านไม่ได้/ยังไม่มี = null ไม่เดา) */
 export function useRegistryProfile(studentId: string) {
-  const [state, setState] = useState<{ loading: boolean; data: RegistryProfile | null; error: string }>({ loading: true, data: null, error: '' });
+  const [state, setState] = useState<{ loading: boolean; data: RegistryProfile | null; parents: ParentNames | null; error: string }>({ loading: true, data: null, parents: null, error: '' });
   useEffect(() => {
     let c = false;
-    setState({ loading: true, data: null, error: '' });
-    getRegistryProfile(studentId)
-      .then(d => { if (!c) setState({ loading: false, data: d, error: '' }); })
-      .catch(e => { if (!c) setState({ loading: false, data: null, error: e instanceof Error ? e.message : 'โหลดไม่สำเร็จ' }); });
+    setState({ loading: true, data: null, parents: null, error: '' });
+    // ชื่อบิดา/มารดามาจากสำเนาที่ผู้ปกครองบันทึก — อ่านไม่ได้/ไม่มี = ว่าง ไม่กระทบส่วนอื่น
+    Promise.all([getRegistryProfile(studentId), getParentNames(studentId).catch(() => null)])
+      .then(([d, parents]) => { if (!c) setState({ loading: false, data: d, parents, error: '' }); })
+      .catch(e => { if (!c) setState({ loading: false, data: null, parents: null, error: e instanceof Error ? e.message : 'โหลดไม่สำเร็จ' }); });
     return () => { c = true; };
   }, [studentId]);
   return state;
 }
 
 /** ส่วนหัว ปพ.6: ข้อมูลโรงเรียน + ข้อมูลส่วนตัวนักเรียน เพื่อให้นักเรียน/ผู้ปกครอง/ครูที่ปรึกษา/งานทะเบียนตรวจความถูกต้อง */
-export function RegistryHeaderCard({ studentId, studentName, room, profile, loading, error }: {
-  studentId: string; studentName?: string; room?: string; profile: RegistryProfile | null; loading: boolean; error: string;
+export function RegistryHeaderCard({ studentId, studentName, room, profile, parents, loading, error }: {
+  studentId: string; studentName?: string; room?: string; profile: RegistryProfile | null; parents?: ParentNames | null; loading: boolean; error: string;
 }) {
   const v = (s?: string) => (s && s.trim() ? s : '-');
   const rows: [string, string][] = [
@@ -40,8 +42,8 @@ export function RegistryHeaderCard({ studentId, studentName, room, profile, load
     ['ศาสนา', v(profile?.religion)],
     ['วันที่เข้าเรียน', v(thLongDate(profile?.enrolledAt || ''))],
     ['โรงเรียนเดิม', v([profile?.prevSchool, profile?.prevProvince && `จังหวัด${profile.prevProvince}`].filter(Boolean).join(' '))],
-    ['ชื่อ-สกุลบิดา', v(profile?.fatherName)],
-    ['ชื่อ-สกุลมารดา', v(profile?.motherName)],
+    ['ชื่อ-สกุลบิดา', v(parents?.fatherName)],
+    ['ชื่อ-สกุลมารดา', v(parents?.motherName)],
   ];
   return (
     <div className="text-xs border border-gray-400 rounded p-3 mb-3 break-inside-avoid">

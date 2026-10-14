@@ -3,6 +3,7 @@ import { isValidThaiNationalId, normalizeNationalId, formatNationalId } from '..
 import { validateRegistryInput, normalizeRegistryProfile, emptyRegistryProfile, REGISTRY_VERIFY_NOTICE } from '../lib/registryProfile';
 import { buildPp5Rows, summarizePp5, attendanceForCourse, attendancePercent } from '../lib/pp5';
 import { groupWithTones, GROUP_TONES, NEUTRAL_TONE } from '../lib/groupTones';
+import { parentFullName, deriveParentNames } from '../lib/parentNames';
 import { readSource } from './helpers/readSource';
 
 describe('เลขประจำตัวประชาชน', () => {
@@ -77,5 +78,19 @@ describe('จัดกลุ่มตามกลุ่มสาระฯ + โ�
     expect(readSource('src/components/student-parent/RegistryHeaderCard.tsx')).toContain('REGISTRY_VERIFY_NOTICE');
     expect(readSource('src/components/student-parent/StudentGradeReport.tsx')).toContain('RegistryHeaderCard');
     expect(readSource('src/components/teacher/Pp5Sheet.tsx')).toContain('GRADE_REPORT_DISCLAIMER');
+  });
+});
+
+describe('ชื่อบิดา/มารดาจากแบบเยี่ยมบ้านผู้ปกครอง', () => {
+  const p = (title: string, firstName: string, lastName: string) => ({ title, firstName, lastName } as any);
+  it('รวมคำนำหน้า+ชื่อ+สกุล; ไม่มีชื่อ = ว่าง', () => {
+    expect(parentFullName(p('นาย', 'สมชาย', 'ใจดี'))).toBe('นาย สมชาย ใจดี');
+    expect(parentFullName(p('', '', 'ใจดี'))).toBe('');
+    expect(deriveParentNames({ father: p('นาย', 'ก', 'ข'), mother: p('', '', '') } as any)).toEqual({ fatherName: 'นาย ก ข', motherName: '' });
+  });
+  it('ฟอร์มนักเรียนไม่มีช่องชื่อบิดา/มารดา และฟอร์มผู้ปกครองซิงก์สำเนา', () => {
+    expect(readSource('src/components/homevisit/StudentHomeVisitInfoForm.tsx')).not.toMatch(/fatherName|motherName/);
+    expect(readSource('src/components/homevisit/FamilyHomeVisitInfoForm.tsx')).toContain('syncParentNames');
+    expect(readSource('src/services/firestoreService.ts')).toMatch(/batch\.set\(doc\(db, PARENT_NAMES_COL/);
   });
 });
