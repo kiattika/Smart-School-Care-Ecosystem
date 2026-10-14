@@ -18,23 +18,16 @@ import {
   FileText
 } from 'lucide-react';
 import { useStore } from '../../store';
-import { ReportCardTerm, ExamScheduleItem } from '../../types';
+import { StudentGradeReport } from './StudentGradeReport';
 
-export function AcademicHomeworkModule({ studentId }: { studentId: string }) {
+export function AcademicHomeworkModule({ studentId, room, studentName }: { studentId: string; room?: string; studentName?: string }) {
   const { 
-    reportCards, 
-    examSchedules, 
-    students 
+    examSchedules,
   } = useStore();
 
-  const student = students.find(s => s.studentId === studentId) || students[0];
-  const reports: ReportCardTerm[] = (reportCards && reportCards[student?.studentId]) || [];
   const exams = examSchedules;
 
   const [activeTab, setActiveTab] = useState<'reportcard' | 'exams'>('reportcard');
-  const [selectedSemester, setSelectedSemester] = useState<string>(reports[0]?.semester || reports[0]?.term || '1/2569');
-  
-  const currentReport = reports.find(r => (r.semester || r.term) === selectedSemester) || reports[0];
 
   return (
     <div className="space-y-6">
@@ -64,144 +57,8 @@ export function AcademicHomeworkModule({ studentId }: { studentId: string }) {
         </button>
       </div>
 
-      {activeTab === 'reportcard' && currentReport && (
-        <div className="space-y-6">
-          {/* Header Summary & Semester Picker */}
-          <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-xs font-bold font-mono">
-                  ปพ.6 ดิจิทัล
-                </span>
-                <span className="text-xs text-slate-400">ระเบียนแสดงผลการเรียนประจำภาคเรียน</span>
-              </div>
-              <h3 className="text-base font-bold text-white">
-                ผลการเรียนรายภาคเรียน: {currentReport.semester || currentReport.term}
-              </h3>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex bg-slate-800 rounded-xl p-1 border border-slate-700">
-                {reports.map((r, idx) => {
-                  const sem = r.semester || r.term || `เทอม ${idx + 1}`;
-                  return (
-                    <button
-                      key={sem}
-                      onClick={() => setSelectedSemester(sem)}
-                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                        selectedSemester === sem
-                          ? 'bg-indigo-600 text-white shadow'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      เทอม {sem}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <button
-                onClick={() => window.print()}
-                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 transition-all"
-                title="พิมพ์ ปพ.6"
-              >
-                <Printer className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Academic Highlights */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="p-4 bg-slate-900/70 border border-slate-800 rounded-2xl">
-              <span className="text-[11px] text-slate-400 block mb-1">เกรดเฉลี่ยประจำเทอม (GPA)</span>
-              <p className="text-3xl font-black text-emerald-400">{currentReport.gpa.toFixed(2)}</p>
-              <span className="text-[10px] text-emerald-400 mt-1 block">เกรดเฉลี่ยยอดเยี่ยม</span>
-            </div>
-
-            <div className="p-4 bg-slate-900/70 border border-slate-800 rounded-2xl">
-              <span className="text-[11px] text-slate-400 block mb-1">เกรดเฉลี่ยสะสม (GPAX)</span>
-              <p className="text-3xl font-black text-indigo-400">{currentReport.gpax.toFixed(2)}</p>
-              <span className="text-[10px] text-slate-400 mt-1 block">สะสมตามแผนการเรียน</span>
-            </div>
-
-            <div className="p-4 bg-slate-900/70 border border-slate-800 rounded-2xl">
-              <span className="text-[11px] text-slate-400 block mb-1">หน่วยกิตที่ได้</span>
-              <p className="text-3xl font-black text-white">{currentReport.totalCredits || currentReport.creditsEarned || 16.5}</p>
-              <span className="text-[10px] text-slate-400 mt-1 block">ครบตามโครงสร้างหลักสูตร</span>
-            </div>
-
-            <div className="p-4 bg-slate-900/70 border border-slate-800 rounded-2xl">
-              <span className="text-[11px] text-slate-400 block mb-1">อันดับในสายชั้น (Rank)</span>
-              <p className="text-3xl font-black text-amber-400">#{currentReport.classRank || 1}</p>
-              <span className="text-[10px] text-slate-400 mt-1 block">จากนักเรียนทั้งหมด 320 คน</span>
-            </div>
-          </div>
-
-          {/* Subject Grade Table */}
-          <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-5 sm:p-6 backdrop-blur-md shadow-xl">
-            <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-              <Award className="w-4 h-4 text-indigo-400" />
-              รายละเอียดรายวิชาและคะแนนเก็บ (Subject Grades & Assessment)
-            </h4>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-slate-800 text-slate-400 pb-3">
-                    <th className="pb-3 font-medium">รหัสวิชา</th>
-                    <th className="pb-3 font-medium">ชื่อรายวิชา</th>
-                    <th className="pb-3 font-medium text-center">หน่วยกิต</th>
-                    <th className="pb-3 font-medium text-center">กลางภาค (20-30)</th>
-                    <th className="pb-3 font-medium text-center">ปลายภาค (20-30)</th>
-                    <th className="pb-3 font-medium text-center">รวม (100)</th>
-                    <th className="pb-3 font-medium text-right">เกรดที่ได้</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {currentReport.subjects.map((subj, idx) => {
-                    const cCode = subj.code || subj.courseCode || '';
-                    const cName = subj.name || subj.courseName || '';
-                    const creditVal = subj.credit ?? subj.credits ?? 1.5;
-                    const midVal = subj.midterm ?? subj.midtermScore ?? '-';
-                    const finVal = subj.final ?? subj.finalScore ?? '-';
-                    const gradeStr = typeof subj.grade === 'number' ? subj.grade.toFixed(1) : String(subj.grade);
-                    const gradeNum = typeof subj.grade === 'number' ? subj.grade : parseFloat(subj.grade) || 4.0;
-                    return (
-                      <tr key={cCode || idx} className="hover:bg-slate-800/30">
-                        <td className="py-3 font-mono font-bold text-indigo-400">{cCode}</td>
-                        <td className="py-3 font-medium text-slate-200">{cName}</td>
-                        <td className="py-3 text-center text-slate-300">{creditVal}</td>
-                        <td className="py-3 text-center text-slate-300">{midVal}</td>
-                        <td className="py-3 text-center text-slate-300">{finVal}</td>
-                        <td className="py-3 text-center font-bold text-white">{subj.totalScore}</td>
-                        <td className="py-3 text-right">
-                          <span className={`px-2.5 py-1 rounded-lg text-xs font-black ${
-                            gradeNum >= 4.0 ? 'bg-emerald-500/20 text-emerald-300' :
-                            gradeNum >= 3.5 ? 'bg-blue-500/20 text-blue-300' :
-                            'bg-amber-500/20 text-amber-300'
-                          }`}>
-                            {gradeStr}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Homeroom Remarks */}
-            <div className="mt-6 p-4 bg-slate-800/40 border border-slate-800 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-              <div>
-                <span className="text-slate-400 block mb-0.5">ความเห็นครูประจำชั้น:</span>
-                <p className="text-slate-200 font-medium">{currentReport.homeroomRemarks || 'ผลการเรียนอยู่ในเกณฑ์ดีเยี่ยม มีความตั้งใจและมีระเบียบวินัยสม่ำเสมอ'}</p>
-              </div>
-              <span className="text-emerald-400 font-bold shrink-0">
-                สถานะ: ผ่านการเลื่อนชั้น (PROMOTED)
-              </span>
-            </div>
-          </div>
-        </div>
+      {activeTab === 'reportcard' && (
+        <StudentGradeReport studentId={studentId} studentName={studentName} room={room} />
       )}
 
       {activeTab === 'exams' && (

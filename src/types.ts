@@ -267,6 +267,8 @@ export interface GlobalCourse {
   teacherIds?: string[];
   // ใช้แยกวิชาหลัก (คะแนนตัวเลข) กับวิชากิจกรรม (ผ่าน/ไม่ผ่าน) ในสมุดบันทึกคะแนน — ดู TeacherPortal.tsx
   subjectType?: 'MAIN' | 'ACTIVITY';
+  /** หน่วยกิตจากไฟล์ตารางสอนที่ import (ไม่มี = undefined ห้ามเดา) */
+  credits?: number;
 }
 
 export interface Course {
@@ -285,6 +287,7 @@ export interface Course {
   level?: string;   // ระดับชั้น เช่น "ม.5/8" (แยกจาก room ที่เป็นห้องกายภาพ เช่น "943")
   // TASK 2 (สมุดบันทึกคะแนน): วิชาหลัก (MAIN) กรอกคะแนนตัวเลขปกติ วิชากิจกรรม (ACTIVITY) เลือกผ่าน/ไม่ผ่านแทน
   subjectType?: 'MAIN' | 'ACTIVITY';
+  credits?: number;
 }
 
 export interface PostTeachingRecord {

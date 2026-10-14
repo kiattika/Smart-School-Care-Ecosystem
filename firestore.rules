@@ -302,6 +302,9 @@ service cloud.firestore {
                      hasRole('SUBJECT_TEACHER') || 
                      hasRole('HOMEROOM_TEACHER') || 
                      hasRole('HEAD_OF_DEPARTMENT') || 
+                     // นักเรียนเจ้าของ/ผู้ปกครองตัวจริง ตามทะเบียน students (query ต้องกรอง studentId) — เดิมเทียบ studentId กับ auth.uid
+                     // ซึ่งไม่มีวันจริง (studentId = รหัส 5 หลัก) นักเรียน/ผู้ปกครองจึงอ่านคะแนนตัวเองไม่ได้
+                     (resource.data.studentId is string && (isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId))) ||
                      (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.studentUid == request.auth.uid || resource.data.studentId == request.auth.uid));
       allow write: if hasRole('SUPER_ADMIN') ||
                       hasRole('SUBJECT_TEACHER') ||

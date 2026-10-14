@@ -581,6 +581,27 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(otherParent.doc('gradebook_scores/score-01').get());
     });
 
+    it('นักเรียนเจ้าของ/ผู้ปกครองตัวจริง (ตามทะเบียน students) อ่านคะแนนของตัวเองได้ด้วย query studentId; คนอื่น/นักเรียนต่างคนอ่านไม่ได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await db.doc('students/11111').set({ studentId: '11111', studentUid: 'stu-uid-11111', parentUid: 'par-uid-11111' });
+        await db.doc('students/22222').set({ studentId: '22222', studentUid: 'stu-uid-22222', parentUid: 'par-uid-22222' });
+        await db.doc('gradebook_scores/SCORE_ท23101_ม.3_11111_1-2569').set({ courseCode: 'ท23101', className: 'ม.3/1', studentId: '11111', term: '1/2569', total: 76, grade: '3.5' });
+        await db.doc('gradebook_scores/SCORE_ท23101_ม.3_22222_1-2569').set({ courseCode: 'ท23101', className: 'ม.3/1', studentId: '22222', term: '1/2569', total: 90, grade: '4' });
+      });
+      const col = (c: any) => collection(c, 'gradebook_scores');
+      const stu1 = asUser('stu-uid-11111', ['STUDENT']).firestore();
+      const par1 = asUser('par-uid-11111', ['PARENT']).firestore();
+      await assertSucceeds(getDocs(query(col(stu1), where('studentId', '==', '11111'))));
+      await assertSucceeds(getDocs(query(col(par1), where('studentId', '==', '11111'))));
+      await assertFails(getDocs(query(col(stu1), where('studentId', '==', '22222'))));
+      await assertFails(getDocs(query(col(par1), where('studentId', '==', '22222'))));
+      await assertFails(getDocs(col(stu1))); // ไม่กรอง studentId = อ่านทั้งคอลเลกชันไม่ได้
+      // เขียนไม่ได้ทั้งนักเรียนและผู้ปกครอง
+      await assertFails(mSetDoc(mDoc(stu1, 'gradebook_scores/x1'), { studentId: '11111', total: 100 }));
+      await assertFails(mSetDoc(mDoc(par1, 'gradebook_scores/x2'), { studentId: '11111', total: 100 }));
+    });
+
     it('denies unauthenticated context from reading gradebook_scores', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('gradebook_scores/score-01').set({ score: 85 });
