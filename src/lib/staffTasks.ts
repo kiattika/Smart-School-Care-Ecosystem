@@ -1,5 +1,5 @@
 import { canTeacherDecide } from './leaveFlow';
-import { isAppointmentPending } from './appointmentFlow';
+import { isAppointmentPending, canStaffHandleAppointment } from './appointmentFlow';
 import { SUBSTITUTE_STAGE_ROLE } from '../types';
 import { normalizeEmail } from './normalizeEmail';
 
@@ -32,11 +32,13 @@ export interface StaffTaskInput {
   /** จำนวนงานคัดกรองค้าง (นับจาก screeningTasks.ts) — ไม่ส่ง = ไม่มี */
   screening?: { twoQ: number; redFlag: number };
   /** คำขอนัดพบที่ส่งถึงฉัน (ครูที่ปรึกษา = ของห้องฉัน, ครูแนะแนว = ที่ขอพบครูแนะแนว) */
-  appointments?: { status: string }[];
+  appointments?: { status: string; recipient?: string; targetStaffId?: string }[];
   /** รายการจัดครูสอนแทนทั้งหมดที่ฉันเห็น (จาก store ที่ sync อยู่แล้ว) */
   substitutes?: { status?: string; currentApprovalStage?: string; substituteTeacherEmail?: string }[];
   /** อีเมลของฉัน — ใช้จับคู่คำขอที่รอฉันยืนยันเป็นครูสอนแทน */
   myEmail?: string;
+  /** staffId ของผู้ดู — นัดแนะแนวที่ผู้ปกครองระบุครูคนอื่นไม่นับเป็นงานค้างของฉัน */
+  myStaffId?: string;
 }
 
 export const LATE_REQUEST_APPROVER_ROLES = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN'] as const;
@@ -73,7 +75,7 @@ export function buildStaffTasks(input: StaffTaskInput): StaffTask[] {
     if (confirm > 0) tasks.push({ kind: 'SUBSTITUTE_CONFIRM', label: 'คำขอให้ฉันสอนแทน รอยืนยัน', count: confirm, where: 'พอร์ทัลครู → สอนแทน' });
   }
   if (src.appointments && input.appointments) {
-    const n = input.appointments.filter(a => isAppointmentPending(a.status)).length;
+    const n = input.appointments.filter(a => isAppointmentPending(a.status) && canStaffHandleAppointment({ recipient: a.recipient || 'HOMEROOM', targetStaffId: a.targetStaffId }, input.myStaffId)).length;
     if (n > 0) tasks.push({ kind: 'APPOINTMENT', label: 'คำขอนัดพบจากผู้ปกครองรอตอบรับ', count: n, where: input.activeRole === 'GUIDANCE_COUNSELOR' ? 'พอร์ทัลแนะแนว → นัดพบผู้ปกครอง' : 'พอร์ทัลครูที่ปรึกษา → ภาพรวม (ส่วน A)' });
   }
   if (src.screening && input.screening) {

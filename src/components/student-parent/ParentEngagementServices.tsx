@@ -18,7 +18,7 @@ import {
 import { useStore } from '../../store';
 import { NoStudentNotice } from './NoStudentNotice';
 import { format } from 'date-fns';
-import { subscribeBillingInvoices, submitPaymentSlip, subscribeAppointments, createAppointmentRequest, cancelAppointment } from '../../services/firestoreService';
+import { subscribeBillingInvoices, submitPaymentSlip, subscribeAppointments, subscribeStaffList, createAppointmentRequest, cancelAppointment } from '../../services/firestoreService';
 import {
   APPOINTMENT_MEETING_LABEL, APPOINTMENT_RECIPIENT_LABEL, APPOINTMENT_TIME_SLOTS, APPOINTMENT_TOPIC_MAX,
   appointmentStatusLabel, canCancelAppointment, safeMeetingLink,
@@ -97,6 +97,15 @@ function ParentEngagementServicesInner({
 
   // Appointment request form state — ไม่ตั้งค่าเริ่มต้นแทนผู้ใช้ (ต้องเลือกเอง)
   const [recipient, setRecipient] = useState<AppointmentRecipient | ''>('');
+  // ครูแนะแนวที่เลือก ('' = ใครก็ได้) — รายชื่อมาจาก staff จริงที่มีบทบาทแนะแนว
+  const [targetStaffId, setTargetStaffId] = useState('');
+  const [counselors, setCounselors] = useState<{ staffId: string; name: string }[]>([]);
+  useEffect(() => subscribeStaffList(list => setCounselors(
+    list.filter(s => (s.roles || []).includes('GUIDANCE_COUNSELOR') && s.status !== 'INACTIVE')
+      .map(s => ({ staffId: s.id || '', name: `${s.prefix || ''}${s.firstName || ''} ${s.lastName || ''}`.trim() }))
+      .filter(c => c.staffId && c.name)
+      .sort((a, b) => a.name.localeCompare(b.name, 'th')),
+  )), []);
   const [appointmentDate, setAppointmentDate] = useState('');
   const [timeSlot, setTimeSlot] = useState('');
   const [meetingType, setMeetingType] = useState<AppointmentMeetingType | ''>('');
@@ -155,9 +164,9 @@ function ParentEngagementServicesInner({
       await createAppointmentRequest({
         student: { studentId: student.studentId, studentUid: student.studentUid || '', parentUid: student.parentUid, room: student.room },
         parent: { uid: parentUid, name: user?.displayName || 'ผู้ปกครอง' },
-        form: { recipient, preferredDate: appointmentDate, timeSlot, meetingType, topic },
+        form: { recipient, targetStaffId: recipient === 'GUIDANCE' ? targetStaffId : '', preferredDate: appointmentDate, timeSlot, meetingType, topic },
       });
-      setRecipient(''); setAppointmentDate(''); setTimeSlot(''); setMeetingType(''); setTopic('');
+      setRecipient(''); setTargetStaffId(''); setAppointmentDate(''); setTimeSlot(''); setMeetingType(''); setTopic('');
       setBookingSuccess(true);
       setTimeout(() => setBookingSuccess(false), 4000);
     } catch (err: any) {
@@ -479,6 +488,21 @@ function ParentEngagementServicesInner({
                     </div>
                   </div>
 
+                  {recipient === 'GUIDANCE' && (
+                    <div>
+                      <label htmlFor="appt-target" className="text-slate-300 block mb-1">เลือกครูแนะแนว:</label>
+                      <select
+                        id="appt-target"
+                        value={targetStaffId}
+                        onChange={(e) => setTargetStaffId(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200"
+                      >
+                        <option value="">ใครก็ได้ (ครูแนะแนวท่านใดรับก็ได้)</option>
+                        {counselors.map(c => <option key={c.staffId} value={c.staffId}>{c.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+
                   <div>
                     <label className="text-slate-300 block mb-1">รูปแบบการพบ:</label>
                     <div className="grid grid-cols-2 gap-2">
@@ -566,7 +590,7 @@ function ParentEngagementServicesInner({
                     className="p-4 bg-slate-800/40 border border-slate-800 rounded-2xl space-y-2.5 hover:border-purple-500/30 transition-all"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-white">{APPOINTMENT_RECIPIENT_LABEL[apt.recipient]}{apt.respondedBy ? ` · ${apt.respondedBy}` : ''}</span>
+                      <span className="text-xs font-bold text-white">{APPOINTMENT_RECIPIENT_LABEL[apt.recipient]}{apt.targetStaffId ? ` (${counselors.find(c => c.staffId === apt.targetStaffId)?.name || 'ระบุครู'})` : ''}{apt.respondedBy ? ` · ${apt.respondedBy}` : ''}</span>
                       <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
                         apt.status === 'CONFIRMED' || apt.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300'
                           : apt.status === 'CANCELLED' || apt.status === 'DECLINED' ? 'bg-red-500/20 text-red-300'
