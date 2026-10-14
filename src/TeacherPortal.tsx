@@ -259,6 +259,7 @@ export function TeacherPortal() {
         // TASK 2 (สมุดบันทึกคะแนน — ผ่าน/ไม่ผ่านสำหรับวิชากิจกรรม): ดึงจาก field เดิมของ schedule doc
         // ที่ import มาอยู่แล้ว (ใช้ตัวเดียวกับที่ scheduleDocIdFor/detectSubjectType ใช้แยก ACTIVITY)
         subjectType: (sch.subjectType || sch.type) === 'ACTIVITY' ? 'ACTIVITY' : 'MAIN',
+        credits: typeof sch.credits === 'number' && Number.isFinite(sch.credits) ? sch.credits : undefined,
       } as GlobalCourse;
     });
   }, [fsSchedules]);
@@ -324,7 +325,8 @@ export function TeacherPortal() {
           attendanceTaken: isTaken,
           teacherName: gc.teacherName,
           roleLabel,
-          subjectType: gc.subjectType || 'MAIN'
+          subjectType: gc.subjectType || 'MAIN',
+          credits: gc.credits,
         };
       });
 
@@ -1710,6 +1712,18 @@ export function TeacherPortal() {
                         final: rawSetting ? rawSetting.maxFinal : 30
                       };
 
+                      // ข้อมูลวิชาที่เก็บคู่กับคะแนน ให้รายงานผลการเรียนของนักเรียน/ผู้ปกครองแสดงชื่อวิชา หน่วยกิต และคะแนนเต็มได้
+                      // (undefined ถูกตัดออก — Firestore ไม่รับ undefined และเอกสารรุ่นเก่าไม่มีค่าเหล่านี้)
+                      const courseMeta = Object.fromEntries(Object.entries({
+                        courseName: selectedCourse?.name,
+                        credits: selectedCourse?.credits,
+                        subjectType: selectedCourse?.subjectType,
+                        maxPreMidterm: setting.preMidterm,
+                        maxMidterm: setting.midterm,
+                        maxPostMidterm: setting.postMidterm,
+                        maxFinal: setting.final,
+                      }).filter(([, v]) => v !== undefined));
+
                       if (gradebookLoading) {
                         return (
                           <div className="text-center py-12 text-slate-400">
@@ -1745,7 +1759,8 @@ export function TeacherPortal() {
                           term,
                           preMidterm: 0, midterm: 0, postMidterm: 0, final: 0, total: 0,
                           grade: gradeLabel,
-                          passFailResult: result
+                          passFailResult: result,
+                          ...courseMeta,
                         });
                       };
 
@@ -1872,7 +1887,8 @@ export function TeacherPortal() {
                                   final: newScores.final,
                                   total,
                                   grade,
-                                  passFailResult: null
+                                  passFailResult: null,
+                                  ...courseMeta,
                                 });
                               };
 

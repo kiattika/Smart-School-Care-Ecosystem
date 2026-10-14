@@ -402,7 +402,7 @@ export function StudentPortal() {
 
         {/* 6. Academic Reports & Homework */}
         {activeTab === 'academic' && (
-          <AcademicHomeworkModule studentId={student.studentId} />
+          <AcademicHomeworkModule studentId={student.studentId} room={student.room} studentName={student.name} />
         )}
 
         {/* 8-10. ชำระเงิน | สนทนากับครู (ช่องส่วนตัวนักเรียน) | นัดพบครู (ดูสถานะ — ผู้ปกครองเป็นคนขอนัด) */}

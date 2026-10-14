@@ -618,7 +618,24 @@ export interface GradebookScoreRecord {
   grade: string;
   // TASK 2 (วิชากิจกรรม — ผ่าน/ไม่ผ่าน) — ดู StudentScore.passFailResult ใน types.ts สำหรับเหตุผล
   passFailResult?: 'PASS' | 'FAIL' | null;
+  // เพิ่มสำหรับรายงานผลการเรียนของนักเรียน/ผู้ปกครอง (เอกสารรุ่นเก่าไม่มี — รายงานแสดง "-" ไม่เดาค่า)
+  courseName?: string;
+  credits?: number;
+  subjectType?: 'MAIN' | 'ACTIVITY';
+  maxPreMidterm?: number;
+  maxMidterm?: number;
+  maxPostMidterm?: number;
+  maxFinal?: number;
   updatedAt?: any;
+}
+
+/** คะแนนทุกวิชาของนักเรียนคนเดียว (นักเรียนเจ้าของ/ผู้ปกครองตัวจริง/ครู — rules บังคับ query ต้องกรอง studentId) */
+export function subscribeGradebookScoresForStudent(studentId: string, cb: (list: GradebookScoreRecord[]) => void, onError?: (e: Error) => void): () => void {
+  return onSnapshot(
+    query(collection(db, 'gradebook_scores'), where('studentId', '==', studentId)),
+    (snap) => cb(snap.docs.map(d => ({ id: d.id, ...(d.data() as GradebookScoreRecord) }))),
+    (err) => onError?.(err),
+  );
 }
 
 /**
