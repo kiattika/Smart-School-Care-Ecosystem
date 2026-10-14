@@ -2733,7 +2733,7 @@ service cloud.firestore {
         || (hasAnyRole() && !('STUDENT' in request.auth.token.get('roles', [])) && !('PARENT' in request.auth.token.get('roles', []))));
       allow create, update: if isSignedIn() && uid == request.auth.uid
         && request.resource.data.keys().hasOnly(['theme', 'textScale', 'photoUrl', 'updatedAt'])
-        && request.resource.data.get('theme', 'system') in ['system', 'light', 'dark']
+        && request.resource.data.get('theme', 'system') in ['system', 'light', 'dark', 'navy', 'pink', 'lavender']
         && request.resource.data.get('textScale', 'normal') in ['normal', 'large', 'xlarge']
         && request.resource.data.get('photoUrl', '') is string
         && request.resource.data.get('photoUrl', '').size() <= 1000

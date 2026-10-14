@@ -144,6 +144,7 @@ export function PortalSidebarLayout({ items, activeId, onSelect, children, title
       <div className={cn('hidden lg:block shrink-0 transition-[width] duration-200', mode === 'pinned' ? 'w-64' : 'w-16')}>
         <nav
           ref={navRef}
+          data-shell="sidebar"
           aria-label={title}
           onMouseEnter={() => { if (!pinned) scheduleExpand(); }}
           onMouseLeave={() => { if (!pinned) scheduleCollapse(); }}
@@ -197,7 +198,7 @@ export function PortalSidebarLayout({ items, activeId, onSelect, children, title
       {drawerOpen && (
         <div className="lg:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label={title}>
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={closeDrawer} aria-hidden="true" />
-          <div ref={drawerRef} className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-[#0a0f16] border-r border-white/10 shadow-2xl flex flex-col">
+          <div ref={drawerRef} data-shell="sidebar" className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-[#0a0f16] border-r border-white/10 shadow-2xl flex flex-col">
             <div className="h-14 flex items-center justify-between px-4 border-b border-white/10 shrink-0">
               <span className="text-sm font-bold text-white truncate">{title}</span>
               <button
