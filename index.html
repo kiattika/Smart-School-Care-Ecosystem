@@ -15,6 +15,18 @@
     <meta name="description" content="A comprehensive school management and student care platform with RBAC and real-time cross-classroom data syncing." />
     <meta property="og:title" content="Smart School Care Platform" />
     <meta property="og:description" content="A comprehensive school management and student care platform with RBAC and real-time cross-classroom data syncing." />
+    <script>
+      /* ธีม/ขนาดตัวอักษรที่ผู้ใช้เลือกไว้ (ค่าจากเครื่องนี้) — ตั้งก่อนวาดหน้าเพื่อไม่ให้จอกะพริบ; ตรรกะเต็มอยู่ src/lib/userPreferences.ts */
+      (function () {
+        try {
+          var p = JSON.parse(localStorage.getItem('ssc.prefs.v1') || '{}');
+          var t = p.theme === 'light' || p.theme === 'dark' ? p.theme : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          var r = document.documentElement;
+          r.setAttribute('data-theme', t);
+          if (p.textScale === 'large' || p.textScale === 'xlarge') r.setAttribute('data-text-scale', p.textScale);
+        } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -1,0 +1,148 @@
+/* สร้างโดย scripts/gen-theme-light.mjs — อย่าแก้มือ */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-slate-50: oklch(12.9% 0.042 264.695);
+  --color-slate-100: oklch(20.8% 0.042 265.755);
+  --color-slate-200: oklch(27.9% 0.041 260.031);
+  --color-slate-300: oklch(37.2% 0.044 257.287);
+  --color-slate-400: oklch(44.6% 0.043 257.281);
+  --color-slate-500: oklch(55.4% 0.046 257.417);
+  --color-slate-600: oklch(70.4% 0.04 256.788);
+  --color-slate-700: oklch(86.9% 0.022 252.894);
+  --color-slate-800: oklch(92.9% 0.013 255.508);
+  --color-slate-900: oklch(96.8% 0.007 247.896);
+  --color-slate-950: oklch(98.4% 0.003 247.858);
+  --color-cyan-200: oklch(45% 0.085 224.283);
+  --color-cyan-300: oklch(52% 0.105 223.128);
+  --color-cyan-400: oklch(60.9% 0.126 221.723);
+  --color-emerald-200: oklch(43.2% 0.095 166.913);
+  --color-emerald-300: oklch(50.8% 0.118 165.612);
+  --color-emerald-400: oklch(59.6% 0.145 163.225);
+  --color-amber-200: oklch(47.3% 0.137 46.201);
+  --color-amber-300: oklch(55.5% 0.163 48.998);
+  --color-amber-400: oklch(66.6% 0.179 58.318);
+  --color-rose-200: oklch(45.5% 0.188 13.697);
+  --color-rose-300: oklch(51.4% 0.222 16.935);
+  --color-rose-400: oklch(58.6% 0.253 17.585);
+  --color-sky-200: oklch(44.3% 0.11 240.79);
+  --color-sky-300: oklch(50% 0.134 242.749);
+  --color-sky-400: oklch(58.8% 0.158 241.966);
+  --color-blue-200: oklch(42.4% 0.199 265.638);
+  --color-blue-300: oklch(48.8% 0.243 264.376);
+  --color-blue-400: oklch(54.6% 0.245 262.881);
+  --color-indigo-200: oklch(39.8% 0.195 277.366);
+  --color-indigo-300: oklch(45.7% 0.24 277.023);
+  --color-indigo-400: oklch(51.1% 0.262 276.966);
+  --color-violet-200: oklch(43.2% 0.232 292.759);
+  --color-violet-300: oklch(49.1% 0.27 292.581);
+  --color-violet-400: oklch(54.1% 0.281 293.009);
+  --color-purple-200: oklch(43.8% 0.218 303.724);
+  --color-purple-300: oklch(49.6% 0.265 301.924);
+  --color-purple-400: oklch(55.8% 0.288 302.321);
+  --color-pink-200: oklch(45.9% 0.187 3.815);
+  --color-pink-300: oklch(52.5% 0.223 3.958);
+  --color-pink-400: oklch(59.2% 0.249 0.584);
+  --color-orange-200: oklch(47% 0.157 37.304);
+  --color-orange-300: oklch(55.3% 0.195 38.402);
+  --color-orange-400: oklch(64.6% 0.222 41.116);
+  --color-teal-200: oklch(43.7% 0.078 188.216);
+  --color-teal-300: oklch(51.1% 0.096 186.391);
+  --color-teal-400: oklch(60% 0.118 184.704);
+  --color-green-200: oklch(44.8% 0.119 151.328);
+  --color-green-300: oklch(52.7% 0.154 150.069);
+  --color-green-400: oklch(62.7% 0.194 149.214);
+  --color-red-200: oklch(44.4% 0.177 26.899);
+  --color-red-300: oklch(50.5% 0.213 27.518);
+  --color-red-400: oklch(57.7% 0.245 27.325);
+  --color-yellow-200: oklch(47.6% 0.114 61.907);
+  --color-yellow-300: oklch(55.4% 0.135 66.442);
+  --color-yellow-400: oklch(68.1% 0.162 75.834);
+  --color-lime-200: oklch(45.3% 0.124 130.933);
+  --color-lime-300: oklch(53.2% 0.157 131.589);
+  --color-lime-400: oklch(64.8% 0.2 131.684);
+  --color-fuchsia-200: oklch(45.2% 0.211 324.591);
+  --color-fuchsia-300: oklch(51.8% 0.253 323.949);
+  --color-fuchsia-400: oklch(59.1% 0.293 322.896);
+  --app-body-bg: #f1f5f9;
+  --app-body-fg: #0f172a;
+}
+
+/* กระดาษขาว: คืนสเกลสีเดิมภายในกล่อง */
+:root[data-theme="light"] .bg-white {
+  color: #0f172a;
+  --color-slate-50: oklch(98.4% 0.003 247.858);
+  --color-slate-100: oklch(96.8% 0.007 247.896);
+  --color-slate-200: oklch(92.9% 0.013 255.508);
+  --color-slate-300: oklch(86.9% 0.022 252.894);
+  --color-slate-400: oklch(70.4% 0.04 256.788);
+  --color-slate-500: oklch(55.4% 0.046 257.417);
+  --color-slate-600: oklch(44.6% 0.043 257.281);
+  --color-slate-700: oklch(37.2% 0.044 257.287);
+  --color-slate-800: oklch(27.9% 0.041 260.031);
+  --color-slate-900: oklch(20.8% 0.042 265.755);
+  --color-slate-950: oklch(12.9% 0.042 264.695);
+  --color-cyan-200: oklch(91.7% 0.08 205.041);
+  --color-cyan-300: oklch(86.5% 0.127 207.078);
+  --color-cyan-400: oklch(78.9% 0.154 211.53);
+  --color-emerald-200: oklch(90.5% 0.093 164.15);
+  --color-emerald-300: oklch(84.5% 0.143 164.978);
+  --color-emerald-400: oklch(76.5% 0.177 163.223);
+  --color-amber-200: oklch(92.4% 0.12 95.746);
+  --color-amber-300: oklch(87.9% 0.169 91.605);
+  --color-amber-400: oklch(82.8% 0.189 84.429);
+  --color-rose-200: oklch(89.2% 0.058 10.001);
+  --color-rose-300: oklch(81% 0.117 11.638);
+  --color-rose-400: oklch(71.2% 0.194 13.428);
+  --color-sky-200: oklch(90.1% 0.058 230.902);
+  --color-sky-300: oklch(82.8% 0.111 230.318);
+  --color-sky-400: oklch(74.6% 0.16 232.661);
+  --color-blue-200: oklch(88.2% 0.059 254.128);
+  --color-blue-300: oklch(80.9% 0.105 251.813);
+  --color-blue-400: oklch(70.7% 0.165 254.624);
+  --color-indigo-200: oklch(87% 0.065 274.039);
+  --color-indigo-300: oklch(78.5% 0.115 274.713);
+  --color-indigo-400: oklch(67.3% 0.182 276.935);
+  --color-violet-200: oklch(89.4% 0.057 293.283);
+  --color-violet-300: oklch(81.1% 0.111 293.571);
+  --color-violet-400: oklch(70.2% 0.183 293.541);
+  --color-purple-200: oklch(90.2% 0.063 306.703);
+  --color-purple-300: oklch(82.7% 0.119 306.383);
+  --color-purple-400: oklch(71.4% 0.203 305.504);
+  --color-pink-200: oklch(89.9% 0.061 343.231);
+  --color-pink-300: oklch(82.3% 0.12 346.018);
+  --color-pink-400: oklch(71.8% 0.202 349.761);
+  --color-orange-200: oklch(90.1% 0.076 70.697);
+  --color-orange-300: oklch(83.7% 0.128 66.29);
+  --color-orange-400: oklch(75% 0.183 55.934);
+  --color-teal-200: oklch(91% 0.096 180.426);
+  --color-teal-300: oklch(85.5% 0.138 181.071);
+  --color-teal-400: oklch(77.7% 0.152 181.912);
+  --color-green-200: oklch(92.5% 0.084 155.995);
+  --color-green-300: oklch(87.1% 0.15 154.449);
+  --color-green-400: oklch(79.2% 0.209 151.711);
+  --color-red-200: oklch(88.5% 0.062 18.334);
+  --color-red-300: oklch(80.8% 0.114 19.571);
+  --color-red-400: oklch(70.4% 0.191 22.216);
+  --color-yellow-200: oklch(94.5% 0.129 101.54);
+  --color-yellow-300: oklch(90.5% 0.182 98.111);
+  --color-yellow-400: oklch(85.2% 0.199 91.936);
+  --color-lime-200: oklch(93.8% 0.127 124.321);
+  --color-lime-300: oklch(89.7% 0.196 126.665);
+  --color-lime-400: oklch(84.1% 0.238 128.85);
+  --color-fuchsia-200: oklch(90.3% 0.076 319.62);
+  --color-fuchsia-300: oklch(83.3% 0.145 321.434);
+  --color-fuchsia-400: oklch(74% 0.238 322.16);
+}
+
+/* ข้อความ text-white บนพื้นหลักเดิม → สีเข้ม; บนปุ่ม/ป้ายสีสด คงเป็นขาว */
+:root[data-theme="light"] .text-white { color: #0f172a; }
+:root[data-theme="light"] :is([class*="bg-cyan-"],[class*="bg-emerald-"],[class*="bg-rose-"],[class*="bg-blue-"],[class*="bg-indigo-"],[class*="bg-violet-"],[class*="bg-purple-"],[class*="bg-pink-"],[class*="bg-orange-"],[class*="bg-teal-"],[class*="bg-sky-"],[class*="bg-red-"],[class*="bg-green-"],[class*="bg-amber-"],[class*="bg-fuchsia-"]):is([class*="-500"],[class*="-600"],[class*="-700"],[class*="-800"]):not([class*="/"]) :is(.text-white, svg),
+:root[data-theme="light"] :is([class*="bg-cyan-"],[class*="bg-emerald-"],[class*="bg-rose-"],[class*="bg-blue-"],[class*="bg-indigo-"],[class*="bg-violet-"],[class*="bg-purple-"],[class*="bg-pink-"],[class*="bg-orange-"],[class*="bg-teal-"],[class*="bg-sky-"],[class*="bg-red-"],[class*="bg-green-"],[class*="bg-amber-"],[class*="bg-fuchsia-"]):is([class*="-500"],[class*="-600"],[class*="-700"],[class*="-800"]):not([class*="/"]).text-white { color: #ffffff; }
+
+/* พื้นหลังฮาร์ดโค้ด hex สีเข้ม (bg-[#0b0f19] ฯลฯ) และชั้นโปร่งขาว/ดำ */
+:root[data-theme="light"] [class*="bg-[#"] { background-color: var(--color-slate-900); }
+:root[data-theme="light"] [class*="border-white/"] { border-color: rgb(15 23 42 / 0.14); }
+:root[data-theme="light"] [class*="bg-white/"] { background-color: rgb(15 23 42 / 0.04); }
+:root[data-theme="light"] [class*="divide-white/"] > :not(:last-child) { border-color: rgb(15 23 42 / 0.14); }
+:root[data-theme="light"] ::placeholder { color: var(--color-slate-500); }
+:root[data-theme="light"] .shadow-2xl, :root[data-theme="light"] .shadow-xl { --tw-shadow-color: rgb(15 23 42 / 0.15); }

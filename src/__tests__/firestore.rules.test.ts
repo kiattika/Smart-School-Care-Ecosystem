@@ -5449,4 +5449,40 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(mDeleteDoc(mDoc(stu(), 'internship_requests/11111')));
     });
   });
+
+  describe('user_preferences (ตั้งค่าส่วนตัว)', () => {
+    const me = () => asUser('u-me', ['SUBJECT_TEACHER'], { staffId: 't-me' }).firestore();
+    const other = () => asUser('u-other', ['SUBJECT_TEACHER'], { staffId: 't-o' }).firestore();
+    const student = () => asUser('u-stu', ['STUDENT']).firestore();
+    const PHOTO = 'https://firebasestorage.googleapis.com/v0/b/x/o/profile_photos%2Fu-me%2F1.jpg?alt=media&token=t';
+
+    it('เจ้าของตั้งธีม/ขนาดตัวอักษร/รูปของตนเองได้ (merge ทีละคีย์)', async () => {
+      await assertSucceeds(mSetDoc(mDoc(me(), 'user_preferences/u-me'), { theme: 'light', updatedAt: mServerTimestamp() }, { merge: true }));
+      await assertSucceeds(mSetDoc(mDoc(me(), 'user_preferences/u-me'), { textScale: 'large', photoUrl: PHOTO, updatedAt: mServerTimestamp() }, { merge: true }));
+      await assertSucceeds(mSetDoc(mDoc(me(), 'user_preferences/u-me'), { photoUrl: '', updatedAt: mServerTimestamp() }, { merge: true }));
+    });
+
+    it('ตั้งค่าของคนอื่นไม่ได้ และนักเรียนตั้งของตนเองได้', async () => {
+      await assertFails(mSetDoc(mDoc(other(), 'user_preferences/u-me'), { theme: 'dark', updatedAt: mServerTimestamp() }, { merge: true }));
+      await assertSucceeds(mSetDoc(mDoc(student(), 'user_preferences/u-stu'), { theme: 'dark', updatedAt: mServerTimestamp() }, { merge: true }));
+    });
+
+    it('ปฏิเสธค่าที่ไม่รู้จัก / คีย์แปลกปลอม / รูปที่ไม่ใช่ลิงก์ Storage / ไม่ใช้เวลาเซิร์ฟเวอร์', async () => {
+      const ref = () => mDoc(me(), 'user_preferences/u-me');
+      await assertFails(mSetDoc(ref(), { theme: 'purple', updatedAt: mServerTimestamp() }, { merge: true }));
+      await assertFails(mSetDoc(ref(), { textScale: 'huge', updatedAt: mServerTimestamp() }, { merge: true }));
+      await assertFails(mSetDoc(ref(), { theme: 'dark', role: 'SUPER_ADMIN', updatedAt: mServerTimestamp() }, { merge: true }));
+      await assertFails(mSetDoc(ref(), { photoUrl: 'https://evil.example/x.jpg', updatedAt: mServerTimestamp() }, { merge: true }));
+      await assertFails(mSetDoc(ref(), { photoUrl: 'javascript:alert(1)', updatedAt: mServerTimestamp() }, { merge: true }));
+      await assertFails(mSetDoc(ref(), { theme: 'dark', updatedAt: new Date() }, { merge: true }));
+    });
+
+    it('บุคลากรอ่านของผู้อื่นได้ แต่นักเรียนอ่านของครูไม่ได้ และลบไม่ได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('user_preferences/u-me').set({ theme: 'dark', updatedAt: new Date() }); });
+      await assertSucceeds(mGetDoc(mDoc(other(), 'user_preferences/u-me')));
+      await assertSucceeds(mGetDoc(mDoc(me(), 'user_preferences/u-me')));
+      await assertFails(mGetDoc(mDoc(student(), 'user_preferences/u-me')));
+      await assertFails(mDeleteDoc(mDoc(me(), 'user_preferences/u-me')));
+    });
+  });
 });
