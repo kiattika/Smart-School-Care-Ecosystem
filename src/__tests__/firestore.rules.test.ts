@@ -3300,6 +3300,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       });
       await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('guidance_counseling_cases/case-3').get());
       await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('guidance_counseling_cases/case-3').set(baseCase({ status: 'RESOLVED' })));
+      await assertFails(asRole('GUIDANCE_COUNSELOR').firestore().doc('guidance_counseling_cases/case-3').get()); // ไม่ใช่เจ้าของเคส
 
       await assertFails(asRole('HOMEROOM_TEACHER').firestore().doc('guidance_counseling_cases/case-3').get());
       await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('guidance_counseling_cases/case-3').get());
@@ -3310,13 +3311,29 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(asRole('PARENT').firestore().doc('guidance_counseling_cases/case-3').set(baseCase({ status: 'RESOLVED' })));
     });
 
-    it('lets a GUIDANCE_COUNSELOR (not just the original author) update status to RESOLVED', async () => {
+    it('ครูแนะแนวอ่าน/แก้สถานะได้เฉพาะเคสของตน; ครูแนะแนวคนอื่นอ่าน/แก้ไม่ได้', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('guidance_counseling_cases/case-5').set(baseCase());
       });
-      await assertSucceeds(asUser('other-counselor', ['GUIDANCE_COUNSELOR']).firestore().doc('guidance_counseling_cases/case-5').set(
-        baseCase({ status: 'RESOLVED', updatedAt: '2026-09-02T00:00:00.000Z' })
-      ));
+      const owner = asUser(COUNSELOR_UID, ['GUIDANCE_COUNSELOR']).firestore();
+      const other = asUser('other-counselor', ['GUIDANCE_COUNSELOR']).firestore();
+      await assertSucceeds(owner.doc('guidance_counseling_cases/case-5').get());
+      await assertFails(other.doc('guidance_counseling_cases/case-5').get());
+      await assertSucceeds(owner.doc('guidance_counseling_cases/case-5').update({ status: 'RESOLVED', updatedAt: '2026-09-02T00:00:00.000Z' }));
+      await assertFails(other.doc('guidance_counseling_cases/case-5').update({ status: 'IN_PROGRESS', updatedAt: '2026-09-03T00:00:00.000Z' }));
+    });
+
+    it('query กรอง counselorUid == uid ผ่าน; query ทั้ง collection โดยครูแนะแนวถูกปฏิเสธ; เจ้าของย้ายเคส/ลบไม่ได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('guidance_counseling_cases/case-7').set(baseCase({ id: 'case-7' }));
+        await ctx.firestore().doc('guidance_counseling_cases/case-8').set(baseCase({ id: 'case-8', counselorUid: 'other-counselor' }));
+      });
+      const owner = asUser(COUNSELOR_UID, ['GUIDANCE_COUNSELOR']).firestore();
+      await assertSucceeds(owner.collection('guidance_counseling_cases').where('counselorUid', '==', COUNSELOR_UID).get());
+      await assertFails(owner.collection('guidance_counseling_cases').get());
+      await assertFails(owner.doc('guidance_counseling_cases/case-7').update({ counselorUid: 'other-counselor' }));
+      await assertFails(owner.doc('guidance_counseling_cases/case-7').delete());
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().collection('guidance_counseling_cases').get());
     });
 
     it('REGRESSION: denies an unauthenticated user entirely', async () => {

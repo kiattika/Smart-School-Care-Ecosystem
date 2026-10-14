@@ -1442,11 +1442,18 @@ service cloud.firestore {
     // (ต่างจาก student_screenings_2q/phq9/student_assessments_sdq ที่ยังให้ HOMEROOM_TEACHER/
     // self อ่านได้ — เคสนี้คือบันทึกการให้คำปรึกษาจริง ไม่ใช่แค่ผลคัดกรอง)
     match /guidance_counseling_cases/{caseId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
+      // เห็นเฉพาะ "ครูเจ้าของเคส" (counselorUid == uid ผู้เขียน) — ครูแนะแนวคนอื่นก็อ่านไม่ได้
+      // SUPER_ADMIN คงไว้เพื่อดูแลระบบ/กู้เคสที่เจ้าของลาออก
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     (hasRole('GUIDANCE_COUNSELOR') && resource.data.counselorUid == request.auth.uid);
       // counselorUid ต้องตรงกับผู้เขียนจริงเสมอตอนสร้าง กันปลอมชื่อผู้บันทึก
       allow create: if (hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR')) &&
                        request.resource.data.counselorUid == request.auth.uid;
-      allow update, delete: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
+      // เจ้าของเคสแก้ได้เฉพาะสถานะ/เวลา (ย้ายเจ้าของเคสไม่ได้)
+      allow update: if hasRole('SUPER_ADMIN') ||
+                       (hasRole('GUIDANCE_COUNSELOR') && resource.data.counselorUid == request.auth.uid &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'lastSessionDate']));
+      allow delete: if hasRole('SUPER_ADMIN');
     }
 
     // 31. Infirmary Visits — ห้องพยาบาล บันทึกอาการ/การรักษา ตั้งใจให้ "เห็นได้" โดยผู้ปกครองและ

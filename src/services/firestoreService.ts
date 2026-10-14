@@ -2890,10 +2890,13 @@ export async function updateGuidanceCounselingCaseStatus(
 /** real-time listener — เฉพาะ GUIDANCE_COUNSELOR/SUPER_ADMIN ที่ผ่าน rules จะได้ข้อมูลจริง
  *  role อื่นจะโดน permission-denied จาก listener error callback (คืน list ว่างแทนการพัง UI) */
 export function subscribeGuidanceCounselingCases(
-  onUpdate: (cases: GuidanceCounselingCase[]) => void
+  onUpdate: (cases: GuidanceCounselingCase[]) => void,
+  /** ครูแนะแนวเห็นเฉพาะเคสของตน — ส่ง uid ตัวเองเพื่อให้ query พิสูจน์ได้ตาม rules; SUPER_ADMIN ไม่ต้องส่ง */
+  ownerUid?: string
 ): () => void {
   try {
-    return onSnapshot(collection(db, GUIDANCE_CASES_COL), (snap) => {
+    const src = ownerUid ? query(collection(db, GUIDANCE_CASES_COL), where('counselorUid', '==', ownerUid)) : collection(db, GUIDANCE_CASES_COL);
+    return onSnapshot(src, (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as GuidanceCounselingCase));
       list.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
       onUpdate(list);

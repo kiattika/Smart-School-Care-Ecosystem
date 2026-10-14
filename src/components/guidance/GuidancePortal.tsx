@@ -126,13 +126,16 @@ export function GuidancePortal() {
   const [cases, setCases] = useState<GuidanceCounselingCase[]>([]);
   const [casesLoading, setCasesLoading] = useState(true);
 
+  // ครูแนะแนวเห็นเฉพาะเคสที่ตนเป็นเจ้าของ (rules บังคับ counselorUid == uid) — SUPER_ADMIN เห็นทั้งหมด
+  const isSuperAdmin = user?.role === 'admin';
   useEffect(() => {
+    if (!user?.uid) { setCases([]); setCasesLoading(false); return; }
     const unsubscribe = subscribeGuidanceCounselingCases((list) => {
       setCases(list);
       setCasesLoading(false);
-    });
+    }, isSuperAdmin ? undefined : user.uid);
     return () => unsubscribe();
-  }, []);
+  }, [user?.uid, isSuperAdmin]);
 
   const [showAddCaseModal, setShowAddCaseModal] = useState(false);
   // เฟส 2 shared components — TASK 2: เปลี่ยนไปใช้ StudentPicker กลาง ไม่ auto-select นักเรียนคนแรกอีกต่อไป
