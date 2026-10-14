@@ -1139,6 +1139,8 @@ export interface ParentAppointment {
   /** ห้องของนักเรียนตอนขอ (students.room) — ใช้ให้ครูที่ปรึกษาห้องนั้นเห็น */
   homeroomClass: string;
   recipient: 'HOMEROOM' | 'GUIDANCE';
+  /** staffId ของครูแนะแนวที่ผู้ปกครองระบุ — '' / ไม่มี (ข้อมูลเดิม) = ใครก็ได้; ใช้กับ recipient=GUIDANCE เท่านั้น */
+  targetStaffId?: string;
   topic: string;
   preferredDate: string;
   timeSlot: string;

@@ -1877,6 +1877,7 @@ export async function createAppointmentRequest(input: CreateAppointmentInput): P
     parentUid: parent.uid,
     homeroomClass: student.room,
     recipient: form.recipient as ParentAppointment['recipient'],
+    targetStaffId: form.recipient === 'GUIDANCE' ? (form.targetStaffId || '') : '',
     topic: form.topic.trim(),
     preferredDate: form.preferredDate,
     timeSlot: form.timeSlot,

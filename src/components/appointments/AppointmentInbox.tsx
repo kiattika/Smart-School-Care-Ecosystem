@@ -4,7 +4,7 @@ import { useStore } from '../../store';
 import { respondAppointment, completeAppointment, createParentNotification } from '../../services/firestoreService';
 import {
   APPOINTMENT_MEETING_LABEL, APPOINTMENT_NOTE_MAX, APPOINTMENT_PLACE_MAX, APPOINTMENT_RECIPIENT_LABEL,
-  canCompleteAppointment, canRespondAppointment,
+  canCompleteAppointment, canRespondAppointment, canStaffHandleAppointment,
 } from '../../lib/appointmentFlow';
 import type { ParentAppointment, Student } from '../../types';
 
@@ -20,8 +20,10 @@ export function AppointmentInbox({ appointments, students }: { appointments: Par
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [places, setPlaces] = useState<Record<string, string>>({});
 
-  const pending = appointments.filter(a => canRespondAppointment(a.status));
-  const confirmed = appointments.filter(a => canCompleteAppointment(a.status));
+  const myStaffId = user?.staffId;
+  // นัดแนะแนวที่ผู้ปกครองระบุครูคนอื่น: ครูแนะแนวคนอื่นเห็นเป็นข้อมูล แต่ตอบ/ปิดงานไม่ได้ (rules บังคับซ้ำ)
+  const pending = appointments.filter(a => canRespondAppointment(a.status) && canStaffHandleAppointment(a, myStaffId));
+  const confirmed = appointments.filter(a => canCompleteAppointment(a.status) && canStaffHandleAppointment(a, myStaffId));
 
   const notifyParent = (apt: ParentAppointment, title: string, message: string, type: 'info' | 'warning') => {
     const student = students.find(s => s.studentId === apt.studentId);

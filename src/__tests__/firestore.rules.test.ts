@@ -2087,6 +2087,43 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     }
     const confirm = { status: 'CONFIRMED', respondedBy: 'ครู', respondedByStaffId: HR_UID, respondedAt: '2026-10-12T02:00:00.000Z', teacherNote: '', locationOrLink: 'ห้องแนะแนว' };
 
+    describe('targetStaffId (เลือกครูแนะแนว)', () => {
+      const gcA = () => asUser('gc-t1', ['GUIDANCE_COUNSELOR'], { staffId: 'gc-t1' }).firestore();
+      const gcB = () => asUser('gc-t2', ['GUIDANCE_COUNSELOR'], { staffId: 'gc-t2' }).firestore();
+      async function seedGc() {
+        await seed();
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc('staff/gc-t1').set({ roles: ['GUIDANCE_COUNSELOR'] });
+          await ctx.firestore().doc('staff/gc-t2').set({ roles: ['GUIDANCE_COUNSELOR'] });
+        });
+      }
+      it('ผู้ปกครองระบุครูแนะแนวตัวจริงได้ / ใครก็ได้ (\'\') ได้ — ระบุครูที่ไม่ใช่แนะแนว, ไม่มีอยู่จริง หรือใช้กับ HOMEROOM ไม่ได้', async () => {
+        await seedGc();
+        await assertSucceeds(par().doc(`${COL}/t1`).set(appt('t1', { recipient: 'GUIDANCE', targetStaffId: 'gc-t1' })));
+        await assertSucceeds(par().doc(`${COL}/t2`).set(appt('t2', { recipient: 'GUIDANCE', targetStaffId: '' })));
+        await assertFails(par().doc(`${COL}/t3`).set(appt('t3', { recipient: 'GUIDANCE', targetStaffId: HR_UID })));
+        await assertFails(par().doc(`${COL}/t4`).set(appt('t4', { recipient: 'GUIDANCE', targetStaffId: 'no-such-staff' })));
+        await assertFails(par().doc(`${COL}/t5`).set(appt('t5', { recipient: 'HOMEROOM', targetStaffId: 'gc-t1' })));
+      });
+      it('นัดที่ระบุครู: เฉพาะครูคนนั้นตอบรับ/ปิดงานได้ — ครูแนะแนวคนอื่นอ่านได้แต่ตอบไม่ได้', async () => {
+        await seedGc();
+        await put('t6', { recipient: 'GUIDANCE', targetStaffId: 'gc-t1' });
+        const resp = { ...confirm, respondedByStaffId: 'gc-t1', updatedAt: new Date() };
+        await assertSucceeds(gcB().doc(`${COL}/t6`).get());
+        await assertFails(gcB().doc(`${COL}/t6`).update(resp));
+        await assertSucceeds(gcA().doc(`${COL}/t6`).update(resp));
+        await assertFails(gcB().doc(`${COL}/t6`).update({ status: 'COMPLETED', completedAt: '2026-10-13T00:00:00.000Z', updatedAt: new Date() }));
+        await assertSucceeds(gcA().doc(`${COL}/t6`).update({ status: 'COMPLETED', completedAt: '2026-10-13T00:00:00.000Z', updatedAt: new Date() }));
+      });
+      it('นัด "ใครก็ได้" และนัดเดิมที่ไม่มี targetStaffId: ครูแนะแนวคนใดก็ตอบได้', async () => {
+        await seedGc();
+        await put('t7', { recipient: 'GUIDANCE', targetStaffId: '' });
+        await put('t8', { recipient: 'GUIDANCE' });
+        await assertSucceeds(gcB().doc(`${COL}/t7`).update({ ...confirm, respondedByStaffId: 'gc-t2', updatedAt: new Date() }));
+        await assertSucceeds(gcA().doc(`${COL}/t8`).update({ ...confirm, respondedByStaffId: 'gc-t1', updatedAt: new Date() }));
+      });
+    });
+
     describe('create', () => {
       it('the real parent can request, to either recipient', async () => {
         await seed();

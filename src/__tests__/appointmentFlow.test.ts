@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   APPOINTMENT_TIME_SLOTS, canCancelAppointment, canCompleteAppointment, canRespondAppointment, isAppointmentPending,
-  safeMeetingLink, validateAppointmentForm, validateConfirmation,
+  canStaffHandleAppointment, safeMeetingLink, validateAppointmentForm, validateConfirmation,
 } from '../lib/appointmentFlow';
 import { buildStaffTasks, staffTaskSources } from '../lib/staffTasks';
 import { readSource } from './helpers/readSource';
@@ -71,5 +71,39 @@ describe('bell + wiring', () => {
     expect(inbox).toMatch(/createParentNotification\(/);
     expect(readSource('src/AdvisorPortal.tsx')).toMatch(/<AppointmentInbox /);
     expect(readSource('src/components/guidance/GuidancePortal.tsx')).toMatch(/<AppointmentInbox /);
+  });
+});
+
+describe('เลือกครูแนะแนว (targetStaffId)', () => {
+  it('ระบุครูได้เฉพาะนัดแนะแนว', () => {
+    expect(validateAppointmentForm({ ...ok, recipient: 'GUIDANCE', targetStaffId: 'gc-1' }, TODAY)).toEqual([]);
+    expect(validateAppointmentForm({ ...ok, recipient: 'GUIDANCE', targetStaffId: '' }, TODAY)).toEqual([]);
+    expect(validateAppointmentForm({ ...ok, recipient: 'HOMEROOM', targetStaffId: 'gc-1' }, TODAY).length).toBe(1);
+  });
+  it('canStaffHandleAppointment ตรงกับ rules: ระบุครู = เฉพาะคนนั้น, ว่าง/ไม่มี = ใครก็ได้, ครูที่ปรึกษาไม่ผูก', () => {
+    expect(canStaffHandleAppointment({ recipient: 'GUIDANCE', targetStaffId: 'gc-1' }, 'gc-1')).toBe(true);
+    expect(canStaffHandleAppointment({ recipient: 'GUIDANCE', targetStaffId: 'gc-1' }, 'gc-2')).toBe(false);
+    expect(canStaffHandleAppointment({ recipient: 'GUIDANCE', targetStaffId: 'gc-1' }, undefined)).toBe(false);
+    expect(canStaffHandleAppointment({ recipient: 'GUIDANCE', targetStaffId: '' }, 'gc-2')).toBe(true);
+    expect(canStaffHandleAppointment({ recipient: 'GUIDANCE' }, 'gc-2')).toBe(true);
+    expect(canStaffHandleAppointment({ recipient: 'HOMEROOM' }, 'x')).toBe(true);
+  });
+  it('กระดิ่งงานค้างไม่นับนัดที่ผู้ปกครองระบุครูแนะแนวคนอื่น', () => {
+    const base = { activeRole: 'GUIDANCE_COUNSELOR', roomLeaves: [], lateRequests: [] } as never;
+    const apts = [
+      { status: 'REQUESTED', recipient: 'GUIDANCE', targetStaffId: 'gc-1' },
+      { status: 'REQUESTED', recipient: 'GUIDANCE', targetStaffId: '' },
+      { status: 'REQUESTED', recipient: 'GUIDANCE', targetStaffId: 'gc-2' },
+    ];
+    const count = (id: string) => buildStaffTasks({ ...(base as object), appointments: apts, myStaffId: id } as never)
+      .find(t => t.kind === 'APPOINTMENT')?.count;
+    expect(count('gc-1')).toBe(2);
+    expect(count('gc-2')).toBe(2);
+    expect(count('gc-3')).toBe(1);
+  });
+  it('แอปส่ง targetStaffId ไปกับคำขอ และกล่องรับนัดกรองด้วย canStaffHandleAppointment', () => {
+    expect(readSource('src/services/firestoreService.ts')).toMatch(/targetStaffId: form\.recipient === 'GUIDANCE'/);
+    expect(readSource('src/components/appointments/AppointmentInbox.tsx')).toMatch(/canStaffHandleAppointment\(a, myStaffId\)/);
+    expect(readSource('firestore.rules')).toMatch(/validAppointmentTarget\(request\.resource\.data\)/);
   });
 });
