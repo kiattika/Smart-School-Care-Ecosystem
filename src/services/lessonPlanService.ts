@@ -3,8 +3,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import {
-  checksComplete, courseKeyOf, planDocId, validateSubmission,
-  type ChecksMap, type LessonPlan, type LessonPlanKind, type PlanQuery,
+  scoresComplete, courseKeyOf, planDocId, validateSubmission,
+  type ScoresMap, type LessonPlan, type LessonPlanKind, type PlanQuery,
 } from '../lib/lessonPlans';
 
 const col = () => collection(db, 'lesson_plan_submissions');
@@ -70,20 +70,20 @@ export interface ReviewInput {
   stage: 'DEPT' | 'FINAL';
   decision: 'APPROVE' | 'REVISE';
   comment: string;
-  checks: ChecksMap;
+  scores: ScoresMap;
   reviewer: { staffId: string; name: string };
 }
 
 /** ตรวจแผน: อนุมัติขั้นนี้ หรือขอแก้ไข (ต้องมีความเห็น) — ต้องตอบแบบประเมินครบทุกข้อ */
 export async function reviewLessonPlan(r: ReviewInput): Promise<void> {
-  if (!checksComplete(r.checks)) throw new Error('กรุณาตอบแบบประเมินให้ครบทุกข้อก่อนบันทึกผล');
+  if (!scoresComplete(r.scores)) throw new Error('กรุณาตอบแบบประเมินให้ครบทั้ง 15 ข้อก่อนบันทึกผล');
   if (r.decision === 'REVISE' && !r.comment.trim()) throw new Error('กรณีขอให้แก้ไข ต้องระบุความเห็น/สิ่งที่ต้องแก้');
   const ref = doc(db, 'lesson_plan_submissions', r.id);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error('ไม่พบรายการนี้');
   const review = {
     byStaffId: r.reviewer.staffId, byName: r.reviewer.name.slice(0, 160),
-    decision: r.decision, comment: r.comment.trim().slice(0, 1000), checks: r.checks, at: serverTimestamp(),
+    decision: r.decision, comment: r.comment.trim().slice(0, 1000), scores: r.scores, at: serverTimestamp(),
   };
   if (r.stage === 'DEPT') {
     await updateDoc(ref, { stage: r.decision === 'APPROVE' ? 'DEPT_APPROVED' : 'REVISION', deptReview: review, updatedAt: serverTimestamp() });

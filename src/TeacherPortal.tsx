@@ -8,6 +8,8 @@ import { useDepartments } from './hooks/useDepartments';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { MySupervisionPanel } from './components/supervision/MySupervisionPanel';
 import { MyLessonPlansPanel } from './components/lessonplans/MyLessonPlansPanel';
+import { EMPTY_PLAN_PICK, PlanUnitPicker, type PlanPick } from './components/teachingproject/PlanUnitPicker';
+import { MyTeachingProjectsPanel } from './components/teachingproject/MyTeachingProjectsPanel';
 import { MyTeachingStatsPanel } from './components/stats/TeacherStatsPanels';
 import { visibleSidebarItems, resolveActiveSidebarId } from './components/shared/portalSidebarLogic';
 import {
@@ -412,12 +414,15 @@ export function TeacherPortal() {
   const [postTeachingPeriod, setPostTeachingPeriod] = useState<SubjectPeriod | null>(null);
   const [ptDate, setPtDate] = useState('');
   const [ptSummary, setPtSummary] = useState('');
+  const [ptPlan, setPtPlan] = useState<PlanPick>(EMPTY_PLAN_PICK);
+  // ปิด/ส่งแล้ว (หรือยกเลิก) ล้างหัวข้อที่เลือกไว้ ไม่ให้ค้างไปคาบถัดไป
+  useEffect(() => { if (!showPostTeachingModal) setPtPlan(EMPTY_PLAN_PICK); }, [showPostTeachingModal]);
   const [ptProblems, setPtProblems] = useState('');
   const [ptSolutions, setPtSolutions] = useState('');
   const [viewingRecord, setViewingRecord] = useState<PostTeachingRecord | null>(null);
 
   // New States for Dashboard Navigation
-  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-lesson-plans' | 'my-stats'>('courses');
+  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-stats'>('courses');
   const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
   // ขอลากิจ/ไปราชการด้วยตนเอง — reuse SubstituteTeachingModule เต็มรูปแบบ (ไม่สร้างฟอร์มซ้ำ)
   const [showSubSelfService, setShowSubSelfService] = useState(false);
@@ -425,7 +430,7 @@ export function TeacherPortal() {
   // ประวัติบันทึกหลังสอนที่ครูคนนี้เห็นได้: คาบที่สอนอยู่ตอนนี้ + บันทึกที่ตัวเองเป็นผู้บันทึก/ครูคนเดิมของคาบ
   // (ดู lib/postTeachingVisibility.ts — เดิมกรองด้วยคาบปัจจุบันอย่างเดียว ทำให้ครูคนเก่าเสียประวัติเมื่อมีการเปลี่ยนครู)
   // รายวิชาที่ส่งแผนได้ = วิชาที่ตนสอนจริง (ไม่รวมแถวสอนแทน) — ซ้ำรหัสวิชารวมเป็นรายการเดียวในแผงเอง
-  const lessonPlanCourses = useMemo(() => myCourses.filter(c => !(c as any).roleLabel).map(c => ({ code: c.code || '', name: c.name || '', level: c.level || '' })), [myCourses]);
+  const lessonPlanCourses = useMemo(() => myCourses.filter(c => !(c as any).roleLabel).map(c => ({ code: c.code || '', name: c.name || '', level: c.level || '', room: c.room, subjectType: c.subjectType })), [myCourses]);
   const myCourseIdSet = useMemo(() => new Set(myCourses.map(c => c.id)), [myCourses]);
   const visiblePostTeachingRecords = useMemo(
     () => postTeachingRecords.filter(r => canViewPostTeachingRecord(user, r, myCourseIdSet)),
@@ -436,7 +441,7 @@ export function TeacherPortal() {
   const activityStudentCount = useTeacherActivityStudentCount();
   const availableDashboardTabs = useMemo(() => {
     const rawTabs: Array<{
-      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-lesson-plans' | 'my-stats';
+      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-stats';
       label: string;
       icon: React.ComponentType<{ className?: string }>;
       count: number;
@@ -458,7 +463,8 @@ export function TeacherPortal() {
       { id: 'records', label: 'ประวัติบันทึกหลังสอนทั้งหมด', icon: NavRecordsIcon, count: visiblePostTeachingRecords.length },
       { id: 'gradebook', label: 'สมุดบันทึกคะแนน (Gradebook)', icon: NavGradebookIcon, count: 0 },
       { id: 'my-supervision', label: 'ผลการนิเทศของฉัน', icon: BookOpen, count: 0 },
-      { id: 'my-lesson-plans', label: 'ส่งแผนการสอน/โครงการสอน', icon: BookOpen, count: 0 },
+      { id: 'my-teaching-projects', label: 'โครงการสอนของฉัน', icon: BookOpen, count: 0 },
+      { id: 'my-lesson-plans', label: 'ส่งแผนการสอน (ลิงก์)', icon: BookOpen, count: 0 },
       { id: 'my-stats', label: 'สถิติการสอนของฉัน (ลา/แลกคาบ/สอนแทน)', icon: Clock, count: 0 },
     ];
 
@@ -805,6 +811,9 @@ export function TeacherPortal() {
         room: postTeachingPeriod?.room || postTeachingCourse.room,
         // ผู้บันทึก — ให้ประวัติอยู่กับครูคนนี้แม้ภายหลังเปลี่ยนครูผู้สอนของคาบ (ไม่มี staffId = ไม่ใส่ ห้ามเดา)
         ...(staffIdOf(user) ? { recordedByStaffId: staffIdOf(user) as string, recordedByName: user?.displayName || user?.email || '' } : {}),
+        // เชื่อมโครงการสอน: ใส่เมื่อครูเลือกหัวข้อ หรือระบุว่าไม่ตรงแผน (ไม่เลือก = ไม่ใส่ ห้ามเดา)
+        ...(ptPlan.projectId && (ptPlan.unitIds.length > 0 || ptPlan.status === 'DEVIATED')
+          ? { planProjectId: ptPlan.projectId, planUnitIds: ptPlan.unitIds, planUnitTitles: ptPlan.unitTitles, planStatus: ptPlan.status } : {}),
       });
     } catch (err) {
       console.error('[postTeaching] save failed:', err);
@@ -817,6 +826,7 @@ export function TeacherPortal() {
     setToast(`บันทึกหลังสอนวิชา ${postTeachingCourse.name} เรียบร้อยแล้ว! ${isLate ? '⚠️ (ส่งช้ากว่ากำหนด)' : '✅ (ส่งตรงเวลา)'}`);
     setShowPostTeachingModal(false);
     setPtSummary('');
+    setPtPlan(EMPTY_PLAN_PICK);
     setPtProblems('');
     setPtSolutions('');
     setPostTeachingCourse(null);
@@ -1913,6 +1923,7 @@ export function TeacherPortal() {
             )}
 
             {dashboardTab === 'my-supervision' && <MySupervisionPanel />}
+            {dashboardTab === 'my-teaching-projects' && <MyTeachingProjectsPanel courses={lessonPlanCourses} />}
             {dashboardTab === 'my-lesson-plans' && <MyLessonPlansPanel courses={lessonPlanCourses} />}
             {dashboardTab === 'my-stats' && <MyTeachingStatsPanel />}
 
@@ -2855,6 +2866,8 @@ export function TeacherPortal() {
                   )}
                 </div>
 
+                <PlanUnitPicker courseCode={postTeachingPeriod?.subjectCode || postTeachingCourse.code} value={ptPlan} onChange={setPtPlan} disabled={isMidnightLocked} />
+
                 {/* Form Input fields */}
                 <div className="space-y-3">
                   <div>
@@ -2952,6 +2965,16 @@ export function TeacherPortal() {
                 <span className="text-slate-400">วันที่ทำการสอน:</span>
                 <span className="text-white font-bold">{viewingRecord.date}</span>
               </div>
+
+              {(viewingRecord.planUnitTitles?.length || viewingRecord.planStatus === 'DEVIATED') ? (
+                <div className="space-y-1">
+                  <div className="text-cyan-400 font-bold">📚 หัวข้อตามโครงการสอน:</div>
+                  <div className="bg-[#0b0f19] p-3 rounded-xl border border-slate-800/80 text-slate-200 text-xs space-y-0.5">
+                    {(viewingRecord.planUnitTitles || []).map(t => <p key={t}>• {t}</p>)}
+                    {viewingRecord.planStatus === 'DEVIATED' && <p className="text-amber-400">ไม่ตรงตามโครงการสอน (มีกิจกรรมแทรก/ปรับเปลี่ยน)</p>}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="space-y-1">
                 <div className="text-slate-400 font-bold">📝 สรุปผลการสอน (Summary):</div>

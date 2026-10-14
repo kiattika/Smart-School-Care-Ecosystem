@@ -4,9 +4,10 @@ import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { useLessonPlans } from '../../hooks/useLessonPlans';
 import { reviewLessonPlan } from '../../services/lessonPlanService';
 import {
-  COMPLIANCE_LABEL, KIND_LABEL, PLAN_CHECKLIST, STAGE_LABEL, checksComplete, complianceOf, embedUrlFor,
-  planOverviewQuery, reviewStageFor, semesterIdOf, type ChecksMap, type LessonPlan,
+  KIND_LABEL, PLAN_CRITERIA, SCORE_LABEL, STAGE_LABEL, averageScore, complianceOf, embedUrlFor,
+  planOverviewQuery, reviewStageFor, scoresComplete, semesterIdOf, suitabilityLevel, type LessonPlan, type ScoresMap,
 } from '../../lib/lessonPlans';
+import { TeachingProjectsOverview } from '../teachingproject/TeachingProjectsOverview';
 import { staffDepartmentId, staffFullName, type StaffRow } from '../../lib/supervisionView';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'ดำเนินการไม่สำเร็จ');
@@ -24,6 +25,7 @@ export function LessonPlanReviewPanel() {
   const { data, loading, error } = useLessonPlans(semesterId, q);
   const [openId, setOpenId] = useState('');
   const [filter, setFilter] = useState<'todo' | 'all'>('todo');
+  const [view, setView] = useState<'plans' | 'projects'>('plans');
 
   const me = { staffId, roles, departmentId: myDept };
   const isHead = (tid: string) => !!staff.find(s => s.id === tid)?.roles?.includes('HEAD_OF_DEPARTMENT');
@@ -41,11 +43,21 @@ export function LessonPlanReviewPanel() {
 
   if (!q) return <p className="text-sm text-slate-400">บทบาทปัจจุบันไม่มีสิทธิ์ตรวจ/ดูแผนการสอน</p>;
   if (open) {
-    return <ReviewDetail key={open.id} plan={open} stage={stageOf(open)} onBack={() => setOpenId('')}
-      reviewer={{ staffId, name: staffFullName(staff.find(s => s.id === staffId)) || user?.displayName || '' }} />;
+    return (
+      <div key={open.id}>
+        <ReviewDetail plan={open} stage={stageOf(open)} onBack={() => setOpenId('')}
+          reviewer={{ staffId, name: staffFullName(staff.find(s => s.id === staffId)) || user?.displayName || '' }} />
+      </div>
+    );
   }
   return (
     <div className="space-y-4">
+      <div className="flex gap-2" role="tablist">
+        {([['plans', 'แผนการสอน (ลิงก์) — ตรวจ'], ['projects', 'โครงการสอน — ดูอย่างเดียว']] as const).map(([id, label]) => (
+          <button key={id} role="tab" aria-selected={view === id} onClick={() => setView(id)} className={`px-3 py-1.5 rounded-lg text-xs border cursor-pointer ${view === id ? 'bg-cyan-600 border-cyan-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>{label}</button>
+        ))}
+      </div>
+      {view === 'projects' ? <TeachingProjectsOverview q={q} /> : <>
       <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-300">
         <p className="text-white font-medium">แผนการสอน/โครงการสอน ภาคเรียน {sem.label}</p>
         <p className="mt-1 text-xs">ครูที่ส่งแล้ว {compliance.teachers} คน · เฉพาะโครงการสอน {compliance.c.PROJECT_ONLY} · ฉบับสมบูรณ์รอตรวจ {compliance.c.PLAN_SUBMITTED} · ฉบับสมบูรณ์ผ่านแล้ว {compliance.c.PLAN_APPROVED}</p>
@@ -66,15 +78,16 @@ export function LessonPlanReviewPanel() {
           ))}
         </ul>
       )}
+      </>}
     </div>
   );
 }
 
 function ReviewDetail({ plan, stage, reviewer, onBack }: {
-  key?: string;
   plan: LessonPlan; stage: 'DEPT' | 'FINAL' | null; reviewer: { staffId: string; name: string }; onBack: () => void;
 }) {
-  const [checks, setChecks] = useState<ChecksMap>({});
+  const [scores, setScores] = useState<ScoresMap>({});
+  const avg = averageScore(scores);
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -84,7 +97,7 @@ function ReviewDetail({ plan, stage, reviewer, onBack }: {
   const decide = async (decision: 'APPROVE' | 'REVISE') => {
     if (!stage) return;
     setBusy(true); setMsg('');
-    try { await reviewLessonPlan({ id: plan.id, stage, decision, comment, checks, reviewer }); onBack(); }
+    try { await reviewLessonPlan({ id: plan.id, stage, decision, comment, scores, reviewer }); onBack(); }
     catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); }
   };
   return (
@@ -109,22 +122,23 @@ function ReviewDetail({ plan, stage, reviewer, onBack }: {
             <>
               <p className="text-sm text-white font-medium">แบบประเมิน — {stage === 'DEPT' ? 'ขั้นที่ 1 หัวหน้ากลุ่มสาระฯ' : 'ขั้นที่ 2 หัวหน้างานนิเทศ'}</p>
               <ul className="space-y-2">
-                {PLAN_CHECKLIST.map((c, i) => (
-                  <li key={c.id} className="flex items-start justify-between gap-2 text-sm text-slate-200">
-                    <span>{i + 1}. {c.label}</span>
-                    <span className="flex gap-1 shrink-0" role="radiogroup" aria-label={c.label}>
-                      {(['Y', 'N'] as const).map(v => (
-                        <button key={v} role="radio" aria-checked={checks[c.id] === v} onClick={() => setChecks(s => ({ ...s, [c.id]: v }))}
-                          className={`px-2.5 py-1 rounded-md text-xs border cursor-pointer ${checks[c.id] === v ? (v === 'Y' ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-rose-600 border-rose-400 text-white') : 'bg-slate-950 border-slate-700 text-slate-300'}`}>{v === 'Y' ? 'ผ่าน' : 'ปรับ'}</button>
+                {PLAN_CRITERIA.map((c, i) => (
+                  <li key={c.id} className="text-sm text-slate-200 space-y-1">
+                    <p>{i + 1}. {c.label}</p>
+                    <span className="flex gap-1" role="radiogroup" aria-label={c.label}>
+                      {[5, 4, 3, 2, 1].map(v => (
+                        <button key={v} type="button" role="radio" aria-checked={scores[c.id] === v} title={SCORE_LABEL[v]} onClick={() => setScores(s => ({ ...s, [c.id]: v }))}
+                          className={`w-9 py-1 rounded-md text-xs border cursor-pointer ${scores[c.id] === v ? 'bg-cyan-600 border-cyan-400 text-white' : 'bg-slate-950 border-slate-700 text-slate-300'}`}>{v}</button>
                       ))}
                     </span>
                   </li>
                 ))}
               </ul>
+              <p className="text-xs text-slate-300" role="status">ค่าเฉลี่ย {avg === null ? '-' : avg.toFixed(2)} · ระดับความเหมาะสม: {suitabilityLevel(avg)} (5 = มากที่สุด … 1 = น้อยที่สุด)</p>
               <textarea className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white" rows={3} maxLength={1000} placeholder="ความเห็น/สิ่งที่ต้องแก้ (จำเป็นเมื่อขอให้แก้ไข)" value={comment} onChange={e => setComment(e.target.value)} />
               <div className="flex gap-2">
-                <button disabled={busy || !checksComplete(checks)} className="px-3 py-1.5 rounded-lg text-xs bg-emerald-600 text-white disabled:opacity-40 cursor-pointer" onClick={() => void decide('APPROVE')}>{stage === 'DEPT' ? 'ผ่าน — ส่งต่อหัวหน้างานนิเทศ' : 'ผ่านการตรวจ'}</button>
-                <button disabled={busy || !checksComplete(checks) || !comment.trim()} className="px-3 py-1.5 rounded-lg text-xs bg-rose-600 text-white disabled:opacity-40 cursor-pointer" onClick={() => void decide('REVISE')}>ขอให้แก้ไข</button>
+                <button disabled={busy || !scoresComplete(scores)} className="px-3 py-1.5 rounded-lg text-xs bg-emerald-600 text-white disabled:opacity-40 cursor-pointer" onClick={() => void decide('APPROVE')}>{stage === 'DEPT' ? 'ผ่าน — ส่งต่อหัวหน้างานนิเทศ' : 'ผ่านการตรวจ'}</button>
+                <button disabled={busy || !scoresComplete(scores) || !comment.trim()} className="px-3 py-1.5 rounded-lg text-xs bg-rose-600 text-white disabled:opacity-40 cursor-pointer" onClick={() => void decide('REVISE')}>ขอให้แก้ไข</button>
               </div>
               {msg && <p role="alert" className="text-xs text-amber-300">{msg}</p>}
             </>
