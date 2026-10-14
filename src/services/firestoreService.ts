@@ -1532,7 +1532,8 @@ export function subscribeStaffList(onUpdate: (staff: UserProfile[]) => void): ()
     return onSnapshot(ref, (snapshot) => {
       const list: UserProfile[] = [];
       snapshot.forEach((docSnap) => {
-        list.push(docSnap.data() as UserProfile);
+        // id = staff doc id เสมอ (เอกสารที่นำเข้าอาจไม่มี field id ในตัวข้อมูล → เดิมทำให้ครูคนนั้นหายจากรายการให้เลือก)
+        list.push({ ...(docSnap.data() as UserProfile), id: docSnap.id });
       });
       onUpdate(list);
     }, (error) => {

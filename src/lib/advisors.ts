@@ -2,7 +2,9 @@ import type { UserProfile } from '../types/auth';
 
 export interface AdvisorOption { staffId: string; name: string }
 
-const fullName = (s: Pick<UserProfile, 'prefix' | 'firstName' | 'lastName'>) => `${s.prefix || ''}${s.firstName || ''} ${s.lastName || ''}`.trim();
+/** ชื่อแสดง — ลำดับเดียวกับหน้าภาระงานสอน (fullName → คำนำหน้า+ชื่อ+สกุล → displayName → อีเมล) เพื่อไม่ให้ครูที่มีแค่ field ใดfield หนึ่งหายไป */
+const fullName = (s: Partial<UserProfile> & { fullName?: string; displayName?: string }) =>
+  (s.fullName || `${s.prefix || ''}${s.firstName || ''} ${s.lastName || ''}`.trim() || s.displayName || s.email || '').trim();
 
 /** ครูที่ปรึกษาของห้อง = บุคลากรที่ยังใช้งานอยู่, มีบทบาท HOMEROOM_TEACHER และ assignments.homeroomClass ตรงห้อง (ตรงกับ isHomeroomTeacherOf ใน rules) */
 export function advisorsOfRoom(staff: UserProfile[], room: string | undefined): AdvisorOption[] {
