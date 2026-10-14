@@ -3,6 +3,8 @@ import { ShieldCheck, PlusCircle, MinusCircle, Award } from 'lucide-react';
 import { useStore } from '../../store';
 import { Student } from '../../types';
 import { subscribeDisciplineLogs, DisciplineLogRecord } from '../../services/firestoreService';
+import { subscribeConductForOwner } from '../../services/conductService';
+import type { ConductEntry } from '../../lib/conduct';
 
 /**
  * คะแนนความประพฤติ + ประวัติเพิ่ม/ตัดคะแนน — ข้อมูลจริงทั้งหมด:
@@ -13,13 +15,31 @@ import { subscribeDisciplineLogs, DisciplineLogRecord } from '../../services/fir
 export function BehaviorDisciplineModule({ student, isParentView = false }: { student: Student; isParentView?: boolean }) {
   const user = useStore(s => s.user);
   const [allLogs, setAllLogs] = useState<DisciplineLogRecord[]>([]);
+  const [entries, setEntries] = useState<ConductEntry[]>([]);
 
   useEffect(() => {
     if (!user?.uid) { setAllLogs([]); return; }
     return subscribeDisciplineLogs(setAllLogs, isParentView ? { parentUid: user.uid } : { studentUid: user.uid });
   }, [user?.uid, isParentView]);
 
-  const logs = allLogs.filter(l => l.studentId === student.studentId);
+  // ระบบคะแนนความประพฤติใหม่ (conduct_entries) — แสดงเฉพาะรายการที่มีผลแล้ว (ยกเลิก/รอพิจารณาไม่นับ)
+  useEffect(() => {
+    if (!user?.uid) { setEntries([]); return; }
+    return subscribeConductForOwner(isParentView ? { parentUid: user.uid } : { studentUid: user.uid }, setEntries, () => setEntries([]));
+  }, [user?.uid, isParentView]);
+
+  const fromEntries: DisciplineLogRecord[] = entries
+    .filter(e => e.studentId === student.studentId && e.status === 'APPLIED' && e.appliedPoints !== 0)
+    .map(e => ({
+      id: `ce_${e.id}`,
+      studentId: e.studentId,
+      points: e.kind === 'ADD' ? e.appliedPoints : -Math.abs(e.appliedPoints),
+      reason: e.reason,
+      date: e.date,
+      recordedBy: e.createdByName,
+    } as DisciplineLogRecord));
+  const logs = [...allLogs.filter(l => l.studentId === student.studentId), ...fromEntries]
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
   const added = logs.filter(l => l.points > 0).reduce((sum, l) => sum + l.points, 0);
   const deducted = logs.filter(l => l.points < 0).reduce((sum, l) => sum + Math.abs(l.points), 0);
   const currentScore = student.behaviorScore;

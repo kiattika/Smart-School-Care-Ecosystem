@@ -19,9 +19,12 @@ describe('guard: คะแนนพฤติกรรม/Active Learning รอ�
     expect(body).not.toMatch(/console\.warn/);
   });
   it('ผู้เรียกรอผลและแจ้งข้อผิดพลาด ไม่ปิด/ไม่แสดงสำเร็จก่อน', () => {
+    // คะแนนความประพฤติของครูไปทาง ConductEntryForm → submitConduct (ledger + cache ใน transaction เดียว)
     const tp = readSource('src/TeacherPortal.tsx');
-    expect(tp).toMatch(/await adjustBehaviorScore\(/);
-    expect(tp).not.toMatch(/\n\s+adjustBehaviorScore\(selectedStudentForScore/);
+    expect(tp).toMatch(/<ConductEntryForm/);
+    expect(tp).not.toMatch(/adjustBehaviorScore/);
+    const form = readSource('src/components/studentaffairs/ConductEntryForm.tsx');
+    expect(form).toMatch(/await submitConduct\(/);
     const rp = readSource('src/components/RandomStudentPickerModal.tsx');
     expect(rp).toMatch(/await addActiveLearningPoints\(/);
     expect(rp).toMatch(/Promise\.allSettled/);

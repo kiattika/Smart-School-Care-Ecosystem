@@ -132,6 +132,7 @@ service cloud.firestore {
                      hasRole('INSTRUCTIONAL_SUPERVISOR') ||
                      hasRole('REGISTRAR') ||
                      hasRole('REGISTRAR_ASSISTANT') ||
+                     hasRole('STUDENT_AFFAIRS') ||
                      (isSignedIn() && resource.data.parentUid == request.auth.uid) ||
                      (isSignedIn() && resource.data.studentUid == request.auth.uid);
       allow create: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
@@ -162,6 +163,8 @@ service cloud.firestore {
                          request.resource.data.statusChangedAt == request.time &&
                          existsAfter(/databases/$(database)/documents/graduation_approvals/$(studentId + '_' + resource.data.get('room', '')[0:3]))
                        ) ||
+                       // คะแนนความประพฤติ: ครู/งานกิจการ ปรับแคชคะแนนได้เฉพาะคู่กับรายการ conduct_entries ในชุดเขียนเดียวกัน (ตัวเลขต้องตรงบัญชีเป๊ะ)
+                       (cdStaff() && cdStudentTouch(studentId)) ||
                        // งานทะเบียนวัดผล/ผู้ช่วย: ดำเนินการย้ายห้องที่คณะกรรมการอนุมัติแล้ว (room_transfers.status APPROVED → APPLIED ในชุดเขียนเดียวกัน)
                        (
                          regAny() &&
@@ -438,6 +441,7 @@ service cloud.firestore {
     match /gate_attendance_logs/{logId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('EXECUTIVE') ||
+                     hasRole('STUDENT_AFFAIRS') ||
                      hasRole('HOMEROOM_TEACHER') ||
                      hasRole('SUBJECT_TEACHER') ||
                      (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
@@ -1191,6 +1195,7 @@ service cloud.firestore {
     //      ผู้ปกครอง/นักเรียน/ครูวิชาอื่นเข้าถึงไม่ได้; ห้ามลบ (เก็บเป็นหลักฐาน)
     match /home_visit_records/{recordId} {
       allow read: if hasRole('SUPER_ADMIN')
+                     || hasRole('STUDENT_AFFAIRS')
                      || hasRole('EXECUTIVE')
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass));
       allow create: if (hasRole('SUPER_ADMIN') || isHomeroomTeacherOf(request.resource.data.homeroomClass))
@@ -1209,6 +1214,7 @@ service cloud.firestore {
     //      homeroomClass ต้องตรง students/{id}.room จริง; ผู้ปกครอง/ครูวิชาอื่นอ่านไม่ได้; ห้ามลบ
     match /home_visit_student_info/{studentId} {
       allow read: if hasRole('SUPER_ADMIN')
+                     || hasRole('STUDENT_AFFAIRS')
                      || hasRole('EXECUTIVE')
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass))
                      // เจ้าของตัดสินจากทะเบียน students/{id}.studentUid (ค่าจริง) ไม่ใช่สำเนาในเอกสารนี้ —
@@ -1227,6 +1233,7 @@ service cloud.firestore {
     //      นักเรียน/ครูวิชาอื่นอ่านไม่ได้ (มีข้อมูลรายได้/ครัวเรือน); ห้ามลบ
     match /home_visit_family_info/{studentId} {
       allow read: if hasRole('SUPER_ADMIN')
+                     || hasRole('STUDENT_AFFAIRS')
                      || hasRole('EXECUTIVE')
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass))
                      // ผู้ปกครองตัดสินจากทะเบียน students/{id}.parentUid (ค่าจริง) ไม่ใช่สำเนาในเอกสารนี้
@@ -2377,6 +2384,131 @@ service cloud.firestore {
           && getAfter(/databases/$(database)/documents/students/$(resource.data.studentId)).data.room == resource.data.toRoom
           && getAfter(/databases/$(database)/documents/students/$(resource.data.studentId)).data.roomTransferId == tid)
       );
+      allow delete: if false;
+    }
+
+    // ───────── คะแนนความประพฤติ (ระเบียบการปกครองนักเรียน 2569) — ดู src/lib/conduct.ts ─────────
+    // ครูทุกคนเพิ่ม/หักได้ไม่เกิน 5 ต่อครั้ง (มีผลทันที); เกิน 5 → PENDING ให้งานกิจการ (STUDENT_AFFAIRS) พิจารณา; หักตามระดับ เบา ≤5/กลาง ≤10/ร้ายแรง ≤20
+    // แก้/ยกเลิกได้เฉพาะงานกิจการ และต้องมีคำร้องจากผู้บันทึกรายการนั้น (conduct_change_requests) — ไม่ลบจริง
+    // students.behaviorScore เป็นแคช: ต้องเขียนพร้อมรายการในชุดเดียว และตัวเลขต้องตรงบัญชี (cdStudentTouch)
+    function cdPath(id) { return /databases/$(database)/documents/conduct_entries/$(id); }
+    function cdAffairs() { return hasRole('SUPER_ADMIN') || hasRole('STUDENT_AFFAIRS'); }
+    function cdStaff() { return cdAffairs() || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER'); }
+    function cdCap(level) { return level == 'LIGHT' ? 5 : (level == 'MEDIUM' ? 10 : (level == 'SEVERE' ? 20 : 0)); }
+    function cdPointsOk(kind, level, p) {
+      return p is int && p >= 1 && (kind == 'ADD' ? (level == 'NONE' && p <= 100) : (kind == 'DEDUCT' && p <= cdCap(level)));
+    }
+    function cdAdd(d) { return (d != null && d.status == 'APPLIED' && d.kind == 'ADD') ? d.appliedPoints : 0; }
+    function cdDed(d) { return (d != null && d.status == 'APPLIED' && d.kind == 'DEDUCT') ? d.appliedPoints : 0; }
+    function cdBefore(id) { return exists(cdPath(id)) ? get(cdPath(id)).data : null; }
+    function cdClamp(n) { return n < 0 ? 0 : (n > 100 ? 100 : n); }
+    function cdStudentTouch(sid) {
+      let n = request.resource.data;
+      let o = resource.data;
+      let eid = n.get('lastConductEntryId', '');
+      let after = getAfter(cdPath(eid)).data;
+      let before = cdBefore(eid);
+      let base = o.get('conductBase', o.get('behaviorScore', 100));
+      let added = o.get('conductAdded', 0) + cdAdd(after) - cdAdd(before);
+      let ded = o.get('conductDeducted', 0) + cdDed(after) - cdDed(before);
+      return eid is string && eid != '' && existsAfter(cdPath(eid))
+        && n.diff(o).affectedKeys().hasOnly(['behaviorScore', 'riskLevel', 'conductBase', 'conductAdded', 'conductDeducted', 'lastConductEntryId', 'updatedAt'])
+        && after.studentId == sid && after.updatedAt == request.time
+        && n.conductBase == base && n.conductAdded == added && n.conductDeducted == ded
+        && n.behaviorScore == cdClamp(base + added - ded)
+        && n.riskLevel in ['NORMAL', 'WARNING', 'CRITICAL'];
+    }
+    // รายการนี้ต้องมีการปรับแคชของนักเรียนในชุดเดียวกัน (อ้างรหัสรายการนี้)
+    function cdTouchesStudent(sid, eid) {
+      return existsAfter(/databases/$(database)/documents/students/$(sid))
+        && getAfter(/databases/$(database)/documents/students/$(sid)).data.get('lastConductEntryId', '') == eid;
+    }
+
+    match /conduct_entries/{eid} {
+      allow read: if cdAffairs() || hasRole('EXECUTIVE')
+                     || (resource.data.room is string && isHomeroomTeacherOf(resource.data.room))
+                     || (myStaffId() != '' && resource.data.createdByStaffId == myStaffId())
+                     || (isSignedIn() && (resource.data.get('studentUid', '') == request.auth.uid || resource.data.get('parentUid', '') == request.auth.uid));
+      allow create: if cdStaff() && myStaffId() != ''
+                       && request.resource.data.keys().hasOnly(['studentId','studentName','studentUid','parentUid','room','kind','level','points','appliedPoints','status','reason','category','date','createdByStaffId','createdByName','createdAt','updatedAt'])
+                       && request.resource.data.keys().hasAll(['studentId','studentName','room','kind','level','points','appliedPoints','status','reason','category','date','createdByStaffId','createdByName','createdAt','updatedAt'])
+                       && request.resource.data.studentId is string
+                       && exists(/databases/$(database)/documents/students/$(request.resource.data.studentId))
+                       && request.resource.data.room == studentField(request.resource.data.studentId, 'room', '__none__')
+                       && request.resource.data.kind in ['ADD', 'DEDUCT'] && request.resource.data.level in ['NONE', 'LIGHT', 'MEDIUM', 'SEVERE']
+                       && cdPointsOk(request.resource.data.kind, request.resource.data.level, request.resource.data.points)
+                       && request.resource.data.studentName is string && request.resource.data.studentName.size() <= 160
+                       && request.resource.data.reason is string && request.resource.data.reason.size() > 0 && request.resource.data.reason.size() <= 500
+                       && request.resource.data.category is string && request.resource.data.category.size() <= 100
+                       && request.resource.data.date is string && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+                       && request.resource.data.createdByStaffId == myStaffId()
+                       && request.resource.data.createdByName is string && request.resource.data.createdByName.size() <= 160
+                       && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time
+                       && ((request.resource.data.status == 'APPLIED' && request.resource.data.appliedPoints == request.resource.data.points
+                            && (request.resource.data.points <= 5 || cdAffairs())
+                            && cdTouchesStudent(request.resource.data.studentId, eid))
+                           || (request.resource.data.status == 'PENDING' && request.resource.data.appliedPoints == 0));
+      allow update: if cdAffairs() && myStaffId() != '' && request.resource.data.updatedAt == request.time
+                       && (
+                         // พิจารณารายการที่ส่งมา
+                         (resource.data.status == 'PENDING'
+                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','appliedPoints','level','decidedByStaffId','decidedByName','decidedAt','decisionNote','updatedAt'])
+                          && request.resource.data.decidedByStaffId == myStaffId() && request.resource.data.decidedAt == request.time
+                          && request.resource.data.decisionNote is string && request.resource.data.decisionNote.size() <= 500
+                          && request.resource.data.decidedByName is string && request.resource.data.decidedByName.size() <= 160
+                          && ((request.resource.data.status == 'REJECTED' && request.resource.data.appliedPoints == 0 && request.resource.data.level == resource.data.level)
+                              || (request.resource.data.status == 'APPLIED'
+                                  && cdPointsOk(resource.data.kind, request.resource.data.level, request.resource.data.appliedPoints)
+                                  && cdTouchesStudent(resource.data.studentId, eid))))
+                         ||
+                         // แก้คะแนน/ยกเลิก ตามคำร้องที่อนุมัติในชุดเดียวกัน
+                         (resource.data.status == 'APPLIED'
+                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','appliedPoints','lastChangeRequestId','updatedAt'])
+                          && request.resource.data.lastChangeRequestId is string
+                          && get(/databases/$(database)/documents/conduct_change_requests/$(request.resource.data.lastChangeRequestId)).data.status == 'PENDING'
+                          && get(/databases/$(database)/documents/conduct_change_requests/$(request.resource.data.lastChangeRequestId)).data.entryId == eid
+                          && getAfter(/databases/$(database)/documents/conduct_change_requests/$(request.resource.data.lastChangeRequestId)).data.status == 'APPROVED'
+                          && ((get(/databases/$(database)/documents/conduct_change_requests/$(request.resource.data.lastChangeRequestId)).data.action == 'DELETE'
+                               && request.resource.data.status == 'REVERSED' && request.resource.data.appliedPoints == resource.data.appliedPoints)
+                              || (get(/databases/$(database)/documents/conduct_change_requests/$(request.resource.data.lastChangeRequestId)).data.action == 'EDIT'
+                                  && request.resource.data.status == 'APPLIED'
+                                  && request.resource.data.appliedPoints == get(/databases/$(database)/documents/conduct_change_requests/$(request.resource.data.lastChangeRequestId)).data.newPoints
+                                  && cdPointsOk(resource.data.kind, resource.data.level, request.resource.data.appliedPoints)))
+                          && cdTouchesStudent(resource.data.studentId, eid))
+                       );
+      allow delete: if false;
+    }
+
+    match /conduct_change_requests/{rid} {
+      allow read: if cdAffairs() || (myStaffId() != '' && resource.data.requestedByStaffId == myStaffId());
+      allow create: if cdStaff() && myStaffId() != ''
+                       && request.resource.data.keys().hasOnly(['entryId','studentId','action','newPoints','beforePoints','reason','status','requestedByStaffId','requestedByName','createdAt','updatedAt'])
+                       && request.resource.data.entryId is string
+                       && exists(cdPath(request.resource.data.entryId))
+                       && get(cdPath(request.resource.data.entryId)).data.createdByStaffId == myStaffId()
+                       && get(cdPath(request.resource.data.entryId)).data.status == 'APPLIED'
+                       && request.resource.data.studentId == get(cdPath(request.resource.data.entryId)).data.studentId
+                       && request.resource.data.beforePoints == get(cdPath(request.resource.data.entryId)).data.appliedPoints
+                       && request.resource.data.action in ['EDIT', 'DELETE']
+                       && (request.resource.data.action == 'DELETE'
+                           ? request.resource.data.newPoints == null
+                           : (cdPointsOk(get(cdPath(request.resource.data.entryId)).data.kind, get(cdPath(request.resource.data.entryId)).data.level, request.resource.data.newPoints)
+                              && request.resource.data.newPoints != request.resource.data.beforePoints))
+                       && request.resource.data.reason is string && request.resource.data.reason.size() > 0 && request.resource.data.reason.size() <= 500
+                       && request.resource.data.status == 'PENDING'
+                       && request.resource.data.requestedByStaffId == myStaffId()
+                       && request.resource.data.requestedByName is string && request.resource.data.requestedByName.size() <= 160
+                       && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      allow update: if cdAffairs() && myStaffId() != '' && resource.data.status == 'PENDING'
+                       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','decidedByStaffId','decidedByName','decidedAt','decisionNote','updatedAt'])
+                       && request.resource.data.status in ['APPROVED', 'REJECTED']
+                       && request.resource.data.decidedByStaffId == myStaffId() && request.resource.data.decidedAt == request.time
+                       && request.resource.data.decisionNote is string && request.resource.data.decisionNote.size() <= 500
+                       && request.resource.data.decidedByName is string && request.resource.data.decidedByName.size() <= 160
+                       && request.resource.data.updatedAt == request.time
+                       && (request.resource.data.status == 'REJECTED'
+                           || (existsAfter(cdPath(resource.data.entryId))
+                               && getAfter(cdPath(resource.data.entryId)).data.get('lastChangeRequestId', '') == rid));
       allow delete: if false;
     }
   }
