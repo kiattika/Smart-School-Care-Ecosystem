@@ -3,9 +3,10 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import {
-  scoresComplete, courseKeyOf, planDocId, validateSubmission,
+  DEFAULT_LESSON_PLAN_TEMPLATE, scoresComplete, courseKeyOf, planDocId, validateSubmission,
   type ScoresMap, type LessonPlan, type LessonPlanKind, type PlanQuery,
 } from '../lib/lessonPlans';
+import type { EvalTemplate } from '../lib/evaluationTemplate';
 
 const col = () => collection(db, 'lesson_plan_submissions');
 
@@ -73,12 +74,15 @@ export interface ReviewInput {
   decision: 'APPROVE' | 'REVISE';
   comment: string;
   scores: ScoresMap;
+  /** แบบที่ใช้ตรวจ (ต้องเป็นเวอร์ชันปัจจุบัน) — ไม่ส่ง = แบบตั้งต้น v1 */
+  tpl?: EvalTemplate;
   reviewer: { staffId: string; name: string };
 }
 
 /** ตรวจแผน: อนุมัติขั้นนี้ หรือขอแก้ไข (ต้องมีความเห็น) — ต้องตอบแบบประเมินครบทุกข้อ */
 export async function reviewLessonPlan(r: ReviewInput): Promise<void> {
-  if (!scoresComplete(r.scores)) throw new Error('กรุณาตอบแบบประเมินให้ครบทั้ง 15 ข้อก่อนบันทึกผล');
+  const tpl = r.tpl ?? DEFAULT_LESSON_PLAN_TEMPLATE;
+  if (!scoresComplete(r.scores, tpl)) throw new Error(`กรุณาตอบแบบประเมินให้ครบทั้ง ${tpl.criteria.length} ข้อก่อนบันทึกผล`);
   if (r.decision === 'REVISE' && !r.comment.trim()) throw new Error('กรณีขอให้แก้ไข ต้องระบุความเห็น/สิ่งที่ต้องแก้');
   const ref = doc(db, 'lesson_plan_submissions', r.id);
   const snap = await getDoc(ref);
@@ -86,6 +90,7 @@ export async function reviewLessonPlan(r: ReviewInput): Promise<void> {
   const review = {
     byStaffId: r.reviewer.staffId, byName: r.reviewer.name.slice(0, 160),
     decision: r.decision, comment: r.comment.trim().slice(0, 1000), scores: r.scores, at: serverTimestamp(),
+    ...(tpl.version > 1 ? { templateVersion: tpl.version } : {}),
   };
   if (r.stage === 'DEPT') {
     await updateDoc(ref, { stage: r.decision === 'APPROVE' ? 'DEPT_APPROVED' : 'REVISION', deptReview: review, updatedAt: serverTimestamp() });
