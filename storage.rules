@@ -95,6 +95,17 @@ service firebase.storage {
       allow delete: if false;
     }
 
+    // path: supervision_photos/{ownerUid}/{fileName} — ภาพการนิเทศ/PLC ที่ผู้นิเทศอัปโหลด (ownerUid = Auth UID ผู้อัปโหลด)
+    // อ่านโดยตรง: เจ้าของเท่านั้น — ผู้อ่านอื่นที่มีสิทธิ์ (ครูผู้รับการนิเทศ/หัวหน้า/ผู้บริหาร) เปิดผ่าน tokenized
+    // download URL ที่เก็บในเอกสาร supervision_observations (firestore.rules จำกัดผู้อ่านไว้แล้ว)
+    match /supervision_photos/{ownerUid}/{fileName} {
+      allow read: if ownerImageRules(ownerUid);
+      allow create, update: if ownerImageRules(ownerUid)
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if false;
+    }
+
     // ทุก path อื่น: ปฏิเสธทั้งหมด
     match /{allPaths=**} {
       allow read, write: if false;

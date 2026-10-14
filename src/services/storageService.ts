@@ -75,3 +75,14 @@ export async function uploadBillingFile(
   const url = await getDownloadURL(objectRef);
   return { url, storagePath, name: file.name };
 }
+
+/**
+ * ภาพการนิเทศการสอน — path: supervision_photos/{ownerUid}/{timestamp-rand}.jpg (ownerUid = Auth UID ผู้นิเทศ)
+ * คืน download URL (มี token) เก็บใน supervision_observations.photos — ผู้ที่อ่านเอกสารนั้นได้ (rules) จึงเปิดดูได้
+ */
+export async function uploadSupervisionPhoto(ownerUid: string, blob: Blob): Promise<string> {
+  const name = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const objectRef = ref(storage, `supervision_photos/${ownerUid}/${name}`);
+  await uploadBytes(objectRef, blob, { contentType: 'image/jpeg' });
+  return getDownloadURL(objectRef);
+}

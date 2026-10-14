@@ -53,16 +53,17 @@ export const ROLE_NAMES_TH: Record<UserRole, string> = {
   SUPER_ADMIN: 'ผู้ดูแลระบบ (Admin)',
   EXECUTIVE: 'ผู้บริหารโรงเรียน',
   HEAD_OF_DEPARTMENT: 'หัวหน้ากลุ่มสาระการเรียนรู้',
+  DEPUTY_HEAD_OF_DEPARTMENT: 'รองหัวหน้ากลุ่มสาระการเรียนรู้',
   ACADEMIC_HEAD: 'หัวหน้าฝ่ายวิชาการและหลักสูตร',
   DEPUTY_DIRECTOR_ACADEMIC: 'รองผู้อำนวยการฝ่ายวิชาการ',
   DIRECTOR: 'ผู้อำนวยการโรงเรียน',
   HOMEROOM_TEACHER: 'ครูประจำชั้น',
   SUBJECT_TEACHER: 'ครูผู้สอน / ครูประจำวิชา',
-  SUPERVISORY_TEACHER: 'ครูนิเทศ (Supervisory)',
+  SUPERVISORY_TEACHER: 'ครูนิเทศ',
   INFIRMARY_STAFF: 'ครูพยาบาล / ห้องพยาบาล',
   GUIDANCE_COUNSELOR: 'ครูแนะแนว / ให้คำปรึกษา',
   FINANCE_STAFF: 'เจ้าหน้าที่การเงินและบัญชี',
-  INSTRUCTIONAL_SUPERVISOR: 'ครูผู้นิเทศ / ฝ่ายวิชาการ',
+  INSTRUCTIONAL_SUPERVISOR: 'หัวหน้างานนิเทศ',
   PARENT: 'ผู้ปกครองนักเรียน',
   STUDENT: 'นักเรียน',
 };
@@ -78,6 +79,7 @@ export const ROLE_COLORS: Record<UserRole, { bg: string; text: string; border: s
   SUPER_ADMIN: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/20' },
   EXECUTIVE: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
   HEAD_OF_DEPARTMENT: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' },
+  DEPUTY_HEAD_OF_DEPARTMENT: { bg: 'bg-yellow-500/10', text: 'text-yellow-400', border: 'border-yellow-500/20' },
   ACADEMIC_HEAD: { bg: 'bg-indigo-500/10', text: 'text-indigo-400', border: 'border-indigo-500/20' },
   DEPUTY_DIRECTOR_ACADEMIC: { bg: 'bg-blue-500/10', text: 'text-blue-400', border: 'border-blue-500/20' },
   DIRECTOR: { bg: 'bg-violet-500/10', text: 'text-violet-400', border: 'border-violet-500/20' },
@@ -183,7 +185,6 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
     [realStudentsForRooms, formHomeroom],
   );
   const [formSubjects, setFormSubjects] = useState<{ subjectCode: string; className: string }[]>([]);
-  const [formMentees, setFormMentees] = useState<string[]>([]);
 
   // Temp Inputs สำหรับการเพิ่มวิชาใน Modal
   const [tempCode, setTempCode] = useState('');
@@ -330,7 +331,6 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
     setFormDept(staff.assignments?.departmentId || '');
     setFormHomeroom(staff.assignments?.homeroomClass || '');
     setFormSubjects(staff.assignments?.teachingSubjects ? [...staff.assignments.teachingSubjects] : []);
-    setFormMentees(staff.assignments?.supervisoryMentees ? [...staff.assignments.supervisoryMentees] : []);
     
     // เคลียร์ Temp Inputs
     setTempCode('');
@@ -374,15 +374,6 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
     triggerToast('🗑️ ลบวิชาสอนออกจากรายการแล้ว');
   };
 
-  // จัดการการเลือกติ๊กคุณครูรับการนิเทศ (Mentees)
-  const handleMenteeToggle = (teacherId: string) => {
-    if (formMentees.includes(teacherId)) {
-      setFormMentees(prev => prev.filter(id => id !== teacherId));
-    } else {
-      setFormMentees(prev => [...prev, teacherId]);
-    }
-  };
-
   // บันทึกการเปลี่ยนแปลงจาก Modal ไปยัง Firestore
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -398,16 +389,16 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
       triggerToast('⚠️ บทบาท "หัวหน้ากลุ่มสาระฯ" จำเป็นต้องระบุกลุ่มสาระฯ สังกัด');
       return;
     }
+    if (formRoles.includes('DEPUTY_HEAD_OF_DEPARTMENT') && !formDept) {
+      triggerToast('⚠️ บทบาท "รองหัวหน้ากลุ่มสาระฯ" จำเป็นต้องระบุกลุ่มสาระฯ สังกัด');
+      return;
+    }
     if (formRoles.includes('HOMEROOM_TEACHER') && !formHomeroom) {
       triggerToast('⚠️ บทบาท "ครูประจำชั้น" จำเป็นต้องระบุห้องประจำชั้น');
       return;
     }
     if (formRoles.includes('SUBJECT_TEACHER') && formSubjects.length === 0) {
       triggerToast('⚠️ บทบาท "ครูผู้สอน" ควรมีรายละเอียดวิชาสอนอย่างน้อย 1 รายการ');
-      return;
-    }
-    if (formRoles.includes('SUPERVISORY_TEACHER') && formMentees.length === 0) {
-      triggerToast('⚠️ บทบาท "ครูนิเทศ" จำเป็นต้องเลือกครูผู้รับการนิเทศอย่างน้อย 1 คน');
       return;
     }
 
@@ -432,9 +423,10 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
       updatedAssignments.teachingSubjects = formSubjects;
     }
 
-    // ครูนิเทศ
-    if (formRoles.includes('SUPERVISORY_TEACHER')) {
-      updatedAssignments.supervisoryMentees = formMentees;
+    // ครูนิเทศ: การจับคู่ผู้รับการนิเทศทำต่อรอบที่หน้า "นิเทศการสอน" (supervision_assignments) ไม่เก็บที่ staff อีกต่อไป
+    // — คงค่า supervisoryMentees เดิม (ถ้ามี) ไว้เฉยๆ ไม่ลบ ไม่ใช้งาน
+    if (editingStaff.assignments?.supervisoryMentees) {
+      updatedAssignments.supervisoryMentees = editingStaff.assignments.supervisoryMentees;
     }
 
     setIsSaving(true);
@@ -780,15 +772,8 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                               วิชาสอน: {staff.assignments.teachingSubjects.length} รายการ
                             </div>
                           )}
-                          {staff.roles.includes('SUPERVISORY_TEACHER') && staff.assignments?.supervisoryMentees && (
-                            <div className="text-[10px] text-pink-400 flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-pink-400" />
-                              รับผิดชอบนิเทศ: {staff.assignments.supervisoryMentees.length} คน
-                            </div>
-                          )}
                           {!staff.assignments?.homeroomClass && 
-                           !staff.assignments?.teachingSubjects && 
-                           !staff.assignments?.supervisoryMentees && (
+                           !staff.assignments?.teachingSubjects && (
                             <span className="text-[10px] text-slate-500 italic block text-center w-full">ไม่มีข้อมูลการเชื่อมสิทธิ์</span>
                           )}
                         </div>
@@ -965,7 +950,7 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                       ))}
                     </select>
                   </div>
-                  {formRoles.includes('HEAD_OF_DEPARTMENT') && (
+                  {(formRoles.includes('HEAD_OF_DEPARTMENT') || formRoles.includes('DEPUTY_HEAD_OF_DEPARTMENT')) && (
                     <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-[10px] text-amber-300 flex items-start gap-2">
                       <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                       <p>เนื่องจาก ติ๊กเลือก <strong>หัวหน้ากลุ่มสาระฯ</strong> บุคลากรจะได้รับสิทธิ์ตรวจสอบสิทธิ์ในการอนุมัติเกรดและรายงานทั้งหมดของกลุ่มสาระฯ "<strong>{departments.find(d => d.id === formDept)?.name || 'กรุณาเลือกกลุ่มสาระฯ ด้านบน'}</strong>" นี้</p>
@@ -1070,44 +1055,11 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                   </div>
                 )}
 
-                {/* 4. ถ้าติ๊ก [x] ครูนิเทศ -> ให้มี Multi-select เลือกครูที่จะรับนิเทศ */}
+                {/* 4. ครูนิเทศ — จับคู่ผู้รับการนิเทศต่อรอบที่หน้า "นิเทศการสอน" โดยหัวหน้างานนิเทศ */}
                 {formRoles.includes('SUPERVISORY_TEACHER') && (
-                  <div className="bg-pink-500/5 border border-pink-500/20 rounded-xl p-4 space-y-3">
-                    <h4 className="text-xs font-bold text-pink-400 flex items-center gap-1.5">
-                      <Award className="w-4 h-4" />
-                      มอบหมายหน้าที่ครูนิเทศ (Supervisory Mentor Assignment)
-                    </h4>
-                    <span className="block text-[10px] font-bold text-slate-400 mb-1">เลือกผู้รับนิเทศ (สตาฟฟ์ท่านอื่นในโรงเรียน)</span>
-                    
-                    <div className="bg-slate-950/60 border border-white/5 rounded-lg max-h-[160px] overflow-y-auto divide-y divide-white/5 p-1">
-                      {staffList
-                        .filter(s => s.id !== editingStaff.id) // ไม่สามารถนิเทศตนเองได้
-                        .map(teacher => {
-                          const isChosen = formMentees.includes(teacher.id);
-                          return (
-                            <button
-                              type="button"
-                              key={teacher.id}
-                              onClick={() => handleMenteeToggle(teacher.id)}
-                              className={`w-full p-2 text-left text-xs flex items-center justify-between rounded hover:bg-white/5 transition-colors ${
-                                isChosen ? 'text-pink-300 bg-pink-500/5' : 'text-slate-400'
-                              }`}
-                            >
-                              <div>
-                                <span className="font-bold">{teacher.prefix}{teacher.firstName} {teacher.lastName}</span>
-                                <span className="text-[10px] text-slate-500 font-mono block">{teacher.email}</span>
-                              </div>
-                              <div className="shrink-0">
-                                {isChosen ? (
-                                  <span className="text-[10px] px-2 py-0.5 bg-pink-500/10 border border-pink-500/20 rounded-full font-bold">รับการนิเทศ</span>
-                                ) : (
-                                  <span className="text-[10px] px-2 py-0.5 bg-slate-800 rounded-full">เว้นไว้</span>
-                                )}
-                              </div>
-                            </button>
-                          );
-                        })}
-                    </div>
+                  <div className="bg-pink-500/5 border border-pink-500/20 rounded-xl p-4 text-[11px] text-pink-300 flex items-start gap-2">
+                    <Award className="w-4 h-4 text-pink-400 shrink-0 mt-0.5" />
+                    <p>ครูนิเทศจะเห็นเฉพาะครูที่ <strong>หัวหน้างานนิเทศจับคู่ให้ในแต่ละรอบ</strong> (ภาคเรียนละ 1 รอบ) — ไม่ต้องเลือกรายชื่อที่นี่</p>
                   </div>
                 )}
 

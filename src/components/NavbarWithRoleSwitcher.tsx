@@ -71,6 +71,15 @@ export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
     iconColor: 'text-amber-400',
     description: 'เสนอจัดครูสอนแทน (ขั้น 1) และอนุมัติผลการเรียนในกลุ่มสาระฯ'
   },
+  DEPUTY_HEAD_OF_DEPARTMENT: {
+    label: 'รองหัวหน้ากลุ่มสาระฯ',
+    badgeBg: 'bg-yellow-500/10',
+    badgeText: 'text-yellow-400',
+    badgeBorder: 'border-yellow-500/20',
+    iconBg: 'bg-yellow-500/20',
+    iconColor: 'text-yellow-400',
+    description: 'ผู้นิเทศโดยตำแหน่งของกลุ่มสาระฯ และดูผลนิเทศของกลุ่มสาระฯ'
+  },
   ACADEMIC_HEAD: {
     label: 'หัวหน้าฝ่ายวิชาการและหลักสูตร',
     badgeBg: 'bg-orange-500/10',
@@ -153,13 +162,13 @@ export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
     description: 'จัดเก็บค่าธรรมเนียม ใบเสร็จดิจิทัล และอนุมัติเบิกงบครู'
   },
   INSTRUCTIONAL_SUPERVISOR: {
-    label: 'ครูผู้นิเทศ/วิชาการ',
+    label: 'หัวหน้างานนิเทศ',
     badgeBg: 'bg-cyan-500/10',
     badgeText: 'text-cyan-400',
     badgeBorder: 'border-cyan-500/20',
     iconBg: 'bg-cyan-500/20',
     iconColor: 'text-cyan-400',
-    description: 'ตรวจแผนการสอน นิเทศชั้นเรียน และประเมินสมรรถนะ'
+    description: 'เปิดรอบนิเทศ จับคู่ผู้นิเทศ และดูผลนิเทศทั้งโรงเรียน'
   },
   PARENT: {
     label: 'ผู้ปกครอง',
@@ -301,12 +310,13 @@ export function NavbarWithRoleSwitcher({
         return assignments.homeroomClass ? `ห้อง ${assignments.homeroomClass}` : '';
       case 'HEAD_OF_DEPARTMENT':
         return assignments.departmentId === 'sci-dept' ? 'กลุ่มสาระฯ วิทยาศาสตร์' : 'หัวหน้าส่วนงาน';
+      case 'DEPUTY_HEAD_OF_DEPARTMENT':
+        return 'รองหัวหน้ากลุ่มสาระฯ';
       case 'SUBJECT_TEACHER':
         const count = assignments.teachingSubjects?.length || 0;
         return count > 0 ? `สอน ${count} รายวิชา` : '';
       case 'SUPERVISORY_TEACHER':
-        const menteesCount = assignments.supervisoryMentees?.length || 0;
-        return menteesCount > 0 ? `นิเทศครู ${menteesCount} ท่าน` : '';
+        return 'ผู้นิเทศการสอน';
       case 'INFIRMARY_STAFF':
         return 'งานพยาบาลและอนามัย';
       case 'GUIDANCE_COUNSELOR':

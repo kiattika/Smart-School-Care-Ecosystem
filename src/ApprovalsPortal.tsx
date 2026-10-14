@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ClipboardCheck, Repeat, Clock, Users, Palette } from 'lucide-react';
+import { ClipboardCheck, Repeat, Clock, Users, Palette, BookOpen } from 'lucide-react';
 import { useStore } from './store';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
 import { LateAttendanceApprovalList } from './components/LateAttendanceApprovalList';
 import { ElectiveActivityManagerPage } from './components/admin/ElectiveActivityManagerPage';
 import { HouseManagerPage } from './components/admin/HouseManagerPage';
+import { SupervisionEmbedded } from './components/supervision/SupervisionWorkspace';
 import { subscribeLateAttendanceRequests } from './services/firestoreService';
 import { LateAttendanceRequestRecord } from './types';
 
@@ -45,12 +46,15 @@ const EXTRA_TAB_ROLES: Record<string, Array<'elective' | 'house'>> = {
 };
 
 // role ที่เห็น tab "เช็คชื่อย้อนหลัง" — DIRECTOR เห็นแบบ read-only (กำกับดูแล)
+// role ที่มีงานในระบบนิเทศ (ผู้นิเทศโดยตำแหน่ง / ผอ. / รองผอ.วิชาการ) — ACADEMIC_HEAD ไม่มี จึงไม่เห็นแท็บ
+const SUPERVISION_TAB_ROLES = ['HEAD_OF_DEPARTMENT', 'DEPUTY_HEAD_OF_DEPARTMENT', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'];
 const LATE_ATTENDANCE_VIEWER_ROLES = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN', 'EXECUTIVE', 'DIRECTOR'];
 // role ที่อนุมัติ/ปฏิเสธได้จริง — นอกเหนือจากนี้ (เช่น DIRECTOR) เห็นอย่างเดียว
 const LATE_ATTENDANCE_APPROVER_ROLES = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN'];
 
 const ROLE_LABEL: Record<string, string> = {
   HEAD_OF_DEPARTMENT: 'หัวหน้ากลุ่มสาระการเรียนรู้',
+  DEPUTY_HEAD_OF_DEPARTMENT: 'รองหัวหน้ากลุ่มสาระการเรียนรู้',
   ACADEMIC_HEAD: 'หัวหน้าฝ่ายวิชาการและหลักสูตร',
   DEPUTY_DIRECTOR_ACADEMIC: 'รองผู้อำนวยการฝ่ายวิชาการ',
   DIRECTOR: 'ผู้อำนวยการสถานศึกษา',
@@ -64,7 +68,7 @@ export function ApprovalsPortal() {
   const lateAttendanceReadOnly = !LATE_ATTENDANCE_APPROVER_ROLES.includes(activeRole);
   const extraTabs = EXTRA_TAB_ROLES[activeRole] || [];
 
-  const [tab, setTab] = useState<'substitute' | 'late-attendance' | 'elective' | 'house'>('substitute');
+  const [tab, setTab] = useState<'substitute' | 'late-attendance' | 'elective' | 'house' | 'supervision'>('substitute');
 
   // นับคำขอเช็คชื่อย้อนหลังที่รออนุมัติ (สำหรับ badge)
   const [lateRequests, setLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
@@ -115,6 +119,7 @@ export function ApprovalsPortal() {
           onSelect={(id) => setTab(id as typeof tab)}
           items={[
             { id: 'substitute', label: 'งานจัดครูสอนแทน', icon: Repeat, badge: pendingSubCount },
+            ...(SUPERVISION_TAB_ROLES.includes(activeRole) ? [{ id: 'supervision', label: 'งานนิเทศการสอน', icon: BookOpen }] : []),
             ...(canSeeLateAttendance ? [{ id: 'late-attendance', label: 'เช็คชื่อย้อนหลัง', icon: Clock, badge: pendingLateCount }] : []),
             // แท็บเพิ่มเติมตามสิทธิ์จริงใน firestore.rules — ตอนนี้มีแค่ ACADEMIC_HEAD (elective_activities_config/house_config)
             ...(extraTabs.includes('elective') ? [{ id: 'elective', label: 'จัดการชุมนุม', icon: Users }] : []),
@@ -126,6 +131,7 @@ export function ApprovalsPortal() {
             <SubstituteTeachingModule />
           </div>
         )}
+        {tab === 'supervision' && <SupervisionEmbedded />}
         {tab === 'elective' && extraTabs.includes('elective') && <ElectiveActivityManagerPage />}
         {tab === 'house' && extraTabs.includes('house') && <HouseManagerPage />}
         {tab === 'late-attendance' && canSeeLateAttendance && (
