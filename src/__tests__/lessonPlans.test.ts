@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readSource } from './helpers/readSource';
 import {
-  PLAN_CHECKLIST, checksComplete, complianceOf, courseKeyOf, embedUrlFor, isHttpsUrl, planDocId, planOverviewQuery,
+  PLAN_CRITERIA, averageScore, scoresComplete, suitabilityLevel, complianceOf, courseKeyOf, embedUrlFor, isHttpsUrl, planDocId, planOverviewQuery,
   reviewStageFor, validateSubmission,
 } from '../lib/lessonPlans';
 
@@ -51,10 +51,19 @@ describe('lessonPlans lib', () => {
     expect(reviewStageFor({ ...p, stage: 'DEPT_APPROVED' }, { staffId: 's', roles: ['INSTRUCTIONAL_SUPERVISOR'], departmentId: 'D3' }, false)).toBe('FINAL');
     expect(reviewStageFor({ ...p, stage: 'DEPT_APPROVED' }, { staffId: 'h', roles: ['HEAD_OF_DEPARTMENT'], departmentId: 'D1' }, false)).toBeNull();
   });
-  it('แบบประเมินครบ 10 ข้อ id ตรง rules', () => {
-    expect(PLAN_CHECKLIST.map(c => c.id)).toEqual(['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7', 'c8', 'c9', 'c10']);
-    expect(checksComplete({ c1: 'Y' })).toBe(false);
-    expect(checksComplete(Object.fromEntries(PLAN_CHECKLIST.map(c => [c.id, 'N'])))).toBe(true);
+  it('แบบประเมิน 15 ข้อ id q1–q15 ตรง rules; ค่าเฉลี่ยและระดับตามเกณฑ์แบบ', () => {
+    expect(PLAN_CRITERIA.map(c => c.id)).toEqual(Array.from({ length: 15 }, (_, i) => `q${i + 1}`));
+    const all = (n: number) => Object.fromEntries(PLAN_CRITERIA.map(c => [c.id, n]));
+    expect(scoresComplete({ q1: 5 })).toBe(false);
+    expect(scoresComplete(all(3))).toBe(true);
+    expect(scoresComplete({ ...all(3), q4: 6 })).toBe(false);
+    expect(scoresComplete({ ...all(3), q4: 2.5 })).toBe(false);
+    expect(averageScore({})).toBeNull();
+    expect(averageScore(all(4))).toBe(4);
+    expect(averageScore({ q1: 5, q2: 4 })).toBe(4.5);
+    expect([4.5, 4.49, 3.5, 3.49, 2.5, 2.49, 1.5, 1.49].map(suitabilityLevel))
+      .toEqual(['มากที่สุด', 'มาก', 'มาก', 'ปานกลาง', 'ปานกลาง', 'น้อย', 'น้อย', 'น้อยที่สุด']);
+    expect(suitabilityLevel(null)).toBe('-');
   });
 });
 
@@ -65,10 +74,11 @@ describe('lesson plan wiring guards', () => {
     expect(src).toMatch(/<iframe/);
     expect(src).toMatch(/aria-label="แบบประเมินแผนการสอน"/);
   });
-  it('rules checks ตรงกับ PLAN_CHECKLIST และมีบล็อกครบ', () => {
+  it('rules scores ตรงกับ PLAN_CRITERIA และมีบล็อกครบ', () => {
     const rules = readSource('firestore.rules');
     expect(rules).toMatch(/match \/lesson_plan_submissions\/\{oid\}/);
-    for (const c of PLAN_CHECKLIST) expect(rules).toContain(`'${c.id}'`);
+    for (const c of PLAN_CRITERIA) expect(rules).toContain(`'${c.id}'`);
+    expect(rules).toContain('lpScoresOk');
   });
   it('เชื่อมเมนูครู + แท็บตรวจแผนในงานนิเทศ', () => {
     expect(readSource('src/TeacherPortal.tsx')).toMatch(/MyLessonPlansPanel/);

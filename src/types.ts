@@ -307,6 +307,12 @@ export interface PostTeachingRecord {
   // (staff doc id + ชื่อ ณ ตอนนั้น) — ครูเหล่านี้ยังเห็นบันทึกนี้ต่อไป และครูคนใหม่เห็นพร้อมป้ายระบุผู้บันทึก
   previousTeacherStaffIds?: string[];
   previousTeacherNames?: string[];
+  // เชื่อมกับโครงการสอน (teaching_projects): หัวข้อที่สอนจริงในคาบ (ไม่บังคับ — ยืดหยุ่นเมื่อมีกิจกรรมแทรก)
+  planProjectId?: string;
+  planUnitIds?: string[];
+  /** ชื่อหัวข้อ ณ ตอนบันทึก (เก็บสำเนา เผื่อภายหลังครูแก้/ลบแถวในโครงการสอน) */
+  planUnitTitles?: string[];
+  planStatus?: 'ON_PLAN' | 'DEVIATED';
 }
 
 export type SubstituteApprovalStage =
