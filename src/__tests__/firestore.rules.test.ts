@@ -4269,4 +4269,18 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(getDocs(query(col(staffCtx('sup1', ['SUPERVISORY_TEACHER'])), where('roundId', '==', RID), where('supervisorStaffId', '==', 'sup1'))));
     });
   });
+
+  describe('public_summary (สารสนเทศโรงเรียนสาธารณะ)', () => {
+    it('ใครก็อ่านเอกสาร current ได้แม้ไม่ล็อกอิน; อ่านเอกสารอื่น/list ไม่ได้; เขียนไม่ได้แม้ SUPER_ADMIN', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('public_summary/current').set({ schemaVersion: 1 });
+        await ctx.firestore().doc('public_summary/other').set({ secret: 1 });
+      });
+      await assertSucceeds(asAnonymous().firestore().doc('public_summary/current').get());
+      await assertFails(asAnonymous().firestore().doc('public_summary/other').get());
+      await assertFails(getDocs(collection(asAnonymous().firestore() as any, 'public_summary')));
+      await assertFails(mSetDoc(mDoc(asRole('SUPER_ADMIN').firestore() as any, 'public_summary/current'), { schemaVersion: 2 }));
+      await assertFails(mSetDoc(mDoc(asAnonymous().firestore() as any, 'public_summary/current'), { schemaVersion: 2 }));
+    });
+  });
 });

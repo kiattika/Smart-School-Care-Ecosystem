@@ -1568,6 +1568,14 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // 40. สรุปสารสนเทศโรงเรียนสำหรับหน้าสาธารณะ /info — อ่านได้ทุกคนแม้ไม่ล็อกอิน (เป็นตัวเลขรวมที่ซ่อนช่อง <5 แล้วเท่านั้น
+    //     ไม่มีข้อมูลรายบุคคล); client เขียนไม่ได้เด็ดขาด (Cloud Function scheduledPublicSummary/refreshPublicSummary ใช้ Admin SDK)
+    //     อ่านได้เฉพาะเอกสาร 'current' เอกสารเดียว — ห้ามเพิ่มข้อมูลละเอียดลงเอกสารนี้
+    match /public_summary/{docId} {
+      allow get: if docId == 'current';
+      allow list, write: if false;
+    }
+
     // Default Deny All Catch-All for unknown paths
     match /{document=**} {
       allow read, write: if false;

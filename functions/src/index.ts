@@ -4,3 +4,4 @@ export { createStaffMember, setStaffActive } from './staffAdmin';
 export { refreshGuidanceStatus } from './guidanceStatus';
 export { submitNineQ } from './nineQSubmit';
 export { importParentVerification, linkParentLine, signInParentLine, unlinkParentLine } from './parentLine';
+export { scheduledPublicSummary, refreshPublicSummary } from './publicSummary';
