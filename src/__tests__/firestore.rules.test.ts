@@ -4967,6 +4967,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
   });
   describe('conduct_entries / conduct_change_requests (งานกิจการนักเรียน)', () => {
     const sc = (sid: string, roles: string[]) => asUser(`uid-${sid}`, roles, { staffId: sid }).firestore();
+    // ใช้ครูผู้สอน (SUBJECT_TEACHER) เท่านั้น: HOMEROOM_TEACHER มีสิทธิ์แก้ students ทุกฟิลด์อยู่เดิม (ข้ามการตรวจแคชได้)
     const seed = async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         const db = ctx.firestore();
@@ -4993,34 +4994,34 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
 
     it('ครูหัก/เพิ่ม ≤5 มีผลทันที เมื่อแคชคะแนนตรงเป๊ะ; แคชผิดหรือไม่ปรับแคชไม่ได้', async () => {
       await seed();
-      const t = sc('hr1', ['HOMEROOM_TEACHER']);
-      await assertSucceeds(submit(t, 'e1', entry('hr1'), cache('e1')));
-      await assertFails(submit(t, 'e2', entry('hr1'), cache('e2', { ded: 3, score: 97 }))); // ไม่สะสมต่อจากแคชเดิม (ควรเป็น 6/94)
-      await assertSucceeds(submit(t, 'e5', entry('hr1'), cache('e5', { ded: 6, score: 94 })));
-      await assertFails(mSetDoc(mDoc(t, 'conduct_entries/e3'), entry('hr1'))); // ไม่ปรับแคชใน batch เดียวกัน
+      const t = sc('t1', ['SUBJECT_TEACHER']);
+      await assertSucceeds(submit(t, 'e1', entry('t1'), cache('e1')));
+      await assertFails(submit(t, 'e2', entry('t1'), cache('e2', { ded: 3, score: 97 }))); // ไม่สะสมต่อจากแคชเดิม (ควรเป็น 6/94)
+      await assertSucceeds(submit(t, 'e5', entry('t1'), cache('e5', { ded: 6, score: 94 })));
+      await assertFails(mSetDoc(mDoc(t, 'conduct_entries/e3'), entry('t1'))); // ไม่ปรับแคชใน batch เดียวกัน
       const b = mWriteBatch(t); // แคชคะแนนไม่ตรงกับรายการ
-      b.set(mDoc(t, 'conduct_entries/e4'), entry('hr1', { points: 2, appliedPoints: 2 }));
+      b.set(mDoc(t, 'conduct_entries/e4'), entry('t1', { points: 2, appliedPoints: 2 }));
       b.update(mDoc(t, 'students/11111'), cache('e4', { ded: 2, score: 50 }));
       await assertFails(b.commit());
     });
 
     it('ครูเกิน 5 ต้องเป็น PENDING เท่านั้น; ระดับ/เพดานต้องตรง; สวมรอยผู้บันทึกไม่ได้', async () => {
       await seed();
-      const t = sc('hr1', ['HOMEROOM_TEACHER']);
-      await assertFails(submit(t, 'e1', entry('hr1', { level: 'MEDIUM', points: 8, appliedPoints: 8 }), cache('e1', { ded: 8, score: 92 })));
-      await assertSucceeds(mSetDoc(mDoc(t, 'conduct_entries/e2'), entry('hr1', { level: 'MEDIUM', points: 8, appliedPoints: 0, status: 'PENDING' })));
-      await assertFails(mSetDoc(mDoc(t, 'conduct_entries/e3'), entry('hr1', { level: 'LIGHT', points: 6, appliedPoints: 0, status: 'PENDING' }))); // เบาเกิน 5
-      await assertFails(mSetDoc(mDoc(t, 'conduct_entries/e4'), entry('hr1', { createdByStaffId: 'other', appliedPoints: 0, status: 'PENDING' }))); // สวมรอย
-      await assertFails(mSetDoc(mDoc(t, 'conduct_entries/e5'), entry('hr1', { room: 'ม.9/9', appliedPoints: 0, status: 'PENDING' }))); // ห้องไม่ตรงทะเบียน
+      const t = sc('t1', ['SUBJECT_TEACHER']);
+      await assertFails(submit(t, 'e1', entry('t1', { level: 'MEDIUM', points: 8, appliedPoints: 8 }), cache('e1', { ded: 8, score: 92 })));
+      await assertSucceeds(mSetDoc(mDoc(t, 'conduct_entries/e2'), entry('t1', { level: 'MEDIUM', points: 8, appliedPoints: 0, status: 'PENDING' })));
+      await assertFails(mSetDoc(mDoc(t, 'conduct_entries/e3'), entry('t1', { level: 'LIGHT', points: 6, appliedPoints: 0, status: 'PENDING' }))); // เบาเกิน 5
+      await assertFails(mSetDoc(mDoc(t, 'conduct_entries/e4'), entry('t1', { createdByStaffId: 'other', appliedPoints: 0, status: 'PENDING' }))); // สวมรอย
+      await assertFails(mSetDoc(mDoc(t, 'conduct_entries/e5'), entry('t1', { room: 'ม.9/9', appliedPoints: 0, status: 'PENDING' }))); // ห้องไม่ตรงทะเบียน
       await assertFails(mSetDoc(mDoc(sc('x1', ['PARENT']), 'conduct_entries/e6'), entry('x1', { appliedPoints: 0, status: 'PENDING' }))); // ไม่ใช่บุคลากร
     });
 
     it('งานกิจการพิจารณารายการที่ส่งมา (อนุมัติปรับแคช/ไม่อนุมัติไม่แตะแคช); ครูพิจารณาเองไม่ได้', async () => {
       await seed();
-      const t = sc('hr1', ['HOMEROOM_TEACHER']);
+      const t = sc('t1', ['SUBJECT_TEACHER']);
       const a = sc('aff1', ['STUDENT_AFFAIRS']);
-      await assertSucceeds(mSetDoc(mDoc(t, 'conduct_entries/e1'), entry('hr1', { level: 'MEDIUM', points: 8, appliedPoints: 0, status: 'PENDING' })));
-      await assertSucceeds(mSetDoc(mDoc(t, 'conduct_entries/e2'), entry('hr1', { level: 'MEDIUM', points: 8, appliedPoints: 0, status: 'PENDING' })));
+      await assertSucceeds(mSetDoc(mDoc(t, 'conduct_entries/e1'), entry('t1', { level: 'MEDIUM', points: 8, appliedPoints: 0, status: 'PENDING' })));
+      await assertSucceeds(mSetDoc(mDoc(t, 'conduct_entries/e2'), entry('t1', { level: 'MEDIUM', points: 8, appliedPoints: 0, status: 'PENDING' })));
       const decide = (db: any, eid: string, status: string, applied: number, staff = 'aff1') => {
         const b = mWriteBatch(db);
         b.update(mDoc(db, `conduct_entries/${eid}`), {
@@ -5029,7 +5030,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         if (status === 'APPLIED') b.update(mDoc(db, 'students/11111'), cache(eid, { ded: applied, score: 100 - applied }));
         return b.commit();
       };
-      await assertFails(decide(t, 'e1', 'APPLIED', 8, 'hr1')); // ครูไม่มีสิทธิ์
+      await assertFails(decide(t, 'e1', 'APPLIED', 8, 't1')); // ครูไม่มีสิทธิ์
       await assertSucceeds(decide(a, 'e1', 'APPLIED', 8));
       await assertFails(decide(a, 'e1', 'REJECTED', 0)); // พิจารณาแล้วเปลี่ยนไม่ได้
       await assertSucceeds(decide(a, 'e2', 'REJECTED', 0));
@@ -5044,17 +5045,17 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
 
     it('แก้/ยกเลิกคะแนนผ่านคำร้องเท่านั้น: ผู้บันทึกยื่น งานกิจการอนุมัติ; ลบไม่ได้', async () => {
       await seed();
-      const t = sc('hr1', ['HOMEROOM_TEACHER']);
+      const t = sc('t1', ['SUBJECT_TEACHER']);
       const a = sc('aff1', ['STUDENT_AFFAIRS']);
-      await assertSucceeds(submit(t, 'e1', entry('hr1'), cache('e1')));
+      await assertSucceeds(submit(t, 'e1', entry('t1'), cache('e1')));
       const req = (staff: string, over: Record<string, unknown> = {}) => ({
         entryId: 'e1', studentId: '11111', action: 'DELETE', newPoints: null, beforePoints: 3, reason: 'บันทึกผิดคน', status: 'PENDING',
         requestedByStaffId: staff, requestedByName: 'ครู', createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(), ...over,
       });
-      await assertFails(mSetDoc(mDoc(sc('hr2', ['HOMEROOM_TEACHER']), 'conduct_change_requests/r0'), req('hr2'))); // ไม่ใช่ผู้บันทึก
-      await assertFails(mSetDoc(mDoc(t, 'conduct_change_requests/r0'), req('hr1', { reason: '' })));
-      await assertFails(mSetDoc(mDoc(t, 'conduct_change_requests/r0'), req('hr1', { action: 'EDIT', newPoints: 3 }))); // เท่าเดิม
-      await assertSucceeds(mSetDoc(mDoc(t, 'conduct_change_requests/r1'), req('hr1')));
+      await assertFails(mSetDoc(mDoc(sc('t2', ['SUBJECT_TEACHER']), 'conduct_change_requests/r0'), req('t2'))); // ไม่ใช่ผู้บันทึก
+      await assertFails(mSetDoc(mDoc(t, 'conduct_change_requests/r0'), req('t1', { reason: '' })));
+      await assertFails(mSetDoc(mDoc(t, 'conduct_change_requests/r0'), req('t1', { action: 'EDIT', newPoints: 3 }))); // เท่าเดิม
+      await assertSucceeds(mSetDoc(mDoc(t, 'conduct_change_requests/r1'), req('t1')));
       // ครูแก้รายการเองตรง ๆ ไม่ได้
       await assertFails(mUpdateDoc(mDoc(t, 'conduct_entries/e1'), { status: 'REVERSED', updatedAt: mServerTimestamp() }));
       await assertFails(mDeleteDoc(mDoc(t, 'conduct_entries/e1')));
@@ -5065,7 +5066,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         b.update(mDoc(db, 'students/11111'), cache('e1', { ded: 0, score: 100 }));
         return b.commit();
       };
-      await assertFails(approve(t, 'hr1')); // ครูอนุมัติเองไม่ได้
+      await assertFails(approve(t, 't1')); // ครูอนุมัติเองไม่ได้
       await assertSucceeds(approve(a, 'aff1'));
       await assertFails(mDeleteDoc(mDoc(a, 'conduct_entries/e1')));
       await assertFails(mDeleteDoc(mDoc(a, 'conduct_change_requests/r1')));
