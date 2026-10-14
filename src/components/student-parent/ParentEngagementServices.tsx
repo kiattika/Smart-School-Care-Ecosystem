@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   CreditCard,
   Calendar,
@@ -28,6 +28,8 @@ import { uploadBillingFile } from '../../services/storageService';
 import { validateBillingFile, buildSlipSubmissionPatch, canSubmitSlip } from '../../lib/billingPayment';
 import { BillingInvoice, ParentAppointment, Student } from '../../types';
 import { DatePicker } from '../shared/DatePicker';
+import { advisorsOfRoom, counselorsOf } from '../../lib/advisors';
+import type { UserProfile } from '../../types/auth';
 import { PromptPayQr } from '../shared/PromptPayQr';
 import { useBillingPaymentInfo } from '../../hooks/useBillingPaymentInfo';
 import { hasPaymentChannel } from '../../lib/billingPaymentInfo';
@@ -99,13 +101,11 @@ function ParentEngagementServicesInner({
   const [recipient, setRecipient] = useState<AppointmentRecipient | ''>('');
   // ครูแนะแนวที่เลือก ('' = ใครก็ได้) — รายชื่อมาจาก staff จริงที่มีบทบาทแนะแนว
   const [targetStaffId, setTargetStaffId] = useState('');
-  const [counselors, setCounselors] = useState<{ staffId: string; name: string }[]>([]);
-  useEffect(() => subscribeStaffList(list => setCounselors(
-    list.filter(s => (s.roles || []).includes('GUIDANCE_COUNSELOR') && s.status !== 'INACTIVE')
-      .map(s => ({ staffId: s.id || '', name: `${s.prefix || ''}${s.firstName || ''} ${s.lastName || ''}`.trim() }))
-      .filter(c => c.staffId && c.name)
-      .sort((a, b) => a.name.localeCompare(b.name, 'th')),
-  )), []);
+  const [staffList, setStaffList] = useState<UserProfile[]>([]);
+  useEffect(() => subscribeStaffList(setStaffList), []);
+  const counselors = useMemo(() => counselorsOf(staffList), [staffList]);
+  const advisors = useMemo(() => advisorsOfRoom(staffList, student.room), [staffList, student.room]);
+  const targetChoices = recipient === 'HOMEROOM' ? advisors : counselors;
   const [appointmentDate, setAppointmentDate] = useState('');
   const [timeSlot, setTimeSlot] = useState('');
   const [meetingType, setMeetingType] = useState<AppointmentMeetingType | ''>('');
@@ -476,7 +476,7 @@ function ParentEngagementServicesInner({
                         <button
                           key={r}
                           type="button"
-                          onClick={() => setRecipient(r)}
+                          onClick={() => { setRecipient(r); setTargetStaffId(''); }}
                           aria-pressed={recipient === r}
                           className={`py-2 px-2 rounded-xl font-bold border transition-all ${
                             recipient === r ? 'bg-purple-500/20 border-purple-500 text-purple-300' : 'bg-slate-800 border-slate-700 text-slate-400'
@@ -488,17 +488,17 @@ function ParentEngagementServicesInner({
                     </div>
                   </div>
 
-                  {recipient === 'GUIDANCE' && (
+                  {recipient !== '' && (
                     <div>
-                      <label htmlFor="appt-target" className="text-slate-300 block mb-1">เลือกครูแนะแนว:</label>
+                      <label htmlFor="appt-target" className="text-slate-300 block mb-1">{recipient === 'HOMEROOM' ? 'เลือกครูที่ปรึกษา:' : 'เลือกครูแนะแนว:'}</label>
                       <select
                         id="appt-target"
                         value={targetStaffId}
                         onChange={(e) => setTargetStaffId(e.target.value)}
                         className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-slate-200"
                       >
-                        <option value="">ใครก็ได้ (ครูแนะแนวท่านใดรับก็ได้)</option>
-                        {counselors.map(c => <option key={c.staffId} value={c.staffId}>{c.name}</option>)}
+                        <option value="">{recipient === 'HOMEROOM' ? 'ครูที่ปรึกษาท่านใดก็ได้ (ทั้งหมด)' : 'ใครก็ได้ (ครูแนะแนวท่านใดรับก็ได้)'}</option>
+                        {targetChoices.map(c => <option key={c.staffId} value={c.staffId}>{c.name}</option>)}
                       </select>
                     </div>
                   )}
@@ -590,7 +590,7 @@ function ParentEngagementServicesInner({
                     className="p-4 bg-slate-800/40 border border-slate-800 rounded-2xl space-y-2.5 hover:border-purple-500/30 transition-all"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-white">{APPOINTMENT_RECIPIENT_LABEL[apt.recipient]}{apt.targetStaffId ? ` (${counselors.find(c => c.staffId === apt.targetStaffId)?.name || 'ระบุครู'})` : ''}{apt.respondedBy ? ` · ${apt.respondedBy}` : ''}</span>
+                      <span className="text-xs font-bold text-white">{APPOINTMENT_RECIPIENT_LABEL[apt.recipient]}{apt.targetStaffId ? ` (${[...advisors, ...counselors].find(c => c.staffId === apt.targetStaffId)?.name || 'ระบุครู'})` : ''}{apt.respondedBy ? ` · ${apt.respondedBy}` : ''}</span>
                       <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
                         apt.status === 'CONFIRMED' || apt.status === 'COMPLETED' ? 'bg-emerald-500/20 text-emerald-300'
                           : apt.status === 'CANCELLED' || apt.status === 'DECLINED' ? 'bg-red-500/20 text-red-300'

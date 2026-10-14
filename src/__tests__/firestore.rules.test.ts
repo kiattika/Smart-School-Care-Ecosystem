@@ -2007,6 +2007,48 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(hr().doc('class_messages/i1').delete());
     });
 
+    describe('เลือกครูที่ปรึกษา (targetStaffId)', () => {
+      const adv2 = () => asUser('chat-hr3', ['HOMEROOM_TEACHER'], { staffId: 'chat-hr3' }).firestore() as any;
+      async function seedAdv() {
+        await seed();
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc('staff/chat-hr3').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+        });
+      }
+      const tThread = (target: string, over: Record<string, unknown> = {}) => ({
+        id: `${SID}_PARENT_${target}`, studentId: SID, studentName: 'Chat Kid', channel: 'PARENT', room: ROOM, memberUid: PARENT_UID,
+        lastText: 'สวัสดี', lastSenderRole: 'PARENT', lastAt: '2026-10-13T00:00:00.000Z', memberLastReadAt: '2026-10-13T00:00:00.000Z',
+        updatedAt: '2026-10-13T00:00:00.000Z', targetStaffId: target, ...over,
+      });
+      it('ผู้ปกครองส่งถึงครูที่ปรึกษาของห้องตัวเองได้ — ครูต่างห้อง/ไม่มีอยู่จริง ไม่ได้', async () => {
+        await seedAdv();
+        await assertSucceeds(mSetDoc(mDoc(par(), 'class_messages/t1'), msg('t1', { targetStaffId: HR_UID })));
+        await assertSucceeds(mSetDoc(mDoc(par(), 'class_messages/t2'), msg('t2', { targetStaffId: 'chat-hr3' })));
+        await assertFails(mSetDoc(mDoc(par(), 'class_messages/t3'), msg('t3', { targetStaffId: 'chat-hr2' })));
+        await assertFails(mSetDoc(mDoc(par(), 'class_messages/t4'), msg('t4', { targetStaffId: 'no-such-staff' })));
+      });
+      it('ครูตอบได้เฉพาะห้องสนทนาที่ส่งถึงตน (หรือ "ท่านใดก็ได้") — ครูร่วมห้องที่ไม่ได้ถูกเลือกตอบไม่ได้', async () => {
+        await seedAdv();
+        await assertSucceeds(mSetDoc(mDoc(hr(), 'class_messages/t5'), { ...teacherMsg('t5', 'PARENT', PARENT_UID), targetStaffId: HR_UID }));
+        await assertFails(mSetDoc(mDoc(adv2(), 'class_messages/t6'), { ...teacherMsg('t6', 'PARENT', PARENT_UID), senderUid: 'chat-hr3', targetStaffId: HR_UID }));
+        await assertSucceeds(mSetDoc(mDoc(adv2(), 'class_messages/t7'), { ...teacherMsg('t7', 'PARENT', PARENT_UID), senderUid: 'chat-hr3' }));
+      });
+      it('ห้องสนทนาเจาะจงครู: id ต้องเป็น {studentId}_{channel}_{staffId}; สร้างได้โดยผู้ปกครองหรือครูผู้ถูกเลือกเท่านั้น', async () => {
+        await seedAdv();
+        await assertSucceeds(mSetDoc(mDoc(par(), `class_chat_threads/${SID}_PARENT_${HR_UID}`), tThread(HR_UID)));
+        await assertFails(mSetDoc(mDoc(par(), `class_chat_threads/${SID}_PARENT`), tThread(HR_UID, { id: `${SID}_PARENT` })));
+        await assertFails(mSetDoc(mDoc(adv2(), `class_chat_threads/${SID}_PARENT_${HR_UID}x`), tThread(HR_UID, { id: `${SID}_PARENT_${HR_UID}x` })));
+        await assertSucceeds(mSetDoc(mDoc(hr(), `class_chat_threads/${SID}_STUDENT_${HR_UID}`), tThread(HR_UID, { id: `${SID}_STUDENT_${HR_UID}`, channel: 'STUDENT', memberUid: STU_UID })));
+      });
+      it('ครูร่วมห้องที่ไม่ได้ถูกเลือก อ่านได้แต่แก้ตัวสรุป/เวลาอ่านของห้องสนทนานั้นไม่ได้', async () => {
+        await seedAdv();
+        await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`class_chat_threads/${SID}_PARENT_${HR_UID}`).set(tThread(HR_UID)); });
+        const ref = (db: any) => mDoc(db, `class_chat_threads/${SID}_PARENT_${HR_UID}`);
+        await assertFails(mUpdateDoc(ref(adv2()), { teacherLastReadAt: '2026-10-13T01:00:00.000Z' }));
+        await assertSucceeds(mUpdateDoc(ref(hr()), { teacherLastReadAt: '2026-10-13T01:00:00.000Z' }));
+      });
+    });
+
     describe('threads', () => {
       const thread = (over: Record<string, unknown> = {}) => ({
         id: `${SID}_PARENT`, studentId: SID, studentName: 'Chat Kid', channel: 'PARENT', room: ROOM, memberUid: PARENT_UID,
@@ -2121,6 +2163,38 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         await put('t8', { recipient: 'GUIDANCE' });
         await assertSucceeds(gcB().doc(`${COL}/t7`).update({ ...confirm, respondedByStaffId: 'gc-t2', updatedAt: new Date() }));
         await assertSucceeds(gcA().doc(`${COL}/t8`).update({ ...confirm, respondedByStaffId: 'gc-t1', updatedAt: new Date() }));
+      });
+    });
+
+    describe('targetStaffId (เลือกครูที่ปรึกษา)', () => {
+      const adv2 = () => asUser('hr-a2', ['HOMEROOM_TEACHER'], { staffId: 'hr-a2' }).firestore();
+      async function seedAdv() {
+        await seed();
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc('staff/hr-a2').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+        });
+      }
+      it('ผู้ปกครองระบุครูที่ปรึกษาของห้องตัวเองได้ / "ทั้งหมด" (ว่าง) ได้ — ครูต่างห้อง, ไม่ใช่ครูที่ปรึกษา, ไม่มีอยู่จริง ไม่ได้', async () => {
+        await seedAdv();
+        await assertSucceeds(par().doc(`${COL}/h1`).set(appt('h1', { targetStaffId: HR_UID })));
+        await assertSucceeds(par().doc(`${COL}/h2`).set(appt('h2', { targetStaffId: 'hr-a2' })));
+        await assertSucceeds(par().doc(`${COL}/h3`).set(appt('h3', { targetStaffId: '' })));
+        await assertFails(par().doc(`${COL}/h4`).set(appt('h4', { targetStaffId: 'other-hr-a' })));
+        await assertFails(par().doc(`${COL}/h5`).set(appt('h5', { targetStaffId: 'no-such-staff' })));
+      });
+      it('นัดที่ระบุครูที่ปรึกษา: เฉพาะครูคนนั้นตอบรับได้ — ครูที่ปรึกษาร่วมห้องอ่านได้แต่ตอบไม่ได้', async () => {
+        await seedAdv();
+        await put('h6', { targetStaffId: HR_UID });
+        await assertSucceeds(adv2().doc(`${COL}/h6`).get());
+        await assertFails(adv2().doc(`${COL}/h6`).update({ ...confirm, respondedByStaffId: 'hr-a2', updatedAt: new Date() }));
+        await assertSucceeds(hr().doc(`${COL}/h6`).update({ ...confirm, updatedAt: new Date() }));
+      });
+      it('นัด "ทั้งหมด" และนัดเดิมที่ไม่มี targetStaffId: ครูที่ปรึกษาคนใดของห้องก็ตอบได้', async () => {
+        await seedAdv();
+        await put('h7', { targetStaffId: '' });
+        await put('h8', {});
+        await assertSucceeds(adv2().doc(`${COL}/h7`).update({ ...confirm, respondedByStaffId: 'hr-a2', updatedAt: new Date() }));
+        await assertSucceeds(hr().doc(`${COL}/h8`).update({ ...confirm, updatedAt: new Date() }));
       });
     });
 
@@ -5198,11 +5272,14 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(mGetDoc(mDoc(fund(), 'fund_programs/dr')));
     });
 
-    it('นักเรียนลงชื่อสนใจได้เมื่อประกาศ+เปิดรับ; ผู้ปกครองลงให้ได้; คนอื่นลงแทนไม่ได้', async () => {
+    it('นักเรียนลงชื่อสนใจได้เมื่อประกาศ+เปิดรับ; ผู้ปกครองลงแทน/ถอนแทนไม่ได้ (อ่านอย่างเดียว); คนอื่นลงแทนไม่ได้', async () => {
       await seedFund();
+      await assertFails(mSetDoc(mDoc(par(), 'fund_interests/p1_11111'), { ...interest('p1'), ...nowTs() }));
       await assertSucceeds(mSetDoc(mDoc(stu(), 'fund_interests/p1_11111'), { ...interest('p1'), ...nowTs() }));
       await assertFails(mSetDoc(mDoc(stuOther(), 'fund_interests/p1_11111b'), { ...interest('p1'), ...nowTs() }));
       await assertFails(mSetDoc(mDoc(stuOther(), 'fund_interests/p1_11111'), { ...interest('p1'), ...nowTs() }));
+      await assertSucceeds(mGetDoc(mDoc(stu(), 'fund_interests/p1_11111')));
+      await assertFails(mUpdateDoc(mDoc(par(), 'fund_interests/p1_11111'), { status: 'WITHDRAWN', note: '', updatedAt: mServerTimestamp() }));
     });
 
     it('ลงชื่อไม่ได้เมื่อปิดรับ/ยังไม่เปิด/ฉบับร่าง/ไม่ได้เปิดระบบลงชื่อ', async () => {

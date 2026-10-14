@@ -55,19 +55,18 @@ export function safeMeetingLink(value: string | undefined | null): string | null
   return /^https:\/\/[^\s]+$/i.test(v) ? v : null;
 }
 
-/** นัดนี้ครูคนนี้ตอบ/ปิดงานได้ไหม — ตรงกับ canHandleAppointment ใน rules (นัดแนะแนวที่ระบุครู = เฉพาะครูคนนั้น; '' = ใครก็ได้) */
+/** นัดนี้ครูคนนี้ตอบ/ปิดงานได้ไหม — ตรงกับ canHandleAppointment ใน rules (นัดที่ระบุครู = เฉพาะครูคนนั้น ทั้งครูที่ปรึกษาและแนะแนว; '' = ใครก็ได้) */
 export function canStaffHandleAppointment(
   apt: { recipient: string; targetStaffId?: string },
   myStaffId: string | undefined,
 ): boolean {
-  if (apt.recipient !== 'GUIDANCE') return true;
   const t = apt.targetStaffId || '';
   return t === '' || (!!myStaffId && t === myStaffId);
 }
 
 export interface AppointmentFormInput {
   recipient: AppointmentRecipient | '';
-  /** เลือกครูแนะแนว (เฉพาะ recipient=GUIDANCE); '' / ไม่ส่ง = ใครก็ได้ */
+  /** เลือกครูผู้รับ (ครูที่ปรึกษาของห้อง หรือครูแนะแนว); '' / ไม่ส่ง = ใครก็ได้ */
   targetStaffId?: string;
   preferredDate: string;
   timeSlot: string;
@@ -81,7 +80,6 @@ export function validateAppointmentForm(f: AppointmentFormInput, todayYmd: strin
   if (f.recipient !== 'HOMEROOM' && f.recipient !== 'GUIDANCE') errs.push('เลือกว่าต้องการพบครูที่ปรึกษาหรือครูแนะแนว');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(f.preferredDate)) errs.push('เลือกวันที่ต้องการนัดพบ');
   else if (f.preferredDate < todayYmd) errs.push('วันที่นัดพบต้องเป็นวันนี้หรือหลังจากนี้');
-  if (f.targetStaffId && f.recipient !== 'GUIDANCE') errs.push('เลือกครูผู้รับได้เฉพาะการนัดพบครูแนะแนว');
   if (!(APPOINTMENT_TIME_SLOTS as readonly string[]).includes(f.timeSlot)) errs.push('เลือกช่วงเวลา');
   if (f.meetingType !== 'IN_PERSON' && f.meetingType !== 'ONLINE_MEET') errs.push('เลือกรูปแบบการพบ');
   const topic = f.topic.trim();

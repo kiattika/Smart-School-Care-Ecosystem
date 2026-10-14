@@ -1877,7 +1877,7 @@ export async function createAppointmentRequest(input: CreateAppointmentInput): P
     parentUid: parent.uid,
     homeroomClass: student.room,
     recipient: form.recipient as ParentAppointment['recipient'],
-    targetStaffId: form.recipient === 'GUIDANCE' ? (form.targetStaffId || '') : '',
+    targetStaffId: form.targetStaffId || '',
     topic: form.topic.trim(),
     preferredDate: form.preferredDate,
     timeSlot: form.timeSlot,
@@ -1995,6 +1995,8 @@ export interface ClassChatMessage {
   senderName: string;
   text: string;
   sentAt: string;
+  /** ครูที่ปรึกษาที่เลือกคุยด้วย ('' / ไม่มี = ท่านใดก็ได้) */
+  targetStaffId?: string;
 }
 
 export interface ClassChatThread {
@@ -2009,6 +2011,7 @@ export interface ClassChatThread {
   lastAt?: string;
   memberLastReadAt?: string;
   teacherLastReadAt?: string;
+  targetStaffId?: string;
 }
 
 export interface SendClassMessageInput {
@@ -2021,6 +2024,8 @@ export interface SendClassMessageInput {
   senderUid: string;
   senderName: string;
   text: string;
+  /** ครูที่ปรึกษาที่เลือก ('' = ท่านใดก็ได้) */
+  targetStaffId?: string;
 }
 
 /** ส่งข้อความ + อัปเดตสรุปห้องสนทนาในชุดเดียว (batch) — ผู้ส่งถือว่า "อ่านแล้ว" ถึงเวลานี้ */
@@ -2031,7 +2036,9 @@ export async function sendClassMessage(input: SendClassMessageInput): Promise<vo
   const senderRole = senderRoleFor(input.side, input.channel);
   const nowIso = new Date().toISOString();
   const msgRef = doc(collection(db, CLASS_MESSAGE_COL));
-  const threadId = chatThreadId(input.studentId, input.channel);
+  const targetStaffId = input.targetStaffId || '';
+  const targetField = targetStaffId ? { targetStaffId } : {}; // ไม่เขียนฟิลด์เมื่อ 'ใครก็ได้' — ห้องสนทนาเดิม (ไม่มีฟิลด์) ยังอัปเดตได้ตาม rules
+  const threadId = chatThreadId(input.studentId, input.channel, targetStaffId);
   const batch = writeBatch(db);
   batch.set(msgRef, {
     id: msgRef.id,
@@ -2045,6 +2052,7 @@ export async function sendClassMessage(input: SendClassMessageInput): Promise<vo
     text,
     sentAt: nowIso,
     createdAt: serverTimestamp(),
+    ...targetField,
   });
   // merge: ครั้งแรก = create (ต้องมี identity ครบ), ครั้งต่อไป = update (affectedKeys มีแค่ฟิลด์ที่เปลี่ยน)
   batch.set(doc(db, CLASS_THREAD_COL, threadId), {
@@ -2059,6 +2067,7 @@ export async function sendClassMessage(input: SendClassMessageInput): Promise<vo
     lastAt: nowIso,
     [input.side === 'TEACHER' ? 'teacherLastReadAt' : 'memberLastReadAt']: nowIso,
     updatedAt: nowIso,
+    ...targetField,
   }, { merge: true });
   try {
     await batch.commit();
@@ -2069,7 +2078,7 @@ export async function sendClassMessage(input: SendClassMessageInput): Promise<vo
 
 export function subscribeClassMessages(
   onUpdate: (list: ClassChatMessage[]) => void,
-  filter: { studentId: string; channel: ChatChannel; memberUid?: string; room?: string },
+  filter: { studentId: string; channel: ChatChannel; memberUid?: string; room?: string; targetStaffId?: string },
 ): () => void {
   // สมาชิก: กรองด้วย memberUid ของตัวเอง, ครู: กรองด้วย room (ให้ตรงเงื่อนไข rules)
   const scope = filter.memberUid ? where('memberUid', '==', filter.memberUid) : filter.room ? where('room', '==', filter.room) : null;
@@ -2077,7 +2086,9 @@ export function subscribeClassMessages(
   const q = query(collection(db, CLASS_MESSAGE_COL), scope, where('studentId', '==', filter.studentId), where('channel', '==', filter.channel));
   try {
     return onSnapshot(q, (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ClassChatMessage));
+      // แยกห้องสนทนาตามครูที่เลือก (กรองฝั่ง client เพื่อให้ข้อความเดิมที่ไม่มีฟิลด์ยังอยู่ในห้อง 'ใครก็ได้')
+      const want = filter.targetStaffId || '';
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ClassChatMessage)).filter(m => (m.targetStaffId || '') === want);
       list.sort((a, b) => (a.sentAt || '').localeCompare(b.sentAt || ''));
       onUpdate(list);
     }, (error) => {
@@ -2112,10 +2123,10 @@ export function subscribeClassChatThreads(
 }
 
 /** ทำเครื่องหมายอ่านแล้ว (ฝั่งตัวเอง) — thread ยังไม่มี/เขียนไม่ได้ = ข้ามเงียบๆ */
-export async function markClassThreadRead(studentId: string, channel: ChatChannel, side: ChatSide): Promise<void> {
+export async function markClassThreadRead(studentId: string, channel: ChatChannel, side: ChatSide, targetStaffId = ''): Promise<void> {
   try {
     const nowIso = new Date().toISOString();
-    await updateDoc(doc(db, CLASS_THREAD_COL, chatThreadId(studentId, channel)), {
+    await updateDoc(doc(db, CLASS_THREAD_COL, chatThreadId(studentId, channel, targetStaffId)), {
       [side === 'TEACHER' ? 'teacherLastReadAt' : 'memberLastReadAt']: nowIso,
       updatedAt: nowIso,
     });
