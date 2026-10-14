@@ -55,7 +55,16 @@ export interface GradeRow {
   percent: number | null;
   /** ผลการเรียนเป็นตัวเลข (วิชาหลัก) หรือ ผ/มผ (กิจกรรม) — null = ยังไม่มีผล */
   grade: string | null;
+  /** มีคะแนนบางส่วนแต่ยังไม่ครบ 4 ช่วง จึงยังตัดสินเกรดไม่ได้ (วิชาหลัก) — ภาคเรียนที่ผ่านแล้วแสดงเป็น "ร" */
+  incomplete: boolean;
+  /** ร้อยละเวลาเรียนของวิชานี้ จากคาบที่ครูเช็คชื่อแล้ว; null = ไม่มีข้อมูล */
+  attendancePercent: number | null;
+  /** เวลาเรียนต่ำกว่าเกณฑ์ (เสี่ยง มส.) — เป็นตัวชี้วัดคำนวณจากการเช็คชื่อ ไม่ใช่ผลตัดสินทางการ */
+  msRisk: boolean;
 }
+
+/** เกณฑ์เวลาเรียนขั้นต่ำ (หลักสูตรแกนกลาง: ไม่น้อยกว่าร้อยละ 80) */
+export const MS_ATTENDANCE_THRESHOLD = 80;
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const codeKey = (c: string) => (c || '').trim();
@@ -80,8 +89,10 @@ export function buildGradeRows(input: {
   scores: readonly ScoreDoc[];
   courses?: readonly CourseInfo[];
   includeSchedule?: boolean;
+  /** ร้อยละเวลาเรียนตามรหัสวิชา (ไม่ส่ง/null = ไม่มีข้อมูล ไม่ประเมินเสี่ยง มส.) */
+  attendancePercentOf?: (code: string) => number | null;
 }): GradeRow[] {
-  const { term, scores, courses = [], includeSchedule = false } = input;
+  const { term, scores, courses = [], includeSchedule = false, attendancePercentOf } = input;
   const info = new Map<string, CourseInfo>();
   for (const c of courses) { const k = codeKey(c.code); if (k && !info.has(k)) info.set(k, c); }
   const byCode = new Map<string, ScoreDoc>();
@@ -99,15 +110,18 @@ export function buildGradeRows(input: {
     // วิชากิจกรรม (ก)/เฉพาะกิจไม่มีหน่วยกิต; วิชาปกติคำนวณจากคาบ/สัปดาห์ ไม่รู้ค่อยใช้ค่าที่เก็บไว้
     const credits = isActivity ? null : effectiveCredits({ code, subjectType: c?.subjectType, periodsPerWeek: c?.periods, stored: num(s?.credits) ?? num(c?.credits) });
     const max = { pre: num(s?.maxPreMidterm), mid: num(s?.maxMidterm), post: num(s?.maxPostMidterm), final: num(s?.maxFinal) };
+    const attendancePercent = attendancePercentOf?.(code) ?? null;
+    const msRisk = attendancePercent !== null && attendancePercent < MS_ATTENDANCE_THRESHOLD;
+    const extra = { attendancePercent, msRisk };
     const maxKnown = max.pre !== null && max.mid !== null && max.post !== null && max.final !== null;
     const maxTotal = maxKnown ? max.pre! + max.mid! + max.post! + max.final! : null;
     if (!s) {
-      rows.push({ code, name, credits, isActivity, hasScore: false, parts: { pre: null, mid: null, post: null, final: null }, max, total: null, maxTotal: null, percent: null, grade: null });
+      rows.push({ code, name, credits, isActivity, hasScore: false, parts: { pre: null, mid: null, post: null, final: null }, max, total: null, maxTotal: null, percent: null, grade: null, incomplete: false, ...extra });
       continue;
     }
     if (isActivity) {
       const grade = s.passFailResult === 'PASS' ? 'ผ' : s.passFailResult === 'FAIL' ? 'มผ' : null;
-      rows.push({ code, name, credits, isActivity: true, hasScore: true, parts: { pre: null, mid: null, post: null, final: null }, max, total: null, maxTotal: null, percent: null, grade });
+      rows.push({ code, name, credits, isActivity: true, hasScore: true, parts: { pre: null, mid: null, post: null, final: null }, max, total: null, maxTotal: null, percent: null, grade, incomplete: false, ...extra });
       continue;
     }
     const parts = { pre: num(s.preMidterm), mid: num(s.midterm), post: num(s.postMidterm), final: num(s.final) };
@@ -115,7 +129,7 @@ export function buildGradeRows(input: {
     // เต็มรวมที่ไม่รู้ = ถือว่าคะแนนรวมเต็ม 100 (ค่าเริ่มต้นของสมุดคะแนน: 25+20+25+30)
     const percent = total === null ? null : Math.round((total / (maxTotal ?? 100)) * 10000) / 100;
     const grade = total === null ? null : (s.grade && s.grade !== '' ? String(s.grade) : gradeFromTotal(percent ?? total));
-    rows.push({ code, name, credits, isActivity: false, hasScore: true, parts, max, total, maxTotal, percent, grade });
+    rows.push({ code, name, credits, isActivity: false, hasScore: true, parts, max, total, maxTotal, percent, grade, incomplete: grade === null, ...extra });
   }
   return rows.sort((a, b) => Number(a.isActivity) - Number(b.isActivity) || a.code.localeCompare(b.code, 'th'));
 }
@@ -142,4 +156,25 @@ export function summarizeGrades(rows: readonly GradeRow[]): GradeSummary {
     pts += r.credits * g; cr += r.credits;
   }
   return { gpa: cr > 0 ? Math.round((pts / cr) * 100) / 100 : null, creditsCounted: cr, missingCredits: missing, pending, activityPassed: ap, activityFailed: af };
+}
+
+/** ผลที่แสดงในช่อง "ผลการเรียน": ไม่มีเกรด + คะแนนไม่ครบ → ภาคเรียนที่ผ่านแล้ว = "ร" (ยังวัดผลไม่ครบ), ภาคปัจจุบัน = "รอผล" */
+export function displayGrade(r: Pick<GradeRow, 'grade' | 'incomplete'>, isPastTerm: boolean): string | null {
+  if (r.grade !== null) return r.grade;
+  return r.incomplete ? (isPastTerm ? 'ร' : 'รอผล') : null;
+}
+
+export interface RankEntry { id: string; gpa: number | null; pending: number }
+export interface RankResult {
+  rank: number; of: number;
+  /** ทุกคนในห้องมีผลครบทุกวิชาแล้ว — false = ลำดับอาจเปลี่ยนเมื่อมีคะแนนเพิ่ม */
+  complete: boolean;
+}
+/** ลำดับที่ตามเกรดเฉลี่ย (คะแนนเท่ากัน = ลำดับเดียวกัน) เฉพาะคนที่มีเกรดเฉลี่ย; คนนั้นไม่มีเกรดเฉลี่ย = null */
+export function rankByGpa(entries: readonly RankEntry[], id: string): RankResult | null {
+  const me = entries.find(e => e.id === id);
+  if (!me || me.gpa === null) return null;
+  const withGpa = entries.filter(e => e.gpa !== null);
+  const rank = 1 + withGpa.filter(e => (e.gpa as number) > (me.gpa as number)).length;
+  return { rank, of: withGpa.length, complete: entries.every(e => e.gpa !== null && e.pending === 0) };
 }

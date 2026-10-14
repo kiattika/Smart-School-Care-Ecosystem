@@ -1,5 +1,6 @@
 import { isValidScoreSetting, scoreSettingDocId, scoreSettingToForm } from '../lib/scoreSettings';
 import { countPeriodsPerWeek, creditsFromPeriods, effectiveCredits, importCredits, isActivityCode, isSchoolSpecificCode, subjectGroupOf } from '../lib/subjectCode';
+import { displayGrade, rankByGpa, MS_ATTENDANCE_THRESHOLD } from '../lib/gradeReport';
 import { buildGradeRows as buildGradeRowsSC } from '../lib/gradeReport';
 import { courseKindOf as courseKindSC } from '../lib/teachingProject';
 import { describe, it, expect } from 'vitest';
@@ -195,5 +196,42 @@ describe('โครงการสอนร่วมระหว่างคร�
     const svc = readSource('src/services/teachingProjectService.ts');
     expect(svc).toContain("where('coTeacherStaffIds', 'array-contains'");
     expect(readSource('src/components/teachingproject/MyTeachingProjectsPanel.tsx')).toMatch(/\{owner && <button[^\n]*>ครูร่วมสอน \(/);
+  });
+});
+
+describe('ปพ.6: ร / เสี่ยง มส. / ลำดับที่', () => {
+  const base = { term: '1/2569', courses: [{ code: 'ว21101', name: 'วิทย์', periods: 2 }] };
+  it('คะแนนไม่ครบ 4 ช่วง = incomplete: ภาคที่ผ่านแล้วขึ้น "ร" ภาคปัจจุบัน "รอผล"; ครบแล้วเป็นเกรด', () => {
+    const part = buildGradeRowsSC({ ...base, scores: [{ courseCode: 'ว21101', term: '1/2569', preMidterm: 20 }] as any })[0];
+    expect(part.incomplete).toBe(true);
+    expect(displayGrade(part, true)).toBe('ร');
+    expect(displayGrade(part, false)).toBe('รอผล');
+    const full = buildGradeRowsSC({ ...base, scores: [{ courseCode: 'ว21101', term: '1/2569', preMidterm: 20, midterm: 15, postMidterm: 20, final: 25 }] as any })[0];
+    expect(full.incomplete).toBe(false);
+    expect(displayGrade(full, true)).toBe('4');
+    const none = buildGradeRowsSC({ ...base, scores: [], includeSchedule: true })[0];
+    expect(none.incomplete).toBe(false);
+    expect(displayGrade(none, true)).toBeNull();
+  });
+  it('เสี่ยง มส.: เวลาเรียนต่ำกว่า 80% เท่านั้น; ไม่มีข้อมูลเวลาเรียน = ไม่ประเมิน', () => {
+    const sc = [{ courseCode: 'ว21101', term: '1/2569', preMidterm: 20, midterm: 15, postMidterm: 20, final: 25 }] as any;
+    expect(MS_ATTENDANCE_THRESHOLD).toBe(80);
+    expect(buildGradeRowsSC({ ...base, scores: sc, attendancePercentOf: () => 79.9 })[0].msRisk).toBe(true);
+    expect(buildGradeRowsSC({ ...base, scores: sc, attendancePercentOf: () => 80 })[0].msRisk).toBe(false);
+    expect(buildGradeRowsSC({ ...base, scores: sc, attendancePercentOf: () => null })[0].msRisk).toBe(false);
+    expect(buildGradeRowsSC({ ...base, scores: sc })[0].msRisk).toBe(false);
+  });
+  it('ลำดับที่ตามเกรดเฉลี่ย: คะแนนเท่ากันลำดับเดียวกัน, ไม่มีเกรดเฉลี่ย = null, ไม่ครบ = complete false', () => {
+    const es = [{ id: 'a', gpa: 3.5, pending: 0 }, { id: 'b', gpa: 3.5, pending: 0 }, { id: 'c', gpa: 2, pending: 0 }, { id: 'd', gpa: null, pending: 2 }];
+    expect(rankByGpa(es, 'a')).toEqual({ rank: 1, of: 3, complete: false });
+    expect(rankByGpa(es, 'b')?.rank).toBe(1);
+    expect(rankByGpa(es, 'c')?.rank).toBe(3);
+    expect(rankByGpa(es, 'd')).toBeNull();
+    expect(rankByGpa(es, 'zz')).toBeNull();
+    expect(rankByGpa(es.slice(0, 3), 'c')?.complete).toBe(true);
+  });
+  it('ลำดับที่แสดงเฉพาะทางครูที่ปรึกษา (นักเรียน/ผู้ปกครองไม่ส่ง rankContext)', () => {
+    expect(readSource('src/components/student-parent/AdvisorGradeReport.tsx')).toContain('rankContext');
+    expect(readSource('src/components/student-parent/AcademicHomeworkModule.tsx')).not.toContain('rankContext');
   });
 });

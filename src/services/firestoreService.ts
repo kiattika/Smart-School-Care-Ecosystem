@@ -741,6 +741,13 @@ export async function getGradebookScoresByClass(
   }
 }
 
+/** คะแนนทุกวิชาของทั้งห้อง (ครูที่ปรึกษาใช้คำนวณลำดับที่ ปพ.6; rules อนุญาต HOMEROOM_TEACHER อ่าน) — ทุกภาคเรียน ให้ผู้เรียกกรองเอง */
+export async function getGradebookScoresByRoom(room: string): Promise<GradebookScoreRecord[]> {
+  const canonical = room.trim().replace(/^M\./i, 'ม.');
+  const snap = await getDocs(query(collection(db, 'gradebook_scores'), where('className', '==', canonical)));
+  return snap.docs.map(d => ({ id: d.id, ...(d.data() as GradebookScoreRecord) }));
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
  * Gradebook hidden courses (TASK 3) — คาบกิจกรรมที่ไม่ต้องประเมิน (เช่น PLC, พักกลางวัน)
  * ครูซ่อนออกจาก dropdown สมุดบันทึกคะแนนของตัวเองได้ (preference ส่วนตัวต่อครูคนเดียว ไม่ลบข้อมูลจริง

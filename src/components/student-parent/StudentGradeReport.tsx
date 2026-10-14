@@ -5,9 +5,10 @@ import { useTeacherFirestoreSchedule } from '../../hooks/useTeacherFirestoreSche
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { subscribeGradebookScoresForStudent } from '../../services/firestoreService';
 import { isScheduleForRoom } from '../../lib/studentDaySchedule';
+import { attendanceForCourse, attendancePercent } from '../../lib/pp5';
 import { RegistryHeaderCard, useRegistryProfile } from './RegistryHeaderCard';
 import {
-  GRADE_REPORT_DISCLAIMER, buildGradeRows, summarizeGrades, termLabel, termOptions,
+  GRADE_REPORT_DISCLAIMER, MS_ATTENDANCE_THRESHOLD, buildGradeRows, displayGrade, rankByGpa, summarizeGrades, termLabel, termOptions,
   type CourseInfo, type ScoreDoc,
 } from '../../lib/gradeReport';
 
@@ -19,7 +20,13 @@ const showCode = (c: string) => (/^ELECTIVE_/.test(c) ? '-' : c);
  * รายงานผลการเรียนรายภาคเรียน (ใช้ร่วมกันหน้านักเรียน/ผู้ปกครอง) — อ่านคะแนนจริงจาก gradebook_scores ของนักเรียนคนนั้น
  * เป็นคะแนนไม่เป็นทางการ ต้องมีหมายเหตุกำกับเสมอ (ทั้งบนจอและฉบับพิมพ์)
  */
-export function StudentGradeReport({ studentId, studentName, room }: { studentId: string; studentName?: string; room?: string }) {
+export function StudentGradeReport({ studentId, studentName, room, courseStats, rankContext }: {
+  studentId: string; studentName?: string; room?: string;
+  /** students/{id}.courseAttendanceStats — ใช้ประเมินเวลาเรียน (เสี่ยง มส.); ไม่ส่ง = ไม่แสดง */
+  courseStats?: unknown;
+  /** เฉพาะครูที่ปรึกษา: คะแนนทั้งห้อง + นักเรียนในห้อง สำหรับ "ลำดับที่" (นักเรียน/ผู้ปกครองอ่านคะแนนคนอื่นไม่ได้ จึงไม่ส่ง) */
+  rankContext?: { scores: ScoreDoc[]; students: Array<{ studentId: string; courseAttendanceStats?: unknown }> };
+}) {
   const sem = useCurrentSemester();
   const currentTerm = `${sem.term}/${sem.academicYear}`;
   const { schedules } = useTeacherFirestoreSchedule();
@@ -46,7 +53,21 @@ export function StudentGradeReport({ studentId, studentName, room }: { studentId
       return { code, name: String(s.subjectName || s.courseName || ''), credits: typeof s.credits === 'number' ? s.credits : undefined, subjectType: s.subjectType || s.type, periods: periods || undefined };
     });
   }, [schedules, room]);
-  const rows = useMemo(() => buildGradeRows({ term, scores, courses, includeSchedule: term === currentTerm }), [term, scores, courses, currentTerm]);
+  const attendancePercentOf = useMemo(() => courseStats
+    ? (code: string) => attendancePercent(attendanceForCourse(courseStats, code))
+    : undefined, [courseStats]);
+  const rows = useMemo(() => buildGradeRows({ term, scores, courses, includeSchedule: term === currentTerm, attendancePercentOf }), [term, scores, courses, currentTerm, attendancePercentOf]);
+  const isPastTerm = !sem.loading && term !== currentTerm;
+  const msRows = rows.filter(r => r.msRisk);
+  const rank = useMemo(() => {
+    if (!rankContext) return null;
+    const entries = rankContext.students.map(st => {
+      const sRows = buildGradeRows({ term, scores: rankContext.scores.filter(s => s.studentId === st.studentId), courses, includeSchedule: term === currentTerm });
+      const sm = summarizeGrades(sRows);
+      return { id: st.studentId, gpa: sm.gpa, pending: sm.pending + sm.missingCredits };
+    });
+    return rankByGpa(entries, studentId);
+  }, [rankContext, term, courses, currentTerm, studentId]);
   const sum = useMemo(() => summarizeGrades(rows), [rows]);
 
   return (
@@ -113,7 +134,7 @@ export function StudentGradeReport({ studentId, studentName, room }: { studentId
                   <td className="border border-gray-400 px-1 py-1 text-center">{r.isActivity ? '' : r.maxTotal === null ? (r.hasScore ? '' : '') : fmt(r.maxTotal)}</td>
                   <td className="border border-gray-400 px-1 py-1 text-center font-semibold">{fmt(r.total)}</td>
                   <td className="border border-gray-400 px-1 py-1 text-center">{r.percent === null ? '' : r.percent.toFixed(2)}</td>
-                  <td className="border border-gray-400 px-2 py-1 text-center font-bold">{r.grade ?? <span className="font-normal text-gray-500">ยังไม่มีผล</span>}</td>
+                  <td className="border border-gray-400 px-2 py-1 text-center font-bold">{displayGrade(r, isPastTerm) ?? <span className="font-normal text-gray-500">ยังไม่มีผล</span>}</td>
                 </tr>
               ))}
             </tbody>
@@ -122,6 +143,9 @@ export function StudentGradeReport({ studentId, studentName, room }: { studentId
             <p><b>เกรดเฉลี่ย (ไม่เป็นทางการ):</b> {sum.gpa === null ? 'ยังคำนวณไม่ได้' : sum.gpa.toFixed(2)}{sum.creditsCounted > 0 ? ` (จาก ${sum.creditsCounted.toFixed(1)} หน่วยกิต)` : ''}</p>
             {sum.missingCredits > 0 && <p className="text-gray-600">มี {sum.missingCredits} วิชาที่ไม่มีข้อมูลหน่วยกิต จึงไม่นับในเกรดเฉลี่ย</p>}
             {sum.pending > 0 && <p className="text-gray-600">{sum.pending} วิชายังไม่มีผลการเรียน</p>}
+            {rank && <p><b>ลำดับที่ตามเกรดเฉลี่ยในห้อง:</b> {rank.rank} จาก {rank.of} คน{!rank.complete && <span className="text-gray-600"> (ยังมีบางคน/บางวิชาไม่ครบ ลำดับอาจเปลี่ยนเมื่อมีคะแนนเพิ่ม)</span>}</p>}
+            {rows.some(r => displayGrade(r, isPastTerm) === 'ร') && <p className="text-gray-600">ร = ยังวัดผลไม่ครบ (คะแนนที่ครูบันทึกยังไม่ครบ 4 ช่วง) — ติดต่อครูผู้สอนเพื่อแก้ไขตามระเบียบของโรงเรียน</p>}
+            {msRows.length > 0 && <p className="text-red-700"><b>เวลาเรียนต่ำกว่าร้อยละ {MS_ATTENDANCE_THRESHOLD} (เสี่ยง มส.):</b> {msRows.map(r => `${showCode(r.code)} ${r.name} (${(r.attendancePercent as number).toFixed(1)}%)`).join(', ')} <span className="text-gray-600">— คำนวณจากคาบที่ครูเช็คชื่อแล้ว ผล มส. ที่เป็นทางการให้ยึดงานทะเบียน</span></p>}
             {(sum.activityPassed + sum.activityFailed) > 0 && <p>วิชากิจกรรม: ผ่าน (ผ) {sum.activityPassed} · ไม่ผ่าน (มผ) {sum.activityFailed}</p>}
           </div>
           <p className="mt-3 text-[11px] text-red-700 border-t border-gray-300 pt-2">{GRADE_REPORT_DISCLAIMER}</p>

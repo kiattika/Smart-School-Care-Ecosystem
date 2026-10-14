@@ -20,7 +20,7 @@ import {
 import { useStore } from '../../store';
 import { StudentGradeReport } from './StudentGradeReport';
 
-export function AcademicHomeworkModule({ studentId, room, studentName }: { studentId: string; room?: string; studentName?: string }) {
+export function AcademicHomeworkModule({ studentId, room, studentName, courseStats }: { studentId: string; room?: string; studentName?: string; courseStats?: unknown }) {
   const { 
     examSchedules,
   } = useStore();
@@ -58,7 +58,7 @@ export function AcademicHomeworkModule({ studentId, room, studentName }: { stude
       </div>
 
       {activeTab === 'reportcard' && (
-        <StudentGradeReport studentId={studentId} studentName={studentName} room={room} />
+        <StudentGradeReport studentId={studentId} studentName={studentName} room={room} courseStats={courseStats} />
       )}
 
       {activeTab === 'exams' && (
