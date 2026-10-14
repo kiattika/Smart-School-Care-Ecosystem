@@ -55,6 +55,7 @@ import { useStore } from './store';
 import { useRealStudents } from './hooks/useRealStudents';
 import { useSchoolHomeVisitData } from './hooks/useHomeVisitData';
 import { HomeVisitSummaryPanel } from './components/homevisit/HomeVisitSummaryPanel';
+import { ActivityOverviewPanel } from './components/stats/TeacherStatsPanels';
 import { ExecutiveSupervisionOverview } from './components/supervision/ExecutiveSupervisionOverview';
 import { summarizeHomeVisit } from './lib/homeVisitAnalytics';
 import {
@@ -196,7 +197,7 @@ export function ExecutivePortal() {
     ? Math.min(100, Math.round((todayCompletedPostTeachingCount / todayScheduledPeriodCount) * 100))
     : null;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'approvals' | 'analytics' | 'homevisit' | 'supervision'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'approvals' | 'analytics' | 'homevisit' | 'supervision' | 'activity'>('dashboard');
 
   const pendingApprovalsCount = lateAttendanceRequests.filter(r => r.status === 'PENDING').length;
 
@@ -207,6 +208,7 @@ export function ExecutivePortal() {
     { id: 'gis', label: 'แผนที่สารสนเทศ', fullLabel: 'แผนที่สารสนเทศ (GIS)', icon: MapIcon, badge: null, color: 'text-emerald-400' },
     { id: 'health', label: 'สุขภาวะ', fullLabel: 'สุขภาวะ (Health & Safety)', icon: Stethoscope, badge: null, color: 'text-emerald-400' },
     { id: 'homevisit', label: 'เยี่ยมบ้าน', fullLabel: 'สารสนเทศเยี่ยมบ้าน (Home Visit)', icon: MapIcon, badge: null, color: 'text-emerald-400' },
+    { id: 'activity', label: 'สถิติการสอน', fullLabel: 'สถิติการปฏิบัติงานสอน (ลา/แลกคาบ/สอนแทน)', icon: Clock, badge: null, color: 'text-amber-400' },
     { id: 'supervision', label: 'นิเทศการสอน', fullLabel: 'ภาพรวมการนิเทศการสอน', icon: Star, badge: null, color: 'text-cyan-400' },
     { id: 'approvals', label: 'กล่องคำขอ', fullLabel: 'กล่องคำขอ (Approvals)', icon: Inbox, badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : null, color: 'text-amber-400' },
   ] as const;
@@ -271,6 +273,7 @@ export function ExecutivePortal() {
               {activeTab === 'gis' && 'Spatial Intelligence (School GIS)'}
               {activeTab === 'health' && 'Student Wellness & Analytics'}
               {activeTab === 'homevisit' && 'สารสนเทศเยี่ยมบ้านระดับโรงเรียน'}
+              {activeTab === 'activity' && 'สถิติการปฏิบัติงานสอนทั้งโรงเรียน (ตัวเลขรวม)'}
               {activeTab === 'supervision' && 'ภาพรวมการนิเทศการสอน (ไม่แสดงรายบุคคล)'}
               {activeTab === 'approvals' && 'Approval Inbox (กล่องคำขออนุมัติ)'}
             </h2>
@@ -669,6 +672,8 @@ export function ExecutivePortal() {
               <HomeVisitSummaryPanel title="สารสนเทศเยี่ยมบ้านทั้งโรงเรียน (ปีการศึกษาปัจจุบัน)" s={schoolVisitSummary} />
             </div>
           )}
+
+          {activeTab === 'activity' && <div className="max-w-6xl mx-auto relative z-10"><ActivityOverviewPanel level="SCHOOL" /></div>}
 
           {activeTab === 'supervision' && <ExecutiveSupervisionOverview />}
 
