@@ -11,7 +11,7 @@ import { th } from 'date-fns/locale';
 import { 
   ShieldAlert, UserCheck, UserX, FileText, CheckCircle, XCircle, Users, Activity,
   MapPin, Route, Navigation, MessageCircle, Home, ClipboardList, AlertTriangle, Heart, Shield, X, Map as MapIcon, ChevronRight, CheckCircle2,
-  Edit3, Clock, Compass, Brain, Sparkles, Target, Search, Filter, Eye
+  Clock, Compass, Brain, Sparkles, Target, Search, Filter, Eye
   , Radar
 } from 'lucide-react';
 import { SkipRadarPanel } from './components/advisor/SkipRadarPanel';
@@ -58,7 +58,6 @@ import { AppointmentInbox } from './components/appointments/AppointmentInbox';
 export function AdvisorPortal() {
   const {
     user,
-    updateStudentProfile
   } = useStore();
 
   // อ่านรายชื่อนักเรียนจาก Firestore สด (real-time) แทน Zustand store แบบ session-local
@@ -74,9 +73,6 @@ export function AdvisorPortal() {
   const [attendanceOverrides, setAttendanceOverrides] = useState<Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>>({});
 
   const myRoom = user?.profile?.assignments?.homeroomClass;
-  // การเชื่อมบัญชีผู้ปกครอง (parentUid) ให้สิทธิ์เข้าถึงข้อมูลนักเรียน → แก้ได้เฉพาะผู้ดูแลระบบ (rules บังคับด้วย)
-  const canLinkParent = user?.activeRole === 'SUPER_ADMIN';
-  const [profileSaveError, setProfileSaveError] = useState('');
   const chatUnread = useRoomChatUnread(myRoom);
 
   // ใบลานักเรียนห้องที่ฉันเป็นครูที่ปรึกษา — real-time จาก Firestore (rules: isHomeroomTeacherOf(homeroomClass))
@@ -220,12 +216,6 @@ export function AdvisorPortal() {
 
   // Custom Morning Attendance & Profile states
   const [routeModalStudent, setRouteModalStudent] = useState<Student | null>(null);
-  const [editProfileStudent, setEditProfileStudent] = useState<Student | null>(null);
-  const [editNickname, setEditNickname] = useState('');
-  const [editPhotoUrl, setEditPhotoUrl] = useState('');
-  const [editAddress, setEditAddress] = useState('');
-  const [editParentUid, setEditParentUid] = useState('');
-  const [editParentEmail, setEditParentEmail] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   
   
@@ -783,28 +773,6 @@ export function AdvisorPortal() {
                                 <Compass className="w-4 h-4" />
                                 <span>แผนที่เดินทาง</span>
                               </button>
-
-                              {/* Edit Profile */}
-                              <button
-                                onClick={() => {
-                                  if (isEditingLocked) return;
-                                  setEditProfileStudent(student); setProfileSaveError("");
-                                  setEditNickname(student.nickname || '');
-                                  setEditPhotoUrl(student.photoUrl || student.avatar || '');
-                                  setEditAddress(student.homeLocation?.address || '');
-                                  setEditParentUid((student as any).parentUid || (student as any).parentId || '');
-                                  setEditParentEmail((student as any).parentEmail || '');
-                                }}
-                                disabled={isEditingLocked}
-                                className={cn(
-                                  "p-2 bg-slate-500/10 border border-slate-500/20 text-slate-300 rounded-lg transition-colors flex items-center justify-center gap-1 text-xs font-semibold",
-                                  isEditingLocked ? "opacity-50 cursor-not-allowed" : "hover:bg-slate-500/20"
-                                )}
-                                title={isEditingLocked ? "ข้อมูลถูกล็อกโดยครูประจำชั้น" : "แก้ไขข้อมูลโปรไฟล์นักเรียน"}
-                              >
-                                <Edit3 className="w-4 h-4" />
-                                <span>แก้ไข</span>
-                              </button>
                             </div>
 
                             {/* Status label / manual toggle group */}
@@ -1285,133 +1253,6 @@ export function AdvisorPortal() {
                    className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-xs rounded-xl border border-white/10 transition-colors"
                  >
                    ปิด
-                 </button>
-               </div>
-             </div>
-           </div>
-         </div>
-       )}
-
-       {/* Edit Student Profile Modal */}
-       {editProfileStudent && (
-         <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-3 sm:p-4 md:p-6 animate-in fade-in">
-           <div className="bg-[#1c1f2b] border border-white/10 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col">
-             <div className="p-4 border-b border-white/10 flex justify-between items-center sticky top-0 bg-[#1c1f2b]/95 backdrop-blur z-10">
-               <div className="flex items-center gap-2">
-                 <Edit3 className="w-5 h-5 text-indigo-400" />
-                 <div>
-                   <h3 className="font-bold text-white text-sm sm:text-base">แก้ไขข้อมูลโปรไฟล์นักเรียน</h3>
-                   <p className="text-[11px] text-slate-400">{editProfileStudent.name} (รหัส {editProfileStudent.studentId})</p>
-                 </div>
-               </div>
-               <button 
-                 onClick={() => setEditProfileStudent(null)} 
-                 className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-               >
-                 <X className="w-5 h-5" />
-               </button>
-             </div>
-
-             <div className="p-4 sm:p-6 space-y-4">
-               <div>
-                 <label className="block text-xs font-bold text-slate-300 mb-1.5">ชื่อเล่น</label>
-                 <input
-                   type="text"
-                   value={editNickname}
-                   onChange={(e) => setEditNickname(e.target.value)}
-                   placeholder="เช่น นนท์, มิ้น..."
-                   className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:border-indigo-500 outline-none"
-                 />
-               </div>
-
-               <div>
-                 <label className="block text-xs font-bold text-slate-300 mb-1.5">ลิงก์รูปภาพประจำตัว (Photo URL)</label>
-                 <input
-                   type="text"
-                   value={editPhotoUrl}
-                   onChange={(e) => setEditPhotoUrl(e.target.value)}
-                   placeholder="https://..."
-                   className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:border-indigo-500 outline-none font-mono text-xs"
-                 />
-               </div>
-
-               <div>
-                 <label className="block text-xs font-bold text-slate-300 mb-1.5">ที่อยู่บ้านนักเรียน</label>
-                 <textarea
-                   value={editAddress}
-                   onChange={(e) => setEditAddress(e.target.value)}
-                   rows={3}
-                   placeholder="เลขที่ หมู่บ้าน ตำบล อำเภอ จังหวัด..."
-                   className="w-full bg-black/30 border border-white/10 rounded-xl p-3 text-sm text-white focus:border-indigo-500 outline-none resize-none"
-                 />
-               </div>
-
-               <div className="pt-2 border-t border-white/10 space-y-3">
-                 <div className="text-xs font-bold text-emerald-400">🔗 บัญชีผู้ปกครอง</div>
-
-                 {!canLinkParent && (
-                   <p className="text-[11px] text-slate-400">
-                     การเชื่อมบัญชีผู้ปกครองทำโดยผู้ปกครองยืนยันตัวตนผ่าน LINE หรือผู้ดูแลระบบเท่านั้น (ครูแก้ไม่ได้) — คุณแก้ได้เฉพาะอีเมลสำหรับติดต่อด้านล่าง
-                   </p>
-                 )}
-
-                 {canLinkParent && <div>
-                   <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                     Firebase Auth UID ของผู้ปกครอง (parentUid)
-                   </label>
-                   <input
-                     type="text"
-                     value={editParentUid}
-                     onChange={(e) => setEditParentUid(e.target.value)}
-                     placeholder="เช่น test_parent_001 หรือ UID จาก Firebase Auth"
-                     className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-emerald-300 focus:border-emerald-500 outline-none font-mono"
-                   />
-                   <p className="text-[10px] text-slate-500 mt-0.5">ใช้สำหรับสิทธิ์ความปลอดภัย Firestore Rules ให้ผู้ปกครองเข้าถึงข้อมูลบุตรหลาน</p>
-                 </div>}
-
-                 <div>
-                   <label className="block text-[11px] font-semibold text-slate-400 mb-1">
-                     อีเมลผู้ปกครอง (Parent Email)
-                   </label>
-                   <input
-                     type="email"
-                     value={editParentEmail}
-                     onChange={(e) => setEditParentEmail(e.target.value)}
-                     placeholder="เช่น parent.test@gmail.com"
-                     className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:border-indigo-500 outline-none"
-                   />
-                 </div>
-               </div>
-
-               {profileSaveError && <p role="alert" className="text-xs text-rose-300">บันทึกไม่สำเร็จ: {profileSaveError}</p>}
-               <div className="pt-2 flex gap-2">
-                 <button
-                   onClick={async () => {
-                     setProfileSaveError('');
-                     try {
-                       await updateStudentProfile(editProfileStudent.studentId, {
-                         nickname: editNickname,
-                         photoUrl: editPhotoUrl,
-                         address: editAddress,
-                         ...(canLinkParent ? { parentUid: editParentUid } : {}),
-                         parentEmail: editParentEmail
-                       });
-                       setEditProfileStudent(null);
-                       setToastMessage(`อัปเดตข้อมูลของ ${editProfileStudent.name} สำเร็จแล้ว`);
-                       setTimeout(() => setToastMessage(null), 3000);
-                     } catch (err) {
-                       setProfileSaveError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ');
-                     }
-                   }}
-                   className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all shadow-md"
-                 >
-                   บันทึกการแก้ไข
-                 </button>
-                 <button
-                   onClick={() => setEditProfileStudent(null)}
-                   className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-xs rounded-xl border border-white/10 transition-colors"
-                 >
-                   ยกเลิก
                  </button>
                </div>
              </div>
