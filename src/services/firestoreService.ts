@@ -1,4 +1,5 @@
 import { omitUndefined } from '../lib/firestorePayload';
+import { deriveParentNames } from '../lib/parentNames';
 import { infirmaryVisitNotice } from '../lib/studentNotices';
 import { applyStockChange, type DispenseLine, type StockMovementType } from '../lib/infirmaryStock';
 import { deriveEmergencyContacts } from '../lib/emergencyContacts';
@@ -3379,6 +3380,7 @@ export async function saveFamilyHomeVisitInfo(info: import('../types').FamilyHom
   const batch = writeBatch(db);
   batch.set(doc(db, HV_FAMILY_COL, info.studentId), { ...info, updatedAt: new Date().toISOString() });
   batch.set(doc(db, EMERGENCY_CONTACTS_COL, info.studentId), emergencyContactsDoc(info));
+  batch.set(doc(db, PARENT_NAMES_COL, info.studentId), parentNamesDoc(info));
   await batch.commit();
 }
 
@@ -3390,6 +3392,22 @@ export async function getRegistryProfile(studentId: string): Promise<import('../
 }
 export async function saveRegistryProfile(p: import('../lib/registryProfile').RegistryProfile & { studentId: string; studentUid: string; homeroomClass: string }): Promise<void> {
   await setDoc(doc(db, REGISTRY_PROFILE_COL, p.studentId), { ...p, updatedAt: serverTimestamp() });
+}
+
+/** สำเนาชื่อบิดา/มารดา student_parent_names/{studentId} — ผู้ปกครองตัวจริงเขียนเท่านั้น (นักเรียนอ่านเอกสารครอบครัวที่มีรายได้ไม่ได้ จึงอ่านเฉพาะสำเนาชื่อนี้ไปแสดงในส่วนหัว ปพ.6) */
+const PARENT_NAMES_COL = 'student_parent_names';
+function parentNamesDoc(info: import('../types').FamilyHomeVisitInfo) {
+  const n = deriveParentNames(info);
+  return { studentId: info.studentId, parentUid: info.parentUid, homeroomClass: info.homeroomClass, fatherName: n.fatherName, motherName: n.motherName, updatedAt: serverTimestamp() };
+}
+export async function syncParentNames(info: import('../types').FamilyHomeVisitInfo): Promise<void> {
+  await setDoc(doc(db, PARENT_NAMES_COL, info.studentId), parentNamesDoc(info));
+}
+export async function getParentNames(studentId: string): Promise<import('../lib/parentNames').ParentNames | null> {
+  const snap = await getDoc(doc(db, PARENT_NAMES_COL, studentId));
+  if (!snap.exists()) return null;
+  const d = snap.data();
+  return { fatherName: String(d.fatherName || ''), motherName: String(d.motherName || '') };
 }
 
 /** สำเนาผู้ติดต่อฉุกเฉิน student_emergency_contacts/{studentId} — ผู้ปกครองตัวจริงเขียนเท่านั้น */

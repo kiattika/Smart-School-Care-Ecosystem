@@ -3999,7 +3999,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     const ROOM = 'ม.5/8', T_ID = 'teacher-07', T_UID = 'hr-uid-1';
     const prof = (over: Record<string, unknown> = {}) => ({
       studentId: '10001', studentUid: 'stu-1', homeroomClass: ROOM, nationalId: '1101700230678',
-      fatherName: 'พ่อ ทดสอบ', motherName: 'แม่ ทดสอบ', enrolledAt: '2566-05-16', gender: 'M', birthDate: '2552-01-01',
+      enrolledAt: '2566-05-16', gender: 'M', birthDate: '2552-01-01',
       nationality: 'ไทย', religion: 'พุทธ', prevSchool: 'โรงเรียนเดิม', prevProvince: 'อุตรดิตถ์', updatedAt: mServerTimestamp(), ...over,
     });
     const ref = (db: any, id = '10001') => mDoc(db, `student_registry_profiles/${id}`);
@@ -4048,6 +4048,52 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     it('ห้ามลบทุกบทบาท', async () => {
       await assertFails(mDeleteDoc(ref(S())));
       await assertFails(mDeleteDoc(ref(asUser('adm', ['SUPER_ADMIN']).firestore())));
+    });
+  });
+
+  // 16b-3. student_parent_names — สำเนาชื่อบิดา/มารดา (ผู้ปกครองเขียน) แสดงในส่วนหัว ปพ.6
+  describe('student_parent_names', () => {
+    const ROOM = 'ม.5/8', T_ID = 'teacher-07', T_UID = 'hr-uid-1';
+    const names = (over: Record<string, unknown> = {}) => ({ studentId: '10001', parentUid: 'par-1', homeroomClass: ROOM, fatherName: 'นาย พ่อ ทดสอบ', motherName: 'นาง แม่ ทดสอบ', updatedAt: mServerTimestamp(), ...over });
+    const ref = (db: any, id = '10001') => mDoc(db, `student_parent_names/${id}`);
+    beforeEach(async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`staff/${T_ID}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+        await ctx.firestore().doc('staff/teacher-08').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+        await ctx.firestore().doc('students/10001').set({ studentId: '10001', room: ROOM, studentUid: 'stu-1', parentUid: 'par-1' });
+        await ctx.firestore().doc('student_parent_names/10001').set({ ...names(), updatedAt: new Date() });
+      });
+    });
+    const S = () => asUser('stu-1', ['STUDENT'], { studentId: '10001' }).firestore();
+    const P = () => asUser('par-1', ['PARENT']).firestore();
+    const HR = () => asUser(T_UID, ['HOMEROOM_TEACHER'], { staffId: T_ID }).firestore();
+
+    it('ผู้ปกครองตัวจริงเขียน/แก้ได้', async () => {
+      await assertSucceeds(mSetDoc(ref(P()), names()));
+      await assertSucceeds(mSetDoc(ref(P()), names({ fatherName: '' })));
+    });
+    it('ปฏิเสธ: นักเรียน/ครู/ผู้ปกครองคนอื่นเขียน, uid/ห้องไม่ตรง, field เกิน, ชื่อยาวเกิน, เวลาไม่ใช่เซิร์ฟเวอร์', async () => {
+      await assertFails(mSetDoc(ref(S()), names()));
+      await assertFails(mSetDoc(ref(HR()), names()));
+      await assertFails(mSetDoc(ref(asUser('par-2', ['PARENT']).firestore()), names({ parentUid: 'par-2' })));
+      await assertFails(mSetDoc(ref(P()), names({ parentUid: 'other' })));
+      await assertFails(mSetDoc(ref(P()), names({ homeroomClass: 'ม.6/1' })));
+      await assertFails(mSetDoc(ref(P()), names({ income: 1 })));
+      await assertFails(mSetDoc(ref(P()), names({ fatherName: 'ก'.repeat(121) })));
+      await assertFails(mSetDoc(ref(P()), names({ updatedAt: new Date('2020-01-01') })));
+    });
+    it('อ่านได้: ผู้ปกครอง/นักเรียนเจ้าของ/ครูที่ปรึกษาห้องนั้น/SUPER_ADMIN; อ่านไม่ได้: EXECUTIVE/ครูห้องอื่น/ครูวิชา/คนอื่น/ไม่ล็อกอิน; ห้าม list/ลบ', async () => {
+      await assertSucceeds(mGetDoc(ref(P())));
+      await assertSucceeds(mGetDoc(ref(S())));
+      await assertSucceeds(mGetDoc(ref(HR())));
+      await assertSucceeds(mGetDoc(ref(asUser('adm', ['SUPER_ADMIN']).firestore())));
+      await assertFails(mGetDoc(ref(asUser('ex', ['EXECUTIVE']).firestore())));
+      await assertFails(mGetDoc(ref(asUser('hr-uid-2', ['HOMEROOM_TEACHER'], { staffId: 'teacher-08' }).firestore())));
+      await assertFails(mGetDoc(ref(asUser('subj', ['SUBJECT_TEACHER']).firestore())));
+      await assertFails(mGetDoc(ref(asUser('par-2', ['PARENT']).firestore())));
+      await assertFails(mGetDoc(ref(asAnonymous().firestore())));
+      await assertFails(getDocs(collection(asUser('adm', ['SUPER_ADMIN']).firestore(), 'student_parent_names')));
+      await assertFails(mDeleteDoc(ref(P())));
     });
   });
 

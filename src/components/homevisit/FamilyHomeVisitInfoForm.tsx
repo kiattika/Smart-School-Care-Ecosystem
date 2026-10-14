@@ -3,7 +3,8 @@ import { Loader2, CheckCircle2, Users } from 'lucide-react';
 import type { Student, FamilyHomeVisitInfo, ParentInfo, GuardianInfo } from '../../types';
 import { useFamilyHomeVisitInfo } from '../../hooks/useHomeVisitData';
 import { deriveEmergencyContacts } from '../../lib/emergencyContacts';
-import { saveFamilyHomeVisitInfo, subscribeEmergencyContacts, syncEmergencyContacts } from '../../services/firestoreService';
+import { deriveParentNames } from '../../lib/parentNames';
+import { saveFamilyHomeVisitInfo, subscribeEmergencyContacts, syncEmergencyContacts, syncParentNames, getParentNames } from '../../services/firestoreService';
 import {
   normalizeFamilyInfo, validateFamilyInfo, PERSON_HEALTH, PARENTS_STATUS, HOUSING_STATUS, DEPENDENTS, SAFETY_RISKS,
   ELECTRICITY, DRINKING_WATER, DISASTER_RISKS, INCOME_BRACKETS, EDUCATION_LEVELS,
@@ -54,6 +55,19 @@ export function FamilyHomeVisitInfoForm({ student, parentUid }: { student: Stude
     if (loading || initialised) return;
     setForm(normalizeFamilyInfo(saved, base, student.parentMobile || '')); setInitialised(true);
   }, [loading, saved, base, student.parentMobile, initialised]);
+
+  // ผู้ปกครองที่เคยบันทึกก่อนมีสำเนาชื่อบิดา/มารดา (ใช้แสดงส่วนหัว ปพ.6) → สร้าง/ปรับให้ตรงครั้งเดียวตอนเปิดฟอร์ม
+  useEffect(() => {
+    if (loading || !saved) return;
+    let c = false;
+    getParentNames(student.studentId).then(d => {
+      const want = deriveParentNames(saved);
+      if (!c && (!d || d.fatherName !== want.fatherName || d.motherName !== want.motherName)) {
+        syncParentNames({ ...saved, ...base }).catch(e => console.warn('[FamilyHomeVisitInfoForm] parent names sync failed', e));
+      }
+    }).catch(() => {});
+    return () => { c = true; };
+  }, [loading, saved, base, student.studentId]);
 
   // ผู้ปกครองที่เคยบันทึกก่อนมีฟีเจอร์ผู้ติดต่อฉุกเฉิน → สร้างสำเนาให้พยาบาลครั้งเดียวตอนเปิดฟอร์ม (ไม่ต้องกดบันทึกใหม่)
   useEffect(() => {

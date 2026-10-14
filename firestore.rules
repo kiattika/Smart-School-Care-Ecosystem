@@ -1224,14 +1224,14 @@ service cloud.firestore {
       allow list: if false;
       allow create, update: if isSignedIn()
                        && request.resource.data.keys().hasOnly(['studentId', 'studentUid', 'homeroomClass', 'nationalId', 'fatherName', 'motherName', 'enrolledAt', 'gender', 'birthDate', 'nationality', 'religion', 'prevSchool', 'prevProvince', 'updatedAt'])
-                       && request.resource.data.keys().hasAll(['studentId', 'studentUid', 'homeroomClass', 'nationalId', 'fatherName', 'motherName', 'enrolledAt', 'gender', 'birthDate', 'nationality', 'religion', 'prevSchool', 'prevProvince', 'updatedAt'])
+                       && request.resource.data.keys().hasAll(['studentId', 'studentUid', 'homeroomClass', 'nationalId', 'enrolledAt', 'gender', 'birthDate', 'nationality', 'religion', 'prevSchool', 'prevProvince', 'updatedAt'])
                        && request.resource.data.studentId == studentId
                        && request.resource.data.studentUid == request.auth.uid
                        && request.resource.data.studentUid == studentField(studentId, 'studentUid', '__none__')
                        && request.resource.data.homeroomClass == studentField(studentId, 'room', '__none__')
                        && request.resource.data.nationalId is string && request.resource.data.nationalId.matches('^([0-9]{13})?$')
-                       && request.resource.data.fatherName is string && request.resource.data.fatherName.size() <= 120
-                       && request.resource.data.motherName is string && request.resource.data.motherName.size() <= 120
+                       && request.resource.data.get('fatherName', '') is string && request.resource.data.get('fatherName', '').size() <= 120   // รุ่นเก่า (ชื่อบิดา/มารดามาจาก student_parent_names แล้ว)
+                       && request.resource.data.get('motherName', '') is string && request.resource.data.get('motherName', '').size() <= 120
                        && request.resource.data.enrolledAt is string && request.resource.data.enrolledAt.size() <= 10
                        && request.resource.data.gender in ['M', 'F', '']
                        && request.resource.data.birthDate is string && request.resource.data.birthDate.size() <= 10
@@ -1239,6 +1239,23 @@ service cloud.firestore {
                        && request.resource.data.religion is string && request.resource.data.religion.size() <= 60
                        && request.resource.data.prevSchool is string && request.resource.data.prevSchool.size() <= 160
                        && request.resource.data.prevProvince is string && request.resource.data.prevProvince.size() <= 60
+                       && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    // 25.3.2 สำเนาชื่อบิดา/มารดา (จากแบบเยี่ยมบ้านฝั่งผู้ปกครอง) ไว้แสดงในส่วนหัว ปพ.6: student_parent_names/{studentId}
+    //      เขียน: ผู้ปกครองตัวจริงเท่านั้น (ตามทะเบียน) พร้อมการบันทึกแบบเยี่ยมบ้าน; อ่าน: ผู้ปกครอง/นักเรียนเจ้าของ/ครูที่ปรึกษาห้องนั้น/SUPER_ADMIN; เก็บเฉพาะชื่อ (ไม่มีรายได้/ครัวเรือน); ห้ามลบ
+    match /student_parent_names/{sid} {
+      allow get: if hasRole('SUPER_ADMIN') || isParentOfStudent(sid) || isSelfStudent(sid) || isHomeroomOfStudent(sid);
+      allow list: if false;
+      allow create, update: if isParentOfStudent(sid)
+                       && request.resource.data.keys().hasOnly(['studentId', 'parentUid', 'homeroomClass', 'fatherName', 'motherName', 'updatedAt'])
+                       && request.resource.data.keys().hasAll(['studentId', 'parentUid', 'homeroomClass', 'fatherName', 'motherName', 'updatedAt'])
+                       && request.resource.data.studentId == sid
+                       && request.resource.data.parentUid == request.auth.uid
+                       && request.resource.data.homeroomClass == studentField(sid, 'room', '__none__')
+                       && request.resource.data.fatherName is string && request.resource.data.fatherName.size() <= 120
+                       && request.resource.data.motherName is string && request.resource.data.motherName.size() <= 120
                        && request.resource.data.updatedAt == request.time;
       allow delete: if false;
     }
