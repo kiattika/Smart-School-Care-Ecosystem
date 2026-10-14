@@ -710,7 +710,7 @@ export async function saveGradebookScore(scoreData: GradebookScoreRecord): Promi
 export async function getGradebookScoresByClass(
   courseCode: string, 
   className: string, 
-  term: string = '1/2569'
+  term: string
 ): Promise<Record<string, GradebookScoreRecord>> {
   const collectionPath = 'gradebook_scores';
   try {
@@ -729,7 +729,8 @@ export async function getGradebookScoresByClass(
     const resultMap: Record<string, GradebookScoreRecord> = {};
     snap.docs.forEach(docSnap => {
       const data = docSnap.data() as GradebookScoreRecord;
-      if (data.studentId) {
+      // กรองภาคเรียนให้ตรง ("ภาค/ปี") — คะแนนต่างภาคเรียนเป็นคนละเอกสาร ห้ามปนกัน
+      if (data.studentId && data.term === term) {
         resultMap[data.studentId] = data;
       }
     });
