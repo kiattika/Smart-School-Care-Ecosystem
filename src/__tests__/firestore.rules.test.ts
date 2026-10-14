@@ -5482,6 +5482,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(mGetDoc(mDoc(other(), 'user_preferences/u-me')));
       await assertSucceeds(mGetDoc(mDoc(me(), 'user_preferences/u-me')));
       await assertFails(mGetDoc(mDoc(student(), 'user_preferences/u-me')));
+      await assertFails(mGetDoc(mDoc(asUser('u-par', ['PARENT']).firestore(), 'user_preferences/u-me')));
       await assertFails(mDeleteDoc(mDoc(me(), 'user_preferences/u-me')));
     });
   });

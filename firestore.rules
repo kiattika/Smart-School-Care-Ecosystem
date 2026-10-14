@@ -2729,7 +2729,8 @@ service cloud.firestore {
     // ===== ตั้งค่าส่วนตัว (src/lib/userPreferences.ts) — ธีม/ขนาดตัวอักษร/รูปโปรไฟล์ ผู้ใช้ทุกบทบาทตั้งของตนเอง =====
     // เจ้าของ (docId == auth.uid) เขียนได้เท่านั้น; บุคลากรอ่านได้ (เห็นรูปกันและกัน); ค่าใหม่ในอนาคตต้องเพิ่มใน hasOnly
     match /user_preferences/{uid} {
-      allow read: if isSignedIn() && (uid == request.auth.uid || hasAnyRole());
+      allow read: if isSignedIn() && (uid == request.auth.uid
+        || (hasAnyRole() && !('STUDENT' in request.auth.token.get('roles', [])) && !('PARENT' in request.auth.token.get('roles', []))));
       allow create, update: if isSignedIn() && uid == request.auth.uid
         && request.resource.data.keys().hasOnly(['theme', 'textScale', 'photoUrl', 'updatedAt'])
         && request.resource.data.get('theme', 'system') in ['system', 'light', 'dark']
