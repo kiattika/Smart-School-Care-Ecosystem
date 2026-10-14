@@ -9,7 +9,7 @@ import * as admin from 'firebase-admin';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { FIRESTORE_DATABASE_ID } from './config';
 import {
-  FetchLike, LineIdentity, PARENT_CLAIMS, hashesEqual, hmacNationalId, isLocked, isValidThaiNationalId,
+  FetchLike, LineIdentity, PARENT_CLAIMS, hashesEqual, hmacNationalId, isLocked, isValidThaiNationalId, normalizeRelationship,
   nextFailedState, normalizeNationalId, parentUidForLine, verifyLineIdToken,
 } from './parentLineLogic';
 
@@ -108,6 +108,10 @@ export const importParentVerification = functions.runWith(RUN_OPTS).https.onCall
     // ลบฟิลด์ hash แบบ SHA-256 เดิม (ถ้ามี) — เลิกใช้แล้ว
     payload.parentNationalIdHash = FieldValue.delete();
     await ref.set(payload, { merge: true });
+    // ผู้ปกครองที่เชื่อมบัญชีแล้ว (ผู้ปกครองคนเดิม) — อัปเดตป้ายความสัมพันธ์ที่ students ด้วย (นำเข้าซ้ำ = backfill)
+    if (existing.exists && sameParent && prev.linkedParentUid) {
+      await db.collection('students').doc(studentId).set({ parentRelationship: normalizeRelationship(r.relationship) }, { merge: true });
+    }
     written++;
   }
   return { written, errors };
@@ -147,7 +151,7 @@ export const linkParentLine = functions.runWith(RUN_OPTS).https.onCall(async (da
 
   const batch = db.batch();
   batch.set(recRef, { linkedParentUid: uid, linkedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  batch.set(studentRef, { parentUid: uid }, { merge: true });
+  batch.set(studentRef, { parentUid: uid, parentRelationship: normalizeRelationship(rec?.relationship) }, { merge: true });
   batch.delete(attemptsRef);
   await batch.commit();
 

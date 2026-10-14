@@ -8,10 +8,11 @@ import {
   User as FirebaseUser,
   getIdTokenResult
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { User, UserProfile, UserRole, Role } from '../types';
 import { AUTH_NO_PROFILE, AUTH_NO_ROLE } from './authErrors';
+import { parentRelationshipLabel } from './parentRelationship';
 
 const googleProvider = new GoogleAuthProvider();
 // hd = แค่ hint ให้หน้าเลือกบัญชีของ Google (UX) — การบังคับโดเมน/ทะเบียนจริงอยู่ที่
@@ -59,6 +60,21 @@ function legacyRoleFor(activeRole: UserRole, roles: UserRole[]): Role {
 }
 
 /**
+ * ป้ายใต้ชื่อของผู้ปกครอง = บิดา/มารดา/ผู้ปกครอง ตาม Relationship ที่นำเข้าจากไฟล์ผู้ปกครอง
+ * (คัดลอกลง students.parentRelationship ตอนเชื่อมบัญชี — parent_verification_records อ่านไม่ได้จาก client)
+ * query ด้วย parentUid ตรง rules; อ่านไม่ได้/ไม่มีค่า = "ผู้ปกครอง" (ไม่ทำให้ login ล้ม)
+ */
+async function parentPositionLabel(uid: string): Promise<string> {
+  try {
+    const snap = await getDocs(query(collection(db, 'students'), where('parentUid', '==', uid), limit(1)));
+    return parentRelationshipLabel(snap.docs[0]?.data()?.parentRelationship);
+  } catch (err) {
+    console.warn('[auth] อ่านความสัมพันธ์ผู้ปกครองไม่ได้', err);
+    return parentRelationshipLabel(undefined);
+  }
+}
+
+/**
  * สร้าง app user จาก custom claims เท่านั้น (ออกโดย blocking functions / assignUserRole)
  * - roles: claims.roles — ไม่มี = signOut แล้ว throw AUTH_NO_ROLE (ไม่มี default role, ไม่เดาจากอีเมล)
  * - บุคลากร: profile จาก staff/{claims.staffId} (doc id = teacherId จากไฟล์ import ไม่ใช่ Auth UID)
@@ -97,7 +113,7 @@ export async function buildAppUser(fbUser: FirebaseUser): Promise<User> {
       prefix: '',
       firstName: fbUser.displayName?.split(' ')[0] || fbUser.email || '',
       lastName: fbUser.displayName?.split(' ').slice(1).join(' ') || '',
-      position: roles.includes('STUDENT') ? 'นักเรียน' : '',
+      position: roles.includes('STUDENT') ? 'นักเรียน' : roles.includes('PARENT') ? await parentPositionLabel(fbUser.uid) : '',
       roles,
     };
   }

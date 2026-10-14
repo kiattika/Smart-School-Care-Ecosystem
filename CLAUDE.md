@@ -247,6 +247,7 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - ⚠️ `createCustomToken` ต้องมีสิทธิ์ลงนาม: บัญชีบริการ `<project>@appspot.gserviceaccount.com` ต้องมีบทบาท Service Account Token Creator (+ เปิด IAM Credentials API) ไม่งั้น callable ล้มด้วย `iam.serviceAccounts.signBlob denied`
 - พอร์ทัลผู้ปกครอง: ไม่มีปุ่มเช็คอิน GPS (ทั้งแถบบนและปุ่มลอย `QuickActionHub` — ซ่อนด้วย `activeRole === 'PARENT'` ทั้งสองจุด); แท็บคัดกรองอารมณ์เป็น "ดูอย่างเดียว" (ระดับ 2Q + รายการที่ครูแจ้งผู้ปกครอง ไม่แสดงคำตอบรายข้อ/หมายเหตุภายใน, ไม่เห็น 9Q/8Q); เมนูประตูไม่มีแท็บสถิติการเข้าเรียน (ผู้ปกครอง+นักเรียน) — สถิติรายวิชาอยู่ที่ `CourseOverviewCards`; ข้อ 13 ในแบบเยี่ยมบ้านเลือก บิดา/มารดา/อื่น ๆ (บิดา/มารดาใช้ข้อมูลข้อ 7/8)
 - `linkedParentUid` ต้องเป็น `null` จนกว่าผู้ปกครองจะเชื่อมบัญชี LINE จริงสำเร็จ ห้าม fabricate
+- ป้ายใต้ชื่อบน Navbar ของผู้ปกครอง = บิดา/มารดา/ผู้ปกครอง ตามคอลัมน์ Relationship ในไฟล์นำเข้า: `linkParentLine` คัดลอกลง `students.parentRelationship` (client อ่าน `parent_verification_records` ไม่ได้) และ `importParentVerification` นำเข้าซ้ำจะ backfill ให้ผู้ที่เชื่อมแล้ว; `buildAppUser` อ่านด้วย `where('parentUid','==',uid)` → `position` (ว่าง/ไม่รู้จัก = "ผู้ปกครอง", ห้ามขึ้น "บุคลากรทางการศึกษา"). รายการค่าอยู่ `src/lib/parentRelationship.ts` (สำเนากับ `functions/src/parentLineLogic.ts` มี test เทียบ)
 
 ### บทบาทเริ่มต้นของครู/บุคลากรที่ import
 - ถ้าคอลัมน์ Roles ในไฟล์ import ว่างเปล่า ให้ default เป็น `['SUBJECT_TEACHER']` เสมอ (ตาม workflow จริง: import ตัวบุคคลก่อน ค่อยไปกำหนดบทบาทพิเศษทีหลังที่หน้า "จัดการสิทธิ์บุคลากร")
