@@ -4745,14 +4745,15 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
   describe('evaluation_template* (แบบประเมินที่แอดมินแก้ได้เป็นเวอร์ชัน)', () => {
     const RID = '2569_1';
     const sc = (sid: string, roles: string[]) => asUser(`uid-${sid}`, roles, { staffId: sid }).firestore();
-    const verDoc = (kind: string, version: number, ids: string[], sections: unknown[] = []) => ({
+    // staff = staffId ของผู้เผยแพร่ (rules บังคับ createdByStaffId/updatedByStaffId == myStaffId() ของผู้เรียก)
+    const verDoc = (kind: string, version: number, ids: string[], sections: unknown[] = [], staff = 'sup-head') => ({
       kind, version, ids, criteria: ids.map(id => ({ id, label: `ข้อ ${id}`, ...(kind === 'SUPERVISION' ? { section: 1 } : {}) })), sections,
-      createdAt: mServerTimestamp(), createdByStaffId: 'sup-head',
+      createdAt: mServerTimestamp(), createdByStaffId: staff,
     });
-    const publish = (db: any, kind: string, version: number, ids: string[], sections: unknown[] = []) => {
+    const publish = (db: any, kind: string, version: number, ids: string[], sections: unknown[] = [], staff = 'sup-head') => {
       const b = mWriteBatch(db);
-      b.set(mDoc(db, `evaluation_template_versions/${kind}_${version}`), verDoc(kind, version, ids, sections));
-      b.set(mDoc(db, `evaluation_templates/${kind}`), { kind, currentVersion: version, updatedAt: mServerTimestamp(), updatedByStaffId: 'sup-head' });
+      b.set(mDoc(db, `evaluation_template_versions/${kind}_${version}`), verDoc(kind, version, ids, sections, staff));
+      b.set(mDoc(db, `evaluation_templates/${kind}`), { kind, currentVersion: version, updatedAt: mServerTimestamp(), updatedByStaffId: staff });
       return b.commit();
     };
     const seed = async () => {
@@ -4771,7 +4772,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(publish(sc('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'LESSON_PLAN', 3, ['c1'])); // ข้ามเวอร์ชัน
       await assertSucceeds(publish(sc('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'LESSON_PLAN', 2, ['c1', 'c2']));
       await assertFails(publish(sc('admin', ['SUPER_ADMIN']), 'LESSON_PLAN', 2, ['c1'])); // เวอร์ชันซ้ำ
-      await assertSucceeds(publish(sc('admin', ['SUPER_ADMIN']), 'LESSON_PLAN', 3, ['c1', 'c2', 'c3']));
+      await assertSucceeds(publish(sc('admin', ['SUPER_ADMIN']), 'LESSON_PLAN', 3, ['c1', 'c2', 'c3'], [], 'admin'));
       // เวอร์ชันที่เผยแพร่แล้วแก้/ลบไม่ได้
       const db = sc('sup-head', ['INSTRUCTIONAL_SUPERVISOR']);
       await assertFails(mUpdateDoc(mDoc(db, 'evaluation_template_versions/LESSON_PLAN_2'), { ids: ['c1'] }));
