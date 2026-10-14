@@ -1,7 +1,7 @@
-import { collection, deleteDoc, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import {
-  GRADUATION_LEVELS, graduationDocId, retakeDocId, validateGraduation, validateRetake,
+  GRADUATION_LEVELS, retakeDocId, validateRetake,
   type GradeRetake, type GraduationApproval, type RetakeInput,
 } from '../lib/gradeRetake';
 import { getStudentLinkIds } from './firestoreService';
@@ -60,16 +60,9 @@ export function subscribeGraduationApprovals(studentId: string, cb: (l: Graduati
     e => onError?.(e));
 }
 
-/** อนุมัติจบหลักสูตร (เฉพาะงานทะเบียนวัดผล ไม่ใช่ผู้ช่วย) — 1 นักเรียนต่อ 1 ระดับ (ม.3/ม.6) อนุมัติแล้วแก้/ถอนไม่ได้ในระบบ */
-export async function approveGraduation(input: { studentId: string; level: string; academicYear: string; note: string }, room: string, by: { staffId: string; name: string }): Promise<void> {
-  const err = validateGraduation(input);
-  if (err) throw new Error(err);
-  if (!by.staffId) throw new Error('บัญชีนี้ไม่ได้เชื่อมกับทะเบียนบุคลากร');
-  const link = await getStudentLinkIds(input.studentId);
-  await setDoc(doc(db, GRADUATIONS, graduationDocId(input.studentId, input.level)), {
-    studentId: input.studentId, studentUid: link.studentUid ?? null, parentUid: link.parentUid ?? null, room,
-    level: input.level, academicYear: input.academicYear, note: input.note.trim(),
-    approvedByStaffId: by.staffId, approvedByName: by.name.slice(0, 160), approvedAt: serverTimestamp(),
-  });
+/** ผลแก้ตัวทั้งห้องแบบอ่านครั้งเดียว (ใช้ตรวจวิชาค้างก่อนอนุมัติจบ) */
+export async function getGradeRetakesForRoom(room: string): Promise<GradeRetake[]> {
+  const snap = await getDocs(query(collection(db, RETAKES), where('room', '==', room)));
+  return snap.docs.map(d => fromDoc(d.id, d.data()));
 }
 export { GRADUATION_LEVELS };

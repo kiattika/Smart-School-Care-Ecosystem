@@ -4910,5 +4910,58 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(mDeleteDoc(mDoc(sc('reg1', ['REGISTRAR']), `graduation_approvals/${gid}`)));
       await assertSucceeds(mGetDoc(mDoc(asUser('uid-stu', []).firestore(), `graduation_approvals/${gid}`)));
     });
+
+    it('อนุมัติจบทั้งชั้น (batch): งานทะเบียนซ่อนนักเรียนได้เฉพาะพร้อมเอกสารอนุมัติ; ผู้ช่วย/ไม่มีเอกสารอนุมัติทำไม่ได้', async () => {
+      await seed();
+      const grad = (staff: string) => ({
+        studentId: '11111', studentUid: 'uid-stu', parentUid: 'uid-par', room: 'ม.3/1', level: 'ม.3', academicYear: '2569', note: '',
+        approvedByStaffId: staff, approvedByName: 'ทะเบียน', approvedAt: mServerTimestamp(),
+      });
+      const stuPatch = (uid: string) => ({ status: 'INACTIVE', statusReason: 'GRADUATED', statusNote: 'จบ', statusChangedBy: uid, statusChangedAt: mServerTimestamp(), updatedAt: mServerTimestamp() });
+      const run = async (staff: string, role: string, withApproval: boolean) => {
+        const db = sc(staff, [role]);
+        const b = mWriteBatch(db);
+        if (withApproval) b.set(mDoc(db, 'graduation_approvals/11111_ม.3'), grad(staff));
+        b.update(mDoc(db, 'students/11111'), stuPatch(`uid-${staff}`));
+        b.set(mDoc(db, 'student_id_registry/11111'), { studentId: '11111', entries: [], updatedAt: mServerTimestamp() }, { merge: true });
+        return b.commit();
+      };
+      await assertFails(run('reg1', 'REGISTRAR', false)); // ไม่มีเอกสารอนุมัติ
+      await assertFails(run('asst1', 'REGISTRAR_ASSISTANT', true)); // ผู้ช่วย
+      await assertFails(mUpdateDoc(mDoc(sc('reg1', ['REGISTRAR']), 'students/11111'), { name: 'แก้ชื่อ', updatedAt: mServerTimestamp() })); // แก้ฟิลด์อื่นไม่ได้
+      await assertSucceeds(run('reg1', 'REGISTRAR', true));
+    });
+
+    it('ย้ายห้อง: ยื่นคำขอ → มติ (ตัวจริงเท่านั้น) → ดำเนินการย้ายพร้อมอัปเดตนักเรียน; แก้/ลบย้อนหลังไม่ได้', async () => {
+      await seed();
+      const asst = sc('asst1', ['REGISTRAR_ASSISTANT']);
+      const reg = sc('reg1', ['REGISTRAR']);
+      const req = (staff: string, over: Record<string, unknown> = {}) => ({
+        studentId: '11111', studentName: 'เด็กหนึ่ง', fromRoom: 'ม.3/1', toRoom: 'ม.3/2', fromHouseId: null, toHouseId: 'h2', reason: 'ย้ายตามความเหมาะสม', status: 'PENDING',
+        requestedByStaffId: staff, requestedByName: 'ทะเบียน', createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(), ...over,
+      });
+      await assertFails(mSetDoc(mDoc(sc('t1', ['SUBJECT_TEACHER']), 'room_transfers/t1'), req('t1')));
+      await assertFails(mSetDoc(mDoc(asst, 'room_transfers/t1'), req('asst1', { fromRoom: 'ม.9/9' }))); // ห้องเดิมไม่ตรงทะเบียน
+      await assertFails(mSetDoc(mDoc(asst, 'room_transfers/t1'), req('asst1', { status: 'APPROVED' }))); // ข้ามขั้นตอน
+      await assertSucceeds(mSetDoc(mDoc(asst, 'room_transfers/t1'), req('asst1')));
+      const decide = (db: any, staff: string, status = 'APPROVED') => mUpdateDoc(mDoc(db, 'room_transfers/t1'), {
+        status, decisionCommittee: 'คำสั่งที่ 7/2569', decisionDate: '2569-11-01', decisionNote: '', decidedByStaffId: staff, decidedByName: 'ทะเบียน', decidedAt: mServerTimestamp(), updatedAt: mServerTimestamp(),
+      });
+      await assertFails(decide(asst, 'asst1')); // ผู้ช่วยบันทึกมติไม่ได้
+      // ยังไม่อนุมัติ → ย้ายนักเรียนไม่ได้
+      const apply = async (db: any, staff: string, room = 'ม.3/2') => {
+        const b = mWriteBatch(db);
+        b.update(mDoc(db, 'students/11111'), { room, houseId: 'h2', roomTransferId: 't1', updatedAt: mServerTimestamp() });
+        b.update(mDoc(db, 'room_transfers/t1'), { status: 'APPLIED', effectiveDate: '2569-11-05', appliedByStaffId: staff, appliedByName: 'ทะเบียน', appliedAt: mServerTimestamp(), updatedAt: mServerTimestamp() });
+        return b.commit();
+      };
+      await assertFails(apply(reg, 'reg1'));
+      await assertSucceeds(decide(reg, 'reg1'));
+      await assertFails(decide(reg, 'reg1', 'REJECTED')); // ตัดสินแล้วแก้ไม่ได้
+      await assertFails(apply(asst, 'asst1', 'ม.5/5')); // ห้องไม่ตรงคำขอ
+      await assertSucceeds(apply(asst, 'asst1')); // ผู้ช่วยดำเนินการย้ายได้
+      await assertFails(mDeleteDoc(mDoc(reg, 'room_transfers/t1')));
+      await assertFails(mUpdateDoc(mDoc(reg, 'room_transfers/t1'), { reason: 'แก้ย้อนหลัง', updatedAt: mServerTimestamp() }));
+    });
   });
 });
