@@ -94,3 +94,13 @@ describe('ชื่อบิดา/มารดาจากแบบเยี่
     expect(readSource('src/services/firestoreService.ts')).toMatch(/batch\.set\(doc\(db, PARENT_NAMES_COL/);
   });
 });
+
+describe('ภาคเรียนของสมุดคะแนน', () => {
+  it('ไม่ฝังภาคเรียนตายตัวใน TeacherPortal/service และอ่านคะแนนกรองตามภาคเรียน', () => {
+    expect(readSource('src/TeacherPortal.tsx')).not.toMatch(/'1\/2569'/);
+    const svc = readSource('src/services/firestoreService.ts');
+    expect(svc).not.toMatch(/'1\/2569'/);
+    expect(svc).toMatch(/data\.studentId && data\.term === term/);
+    expect(readSource('src/TeacherPortal.tsx')).toMatch(/useCurrentSemester\(\)/);
+  });
+});

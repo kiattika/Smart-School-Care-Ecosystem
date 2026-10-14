@@ -5,6 +5,7 @@ import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTea
 import { isStaffAssigned, isStaffIn, staffIdOf } from './lib/staffIdentity';
 import { canViewPostTeachingRecord, postTeachingAuthorNote } from './lib/postTeachingVisibility';
 import { useDepartments } from './hooks/useDepartments';
+import { useCurrentSemester } from './hooks/useCurrentSemester';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { MySupervisionPanel } from './components/supervision/MySupervisionPanel';
 import { MyLessonPlansPanel } from './components/lessonplans/MyLessonPlansPanel';
@@ -115,6 +116,9 @@ export function TeacherPortal() {
 
   // ชื่อกลุ่มสาระของครูจาก profile จริง — ไม่มี departmentId = ไม่แสดง (ห้ามฝังชื่อกลุ่มสาระตายตัว)
   const { nameOf: departmentNameOf } = useDepartments();
+  // ภาคเรียนปัจจุบัน ("ภาค/ปี") ของสมุดคะแนน — จากการตั้งค่าโรงเรียน/ปฏิทิน ไม่ฝังตายตัว
+  const currentSem = useCurrentSemester();
+  const currentTerm = `${currentSem.term}/${currentSem.academicYear}`;
   const myDepartmentId = user?.profile?.assignments?.departmentId || '';
   const myDepartmentName = myDepartmentId ? departmentNameOf(myDepartmentId) : '';
 
@@ -320,7 +324,7 @@ export function TeacherPortal() {
           name: gc.courseName,
           room: gc.roomName,
           level: levelStr,
-          term: '1/2569',
+          term: currentTerm,
           // จำนวนนักเรียนจริงจาก students (Firestore สด) ที่อยู่ห้องนี้ — ไม่มีข้อมูล = undefined (ห้ามเติมตัวเลขปลอม)
           studentsCount: countStudentsInRoom(gc.roomName),
           schedule: gc.scheduleString,
@@ -367,7 +371,7 @@ export function TeacherPortal() {
     }
     // ชุมนุมที่ครูคนนี้รับผิดชอบจริง (elective_activities_config.responsibleTeacherUids = staff doc id)
     // id `elective_<configId>` เหมือนที่หน้าเช็คชื่อใช้ — className ใช้ id เดียวกันเป็นรหัสห้อง (ไม่มี level/room)
-    const term = out[0]?.term || '1/2569';
+    const term = out[0]?.term || currentTerm;
     for (const cfg of electiveConfigs) {
       if (!isStaffIn(user, cfg.responsibleTeacherUids)) continue;
       out.push({
@@ -538,7 +542,7 @@ export function TeacherPortal() {
     // (teacherId → teacherIds) เลย ตรวจแล้วว่า gradebookCourses/myCourses กรองวิชาถูกต้องอยู่แล้ว
     const targetClassName = selectedCourse?.level || selectedCourse?.room || (selectedCourse as any)?.className || (selectedCourse as any)?.roomName || '';
     const courseCode = selectedCourse?.code || '';
-    const term = selectedCourse?.term || '1/2569';
+    const term = selectedCourse?.term || currentTerm;
 
     if (!targetClassName) {
       setGradebookStudents([]);
@@ -579,7 +583,7 @@ export function TeacherPortal() {
         }
       });
     });
-  }, [selectedGradebookCourseId]);
+  }, [selectedGradebookCourseId, currentTerm]);
 
   // รายชื่อนักเรียนในชุมนุมที่เลือกในสมุดบันทึกคะแนน — real-time จาก activity_enrollments (สมัครจริงเท่านั้น)
   const [gradebookElectiveEnrollments, setGradebookElectiveEnrollments] = useState<ActivityEnrollment[] | null>(null);
@@ -1343,7 +1347,7 @@ export function TeacherPortal() {
                     name: periodItem.subjectName,
                     room: periodItem.className,
                     level: periodItem.className,
-                    term: '1/2569',
+                    term: currentTerm,
                     studentsCount: periodItem.studentsCount,
                     attendanceTaken: !!periodItem.attendanceTaken,
                     periodIndex: periodItem.periodNumber
@@ -1701,7 +1705,7 @@ export function TeacherPortal() {
                 {showPp5 && (() => {
                   const sc = gradebookCourses.find(c => c.id === selectedGradebookCourseId);
                   if (!sc) return null;
-                  const [pTerm, pYear] = (sc.term || '1/2569').split('/');
+                  const [pTerm, pYear] = (sc.term || currentTerm).split('/');
                   const rs = courseScoreSettings.find(x => x.courseId === selectedGradebookCourseId);
                   const max = { pre: rs ? rs.maxPreMidterm : 25, mid: rs ? rs.maxMidterm : 20, post: rs ? rs.maxPostMidterm : 25, final: rs ? rs.maxFinal : 30 };
                   const isAct = sc.subjectType === 'ACTIVITY';
@@ -1734,7 +1738,7 @@ export function TeacherPortal() {
                       // แต่เขียนด้วย "943") ทำให้คะแนนที่บันทึกหายไปเงียบๆ ตอนโหลดหน้าใหม่
                       const targetClassName = selectedCourse?.level || selectedCourse?.room || (selectedCourse as any)?.className || (selectedCourse as any)?.roomName || '';
                       const courseCode = selectedCourse?.code || '';
-                      const term = selectedCourse?.term || '1/2569';
+                      const term = selectedCourse?.term || currentTerm;
                       // TASK 2: วิชากิจกรรม (ACTIVITY) บันทึกแค่ผ่าน/ไม่ผ่าน ไม่ใช่คะแนนตัวเลข 4 ช่องแบบวิชาหลัก
                       const isActivitySubject = selectedCourse?.subjectType === 'ACTIVITY';
 
