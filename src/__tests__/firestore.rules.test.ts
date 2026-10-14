@@ -5171,6 +5171,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       programId: pid, studentId: '11111', studentUid: 'uid-stu', studentName: 'เด็กหนึ่ง', room: 'ม.3/1', kind: 'SCHOLARSHIP',
       status: 'INTERESTED', note: '', createdAt: new Date(), updatedAt: new Date(), ...o,
     });
+    const nowTs = () => ({ createdAt: mServerTimestamp(), updatedAt: mServerTimestamp() });
     async function seedFund(programs: Record<string, unknown>[] = [prog('p1')]) {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         const db = ctx.firestore();
@@ -5182,26 +5183,26 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
 
     it('งานกองทุนสร้าง/แก้/ลบ(เฉพาะฉบับร่าง)ได้ — ครูอื่นและนักเรียนเขียนไม่ได้', async () => {
       await seedFund([]);
-      await assertSucceeds(fund().doc('fund_programs/n1').set(prog('n1', { status: 'DRAFT', createdAt: new Date(), updatedAt: new Date() })));
-      await assertFails(gc().doc('fund_programs/n2').set(prog('n2')));
-      await assertFails(stu().doc('fund_programs/n3').set(prog('n3')));
-      await assertSucceeds(fund().doc('fund_programs/n1').delete());
+      await assertSucceeds(mSetDoc(mDoc(fund(), 'fund_programs/n1'), prog('n1', { status: 'DRAFT', createdAt: mServerTimestamp(), updatedAt: mServerTimestamp() })));
+      await assertFails(mSetDoc(mDoc(gc(), 'fund_programs/n2'), prog('n2')));
+      await assertFails(mSetDoc(mDoc(stu(), 'fund_programs/n3'), prog('n3')));
+      await assertSucceeds(mDeleteDoc(mDoc(fund(), 'fund_programs/n1')));
     });
 
     it('นักเรียน/ผู้ปกครองอ่านเฉพาะที่ประกาศแล้ว — ฉบับร่างอ่านไม่ได้; แนะแนวอ่านได้ทั้งหมด', async () => {
       await seedFund([prog('pub'), prog('dr', { status: 'DRAFT' })]);
-      await assertSucceeds(stu().doc('fund_programs/pub').get());
-      await assertSucceeds(par().doc('fund_programs/pub').get());
-      await assertFails(stu().doc('fund_programs/dr').get());
-      await assertSucceeds(gc().doc('fund_programs/dr').get());
-      await assertSucceeds(fund().doc('fund_programs/dr').get());
+      await assertSucceeds(mGetDoc(mDoc(stu(), 'fund_programs/pub')));
+      await assertSucceeds(mGetDoc(mDoc(par(), 'fund_programs/pub')));
+      await assertFails(mGetDoc(mDoc(stu(), 'fund_programs/dr')));
+      await assertSucceeds(mGetDoc(mDoc(gc(), 'fund_programs/dr')));
+      await assertSucceeds(mGetDoc(mDoc(fund(), 'fund_programs/dr')));
     });
 
     it('นักเรียนลงชื่อสนใจได้เมื่อประกาศ+เปิดรับ; ผู้ปกครองลงให้ได้; คนอื่นลงแทนไม่ได้', async () => {
       await seedFund();
-      await assertSucceeds(stu().doc('fund_interests/p1_11111').set(interest('p1')));
-      await assertFails(stuOther().doc('fund_interests/p1_11111b').set(interest('p1')));
-      await assertFails(stuOther().doc('fund_interests/p1_11111').set(interest('p1')));
+      await assertSucceeds(mSetDoc(mDoc(stu(), 'fund_interests/p1_11111'), { ...interest('p1'), ...nowTs() }));
+      await assertFails(mSetDoc(mDoc(stuOther(), 'fund_interests/p1_11111b'), { ...interest('p1'), ...nowTs() }));
+      await assertFails(mSetDoc(mDoc(stuOther(), 'fund_interests/p1_11111'), { ...interest('p1'), ...nowTs() }));
     });
 
     it('ลงชื่อไม่ได้เมื่อปิดรับ/ยังไม่เปิด/ฉบับร่าง/ไม่ได้เปิดระบบลงชื่อ', async () => {
@@ -5212,25 +5213,25 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         prog('off', { registrationEnabled: false }),
       ]);
       for (const id of ['late', 'early', 'dr', 'off']) {
-        await assertFails(stu().doc(`fund_interests/${id}_11111`).set(interest(id)));
+        await assertFails(mSetDoc(mDoc(stu(), `fund_interests/${id}_11111`), { ...interest(id), ...nowTs() }));
       }
     });
 
     it('ลงชื่อด้วยข้อมูลปลอมไม่ได้ (uid/ห้อง/ประเภท/สถานะ/id ไม่ตรง)', async () => {
       await seedFund();
-      await assertFails(stu().doc('fund_interests/p1_11111').set(interest('p1', { studentUid: 'someone' })));
-      await assertFails(stu().doc('fund_interests/p1_11111').set(interest('p1', { room: 'ม.6/9' })));
-      await assertFails(stu().doc('fund_interests/p1_11111').set(interest('p1', { kind: 'STUDENT_LOAN' })));
-      await assertFails(stu().doc('fund_interests/p1_11111').set(interest('p1', { status: 'AWARDED' })));
-      await assertFails(stu().doc('fund_interests/wrong-id').set(interest('p1')));
+      await assertFails(mSetDoc(mDoc(stu(), 'fund_interests/p1_11111'), { ...interest('p1', { studentUid: 'someone' }), ...nowTs() }));
+      await assertFails(mSetDoc(mDoc(stu(), 'fund_interests/p1_11111'), { ...interest('p1', { room: 'ม.6/9' }), ...nowTs() }));
+      await assertFails(mSetDoc(mDoc(stu(), 'fund_interests/p1_11111'), { ...interest('p1', { kind: 'STUDENT_LOAN' }), ...nowTs() }));
+      await assertFails(mSetDoc(mDoc(stu(), 'fund_interests/p1_11111'), { ...interest('p1', { status: 'AWARDED' }), ...nowTs() }));
+      await assertFails(mSetDoc(mDoc(stu(), 'fund_interests/wrong-id'), { ...interest('p1'), ...nowTs() }));
     });
 
     it('นักเรียนถอนได้เสมอ; ลงใหม่ได้เมื่อยังเปิดรับ; แก้เป็น AWARDED เองไม่ได้', async () => {
       await seedFund();
       await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('fund_interests/p1_11111').set(interest('p1')); });
-      await assertFails(stu().doc('fund_interests/p1_11111').update({ status: 'AWARDED', updatedAt: new Date() }));
-      await assertSucceeds(stu().doc('fund_interests/p1_11111').update({ status: 'WITHDRAWN', note: '', updatedAt: new Date() }));
-      await assertSucceeds(stu().doc('fund_interests/p1_11111').update({ status: 'INTERESTED', note: '', updatedAt: new Date() }));
+      await assertFails(mUpdateDoc(mDoc(stu(), 'fund_interests/p1_11111'), { status: 'AWARDED', updatedAt: mServerTimestamp() }));
+      await assertSucceeds(mUpdateDoc(mDoc(stu(), 'fund_interests/p1_11111'), { status: 'WITHDRAWN', note: '', updatedAt: mServerTimestamp() }));
+      await assertSucceeds(mUpdateDoc(mDoc(stu(), 'fund_interests/p1_11111'), { status: 'INTERESTED', note: '', updatedAt: mServerTimestamp() }));
     });
 
     it('งานกองทุนบันทึกผลคัดเลือกตามลำดับสถานะได้ — ข้ามจากถอนไม่ได้, ครูแนะแนวแก้ไม่ได้', async () => {
@@ -5239,24 +5240,24 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         await ctx.firestore().doc('fund_interests/p1_11111').set(interest('p1'));
         await ctx.firestore().doc('fund_interests/p1_22222').set(interest('p1', { studentId: '22222', studentUid: 'uid-stu2', status: 'WITHDRAWN' }));
       });
-      const decide = (s: string) => ({ status: s, staffNote: 'ok', decidedByStaffId: 'fund-1', decidedByName: 'ครูทุน', updatedAt: new Date() });
-      await assertFails(gc().doc('fund_interests/p1_11111').update(decide('SHORTLISTED')));
-      await assertFails(fund().doc('fund_interests/p1_22222').update(decide('AWARDED')));
-      await assertFails(fund().doc('fund_interests/p1_11111').update({ ...decide('SHORTLISTED'), decidedByStaffId: 'other' }));
-      await assertSucceeds(fund().doc('fund_interests/p1_11111').update(decide('SHORTLISTED')));
-      await assertSucceeds(fund().doc('fund_interests/p1_11111').update(decide('AWARDED')));
-      await assertFails(fund().doc('fund_interests/p1_11111').update(decide('NOT_SELECTED')));
+      const decide = (s: string) => ({ status: s, staffNote: 'ok', decidedByStaffId: 'fund-1', decidedByName: 'ครูทุน', updatedAt: mServerTimestamp() });
+      await assertFails(mUpdateDoc(mDoc(gc(), 'fund_interests/p1_11111'), decide('SHORTLISTED')));
+      await assertFails(mUpdateDoc(mDoc(fund(), 'fund_interests/p1_22222'), decide('AWARDED')));
+      await assertFails(mUpdateDoc(mDoc(fund(), 'fund_interests/p1_11111'), { ...decide('SHORTLISTED'), decidedByStaffId: 'other' }));
+      await assertSucceeds(mUpdateDoc(mDoc(fund(), 'fund_interests/p1_11111'), decide('SHORTLISTED')));
+      await assertSucceeds(mUpdateDoc(mDoc(fund(), 'fund_interests/p1_11111'), decide('AWARDED')));
+      await assertFails(mUpdateDoc(mDoc(fund(), 'fund_interests/p1_11111'), decide('NOT_SELECTED')));
     });
 
     it('อ่านรายการลงชื่อ: เจ้าตัว/ผู้ปกครอง/งานกองทุน/แนะแนว — นักเรียนอื่นอ่านไม่ได้; ห้ามลบ', async () => {
       await seedFund();
       await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('fund_interests/p1_11111').set(interest('p1')); });
-      await assertSucceeds(stu().doc('fund_interests/p1_11111').get());
-      await assertSucceeds(par().doc('fund_interests/p1_11111').get());
-      await assertSucceeds(fund().doc('fund_interests/p1_11111').get());
-      await assertSucceeds(gc().doc('fund_interests/p1_11111').get());
-      await assertFails(stuOther().doc('fund_interests/p1_11111').get());
-      await assertFails(fund().doc('fund_interests/p1_11111').delete());
+      await assertSucceeds(mGetDoc(mDoc(stu(), 'fund_interests/p1_11111')));
+      await assertSucceeds(mGetDoc(mDoc(par(), 'fund_interests/p1_11111')));
+      await assertSucceeds(mGetDoc(mDoc(fund(), 'fund_interests/p1_11111')));
+      await assertSucceeds(mGetDoc(mDoc(gc(), 'fund_interests/p1_11111')));
+      await assertFails(mGetDoc(mDoc(stuOther(), 'fund_interests/p1_11111')));
+      await assertFails(mDeleteDoc(mDoc(fund(), 'fund_interests/p1_11111')));
     });
   });
 });
