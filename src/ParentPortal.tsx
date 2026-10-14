@@ -386,7 +386,7 @@ export function ParentPortal() {
 
         {/* 6. Academic Reports & Homework */}
         {activeTab === 'academic' && (
-          <AcademicHomeworkModule studentId={student.studentId} room={student.room} studentName={student.name} />
+          <AcademicHomeworkModule studentId={student.studentId} room={student.room} studentName={student.name} courseStats={student.courseAttendanceStats} />
         )}
 
         {/* 7. Parent Engagement & e-Billing & Appointments */}
