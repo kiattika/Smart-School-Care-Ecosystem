@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  DEFAULT_PREFERENCES, applyPreferences, normalizePreferences, prefsPatch, resolveTheme, THEME_COLOR,
+  DEFAULT_PREFERENCES, applyPreferences, normalizePreferences, prefsPatch, resolveTheme, resolvePalette, PALETTE_COLOR, THEME_COLOR,
 } from '../lib/userPreferences';
 import { readSource } from './helpers/readSource';
 
@@ -38,6 +38,39 @@ describe('resolveTheme / applyPreferences', () => {
     applyPreferences({ theme: 'system', textScale: 'normal' }, fakeDoc, true);
     expect(attrs['data-theme']).toBe('dark');
     expect(meta.content).toBe(THEME_COLOR.dark);
+  });
+  it('ธีมโทนสี (กรมท่า/ชมพู/ลาเวนเดอร์) = โหมดสว่าง + data-palette และล้างค่าเมื่อกลับธีมอื่น', () => {
+    const attrs: Record<string, string> = {};
+    const meta = { content: '#000', setAttribute(k: string, v: string) { if (k === 'content') this.content = v; } };
+    const fakeDoc = {
+      documentElement: { setAttribute: (k: string, v: string) => { attrs[k] = v; }, removeAttribute: (k: string) => { delete attrs[k]; } },
+      querySelector: () => meta,
+    } as unknown as Document;
+    for (const [t, c] of [['navy', PALETTE_COLOR.navy], ['pink', PALETTE_COLOR.pink], ['lavender', PALETTE_COLOR.lavender]] as const) {
+      applyPreferences({ theme: t, textScale: 'normal' }, fakeDoc, true); // แม้อุปกรณ์เป็นโหมดมืด ธีมที่เลือกชัดเจนต้องชนะ
+      expect(attrs['data-theme']).toBe('light');
+      expect(attrs['data-palette']).toBe(t);
+      expect(meta.content).toBe(c);
+    }
+    applyPreferences({ theme: 'dark', textScale: 'normal' }, fakeDoc, false);
+    expect(attrs['data-palette']).toBeUndefined();
+    expect(resolvePalette('light')).toBeNull();
+    expect(normalizePreferences({ theme: 'pink' }).theme).toBe('pink');
+    expect(normalizePreferences({ theme: 'rainbow' }).theme).toBe('system');
+  });
+  it('CSS โทนสี: สีสถานะไม่ถูกแตะ, ทุกโทนมีแถบบน/เมนูข้าง, index.html และ rules รู้จักค่าใหม่', () => {
+    const css = readSource('src/theme-light.css');
+    for (const n of ['navy', 'pink', 'lavender']) {
+      expect(css).toContain(`:root[data-theme="light"][data-palette="${n}"] {`);
+      expect(css).toContain(`[data-palette="${n}"] [data-shell="topbar"]`);
+      expect(css).toContain(`[data-palette="${n}"] [data-shell="sidebar"]`);
+      expect(readSource('index.html')).toContain(`'${n}'`);
+      expect(readSource('firestore.rules')).toContain(`'${n}'`);
+    }
+    const pal = css.slice(css.indexOf('[data-palette="navy"] {'));
+    for (const h of ['red', 'rose', 'amber', 'emerald', 'green', 'orange', 'yellow']) expect(pal).not.toMatch(new RegExp(`--color-${h}-(500|600)\\b`));
+    expect(readSource('src/components/NavbarWithRoleSwitcher.tsx')).toContain('data-shell="topbar"');
+    expect(readSource('src/components/shared/PortalSidebarLayout.tsx').match(/data-shell="sidebar"/g)?.length).toBe(2);
   });
 });
 

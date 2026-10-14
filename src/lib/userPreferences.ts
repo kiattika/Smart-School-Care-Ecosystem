@@ -3,11 +3,13 @@
  * เก็บ 2 ที่: localStorage (ใช้ทันทีก่อนล็อกอิน/กันจอกะพริบ) + Firestore user_preferences/{uid} (ตามผู้ใช้ข้ามอุปกรณ์)
  * ค่าใหม่ในอนาคต: เพิ่มคีย์ที่นี่ + ใน rules (hasOnly) + UserSettingsModal
  */
-export type ThemeChoice = 'system' | 'light' | 'dark';
+export type ThemeChoice = 'system' | 'light' | 'dark' | 'navy' | 'pink' | 'lavender';
+/** ธีมโทนสี = โหมดสว่าง + data-palette (สีเน้น/แถบเมนู/พื้นหลังเฉพาะธีม) */
+export type PaletteName = 'navy' | 'pink' | 'lavender';
 export type TextScale = 'normal' | 'large' | 'xlarge';
-export const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark'];
+export const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark', 'navy', 'pink', 'lavender'];
 export const TEXT_SCALES: readonly TextScale[] = ['normal', 'large', 'xlarge'];
-export const THEME_LABEL: Record<ThemeChoice, string> = { system: 'ตามอุปกรณ์', light: 'สว่าง', dark: 'มืด' };
+export const THEME_LABEL: Record<ThemeChoice, string> = { system: 'ตามอุปกรณ์', light: 'สว่าง', dark: 'มืด', navy: 'กรมท่า', pink: 'ชมพูอ่อน', lavender: 'ลาเวนเดอร์' };
 export const TEXT_SCALE_LABEL: Record<TextScale, string> = { normal: 'ปกติ', large: 'ใหญ่', xlarge: 'ใหญ่มาก' };
 
 export interface UserPreferences {
@@ -33,20 +35,29 @@ export function normalizePreferences(raw: unknown): UserPreferences {
   };
 }
 
-/** ธีมที่ใช้จริง (แปลง 'system' ตามอุปกรณ์) */
+/** โหมดที่ใช้จริง (แปลง 'system' ตามอุปกรณ์; ธีมโทนสีทั้งสามอยู่บนโหมดสว่าง) */
 export const resolveTheme = (choice: ThemeChoice, systemPrefersDark: boolean): 'light' | 'dark' =>
-  choice === 'system' ? (systemPrefersDark ? 'dark' : 'light') : choice;
+  choice === 'system' ? (systemPrefersDark ? 'dark' : 'light') : choice === 'dark' ? 'dark' : 'light';
 
-export const THEME_COLOR: Record<'light' | 'dark', string> = { light: '#f1f5f9', dark: '#0f172a' };
+/** ชื่อโทนสีของธีมที่เลือก (null = ไม่ใช่ธีมโทนสี) */
+export const resolvePalette = (choice: ThemeChoice): PaletteName | null =>
+  choice === 'navy' || choice === 'pink' || choice === 'lavender' ? choice : null;
 
-/** ใช้ค่ากับเอกสาร (data-theme / data-text-scale / meta theme-color) */
+export const THEME_COLOR: Record<'light' | 'dark', string> = { light: '#e8ecf2', dark: '#0f172a' };
+/** สี meta theme-color (แถบสถานะมือถือ) ของแต่ละโทนสี = สีแถบบน */
+export const PALETTE_COLOR: Record<PaletteName, string> = { navy: '#0f1a34', pink: '#70243b', lavender: '#2a1b60' };
+
+/** ใช้ค่ากับเอกสาร (data-theme / data-palette / data-text-scale / meta theme-color) */
 export function applyPreferences(p: Pick<UserPreferences, 'theme' | 'textScale'>, doc: Document = document, systemPrefersDark?: boolean): void {
   const dark = systemPrefersDark ?? (typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches);
   const t = resolveTheme(p.theme, dark);
+  const palette = resolvePalette(p.theme);
   const root = doc.documentElement;
   root.setAttribute('data-theme', t);
+  if (palette) root.setAttribute('data-palette', palette);
+  else root.removeAttribute?.('data-palette');
   root.setAttribute('data-text-scale', p.textScale);
-  doc.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[t]);
+  doc.querySelector('meta[name="theme-color"]')?.setAttribute('content', palette ? PALETTE_COLOR[palette] : THEME_COLOR[t]);
 }
 
 export function loadLocalPreferences(): UserPreferences {

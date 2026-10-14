@@ -5458,6 +5458,10 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
 
     it('เจ้าของตั้งธีม/ขนาดตัวอักษร/รูปของตนเองได้ (merge ทีละคีย์)', async () => {
       await assertSucceeds(mSetDoc(mDoc(me(), 'user_preferences/u-me'), { theme: 'light', updatedAt: mServerTimestamp() }, { merge: true }));
+      for (const th of ['navy', 'pink', 'lavender', 'system', 'dark']) {
+        await assertSucceeds(mSetDoc(mDoc(me(), 'user_preferences/u-me'), { theme: th, updatedAt: mServerTimestamp() }, { merge: true }));
+      }
+      await assertFails(mSetDoc(mDoc(me(), 'user_preferences/u-me'), { theme: 'purple', updatedAt: mServerTimestamp() }, { merge: true }));
       await assertSucceeds(mSetDoc(mDoc(me(), 'user_preferences/u-me'), { textScale: 'large', photoUrl: PHOTO, updatedAt: mServerTimestamp() }, { merge: true }));
       await assertSucceeds(mSetDoc(mDoc(me(), 'user_preferences/u-me'), { photoUrl: '', updatedAt: mServerTimestamp() }, { merge: true }));
     });

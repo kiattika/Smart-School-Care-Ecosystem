@@ -383,7 +383,7 @@ export function NavbarWithRoleSwitcher({
 
   return (
     <>
-      <nav className="w-full bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800 text-slate-100 px-3 sm:px-6 py-2.5 sm:py-3.5 flex items-center justify-between sticky top-0 z-50 shadow-lg">
+      <nav data-shell="topbar" className="w-full bg-[#0f172a]/90 backdrop-blur-md border-b border-slate-800 text-slate-100 px-3 sm:px-6 py-2.5 sm:py-3.5 flex items-center justify-between sticky top-0 z-50 shadow-lg">
       
       {/* ฝั่งซ้าย: โลโก้และชื่อระบบ */}
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">

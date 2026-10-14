@@ -7,7 +7,11 @@ import {
 } from '../../lib/userPreferences';
 import { saveUserPreferences, uploadMyProfilePhoto } from '../../services/userPreferencesService';
 
-const THEME_ICON: Record<ThemeChoice, React.ReactNode> = { system: <Monitor className="w-4 h-4" />, light: <Sun className="w-4 h-4" />, dark: <Moon className="w-4 h-4" /> };
+const swatch = (c: string) => <span className="w-4 h-4 rounded-full border border-white/40 shrink-0" style={{ backgroundColor: c }} aria-hidden="true" />;
+const THEME_ICON: Record<ThemeChoice, React.ReactNode> = {
+  system: <Monitor className="w-4 h-4" />, light: <Sun className="w-4 h-4" />, dark: <Moon className="w-4 h-4" />,
+  navy: swatch('#1b2a4a'), pink: swatch('#9c425d'), lavender: swatch('#4a3aff'),
+};
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ');
 
 /**
@@ -46,7 +50,7 @@ export function UserSettingsModal({ uid, prefs, showPhoto, initial, onPreview, o
     } catch (e) { setError(errMsg(e)); } finally { setBusy(false); }
   };
   const shownPhoto = photo?.previewUrl || draft.photoUrl;
-  const seg = (active: boolean) => `flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border cursor-pointer ${active ? 'bg-cyan-600 border-cyan-500 text-white' : 'bg-slate-950 border-slate-700 text-slate-300'}`;
+  const seg = (active: boolean) => `flex-1 basis-[30%] flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs border cursor-pointer ${active ? 'bg-cyan-600 border-cyan-500 text-white' : 'bg-slate-950 border-slate-700 text-slate-300'}`;
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 p-4" onClick={cancel} role="dialog" aria-modal="true" aria-label="ตั้งค่าส่วนตัว">
       <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto bg-slate-900 border border-slate-700 rounded-2xl p-5 space-y-5 shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -75,7 +79,7 @@ export function UserSettingsModal({ uid, prefs, showPhoto, initial, onPreview, o
 
         <section className="space-y-2">
           <div className="text-xs font-semibold text-slate-300">ธีมการแสดงผล</div>
-          <div className="flex gap-2" role="radiogroup" aria-label="ธีม">
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="ธีม">
             {THEME_CHOICES.map(t => (
               <button key={t} role="radio" aria-checked={draft.theme === t} className={seg(draft.theme === t)} onClick={() => change({ theme: t })}>{THEME_ICON[t]} {THEME_LABEL[t]}</button>
             ))}
