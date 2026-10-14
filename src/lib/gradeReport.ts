@@ -4,6 +4,7 @@
  */
 import { courseKindOf } from './teachingProject';
 import { effectiveCredits } from './subjectCode';
+import { retakeMapFor, type GradeRetake } from './gradeRetake';
 
 export const GRADE_REPORT_DISCLAIMER =
   'หมายเหตุ: รายงานนี้เป็นคะแนนอย่างไม่เป็นทางการที่ยังไม่ได้รับการอนุมัติ — คะแนนอย่างเป็นทางการให้ติดตามผ่านโปรแกรม SGS ของโรงเรียน';
@@ -61,6 +62,10 @@ export interface GradeRow {
   attendancePercent: number | null;
   /** เวลาเรียนต่ำกว่าเกณฑ์ (เสี่ยง มส.) — เป็นตัวชี้วัดคำนวณจากการเช็คชื่อ ไม่ใช่ผลตัดสินทางการ */
   msRisk: boolean;
+  /** ผลแก้ตัว/เรียนซ้ำที่งานทะเบียนวัดผลบันทึก — แสดงคู่กับผลเดิม (grade); ไม่มี = ไม่เคยแก้ */
+  retake?: { kind: 'MAKEUP' | 'REPEAT'; originalGrade: string; newGrade: string; retakeDate: string };
+  /** เกรดที่ใช้คำนวณเกรดเฉลี่ย = ผลใหม่จากการแก้ตัว/เรียนซ้ำ ถ้ามี ไม่งั้นเกรดปกติ */
+  gpaGrade: string | null;
 }
 
 /** เกณฑ์เวลาเรียนขั้นต่ำ (หลักสูตรแกนกลาง: ไม่น้อยกว่าร้อยละ 80) */
@@ -91,8 +96,11 @@ export function buildGradeRows(input: {
   includeSchedule?: boolean;
   /** ร้อยละเวลาเรียนตามรหัสวิชา (ไม่ส่ง/null = ไม่มีข้อมูล ไม่ประเมินเสี่ยง มส.) */
   attendancePercentOf?: (code: string) => number | null;
+  /** ผลแก้ตัว/เรียนซ้ำของนักเรียน (กรองตามภาคเรียนให้เอง) */
+  retakes?: readonly GradeRetake[];
 }): GradeRow[] {
-  const { term, scores, courses = [], includeSchedule = false, attendancePercentOf } = input;
+  const { term, scores, courses = [], includeSchedule = false, attendancePercentOf, retakes = [] } = input;
+  const retakeBy = retakeMapFor(retakes, term);
   const info = new Map<string, CourseInfo>();
   for (const c of courses) { const k = codeKey(c.code); if (k && !info.has(k)) info.set(k, c); }
   const byCode = new Map<string, ScoreDoc>();
@@ -112,7 +120,7 @@ export function buildGradeRows(input: {
     const max = { pre: num(s?.maxPreMidterm), mid: num(s?.maxMidterm), post: num(s?.maxPostMidterm), final: num(s?.maxFinal) };
     const attendancePercent = attendancePercentOf?.(code) ?? null;
     const msRisk = attendancePercent !== null && attendancePercent < MS_ATTENDANCE_THRESHOLD;
-    const extra = { attendancePercent, msRisk };
+    const extra = { attendancePercent, msRisk, gpaGrade: null as string | null };
     const maxKnown = max.pre !== null && max.mid !== null && max.post !== null && max.final !== null;
     const maxTotal = maxKnown ? max.pre! + max.mid! + max.post! + max.final! : null;
     if (!s) {
@@ -130,6 +138,12 @@ export function buildGradeRows(input: {
     const percent = total === null ? null : Math.round((total / (maxTotal ?? 100)) * 10000) / 100;
     const grade = total === null ? null : (s.grade && s.grade !== '' ? String(s.grade) : gradeFromTotal(percent ?? total));
     rows.push({ code, name, credits, isActivity: false, hasScore: true, parts, max, total, maxTotal, percent, grade, incomplete: grade === null, ...extra });
+  }
+  // ผลแก้ตัว/เรียนซ้ำ: แสดงคู่กับผลเดิม และให้เกรดเฉลี่ยใช้ผลใหม่ (วิชาที่ยังไม่มีเอกสารคะแนนแต่มีผลแก้ตัวก็นับ)
+  for (const r of rows) {
+    const rt = retakeBy.get(r.code);
+    r.retake = rt;
+    r.gpaGrade = rt ? rt.newGrade : r.grade;
   }
   return rows.sort((a, b) => Number(a.isActivity) - Number(b.isActivity) || a.code.localeCompare(b.code, 'th'));
 }
@@ -149,9 +163,10 @@ export interface GradeSummary {
 export function summarizeGrades(rows: readonly GradeRow[]): GradeSummary {
   let pts = 0, cr = 0, missing = 0, pending = 0, ap = 0, af = 0;
   for (const r of rows) {
-    if (r.grade === null) { pending++; continue; }
-    if (r.isActivity) { if (r.grade === 'ผ') ap++; else af++; continue; }
-    const g = Number(r.grade);
+    const eff = r.gpaGrade ?? r.grade;
+    if (eff === null) { pending++; continue; }
+    if (r.isActivity) { if (eff === 'ผ') ap++; else af++; continue; }
+    const g = Number(eff);
     if (r.credits === null || !Number.isFinite(g)) { missing++; continue; }
     pts += r.credits * g; cr += r.credits;
   }

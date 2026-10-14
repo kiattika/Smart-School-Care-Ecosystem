@@ -430,3 +430,10 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - id ข้อ (`c1`,`c2`,… ผ่าน `nextCriterionId`) เป็นคีย์ใน `scores` — **ห้ามใช้ id ซ้ำ/เปลี่ยนความหมายในเวอร์ชันเดียวกัน**; ภาพรวมนิเทศนับรายข้อ/หมวดเฉพาะผลเวอร์ชันเดียวกัน
 - ข้อจำกัด rules: เวอร์ชัน ≥2 ตรวจ key ครบ/ค่า 1–5/percent สอดคล้อง total/ผลสรุปตรง percent แต่ **ตรวจผลรวมคะแนนรายข้อ = total ไม่ได้** (rules วนลูปไม่ได้) — ฉบับ v1 ยังตรวจเต็ม
 - Deploy: `firebase deploy --only firestore:rules` ก่อน hosting (ฝั่ง client ใหม่เขียน/อ่านคอลเลกชันใหม่)
+
+## งานทะเบียนวัดผล: แก้ตัว/เรียนซ้ำ + อนุมัติจบหลักสูตร (`src/lib/gradeRetake.ts`)
+- บทบาท `REGISTRAR` (เพิ่ม/แก้/ลบ + อนุมัติจบ) และ `REGISTRAR_ASSISTANT` (เพิ่ม/แก้ **ลบไม่ได้ อนุมัติจบไม่ได้**) — หน้า `RegistrarPortal` (`src/components/registrar/`); เพิ่มบทบาทต้องแก้ครบ: `UserRole`/`ROLE_PERMISSIONS`/`Permission`, `ROLE_NAMES_TH`/`ROLE_COLORS`, `ROLE_VISUALS`/`PERMISSION_LABELS` (Navbar), `App.tsx`, rules (`students`/`gradebook_scores` read)
+- `grade_retakes/{studentId}_{ภาค-ปี}_{รหัสวิชา}`: 1 ผลต่อวิชา/ภาค ไม่ทับ `gradebook_scores` ของครู — `buildGradeRows({retakes})` ใส่ `row.retake` (แสดง "เดิม X → แก้ตัว/เรียนซ้ำ Y") และ `row.gpaGrade` = เกรดใหม่; **`summarizeGrades`/ลำดับที่ใช้ `gpaGrade`** (ครูที่ปรึกษาส่ง `rankContext.retakes`)
+- rules: `room` ต้องตรง `students/{id}.room` (ใช้จำกัดครูที่ปรึกษา), รหัสวิชาห้ามมี `/` หรือช่องว่าง (ตรงกับ doc id), `recordedByStaffId == myStaffId()`
+- `graduation_approvals/{studentId}_{ม.3|ม.6}`: อนุมัติครั้งเดียว แก้/ลบไม่ได้, ระดับต้องตรงห้อง, เตือนเมื่อยังมี 0/ร/มส/มผ ค้าง (ไม่บล็อก — ให้งานทะเบียนตัดสินใจ)
+- ยังไม่ทำ: เลื่อนชั้น, ย้ายห้อง, ขอบเขตระดับชั้น/หัวหน้าระดับ

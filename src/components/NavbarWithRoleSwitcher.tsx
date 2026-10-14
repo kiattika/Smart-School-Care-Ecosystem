@@ -134,6 +134,24 @@ export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
     iconColor: 'text-teal-400',
     description: 'ประเมินแผนการสอน นิเทศสังเกตการณ์ชั้นเรียน'
   },
+  REGISTRAR: {
+    label: 'งานทะเบียนวัดผล',
+    badgeBg: 'bg-orange-500/10',
+    badgeText: 'text-orange-400',
+    badgeBorder: 'border-orange-500/20',
+    iconBg: 'bg-orange-500/20',
+    iconColor: 'text-orange-400',
+    description: 'บันทึกผลแก้ตัว/เรียนซ้ำ อนุมัติจบหลักสูตร'
+  },
+  REGISTRAR_ASSISTANT: {
+    label: 'ผู้ช่วยงานทะเบียนวัดผล',
+    badgeBg: 'bg-orange-500/10',
+    badgeText: 'text-orange-300',
+    badgeBorder: 'border-orange-500/20',
+    iconBg: 'bg-orange-500/20',
+    iconColor: 'text-orange-300',
+    description: 'บันทึก/แก้ไขผลแก้ตัว/เรียนซ้ำ (ลบไม่ได้)'
+  },
   INFIRMARY_STAFF: {
     label: 'พยาบาลโรงเรียน',
     badgeBg: 'bg-rose-500/10',
@@ -261,6 +279,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   MANAGE_INFIRMARY: 'จัดการห้องพยาบาลและสถิติสุขภาพ',
   MANAGE_COUNSELING: 'จัดการระบบแนะแนวและให้คำปรึกษา',
   MANAGE_FINANCE: 'จัดการงานการเงินและบัญชีโรงเรียน',
+  MANAGE_REGISTRAR: 'งานทะเบียนวัดผล (แก้ตัว/เรียนซ้ำ จบหลักสูตร)',
   MANAGE_SUPERVISION: 'จัดการงานนิเทศการสอนและตรวจแผน'
 };
 
@@ -317,6 +336,9 @@ export function NavbarWithRoleSwitcher({
         return count > 0 ? `สอน ${count} รายวิชา` : '';
       case 'SUPERVISORY_TEACHER':
         return 'ผู้นิเทศการสอน';
+      case 'REGISTRAR':
+      case 'REGISTRAR_ASSISTANT':
+        return 'งานทะเบียนวัดผล';
       case 'INFIRMARY_STAFF':
         return 'งานพยาบาลและอนามัย';
       case 'GUIDANCE_COUNSELOR':

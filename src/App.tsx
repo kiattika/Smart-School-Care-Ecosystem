@@ -9,6 +9,7 @@ import { StudentPortal } from './StudentPortal';
 import { AdminPortal } from './AdminPortal';
 import { InfirmaryPortal } from './components/infirmary/InfirmaryPortal';
 import { GuidancePortal } from './components/guidance/GuidancePortal';
+import { RegistrarPortal } from './components/registrar/RegistrarPortal';
 import { FinancePortal } from './components/finance/FinancePortal';
 import { SupervisionPortal } from './components/supervision/SupervisionPortal';
 import { ApprovalsPortal } from './ApprovalsPortal';
@@ -149,6 +150,8 @@ export default function App() {
               <InfirmaryPortal />
             ) : user.activeRole === 'GUIDANCE_COUNSELOR' ? (
               <GuidancePortal />
+            ) : (user.activeRole === 'REGISTRAR' || user.activeRole === 'REGISTRAR_ASSISTANT') ? (
+              <RegistrarPortal />
             ) : (['HEAD_OF_DEPARTMENT', 'DEPUTY_HEAD_OF_DEPARTMENT', 'ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'] as const).includes(user.activeRole as any) ? (
               // role ระดับบริหารที่ทำหน้าที่อนุมัติ (สอนแทน 4 ขั้น + เช็คชื่อย้อนหลัง) — เดิมตกไป TeacherPortal
               <ApprovalsPortal />
