@@ -1,4 +1,5 @@
 import { ConductEntryForm } from './components/studentaffairs/ConductEntryForm';
+import { TeacherConductPanel } from './components/studentaffairs/TeacherConductPanel';
 import { MyConductEntriesPanel } from './components/studentaffairs/MyConductEntriesPanel';
 import { useSchoolGeofence } from './hooks/useSchoolGeofence';
 import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/utils";
@@ -434,7 +435,7 @@ export function TeacherPortal() {
   const [viewingRecord, setViewingRecord] = useState<PostTeachingRecord | null>(null);
 
   // New States for Dashboard Navigation
-  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats'>('courses');
+  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats' | 'conduct'>('courses');
   const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
   // ขอลากิจ/ไปราชการด้วยตนเอง — reuse SubstituteTeachingModule เต็มรูปแบบ (ไม่สร้างฟอร์มซ้ำ)
   const [showSubSelfService, setShowSubSelfService] = useState(false);
@@ -453,7 +454,7 @@ export function TeacherPortal() {
   const activityStudentCount = useTeacherActivityStudentCount();
   const availableDashboardTabs = useMemo(() => {
     const rawTabs: Array<{
-      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats';
+      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats' | 'conduct';
       label: string;
       icon: React.ComponentType<{ className?: string }>;
       count: number;
@@ -480,6 +481,7 @@ export function TeacherPortal() {
       { id: 'my-plc', label: 'PLC และสะท้อนคิด', icon: BookOpen, count: 0 },
       { id: 'my-portfolio', label: 'แฟ้มสะสมงานของฉัน', icon: BookOpen, count: 0 },
       { id: 'my-stats', label: 'สถิติการสอนของฉัน (ลา/แลกคาบ/สอนแทน)', icon: Clock, count: 0 },
+      { id: 'conduct', label: 'ให้/หักคะแนนความประพฤติ', icon: BookOpen, count: 0 },
     ];
 
     // ซ่อนตามบทบาท (hideForRoles) — ตรรกะกลางของแถบเมนู (portalSidebarLogic.ts) ค่าเริ่มต้นบทบาทเหมือนเดิม
@@ -1994,6 +1996,7 @@ export function TeacherPortal() {
             {dashboardTab === 'my-plc' && <PlcReflectionPanel />}
             {dashboardTab === 'my-portfolio' && <MyPortfolioPanel />}
             {dashboardTab === 'my-stats' && <MyTeachingStatsPanel />}
+            {dashboardTab === 'conduct' && <TeacherConductPanel />}
 
             {dashboardTab === 'leaderboard' && (
               <ClassroomLeaderboard />
