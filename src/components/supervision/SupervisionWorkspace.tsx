@@ -18,9 +18,11 @@ import {
 } from '../../services/supervisionService';
 import { ObservationForm } from './ObservationForm';
 import { ObservationResultView } from './ObservationResultView';
+import { LessonPlanReviewPanel } from '../lessonplans/LessonPlanReviewPanel';
+import { planOverviewQuery } from '../../lib/lessonPlans';
 import { SupervisionOverviewPanel } from './SupervisionOverviewPanel';
 
-export type Tab = 'observe' | 'results' | 'overview' | 'manage';
+export type Tab = 'observe' | 'results' | 'overview' | 'plans' | 'manage';
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'ดำเนินการไม่สำเร็จ');
 
@@ -36,6 +38,7 @@ export function useSupervisionTabs(): SupervisionTabItem[] {
     ...(isSupervisor(roles) ? [{ id: 'observe' as Tab, label: 'ลงนิเทศ', icon: ClipboardList }] : []),
     ...(resultsQuery(roles, staffId, myDept) ? [{ id: 'results' as Tab, label: 'ผลการนิเทศ', icon: FileText }] : []),
     ...(overviewQuery(roles) ? [{ id: 'overview' as Tab, label: 'ภาพรวม', icon: BarChart3 }] : []),
+    ...(planOverviewQuery(roles, myDept) ? [{ id: 'plans' as Tab, label: 'ตรวจแผนการสอน', icon: FileText }] : []),
     ...(canManageSupervision(roles) ? [{ id: 'manage' as Tab, label: 'จัดการรอบ/จับคู่', icon: Settings2 }] : []),
   ], [roles, staffId, myDept]);
 }
@@ -55,6 +58,7 @@ export function SupervisionWorkspace({ tab }: { tab: Tab }) {
   const roundId = rounds.find(r => r.id === roundState)?.id || rounds[0]?.id || null;
   const round = rounds.find(r => r.id === roundId) || null;
 
+  if (tab === 'plans') return <LessonPlanReviewPanel />;
   if (!user || !staffId) return <p className="text-sm text-slate-400">บัญชีนี้ไม่ได้เชื่อมกับทะเบียนบุคลากร จึงใช้งานระบบนิเทศไม่ได้</p>;
 
   return (

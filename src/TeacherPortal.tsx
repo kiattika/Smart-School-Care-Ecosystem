@@ -7,6 +7,7 @@ import { canViewPostTeachingRecord, postTeachingAuthorNote } from './lib/postTea
 import { useDepartments } from './hooks/useDepartments';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { MySupervisionPanel } from './components/supervision/MySupervisionPanel';
+import { MyLessonPlansPanel } from './components/lessonplans/MyLessonPlansPanel';
 import { MyTeachingStatsPanel } from './components/stats/TeacherStatsPanels';
 import { visibleSidebarItems, resolveActiveSidebarId } from './components/shared/portalSidebarLogic';
 import {
@@ -416,13 +417,15 @@ export function TeacherPortal() {
   const [viewingRecord, setViewingRecord] = useState<PostTeachingRecord | null>(null);
 
   // New States for Dashboard Navigation
-  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-stats'>('courses');
+  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-lesson-plans' | 'my-stats'>('courses');
   const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
   // ขอลากิจ/ไปราชการด้วยตนเอง — reuse SubstituteTeachingModule เต็มรูปแบบ (ไม่สร้างฟอร์มซ้ำ)
   const [showSubSelfService, setShowSubSelfService] = useState(false);
 
   // ประวัติบันทึกหลังสอนที่ครูคนนี้เห็นได้: คาบที่สอนอยู่ตอนนี้ + บันทึกที่ตัวเองเป็นผู้บันทึก/ครูคนเดิมของคาบ
   // (ดู lib/postTeachingVisibility.ts — เดิมกรองด้วยคาบปัจจุบันอย่างเดียว ทำให้ครูคนเก่าเสียประวัติเมื่อมีการเปลี่ยนครู)
+  // รายวิชาที่ส่งแผนได้ = วิชาที่ตนสอนจริง (ไม่รวมแถวสอนแทน) — ซ้ำรหัสวิชารวมเป็นรายการเดียวในแผงเอง
+  const lessonPlanCourses = useMemo(() => myCourses.filter(c => !(c as any).roleLabel).map(c => ({ code: c.code || '', name: c.name || '', level: c.level || '' })), [myCourses]);
   const myCourseIdSet = useMemo(() => new Set(myCourses.map(c => c.id)), [myCourses]);
   const visiblePostTeachingRecords = useMemo(
     () => postTeachingRecords.filter(r => canViewPostTeachingRecord(user, r, myCourseIdSet)),
@@ -433,7 +436,7 @@ export function TeacherPortal() {
   const activityStudentCount = useTeacherActivityStudentCount();
   const availableDashboardTabs = useMemo(() => {
     const rawTabs: Array<{
-      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-stats';
+      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-lesson-plans' | 'my-stats';
       label: string;
       icon: React.ComponentType<{ className?: string }>;
       count: number;
@@ -455,6 +458,7 @@ export function TeacherPortal() {
       { id: 'records', label: 'ประวัติบันทึกหลังสอนทั้งหมด', icon: NavRecordsIcon, count: visiblePostTeachingRecords.length },
       { id: 'gradebook', label: 'สมุดบันทึกคะแนน (Gradebook)', icon: NavGradebookIcon, count: 0 },
       { id: 'my-supervision', label: 'ผลการนิเทศของฉัน', icon: BookOpen, count: 0 },
+      { id: 'my-lesson-plans', label: 'ส่งแผนการสอน/โครงการสอน', icon: BookOpen, count: 0 },
       { id: 'my-stats', label: 'สถิติการสอนของฉัน (ลา/แลกคาบ/สอนแทน)', icon: Clock, count: 0 },
     ];
 
@@ -1909,6 +1913,7 @@ export function TeacherPortal() {
             )}
 
             {dashboardTab === 'my-supervision' && <MySupervisionPanel />}
+            {dashboardTab === 'my-lesson-plans' && <MyLessonPlansPanel courses={lessonPlanCourses} />}
             {dashboardTab === 'my-stats' && <MyTeachingStatsPanel />}
 
             {dashboardTab === 'leaderboard' && (
