@@ -1729,8 +1729,11 @@ service cloud.firestore {
     function tpDocOk(d) {
       return d.keys().hasOnly(['semesterId', 'academicYear', 'term', 'teacherStaffId', 'teacherName', 'departmentId', 'courseKey',
                                'courseCode', 'courseName', 'kind', 'levelLabel', 'credits', 'hoursPerWeek', 'courseType',
-                               'description', 'indicators', 'units', 'assessment', 'assessmentNote', 'createdAt', 'updatedAt'])
+                               'description', 'indicators', 'units', 'assessment', 'assessmentNote', 'coTeacherStaffIds', 'coTeacherNames', 'createdAt', 'updatedAt'])
         && d.keys().hasAll(['semesterId', 'teacherStaffId', 'departmentId', 'courseKey', 'courseCode', 'kind', 'description', 'indicators', 'units', 'assessment'])
+        // ครูร่วมสอน (แชร์ฉบับเดียวกัน): รายชื่อ staff id ≤10 + สำเนาชื่อเรียงคู่กัน — รุ่นเก่าไม่มี field นี้
+        && d.get('coTeacherStaffIds', []) is list && d.get('coTeacherStaffIds', []).size() <= 10
+        && d.get('coTeacherNames', []) is list && d.get('coTeacherNames', []).size() == d.get('coTeacherStaffIds', []).size()
         && d.semesterId.matches('^[0-9]{4}_[12]$') && d.academicYear is string && d.term in ['1', '2']
         && (d.academicYear + '_' + d.term) == d.semesterId
         && d.teacherStaffId is string && d.teacherName is string && d.teacherName.size() <= 160
@@ -1765,9 +1768,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ครูร่วมสอน (`coTeacherStaffIds` ที่เจ้าของเลือก) อ่าน+แก้เนื้อหาฉบับเดียวกันได้ แต่แก้รายชื่อครูร่วม/ชื่อเจ้าของ/ลบไม่ได้
     match /teaching_projects/{pid} {
       allow read: if myStaffId() != '' && (
         resource.data.teacherStaffId == myStaffId() ||
+        ('coTeacherStaffIds' in resource.data && myStaffId() in resource.data.coTeacherStaffIds) ||
         hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
         supInMyDept(resource.data.departmentId)
       );
@@ -1777,13 +1782,22 @@ service cloud.firestore {
                        && request.resource.data.teacherStaffId == myStaffId()
                        && pid == request.resource.data.semesterId + '_' + myStaffId() + '_' + request.resource.data.courseKey
                        && request.resource.data.departmentId == supStaffDept(myStaffId())
+                       && !(myStaffId() in request.resource.data.get('coTeacherStaffIds', []))
                        && request.resource.data.createdAt == request.time
                        && request.resource.data.updatedAt == request.time;
 
-      allow update: if myStaffId() != '' && resource.data.teacherStaffId == myStaffId()
+      allow update: if myStaffId() != ''
                        && tpDocOk(request.resource.data)
                        && request.resource.data.diff(resource.data).unchangedKeys().hasAll(['semesterId', 'teacherStaffId', 'departmentId', 'courseKey', 'courseCode', 'createdAt'])
-                       && request.resource.data.updatedAt == request.time;
+                       && request.resource.data.updatedAt == request.time
+                       && (
+                         (resource.data.teacherStaffId == myStaffId()
+                           && !(resource.data.teacherStaffId in request.resource.data.get('coTeacherStaffIds', [])))
+                         || (('coTeacherStaffIds' in resource.data && myStaffId() in resource.data.coTeacherStaffIds)
+                           && request.resource.data.get('coTeacherStaffIds', []) == resource.data.get('coTeacherStaffIds', [])
+                           && request.resource.data.get('coTeacherNames', []) == resource.data.get('coTeacherNames', [])
+                           && request.resource.data.get('teacherName', '') == resource.data.get('teacherName', ''))
+                       );
 
       allow delete: if myStaffId() != '' && resource.data.teacherStaffId == myStaffId();
     }

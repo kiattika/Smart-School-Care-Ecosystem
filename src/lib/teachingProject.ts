@@ -63,8 +63,12 @@ export interface TeachingProject {
   units: ProjectUnit[];
   assessment: AssessmentItem[];
   assessmentNote: string;
+  /** ครูร่วมสอนที่เจ้าของแชร์ฉบับนี้ให้ (staff id) + สำเนาชื่อเรียงคู่กัน — รุ่นเก่าไม่มี */
+  coTeacherStaffIds?: string[];
+  coTeacherNames?: string[];
 }
 
+export const MAX_CO_TEACHERS = 10;
 export const MAX_UNITS = 60;
 export const MAX_INDICATORS = 30;
 export const MAX_ASSESSMENT = 20;
@@ -158,3 +162,17 @@ export const PLAN_STATUS_LABEL: Record<PlanStatus, string> = {
   ON_PLAN: 'สอนตามโครงการสอน',
   DEVIATED: 'ไม่ตรงตามโครงการสอน (มีกิจกรรมแทรก/ปรับเปลี่ยน)',
 };
+
+/** ตรวจรายชื่อครูร่วมสอนก่อนบันทึก (ว่าง = ผ่าน) */
+export function validateCoTeachers(ids: readonly string[], names: readonly string[]): string {
+  if (ids.length > MAX_CO_TEACHERS) return `ครูร่วมสอนได้ไม่เกิน ${MAX_CO_TEACHERS} คน`;
+  if (ids.length !== names.length) return 'รายชื่อครูร่วมสอนไม่ครบถ้วน';
+  if (new Set(ids).size !== ids.length) return 'มีครูร่วมสอนซ้ำกัน';
+  return '';
+}
+
+/** โครงการของรหัสวิชานี้ที่ครูเห็น: ฉบับที่ตนเป็นเจ้าของมาก่อน แล้วฉบับที่ครูอื่นแชร์ให้ */
+export function projectsForKey<T extends Pick<TeachingProject, 'courseKey' | 'teacherStaffId'>>(projects: readonly T[], courseKey: string, staffId: string): T[] {
+  return projects.filter(p => p.courseKey === courseKey)
+    .sort((a, b) => (a.teacherStaffId === staffId ? 0 : 1) - (b.teacherStaffId === staffId ? 0 : 1));
+}

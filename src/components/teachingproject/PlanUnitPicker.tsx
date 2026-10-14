@@ -3,7 +3,7 @@ import { useStore } from '../../store';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { useTeachingProjects } from '../../hooks/useTeachingProjects';
 import { courseKeyOf, semesterIdOf } from '../../lib/lessonPlans';
-import { PLAN_STATUS_LABEL, unitLabel, type PlanStatus } from '../../lib/teachingProject';
+import { PLAN_STATUS_LABEL, projectsForKey, unitLabel, type PlanStatus, type TeachingProject } from '../../lib/teachingProject';
 
 export interface PlanPick { projectId: string; unitIds: string[]; unitTitles: string[]; status: PlanStatus }
 export const EMPTY_PLAN_PICK: PlanPick = { projectId: '', unitIds: [], unitTitles: [], status: 'ON_PLAN' };
@@ -16,7 +16,7 @@ export function PlanUnitPicker({ courseCode, value, onChange, disabled }: {
   const sem = useCurrentSemester();
   const q = useMemo(() => (staffId ? ({ scope: 'SELF', staffId } as const) : null), [staffId]);
   const { data, loading } = useTeachingProjects(semesterIdOf(sem.academicYear, sem.term), q);
-  const project = data.find(p => p.courseKey === courseKeyOf(courseCode));
+  const project = projectsForKey<TeachingProject>(data, courseKeyOf(courseCode), staffId).find(p => p.units.length > 0) || projectsForKey<TeachingProject>(data, courseKeyOf(courseCode), staffId)[0];
 
   if (loading) return null;
   if (!project || project.units.length === 0) {

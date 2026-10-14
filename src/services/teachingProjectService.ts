@@ -1,7 +1,7 @@
 import { collection, deleteDoc, doc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, type Query } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { courseKeyOf, type PlanQuery } from '../lib/lessonPlans';
-import { projectDocId, validateProject, type TeachingProject } from '../lib/teachingProject';
+import { projectDocId, validateCoTeachers, validateProject, type TeachingProject } from '../lib/teachingProject';
 
 const col = () => collection(db, 'teaching_projects');
 
@@ -13,12 +13,23 @@ export function subscribeTeachingProjects(
   const built: Query =
     q.scope === 'ALL' ? query(col(), base)
       : q.scope === 'DEPARTMENT' ? query(col(), base, where('departmentId', '==', q.departmentId))
-        : query(col(), base, where('teacherStaffId', '==', q.staffId));
-  return onSnapshot(
-    built,
-    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<TeachingProject, 'id'>) }))),
-    (err) => onError?.(err),
-  );
+        : null;
+  const toList = (snap: { docs: { id: string; data: () => unknown }[] }) => snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<TeachingProject, 'id'>) }));
+  if (!built) {
+    // ของตนเอง = ที่ตนเป็นเจ้าของ + ที่ครูอื่นแชร์ให้ในฐานะครูร่วมสอน (2 query ที่ตรง rules แล้วรวมตาม id)
+    const sid = (q as { staffId: string }).staffId;
+    let mine: TeachingProject[] | null = null; let shared: TeachingProject[] | null = null;
+    const emit = () => {
+      if (!mine || !shared) return;
+      const m = new Map<string, TeachingProject>();
+      [...mine, ...shared].forEach(p => m.set(p.id, p));
+      cb([...m.values()]);
+    };
+    const u1 = onSnapshot(query(col(), base, where('teacherStaffId', '==', sid)), (snap) => { mine = toList(snap); emit(); }, (err) => onError?.(err));
+    const u2 = onSnapshot(query(col(), base, where('coTeacherStaffIds', 'array-contains', sid)), (snap) => { shared = toList(snap); emit(); }, (err) => onError?.(err));
+    return () => { u1(); u2(); };
+  }
+  return onSnapshot(built, (snap) => cb(toList(snap)), (err) => onError?.(err));
 }
 
 export type ProjectContent = Pick<TeachingProject,
@@ -30,6 +41,8 @@ export interface SaveProjectInput {
   course: { code: string; name: string };
   content: ProjectContent;
   exists: boolean;
+  /** แก้ฉบับที่มีอยู่ (รวมฉบับที่ครูอื่นแชร์ให้) — ส่ง id เดิม; สร้างใหม่ = ไม่ส่ง */
+  existingId?: string;
 }
 
 /** บันทึกโครงการสอน (สร้างใหม่/แก้ไข) — throw เมื่อไม่ผ่านการตรวจหรือเขียนไม่สำเร็จ */
@@ -39,7 +52,7 @@ export async function saveTeachingProject(input: SaveProjectInput): Promise<stri
   const problems = validateProject(input.content);
   if (problems.length > 0) throw new Error(problems[0]);
   const semesterId = `${input.semester.academicYear}_${input.semester.term}`;
-  const id = projectDocId(semesterId, input.teacher.staffId, key);
+  const id = input.existingId || projectDocId(semesterId, input.teacher.staffId, key);
   const ref = doc(db, 'teaching_projects', id);
   const c = input.content;
   const content = {
@@ -64,4 +77,11 @@ export async function saveTeachingProject(input: SaveProjectInput): Promise<stri
 
 export async function deleteTeachingProject(id: string): Promise<void> {
   await deleteDoc(doc(db, 'teaching_projects', id));
+}
+
+/** เจ้าของเลือกครูร่วมสอน (แชร์ฉบับเดียวกัน) — ไม่รวมตนเอง ≤ MAX_CO_TEACHERS; names เรียงคู่กับ ids */
+export async function setProjectCoTeachers(id: string, co: { ids: string[]; names: string[] }): Promise<void> {
+  const check = validateCoTeachers(co.ids, co.names);
+  if (check) throw new Error(check);
+  await updateDoc(doc(db, 'teaching_projects', id), { coTeacherStaffIds: co.ids, coTeacherNames: co.names.map(n => n.slice(0, 160)), updatedAt: serverTimestamp() });
 }
