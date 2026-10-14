@@ -8,6 +8,13 @@ const out = [];
 // พื้นผิว/เส้น/ข้อความเทา: กลับสเกล 50↔950
 const steps = ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '950'];
 steps.forEach((s, i) => out.push(`  --color-slate-${s}: ${v('slate-' + steps[steps.length - 1 - i])};`));
+// ปรับพื้นผิวให้ "ไม่ขาวโพลน" (ผู้ใช้แจ้งว่าสเกลกลับด้านตรง ๆ ได้พื้นขาวเกือบทั้งหน้า): พื้นหน้า/กล่อง/เส้นขอบเข้มขึ้นเป็นเทาอมฟ้านวล
+// ช่องกรอก/บ่อ (slate-950) สว่างกว่าพื้นหน้าเล็กน้อย; ข้อความรอง (slate-500) เข้มขึ้นให้ผ่าน 4.5:1 บนพื้นใหม่
+const override = { '950': '#f4f6f9', '900': '#e8ecf2', '800': '#d9dfe8', '700': '#c5cdd9', '500': 'oklch(50% 0.046 257.417)' };
+for (const [s, c] of Object.entries(override)) {
+  const i = out.findIndex(l => l.startsWith(`  --color-slate-${s}:`));
+  out[i] = `  --color-slate-${s}: ${c};`;
+}
 // สีเน้น: ข้อความโทนอ่อน (200-400) ถูกออกแบบสำหรับพื้นมืด → ใช้โทนเข้มแทนบนพื้นสว่าง
 const hues = ['cyan', 'emerald', 'amber', 'rose', 'sky', 'blue', 'indigo', 'violet', 'purple', 'pink', 'orange', 'teal', 'green', 'red', 'yellow', 'lime', 'fuchsia'];
 for (const h of hues) {
@@ -24,7 +31,7 @@ const css = `/* สร้างโดย scripts/gen-theme-light.mjs — อย�
 :root[data-theme="light"] {
   color-scheme: light;
 ${out.join('\n')}
-  --app-body-bg: #f1f5f9;
+  --app-body-bg: #e8ecf2;
   --app-body-fg: #0f172a;
 }
 

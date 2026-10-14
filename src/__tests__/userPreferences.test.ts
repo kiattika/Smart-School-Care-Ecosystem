@@ -55,8 +55,11 @@ describe('ธีมสว่าง + wiring', () => {
   it('สลับสเกล slate (900 ในธีมสว่าง = ค่าของ 100 เดิม) และตั้ง color-scheme', () => {
     const theme = readSource('node_modules/tailwindcss/theme.css');
     const v = (n: string) => theme.match(new RegExp(`--color-${n}:\\s*([^;]+);`))![1].trim();
-    expect(css).toContain(`--color-slate-900: ${v('slate-100')};`);
-    expect(css).toContain(`--color-slate-950: ${v('slate-50')};`);
+    // พื้นผิว 700–950 ถูกปรับเป็นเทาอมฟ้านวลโดยตั้งใจ (กันขาวโพลน) — ที่เหลือกลับด้านตรง ๆ
+    expect(css).toContain('--color-slate-900: #e8ecf2;');
+    expect(css).toContain('--color-slate-950: #f4f6f9;');
+    expect(css).toContain(`--color-slate-100: ${v('slate-900')};`);
+    expect(css).toContain(`--color-slate-50: ${v('slate-950')};`);
     expect(css).toContain('color-scheme: light');
   });
   it('กล่อง bg-white (กระดาษพิมพ์) คืนสเกลสีเดิม และหน้า /info ไม่ตามธีมส่วนตัว', () => {
