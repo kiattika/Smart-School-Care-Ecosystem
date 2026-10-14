@@ -934,7 +934,8 @@ export async function updateStudentProfileFirestore(
     }
     await updateDoc(ref, updatePayload);
   } catch (error) {
-    console.warn(`[updateStudentProfileFirestore] Notice: Firestore update handled:`, error);
+    // ห้ามกลืน error — ผู้เรียกต้องแจ้งผู้ใช้ว่าบันทึกไม่สำเร็จ (เดิมแจ้ง "สำเร็จ" ทั้งที่ rules ปฏิเสธ)
+    handleFirestoreError(error, OperationType.UPDATE, `students/${studentId} (profile)`);
   }
 }
 

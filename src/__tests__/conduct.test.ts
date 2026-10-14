@@ -101,3 +101,26 @@ describe('guard: ห้ามลบประวัติคะแนนควา
     expect(r.slice(i)).toMatch(/allow delete: if false/);
   });
 });
+
+describe('guard: ช่องแก้โปรไฟล์นักเรียนของครูที่ปรึกษา', () => {
+  it('rules: HOMEROOM_TEACHER แก้ students ได้เฉพาะ allowlist (ไม่มี parentUid/behaviorScore) และไม่ใช่ bare hasRole', () => {
+    const r = readSource('firestore.rules');
+    const i = r.indexOf('match /students/{studentId}');
+    const upd = r.slice(r.indexOf('allow update:', i), r.indexOf('// ทะเบียนเลขประจำตัวนักเรียน', i));
+    expect(upd).not.toMatch(/hasRole\('SUPER_ADMIN'\) \|\| hasRole\('HOMEROOM_TEACHER'\)/);
+    expect(upd).toMatch(/isHomeroomTeacherOf\(resource\.data\.get\('room'/);
+    const allow = upd.slice(upd.indexOf("'nickname'"), upd.indexOf(']', upd.indexOf("'nickname'")));
+    expect(allow).not.toMatch(/parentUid|parentId|behaviorScore|room'|status/);
+  });
+  it('UI: ครูไม่เห็นช่อง parentUid (เฉพาะ SUPER_ADMIN) และไม่แจ้งสำเร็จก่อนบันทึกจริง', () => {
+    const a = readSource('src/AdvisorPortal.tsx');
+    expect(a).toMatch(/canLinkParent = user\?\.activeRole === 'SUPER_ADMIN'/);
+    expect(a).toMatch(/await updateStudentProfile\(/);
+    const f = readSource('src/services/firestoreService.ts');
+    const i = f.indexOf('export async function updateStudentProfileFirestore');
+    expect(f.slice(i, f.indexOf('\n}\n', i))).toMatch(/handleFirestoreError/);
+  });
+  it('StudentManagementPage ไม่เขียนทับ behaviorScore ตอนแก้ข้อมูล', () => {
+    expect(readSource('src/components/StudentManagementPage.tsx')).not.toMatch(/behaviorScore: editingStudent/);
+  });
+});

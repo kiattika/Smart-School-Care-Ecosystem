@@ -74,6 +74,9 @@ export function AdvisorPortal() {
   const [attendanceOverrides, setAttendanceOverrides] = useState<Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'>>({});
 
   const myRoom = user?.profile?.assignments?.homeroomClass;
+  // การเชื่อมบัญชีผู้ปกครอง (parentUid) ให้สิทธิ์เข้าถึงข้อมูลนักเรียน → แก้ได้เฉพาะผู้ดูแลระบบ (rules บังคับด้วย)
+  const canLinkParent = user?.activeRole === 'SUPER_ADMIN';
+  const [profileSaveError, setProfileSaveError] = useState('');
   const chatUnread = useRoomChatUnread(myRoom);
 
   // ใบลานักเรียนห้องที่ฉันเป็นครูที่ปรึกษา — real-time จาก Firestore (rules: isHomeroomTeacherOf(homeroomClass))
@@ -785,7 +788,7 @@ export function AdvisorPortal() {
                               <button
                                 onClick={() => {
                                   if (isEditingLocked) return;
-                                  setEditProfileStudent(student);
+                                  setEditProfileStudent(student); setProfileSaveError("");
                                   setEditNickname(student.nickname || '');
                                   setEditPhotoUrl(student.photoUrl || student.avatar || '');
                                   setEditAddress(student.homeLocation?.address || '');
@@ -1344,9 +1347,15 @@ export function AdvisorPortal() {
                </div>
 
                <div className="pt-2 border-t border-white/10 space-y-3">
-                 <div className="text-xs font-bold text-emerald-400">🔗 เชื่อมโยงบัญชีผู้ปกครอง (Parent Account Linkage)</div>
-                 
-                 <div>
+                 <div className="text-xs font-bold text-emerald-400">🔗 บัญชีผู้ปกครอง</div>
+
+                 {!canLinkParent && (
+                   <p className="text-[11px] text-slate-400">
+                     การเชื่อมบัญชีผู้ปกครองทำโดยผู้ปกครองยืนยันตัวตนผ่าน LINE หรือผู้ดูแลระบบเท่านั้น (ครูแก้ไม่ได้) — คุณแก้ได้เฉพาะอีเมลสำหรับติดต่อด้านล่าง
+                   </p>
+                 )}
+
+                 {canLinkParent && <div>
                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
                      Firebase Auth UID ของผู้ปกครอง (parentUid)
                    </label>
@@ -1358,7 +1367,7 @@ export function AdvisorPortal() {
                      className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-emerald-300 focus:border-emerald-500 outline-none font-mono"
                    />
                    <p className="text-[10px] text-slate-500 mt-0.5">ใช้สำหรับสิทธิ์ความปลอดภัย Firestore Rules ให้ผู้ปกครองเข้าถึงข้อมูลบุตรหลาน</p>
-                 </div>
+                 </div>}
 
                  <div>
                    <label className="block text-[11px] font-semibold text-slate-400 mb-1">
@@ -1374,19 +1383,25 @@ export function AdvisorPortal() {
                  </div>
                </div>
 
+               {profileSaveError && <p role="alert" className="text-xs text-rose-300">บันทึกไม่สำเร็จ: {profileSaveError}</p>}
                <div className="pt-2 flex gap-2">
                  <button
-                   onClick={() => {
-                     updateStudentProfile(editProfileStudent.studentId, {
-                       nickname: editNickname,
-                       photoUrl: editPhotoUrl,
-                       address: editAddress,
-                       parentUid: editParentUid,
-                       parentEmail: editParentEmail
-                     });
-                     setEditProfileStudent(null);
-                     setToastMessage(`อัปเดตข้อมูลและเชื่อมโยงผู้ปกครองของ ${editProfileStudent.name} สำเร็จแล้ว`);
-                     setTimeout(() => setToastMessage(null), 3000);
+                   onClick={async () => {
+                     setProfileSaveError('');
+                     try {
+                       await updateStudentProfile(editProfileStudent.studentId, {
+                         nickname: editNickname,
+                         photoUrl: editPhotoUrl,
+                         address: editAddress,
+                         ...(canLinkParent ? { parentUid: editParentUid } : {}),
+                         parentEmail: editParentEmail
+                       });
+                       setEditProfileStudent(null);
+                       setToastMessage(`อัปเดตข้อมูลของ ${editProfileStudent.name} สำเร็จแล้ว`);
+                       setTimeout(() => setToastMessage(null), 3000);
+                     } catch (err) {
+                       setProfileSaveError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ');
+                     }
                    }}
                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all shadow-md"
                  >
