@@ -15,6 +15,8 @@ export type UserRole =
   | 'GUIDANCE_COUNSELOR'   // ครูแนะแนว / ให้คำปรึกษา
   | 'FINANCE_STAFF'        // เจ้าหน้าที่งานการเงิน / บัญชี
   | 'INSTRUCTIONAL_SUPERVISOR' // หัวหน้างานนิเทศ (เปิดรอบ จับคู่ผู้นิเทศ ดูผลทั้งโรงเรียน)
+  | 'REGISTRAR'            // งานทะเบียนวัดผล (บันทึกผลแก้ตัว/เรียนซ้ำ อนุมัติจบหลักสูตร)
+  | 'REGISTRAR_ASSISTANT'  // ผู้ช่วยงานทะเบียนวัดผล (บันทึก/แก้ไขได้ ลบไม่ได้ อนุมัติจบไม่ได้)
   | 'PARENT'               // ผู้ปกครองนักเรียน
   | 'STUDENT';             // นักเรียน
 
@@ -30,6 +32,7 @@ export type Permission =
   | 'MANAGE_INFIRMARY'     // บันทึกและจัดการห้องพยาบาล ยา และตรวจสุขภาพ
   | 'MANAGE_COUNSELING'    // จัดการระบบแนะแนว เคสให้คำปรึกษา และ SDQ/EQ
   | 'MANAGE_FINANCE'       // จัดการงานการเงิน บัญชี และเบิกจ่ายงบประมาณ
+  | 'MANAGE_REGISTRAR'     // งานทะเบียนวัดผล: แก้ตัว/เรียนซ้ำ อนุมัติจบหลักสูตร
   | 'MANAGE_SUPERVISION';  // จัดการงานนิเทศการสอน และตรวจสอบแผนการจัดการเรียนรู้
 
 // 3. โครงสร้างบัญชีผู้ใช้ (User Profile)
@@ -127,6 +130,13 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'MANAGE_SUPERVISION',
     'EVALUATE_TEACHERS',
     'VIEW_ALL_REPORTS'
+  ],
+  REGISTRAR: [
+    'MANAGE_REGISTRAR',
+    'VIEW_ALL_REPORTS'
+  ],
+  REGISTRAR_ASSISTANT: [
+    'MANAGE_REGISTRAR'
   ],
   PARENT: [],
   STUDENT: []

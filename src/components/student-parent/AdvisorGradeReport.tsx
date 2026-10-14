@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { StudentPicker } from '../shared/StudentPicker';
 import { StudentGradeReport } from './StudentGradeReport';
 import { getGradebookScoresByRoom } from '../../services/firestoreService';
+import { subscribeGradeRetakesForRoom } from '../../services/gradeRetakeService';
+import type { GradeRetake } from '../../lib/gradeRetake';
 import type { ScoreDoc } from '../../lib/gradeReport';
 import type { Student } from '../../types';
 
@@ -9,6 +11,7 @@ import type { Student } from '../../types';
 export function AdvisorGradeReport({ room, students }: { room: string; students: Student[] }) {
   const [sid, setSid] = useState('');
   const [roomScores, setRoomScores] = useState<ScoreDoc[] | null>(null);
+  const [roomRetakes, setRoomRetakes] = useState<GradeRetake[]>([]);
   const [rankErr, setRankErr] = useState('');
   const picked = students.find(s => s.studentId === sid);
   // คะแนนทั้งห้อง (ใช้คำนวณลำดับที่) — โหลดครั้งเดียวต่อห้อง; ล้มเหลว = ไม่แสดงลำดับที่ (ไม่กระทบรายงาน)
@@ -17,7 +20,8 @@ export function AdvisorGradeReport({ room, students }: { room: string; students:
     let alive = true;
     setRoomScores(null); setRankErr('');
     getGradebookScoresByRoom(room).then(l => { if (alive) setRoomScores(l as unknown as ScoreDoc[]); }).catch((e: Error) => { if (alive) setRankErr(e.message); });
-    return () => { alive = false; };
+    const un = subscribeGradeRetakesForRoom(room, setRoomRetakes, () => setRoomRetakes([]));
+    return () => { alive = false; un(); };
   }, [room]);
   if (!room) return <p className="text-sm text-slate-400">ยังไม่มีห้องที่ปรึกษา</p>;
   return (
@@ -27,7 +31,7 @@ export function AdvisorGradeReport({ room, students }: { room: string; students:
       <StudentPicker mode="single" students={students} value={sid} onSelect={setSid} placeholder="ค้นหาด้วยเลขประจำตัวหรือชื่อ" />
       {picked ? (
         <div key={picked.studentId}><StudentGradeReport studentId={picked.studentId} studentName={picked.name} room={picked.room} courseStats={picked.courseAttendanceStats}
-          rankContext={roomScores ? { scores: roomScores, students: students.map(s => ({ studentId: s.studentId, courseAttendanceStats: s.courseAttendanceStats })) } : undefined} /></div>
+          rankContext={roomScores ? { scores: roomScores, retakes: roomRetakes, students: students.map(s => ({ studentId: s.studentId, courseAttendanceStats: s.courseAttendanceStats })) } : undefined} /></div>
       ) : <p className="text-sm text-slate-400 border border-dashed border-slate-700 rounded-xl p-6 text-center">เลือกนักเรียนเพื่อดูรายงานผลการเรียน</p>}
     </div>
   );

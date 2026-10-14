@@ -64,6 +64,8 @@ export const ROLE_NAMES_TH: Record<UserRole, string> = {
   GUIDANCE_COUNSELOR: 'ครูแนะแนว / ให้คำปรึกษา',
   FINANCE_STAFF: 'เจ้าหน้าที่การเงินและบัญชี',
   INSTRUCTIONAL_SUPERVISOR: 'หัวหน้างานนิเทศ',
+  REGISTRAR: 'งานทะเบียนวัดผล',
+  REGISTRAR_ASSISTANT: 'ผู้ช่วยงานทะเบียนวัดผล',
   PARENT: 'ผู้ปกครองนักเรียน',
   STUDENT: 'นักเรียน',
 };
@@ -90,6 +92,8 @@ export const ROLE_COLORS: Record<UserRole, { bg: string; text: string; border: s
   GUIDANCE_COUNSELOR: { bg: 'bg-fuchsia-500/10', text: 'text-fuchsia-400', border: 'border-fuchsia-500/20' },
   FINANCE_STAFF: { bg: 'bg-emerald-500/10', text: 'text-emerald-300', border: 'border-emerald-500/20' },
   INSTRUCTIONAL_SUPERVISOR: { bg: 'bg-cyan-500/10', text: 'text-cyan-400', border: 'border-cyan-500/20' },
+  REGISTRAR: { bg: 'bg-orange-500/10', text: 'text-orange-400', border: 'border-orange-500/20' },
+  REGISTRAR_ASSISTANT: { bg: 'bg-orange-500/10', text: 'text-orange-300', border: 'border-orange-500/20' },
   PARENT: { bg: 'bg-amber-500/10', text: 'text-amber-300', border: 'border-amber-500/20' },
   STUDENT: { bg: 'bg-sky-500/10', text: 'text-sky-300', border: 'border-sky-500/20' },
 };

@@ -4840,4 +4840,75 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(mUpdateDoc(mDoc(hod, 'lesson_plan_submissions/p2'), review({ c1: 4, c2: 5 }, { templateVersion: 2 })));
     });
   });
+  describe('grade_retakes / graduation_approvals (งานทะเบียนวัดผล)', () => {
+    const sc = (sid: string, roles: string[]) => asUser(`uid-${sid}`, roles, { staffId: sid }).firestore();
+    const RID = '11111_1-2569_ท23101';
+    const retake = (over: Record<string, unknown> = {}) => ({
+      studentId: '11111', studentUid: 'uid-stu', parentUid: 'uid-par', room: 'ม.3/1', term: '1/2569', courseCode: 'ท23101', courseName: 'ภาษาไทย',
+      kind: 'MAKEUP', originalGrade: '0', newGrade: '2', retakeDate: '2569-11-01', note: '', recordedByStaffId: 'reg1', recordedByName: 'ทะเบียน',
+      createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(), ...over,
+    });
+    const seed = async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await db.doc('students/11111').set({ studentId: '11111', name: 'เด็กหนึ่ง', room: 'ม.3/1', studentUid: 'uid-stu', parentUid: 'uid-par' });
+        await db.doc('students/22222').set({ studentId: '22222', name: 'เด็กสอง', room: 'ม.4/1', studentUid: 'uid-stu2' });
+        await db.doc('staff/hr1').set({ firstName: 'ครู', lastName: 'ประจำชั้น', roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.3/1' } });
+        await db.doc('staff/hr2').set({ firstName: 'ครู', lastName: 'อื่น', roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.5/1' } });
+      });
+    };
+
+    it('งานทะเบียน/ผู้ช่วยบันทึกได้ ครูทั่วไปบันทึกไม่ได้; ข้อมูลต้องตรงทะเบียนนักเรียน', async () => {
+      await seed();
+      await assertFails(mSetDoc(mDoc(sc('t1', ['SUBJECT_TEACHER']), `grade_retakes/${RID}`), retake({ recordedByStaffId: 't1' })));
+      await assertSucceeds(mSetDoc(mDoc(sc('reg1', ['REGISTRAR']), `grade_retakes/${RID}`), retake()));
+      await assertFails(mSetDoc(mDoc(sc('reg1', ['REGISTRAR']), `grade_retakes/${RID}x`), retake())); // รหัสเอกสารไม่ตรง
+      await assertFails(mSetDoc(mDoc(sc('reg1', ['REGISTRAR']), 'grade_retakes/11111_1-2569_ค1'), retake({ courseCode: 'ค1', room: 'ม.9/9' }))); // ห้องไม่ตรงทะเบียน
+      await assertFails(mSetDoc(mDoc(sc('reg1', ['REGISTRAR']), 'grade_retakes/11111_1-2569_ค1'), retake({ courseCode: 'ค1', newGrade: '0' }))); // เท่าเดิม
+      await assertFails(mSetDoc(mDoc(sc('reg1', ['REGISTRAR']), 'grade_retakes/11111_1-2569_ค1'), retake({ courseCode: 'ค1', newGrade: '5' }))); // เกรดไม่มี
+      await assertFails(mSetDoc(mDoc(sc('reg1', ['REGISTRAR']), 'grade_retakes/11111_1-2569_ค1'), retake({ courseCode: 'ค1', recordedByStaffId: 'someone' }))); // สวมรอย
+      await assertSucceeds(mSetDoc(mDoc(sc('asst1', ['REGISTRAR_ASSISTANT']), 'grade_retakes/11111_1-2569_ค1'), retake({ courseCode: 'ค1', recordedByStaffId: 'asst1', originalGrade: 'ร', newGrade: '1' })));
+    });
+
+    it('ผู้ช่วยแก้ได้แต่ลบไม่ได้; แก้ฟิลด์ระบุตัวไม่ได้; งานทะเบียนลบได้', async () => {
+      await seed();
+      await assertSucceeds(mSetDoc(mDoc(sc('reg1', ['REGISTRAR']), `grade_retakes/${RID}`), retake()));
+      const created = (await mGetDoc(mDoc(sc('reg1', ['REGISTRAR']), `grade_retakes/${RID}`))).data()!.createdAt;
+      const upd = (over: Record<string, unknown>) => mSetDoc(mDoc(sc('asst1', ['REGISTRAR_ASSISTANT']), `grade_retakes/${RID}`), retake({ recordedByStaffId: 'asst1', createdAt: created, ...over }));
+      await assertSucceeds(upd({ newGrade: '3' }));
+      await assertFails(upd({ studentId: '22222' }));
+      await assertFails(upd({ courseCode: 'ค9' }));
+      await assertFails(mDeleteDoc(mDoc(sc('asst1', ['REGISTRAR_ASSISTANT']), `grade_retakes/${RID}`)));
+      await assertSucceeds(mDeleteDoc(mDoc(sc('reg1', ['REGISTRAR']), `grade_retakes/${RID}`)));
+    });
+
+    it('อ่าน: นักเรียนเจ้าของ/ผู้ปกครอง/ครูที่ปรึกษาห้องนั้น/งานทะเบียน ได้; คนอื่นไม่ได้', async () => {
+      await seed();
+      await assertSucceeds(mSetDoc(mDoc(sc('reg1', ['REGISTRAR']), `grade_retakes/${RID}`), retake()));
+      const read = (db: any) => mGetDoc(mDoc(db, `grade_retakes/${RID}`));
+      await assertSucceeds(read(asUser('uid-stu', []).firestore()));
+      await assertSucceeds(read(asUser('uid-par', []).firestore()));
+      await assertSucceeds(read(sc('hr1', ['HOMEROOM_TEACHER'])));
+      await assertSucceeds(read(sc('asst1', ['REGISTRAR_ASSISTANT'])));
+      await assertFails(read(sc('hr2', ['HOMEROOM_TEACHER'])));
+      await assertFails(read(asUser('uid-stu2', []).firestore()));
+      await assertFails(read(sc('t1', ['SUBJECT_TEACHER'])));
+    });
+
+    it('อนุมัติจบหลักสูตร: เฉพาะงานทะเบียน (ผู้ช่วยไม่ได้) ระดับต้องตรงห้อง และแก้/ลบไม่ได้', async () => {
+      await seed();
+      const gid = '11111_ม.3';
+      const grad = (over: Record<string, unknown> = {}) => ({
+        studentId: '11111', studentUid: 'uid-stu', parentUid: 'uid-par', room: 'ม.3/1', level: 'ม.3', academicYear: '2569', note: '',
+        approvedByStaffId: 'reg1', approvedByName: 'ทะเบียน', approvedAt: mServerTimestamp(), ...over,
+      });
+      await assertFails(mSetDoc(mDoc(sc('asst1', ['REGISTRAR_ASSISTANT']), `graduation_approvals/${gid}`), grad({ approvedByStaffId: 'asst1' })));
+      await assertFails(mSetDoc(mDoc(sc('reg1', ['REGISTRAR']), 'graduation_approvals/11111_ม.6'), grad({ level: 'ม.6' }))); // ห้องเป็น ม.3
+      await assertFails(mSetDoc(mDoc(sc('reg1', ['REGISTRAR']), 'graduation_approvals/22222_ม.3'), grad({ studentId: '22222', room: 'ม.4/1' }))); // ม.4 ไม่จบ
+      await assertSucceeds(mSetDoc(mDoc(sc('reg1', ['REGISTRAR']), `graduation_approvals/${gid}`), grad()));
+      await assertFails(mSetDoc(mDoc(sc('reg1', ['REGISTRAR']), `graduation_approvals/${gid}`), grad({ note: 'แก้' })));
+      await assertFails(mDeleteDoc(mDoc(sc('reg1', ['REGISTRAR']), `graduation_approvals/${gid}`)));
+      await assertSucceeds(mGetDoc(mDoc(asUser('uid-stu', []).firestore(), `graduation_approvals/${gid}`)));
+    });
+  });
 });

@@ -4,6 +4,8 @@ import { Printer, Info } from 'lucide-react';
 import { useTeacherFirestoreSchedule } from '../../hooks/useTeacherFirestoreSchedule';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { subscribeGradebookScoresForStudent } from '../../services/firestoreService';
+import { subscribeGradeRetakesForStudent } from '../../services/gradeRetakeService';
+import { RETAKE_KIND_LABEL, type GradeRetake } from '../../lib/gradeRetake';
 import { isScheduleForRoom } from '../../lib/studentDaySchedule';
 import { attendanceForCourse, attendancePercent } from '../../lib/pp5';
 import { RegistryHeaderCard, useRegistryProfile } from './RegistryHeaderCard';
@@ -25,12 +27,13 @@ export function StudentGradeReport({ studentId, studentName, room, courseStats, 
   /** students/{id}.courseAttendanceStats — ใช้ประเมินเวลาเรียน (เสี่ยง มส.); ไม่ส่ง = ไม่แสดง */
   courseStats?: unknown;
   /** เฉพาะครูที่ปรึกษา: คะแนนทั้งห้อง + นักเรียนในห้อง สำหรับ "ลำดับที่" (นักเรียน/ผู้ปกครองอ่านคะแนนคนอื่นไม่ได้ จึงไม่ส่ง) */
-  rankContext?: { scores: ScoreDoc[]; students: Array<{ studentId: string; courseAttendanceStats?: unknown }> };
+  rankContext?: { scores: ScoreDoc[]; retakes?: GradeRetake[]; students: Array<{ studentId: string; courseAttendanceStats?: unknown }> };
 }) {
   const sem = useCurrentSemester();
   const currentTerm = `${sem.term}/${sem.academicYear}`;
   const { schedules } = useTeacherFirestoreSchedule();
   const [scores, setScores] = useState<ScoreDoc[]>([]);
+  const [retakes, setRetakes] = useState<GradeRetake[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [picked, setPicked] = useState('');
@@ -38,7 +41,10 @@ export function StudentGradeReport({ studentId, studentName, room, courseStats, 
 
   useEffect(() => {
     setLoading(true); setError('');
-    return subscribeGradebookScoresForStudent(studentId, (l) => { setScores(l as ScoreDoc[]); setLoading(false); }, (e) => { setError(e.message); setLoading(false); });
+    const un1 = subscribeGradebookScoresForStudent(studentId, (l) => { setScores(l as ScoreDoc[]); setLoading(false); }, (e) => { setError(e.message); setLoading(false); });
+    // ผลแก้ตัว/เรียนซ้ำ — อ่านไม่ได้ไม่กระทบรายงานหลัก (แสดงเกรดเดิม)
+    const un2 = subscribeGradeRetakesForStudent(studentId, setRetakes, () => setRetakes([]));
+    return () => { un1(); un2(); };
   }, [studentId]);
 
   const terms = useMemo(() => termOptions(scores, sem.loading ? undefined : currentTerm), [scores, sem.loading, currentTerm]);
@@ -56,13 +62,13 @@ export function StudentGradeReport({ studentId, studentName, room, courseStats, 
   const attendancePercentOf = useMemo(() => courseStats
     ? (code: string) => attendancePercent(attendanceForCourse(courseStats, code))
     : undefined, [courseStats]);
-  const rows = useMemo(() => buildGradeRows({ term, scores, courses, includeSchedule: term === currentTerm, attendancePercentOf }), [term, scores, courses, currentTerm, attendancePercentOf]);
+  const rows = useMemo(() => buildGradeRows({ term, scores, retakes, courses, includeSchedule: term === currentTerm, attendancePercentOf }), [term, scores, retakes, courses, currentTerm, attendancePercentOf]);
   const isPastTerm = !sem.loading && term !== currentTerm;
   const msRows = rows.filter(r => r.msRisk);
   const rank = useMemo(() => {
     if (!rankContext) return null;
     const entries = rankContext.students.map(st => {
-      const sRows = buildGradeRows({ term, scores: rankContext.scores.filter(s => s.studentId === st.studentId), courses, includeSchedule: term === currentTerm });
+      const sRows = buildGradeRows({ term, scores: rankContext.scores.filter(s => s.studentId === st.studentId), retakes: rankContext.retakes?.filter(x => x.studentId === st.studentId), courses, includeSchedule: term === currentTerm });
       const sm = summarizeGrades(sRows);
       return { id: st.studentId, gpa: sm.gpa, pending: sm.pending + sm.missingCredits };
     });
@@ -134,7 +140,9 @@ export function StudentGradeReport({ studentId, studentName, room, courseStats, 
                   <td className="border border-gray-400 px-1 py-1 text-center">{r.isActivity ? '' : r.maxTotal === null ? (r.hasScore ? '' : '') : fmt(r.maxTotal)}</td>
                   <td className="border border-gray-400 px-1 py-1 text-center font-semibold">{fmt(r.total)}</td>
                   <td className="border border-gray-400 px-1 py-1 text-center">{r.percent === null ? '' : r.percent.toFixed(2)}</td>
-                  <td className="border border-gray-400 px-2 py-1 text-center font-bold">{displayGrade(r, isPastTerm) ?? <span className="font-normal text-gray-500">ยังไม่มีผล</span>}</td>
+                  <td className="border border-gray-400 px-2 py-1 text-center font-bold">{r.retake
+                    ? <span>{r.retake.newGrade}<span className="block font-normal text-[10px] text-gray-600">เดิม {r.retake.originalGrade} → {RETAKE_KIND_LABEL[r.retake.kind]}</span></span>
+                    : (displayGrade(r, isPastTerm) ?? <span className="font-normal text-gray-500">ยังไม่มีผล</span>)}</td>
                 </tr>
               ))}
             </tbody>
