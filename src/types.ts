@@ -1251,7 +1251,7 @@ export interface StoreState {
   setCourses: (courses: Course[]) => void;
   updateCourseSchedule: (courseId: string, newSchedule: string) => void;
   markAttendanceDone: (courseId: string) => void;
-  updateStudentProfile: (studentId: string, profile: { nickname?: string; photoUrl?: string; address?: string; parentUid?: string; parentEmail?: string }) => void;
+  updateStudentProfile: (studentId: string, profile: { nickname?: string; photoUrl?: string; address?: string; parentUid?: string; parentEmail?: string }) => Promise<void>;
   updateMorningAttendance: (studentId: string, status: 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE', method: 'SCAN' | 'GEOFENCE' | 'MANUAL') => void;
   
   submitPostTeachingRecord: (record: PostTeachingRecord) => Promise<void>;

@@ -433,7 +433,8 @@ export function StudentManagementPage({ onGoToImport, onOpenIdRegistry }: { onGo
         },
         address: formAddress.trim(),
         // สถานะ (status/statusReason/...) ไม่เขียนจากฟอร์มแก้ไข — เปลี่ยนผ่าน "เปลี่ยนสถานะ" เท่านั้น; นักเรียนใหม่ได้ ACTIVE จาก createStudentWithRegistry
-        behaviorScore: editingStudent?.behaviorScore ?? 100,
+        // คะแนนความประพฤติเปลี่ยนผ่าน conduct_entries เท่านั้น — ตอนแก้ข้อมูลห้ามเขียนทับ (merge จะชนกับแคชของ ledger)
+        ...(isNewStudent ? { behaviorScore: 100 } : {}),
         updatedAt: serverTimestamp(),
         ...(isNewStudent ? { createdAt: serverTimestamp() } : {})
       };

@@ -352,7 +352,7 @@ export const useStore = create<StoreState>((set, get) => ({
       }
     };
   }),
-  updateStudentProfile: (studentId, profile) => {
+  updateStudentProfile: async (studentId, profile) => {
     set((state) => ({
       students: state.students.map(s => {
         if (s.studentId === studentId) {
@@ -380,14 +380,8 @@ export const useStore = create<StoreState>((set, get) => ({
       })
     }));
 
-    // Async persist to Firestore
-    try {
-      updateStudentProfileFirestore(studentId, profile).catch(err => {
-        console.warn("Notice: Firestore persistence for student profile update handled optimistically", err);
-      });
-    } catch {
-      // ignore
-    }
+    // บันทึกลง Firestore จริง — throw เมื่อไม่สำเร็จ (ผู้เรียกต้องแจ้งข้อผิดพลาด ไม่แสดงสำเร็จก่อน)
+    await updateStudentProfileFirestore(studentId, profile);
   },
   updateMorningAttendance: (studentId, status, method) => set((state) => ({
     students: state.students.map(s => {
