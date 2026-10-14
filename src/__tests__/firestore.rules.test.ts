@@ -4430,6 +4430,87 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  describe('plc_logs / teaching_reflections (นิเทศเฟส 3)', () => {
+    const SEM = '2569_1';
+    const ctxOf = (sid: string, roles: string[]) => asUser(`uid-${sid}`, roles, { staffId: sid }).firestore();
+    const plc = (t: string, dept: string, over: any = {}) => ({
+      semesterId: SEM, academicYear: '2569', term: '1', authorStaffId: t, authorName: 'ครู', departmentId: dept,
+      groupName: 'PLC คณิต', topic: 'การคิดวิเคราะห์', meetingDate: '2026-09-01', step: 'PLAN', members: ['ก', 'ข'],
+      summary: 'ประชุม', outcome: '', nextAction: '', evidenceUrl: '', createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(), ...over,
+    });
+    const refl = (t: string, dept: string, over: any = {}) => ({
+      semesterId: SEM, academicYear: '2569', term: '1', teacherStaffId: t, teacherName: 'ครู', departmentId: dept,
+      outcomes: 'a', strengths: '', problems: 'b', improvements: 'c', nextPlan: 'd', createdAt: mServerTimestamp(), updatedAt: mServerTimestamp(), ...over,
+    });
+    const seed = async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await db.doc('staff/t1').set({ roles: ['SUBJECT_TEACHER'], assignments: { departmentId: 'D1' } });
+        await db.doc('staff/t2').set({ roles: ['SUBJECT_TEACHER'], assignments: { departmentId: 'D2' } });
+        await db.doc('staff/hod1').set({ roles: ['HEAD_OF_DEPARTMENT'], assignments: { departmentId: 'D1' } });
+        await db.doc('staff/sv').set({ roles: ['INSTRUCTIONAL_SUPERVISOR'], assignments: { departmentId: 'D3' } });
+      });
+    };
+    const put = async (path: string, data: any) => testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(path).set({ ...data, createdAt: new Date(), updatedAt: new Date() }); });
+
+    it('PLC: ครูสร้าง/แก้/ลบของตนเองได้; ปลอมผู้เขียน แผนกผิด ขั้นผิด ลิงก์ไม่ใช่ https ไม่ได้', async () => {
+      await seed();
+      const t1 = ctxOf('t1', ['SUBJECT_TEACHER']);
+      await assertSucceeds(mSetDoc(mDoc(t1, 'plc_logs/a1'), plc('t1', 'D1')));
+      await assertFails(mSetDoc(mDoc(t1, 'plc_logs/a2'), plc('t2', 'D2')));
+      await assertFails(mSetDoc(mDoc(t1, 'plc_logs/a3'), plc('t1', 'D2')));
+      await assertFails(mSetDoc(mDoc(t1, 'plc_logs/a4'), plc('t1', 'D1', { step: 'DONE' })));
+      await assertFails(mSetDoc(mDoc(t1, 'plc_logs/a5'), plc('t1', 'D1', { evidenceUrl: 'http://x.co/a' })));
+      await assertFails(mSetDoc(mDoc(t1, 'plc_logs/a6'), plc('t1', 'D1', { meetingDate: '1/9/2569' })));
+      await assertSucceeds(mUpdateDoc(mDoc(t1, 'plc_logs/a1'), { step: 'DO', summary: 'ปฏิบัติ', updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(mDoc(t1, 'plc_logs/a1'), { authorStaffId: 't2', updatedAt: mServerTimestamp() }));
+      await assertSucceeds(mDeleteDoc(mDoc(t1, 'plc_logs/a1')));
+    });
+
+    it('PLC: ผู้อื่น (รวมหัวหน้า/หัวหน้างานนิเทศ/แอดมิน) แก้หรือลบของครูไม่ได้', async () => {
+      await seed();
+      await put('plc_logs/b1', plc('t1', 'D1'));
+      for (const c of [ctxOf('t2', ['SUBJECT_TEACHER']), ctxOf('hod1', ['HEAD_OF_DEPARTMENT']), ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR']), ctxOf('adm', ['SUPER_ADMIN'])]) {
+        await assertFails(mUpdateDoc(mDoc(c, 'plc_logs/b1'), { summary: 'hack', updatedAt: mServerTimestamp() }));
+        await assertFails(mDeleteDoc(mDoc(c, 'plc_logs/b1')));
+      }
+    });
+
+    it('สะท้อนคิด: id = ปี_ภาค_staffId เท่านั้น; แก้ได้เฉพาะเจ้าของ; เกิน 2000 ตัวอักษรไม่ได้', async () => {
+      await seed();
+      const t1 = ctxOf('t1', ['SUBJECT_TEACHER']);
+      await assertSucceeds(mSetDoc(mDoc(t1, `teaching_reflections/${SEM}_t1`), refl('t1', 'D1')));
+      await assertFails(mSetDoc(mDoc(t1, 'teaching_reflections/random'), refl('t1', 'D1')));
+      await assertFails(mSetDoc(mDoc(t1, `teaching_reflections/${SEM}_t2`), refl('t2', 'D2')));
+      await assertFails(mUpdateDoc(mDoc(t1, `teaching_reflections/${SEM}_t1`), { outcomes: 'x'.repeat(2001), updatedAt: mServerTimestamp() }));
+      await assertSucceeds(mUpdateDoc(mDoc(t1, `teaching_reflections/${SEM}_t1`), { outcomes: 'แก้', updatedAt: mServerTimestamp() }));
+      await assertFails(mUpdateDoc(mDoc(ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR']), `teaching_reflections/${SEM}_t1`), { outcomes: 'hack', updatedAt: mServerTimestamp() }));
+    });
+
+    it('การอ่าน PLC/สะท้อนคิด: เจ้าของ; หัวหน้ากลุ่มสาระฯ เฉพาะแผนก; หัวหน้างานนิเทศ/ผอ./รอง ผอ.วิชาการ ทั้งหมด; EXECUTIVE/SUPER_ADMIN ไม่ได้', async () => {
+      await seed();
+      await put('plc_logs/c1', plc('t1', 'D1'));
+      await put('plc_logs/c2', plc('t2', 'D2'));
+      await put(`teaching_reflections/${SEM}_t1`, refl('t1', 'D1'));
+      await put(`teaching_reflections/${SEM}_t2`, refl('t2', 'D2'));
+      const all = (c: any, name: string) => getDocs(query(collection(c, name), where('semesterId', '==', SEM)));
+      const dep = (c: any, name: string, d: string) => getDocs(query(collection(c, name), where('semesterId', '==', SEM), where('departmentId', '==', d)));
+      const own = (c: any, name: string, field: string, id: string) => getDocs(query(collection(c, name), where('semesterId', '==', SEM), where(field, '==', id)));
+      await assertSucceeds(own(ctxOf('t1', ['SUBJECT_TEACHER']), 'plc_logs', 'authorStaffId', 't1'));
+      await assertFails(own(ctxOf('t1', ['SUBJECT_TEACHER']), 'plc_logs', 'authorStaffId', 't2'));
+      await assertSucceeds(own(ctxOf('t1', ['SUBJECT_TEACHER']), 'teaching_reflections', 'teacherStaffId', 't1'));
+      for (const name of ['plc_logs', 'teaching_reflections']) {
+        await assertSucceeds(dep(ctxOf('hod1', ['HEAD_OF_DEPARTMENT']), name, 'D1'));
+        await assertFails(dep(ctxOf('hod1', ['HEAD_OF_DEPARTMENT']), name, 'D2'));
+        await assertSucceeds(all(ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR']), name));
+        await assertSucceeds(all(ctxOf('d1', ['DIRECTOR']), name));
+        await assertSucceeds(all(ctxOf('d2', ['DEPUTY_DIRECTOR_ACADEMIC']), name));
+        await assertFails(all(ctxOf('ex', ['EXECUTIVE']), name));
+        await assertFails(all(ctxOf('adm', ['SUPER_ADMIN']), name));
+      }
+    });
+  });
+
   describe('public_summary (สารสนเทศโรงเรียนสาธารณะ)', () => {
     it('ใครก็อ่านเอกสาร current ได้แม้ไม่ล็อกอิน; อ่านเอกสารอื่น/list ไม่ได้; เขียนไม่ได้แม้ SUPER_ADMIN', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {

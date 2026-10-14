@@ -7,6 +7,7 @@ import {
   KIND_LABEL, PLAN_CRITERIA, SCORE_LABEL, STAGE_LABEL, averageScore, complianceOf, embedUrlFor,
   planOverviewQuery, reviewStageFor, scoresComplete, semesterIdOf, suitabilityLevel, type LessonPlan, type ScoresMap,
 } from '../../lib/lessonPlans';
+import { PlcReflectionOverview } from '../portfolio/PlcReflectionOverview';
 import { TeachingProjectsOverview } from '../teachingproject/TeachingProjectsOverview';
 import { staffDepartmentId, staffFullName, type StaffRow } from '../../lib/supervisionView';
 
@@ -25,7 +26,7 @@ export function LessonPlanReviewPanel() {
   const { data, loading, error } = useLessonPlans(semesterId, q);
   const [openId, setOpenId] = useState('');
   const [filter, setFilter] = useState<'todo' | 'all'>('todo');
-  const [view, setView] = useState<'plans' | 'projects'>('plans');
+  const [view, setView] = useState<'plans' | 'projects' | 'plc'>('plans');
 
   const me = { staffId, roles, departmentId: myDept };
   const isHead = (tid: string) => !!staff.find(s => s.id === tid)?.roles?.includes('HEAD_OF_DEPARTMENT');
@@ -53,11 +54,11 @@ export function LessonPlanReviewPanel() {
   return (
     <div className="space-y-4">
       <div className="flex gap-2" role="tablist">
-        {([['plans', 'แผนการสอน (ลิงก์) — ตรวจ'], ['projects', 'โครงการสอน — ดูอย่างเดียว']] as const).map(([id, label]) => (
+        {([['plans', 'แผนการสอน (ลิงก์) — ตรวจ'], ['projects', 'โครงการสอน — ดูอย่างเดียว'], ['plc', 'PLC / สะท้อนคิด — ดูอย่างเดียว']] as const).map(([id, label]) => (
           <button key={id} role="tab" aria-selected={view === id} onClick={() => setView(id)} className={`px-3 py-1.5 rounded-lg text-xs border cursor-pointer ${view === id ? 'bg-cyan-600 border-cyan-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-300'}`}>{label}</button>
         ))}
       </div>
-      {view === 'projects' ? <TeachingProjectsOverview q={q} /> : <>
+      {view === 'projects' ? <TeachingProjectsOverview q={q} /> : view === 'plc' ? <PlcReflectionOverview q={q} /> : <>
       <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-300">
         <p className="text-white font-medium">แผนการสอน/โครงการสอน ภาคเรียน {sem.label}</p>
         <p className="mt-1 text-xs">ครูที่ส่งแล้ว {compliance.teachers} คน · เฉพาะโครงการสอน {compliance.c.PROJECT_ONLY} · ฉบับสมบูรณ์รอตรวจ {compliance.c.PLAN_SUBMITTED} · ฉบับสมบูรณ์ผ่านแล้ว {compliance.c.PLAN_APPROVED}</p>
