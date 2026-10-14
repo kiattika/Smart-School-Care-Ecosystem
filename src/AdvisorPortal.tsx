@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { SkipRadarPanel } from './components/advisor/SkipRadarPanel';
 import { AdvisorHealthSummaryPanel } from './components/advisor/AdvisorHealthSummaryPanel';
+import { AdvisorGradeReport } from './components/student-parent/AdvisorGradeReport';
 import { ClassChatTeacherView, useRoomChatUnread } from './components/chat/ClassChatPanel';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import clsx from 'clsx';
@@ -64,7 +65,7 @@ export function AdvisorPortal() {
   // store จะมีข้อมูลก็ต่อเมื่อมีคน import ในเซสชันเดียวกันเท่านั้น — เปิดใหม่/ล็อกอินใหม่แล้วว่าง
   const { students, loading: studentsLoading } = useRealStudents();
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq' | 'screening' | 'class-chat' | 'skip-radar' | 'health'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq' | 'screening' | 'class-chat' | 'skip-radar' | 'health' | 'pp6'>('dashboard');
   const [assessmentModalStudent, setAssessmentModalStudent] = useState<Student | null>(null);
   const [assessmentSearch, setAssessmentSearch] = useState('');
   const [assessmentFilter, setAssessmentFilter] = useState<'ALL' | 'COMPLETED' | 'PENDING'>('ALL');
@@ -299,6 +300,7 @@ export function AdvisorPortal() {
             { id: 'school-checkin', label: 'เช็คชื่อโฮมรูม', icon: ClipboardList },
             { id: 'skip-radar', label: 'เรดาร์โดดเรียน', icon: Radar },
             { id: 'health', label: 'สุขภาพนักเรียน', icon: Heart },
+            { id: 'pp6', label: 'ผลการเรียนรายคน (ปพ.6)', icon: ClipboardList },
             { id: 'analytics', label: 'สถิติวิชาการ', icon: Sparkles },
           ]}
         >
@@ -453,6 +455,8 @@ export function AdvisorPortal() {
             </div>
 
           )}
+          {activeTab === 'pp6' && <AdvisorGradeReport room={myRoom || ''} students={myStudents as any} />}
+
           {activeTab === 'class-chat' && user?.uid && (
             <ClassChatTeacherView
               room={myRoom || ''}

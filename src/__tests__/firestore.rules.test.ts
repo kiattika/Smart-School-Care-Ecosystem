@@ -3994,6 +3994,63 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // 16b-2. student_registry_profiles — ข้อมูลส่วนหัว ปพ.6 + เลขประจำตัวประชาชน (PDPA) สิทธิ์จำกัด
+  describe('student_registry_profiles (เลขประจำตัวประชาชน/ส่วนหัว ปพ.6)', () => {
+    const ROOM = 'ม.5/8', T_ID = 'teacher-07', T_UID = 'hr-uid-1';
+    const prof = (over: Record<string, unknown> = {}) => ({
+      studentId: '10001', studentUid: 'stu-1', homeroomClass: ROOM, nationalId: '1101700230678',
+      fatherName: 'พ่อ ทดสอบ', motherName: 'แม่ ทดสอบ', enrolledAt: '2566-05-16', gender: 'M', birthDate: '2552-01-01',
+      nationality: 'ไทย', religion: 'พุทธ', prevSchool: 'โรงเรียนเดิม', prevProvince: 'อุตรดิตถ์', updatedAt: mServerTimestamp(), ...over,
+    });
+    const ref = (db: any, id = '10001') => mDoc(db, `student_registry_profiles/${id}`);
+    beforeEach(async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(`staff/${T_ID}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: ROOM } });
+        await ctx.firestore().doc('staff/teacher-08').set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: 'ม.6/1' } });
+        await ctx.firestore().doc('students/10001').set({ studentId: '10001', room: ROOM, studentUid: 'stu-1', parentUid: 'par-1' });
+        await ctx.firestore().doc('student_registry_profiles/10001').set({ ...prof(), updatedAt: new Date() });
+      });
+    });
+    const S = () => asUser('stu-1', ['STUDENT'], { studentId: '10001' }).firestore();
+    const P = () => asUser('par-1', ['PARENT']).firestore();
+    const HR = () => asUser(T_UID, ['HOMEROOM_TEACHER'], { staffId: T_ID }).firestore();
+
+    it('นักเรียนเจ้าของเขียน/แก้ได้ (nationalId 13 หลักหรือว่าง)', async () => {
+      await assertSucceeds(mSetDoc(ref(S()), prof()));
+      await assertSucceeds(mSetDoc(ref(S()), prof({ nationalId: '' })));
+    });
+    it('ปฏิเสธ: เลขไม่ใช่ 13 หลัก / มีตัวอักษร / uid ไม่ตรง / ห้องไม่ตรง / เขียนแทนคนอื่น / field เกิน / updatedAt ไม่ใช่เวลาเซิร์ฟเวอร์', async () => {
+      await assertFails(mSetDoc(ref(S()), prof({ nationalId: '12345' })));
+      await assertFails(mSetDoc(ref(S()), prof({ nationalId: '11017002306AB' })));
+      await assertFails(mSetDoc(ref(S()), prof({ studentUid: 'other' })));
+      await assertFails(mSetDoc(ref(S()), prof({ homeroomClass: 'ม.6/1' })));
+      await assertFails(mSetDoc(ref(S(), '10002'), prof({ studentId: '10002' })));
+      await assertFails(mSetDoc(ref(S()), prof({ extra: 'x' })));
+      await assertFails(mSetDoc(ref(S()), prof({ updatedAt: new Date('2020-01-01') })));
+      await assertFails(mSetDoc(ref(S()), prof({ gender: 'X' })));
+    });
+    it('ผู้ปกครองตัวจริง/ครูที่ปรึกษาห้องนั้น/SUPER_ADMIN อ่านได้ แต่ผู้ปกครองและครูเขียนไม่ได้', async () => {
+      await assertSucceeds(mGetDoc(ref(S())));
+      await assertSucceeds(mGetDoc(ref(P())));
+      await assertSucceeds(mGetDoc(ref(HR())));
+      await assertSucceeds(mGetDoc(ref(asUser('adm', ['SUPER_ADMIN']).firestore())));
+      await assertFails(mSetDoc(ref(P()), prof()));
+      await assertFails(mSetDoc(ref(HR()), prof()));
+    });
+    it('ปฏิเสธการอ่าน: EXECUTIVE / ครูห้องอื่น / ครูวิชา / ผู้ปกครองคนอื่น / ไม่ล็อกอิน / list ทั้งคอลเลกชัน', async () => {
+      await assertFails(mGetDoc(ref(asUser('ex', ['EXECUTIVE']).firestore())));
+      await assertFails(mGetDoc(ref(asUser('hr-uid-2', ['HOMEROOM_TEACHER'], { staffId: 'teacher-08' }).firestore())));
+      await assertFails(mGetDoc(ref(asUser('subj', ['SUBJECT_TEACHER']).firestore())));
+      await assertFails(mGetDoc(ref(asUser('par-2', ['PARENT']).firestore())));
+      await assertFails(mGetDoc(ref(asAnonymous().firestore())));
+      await assertFails(getDocs(collection(asUser('adm', ['SUPER_ADMIN']).firestore(), 'student_registry_profiles')));
+    });
+    it('ห้ามลบทุกบทบาท', async () => {
+      await assertFails(mDeleteDoc(ref(S())));
+      await assertFails(mDeleteDoc(ref(asUser('adm', ['SUPER_ADMIN']).firestore())));
+    });
+  });
+
   // 16. home_visit_records — บันทึกเยี่ยมบ้าน (แบบ สพฐ.) เฉพาะครูที่ปรึกษาห้องนั้น/SUPER_ADMIN (+ EXECUTIVE อ่าน)
   describe('home_visit_records', () => {
     const ROOM = 'ม.5/8';

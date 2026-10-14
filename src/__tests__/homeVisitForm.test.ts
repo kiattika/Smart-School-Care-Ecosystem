@@ -79,9 +79,13 @@ describe('guard: การเชื่อมต่อ/ความปลอด�
     expect(readSource('src/StudentPortal.tsx')).toMatch(/<StudentHomeVisitInfoForm/);
     expect(readSource('src/ParentPortal.tsx')).toMatch(/<FamilyHomeVisitInfoForm/);
   });
-  it('ไม่เก็บเลขบัตรประชาชนในฟอร์ม/ชนิดข้อมูล', () => {
-    const t = readSource('src/types/homeVisit.ts') + readSource('src/components/homevisit/FamilyHomeVisitInfoForm.tsx') + readSource('src/components/homevisit/StudentHomeVisitInfoForm.tsx');
+  it('ไม่เก็บเลขบัตรประชาชนในเอกสารเยี่ยมบ้าน — เก็บแยกที่ student_registry_profiles (สิทธิ์จำกัด)', () => {
+    const t = readSource('src/types/homeVisit.ts') + readSource('src/components/homevisit/FamilyHomeVisitInfoForm.tsx');
     expect(t).not.toMatch(/nationalId|idCard|citizenId|เลขบัตรประชาชน\s*\*/i);
+    const f = readSource('src/components/homevisit/StudentHomeVisitInfoForm.tsx');
+    expect(f).toMatch(/saveRegistryProfile/);
+    expect(f).not.toMatch(/saveStudentHomeVisitInfo\(\{[^}]*nationalId/);
+    expect(readSource('src/lib/homeVisitData.ts')).not.toMatch(/nationalId/);
   });
   it('เอกสารสรุปไม่ใช้ข้อมูลสมมติ และมีปุ่มพิมพ์จริง', () => {
     const d = readSource('src/components/homevisit/HomeVisitDocumentModal.tsx');

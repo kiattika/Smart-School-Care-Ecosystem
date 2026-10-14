@@ -4,6 +4,7 @@ import { useTeacherFirestoreSchedule } from '../../hooks/useTeacherFirestoreSche
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { subscribeGradebookScoresForStudent } from '../../services/firestoreService';
 import { isScheduleForRoom } from '../../lib/studentDaySchedule';
+import { RegistryHeaderCard, useRegistryProfile } from './RegistryHeaderCard';
 import {
   GRADE_REPORT_DISCLAIMER, buildGradeRows, summarizeGrades, termLabel, termOptions,
   type CourseInfo, type ScoreDoc,
@@ -25,6 +26,7 @@ export function StudentGradeReport({ studentId, studentName, room }: { studentId
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [picked, setPicked] = useState('');
+  const reg = useRegistryProfile(studentId);
 
   useEffect(() => {
     setLoading(true); setError('');
@@ -66,6 +68,9 @@ export function StudentGradeReport({ studentId, studentName, room }: { studentId
       </div>
 
       {error && <p role="alert" className="text-sm text-amber-300">โหลดคะแนนไม่สำเร็จ: {error}</p>}
+      {!loading && rows.length === 0 && (
+        <div className="gr-no-print bg-white text-black rounded-xl p-4"><RegistryHeaderCard studentId={studentId} studentName={studentName} room={room} profile={reg.data} loading={reg.loading} error={reg.error} /></div>
+      )}
       {loading ? <p className="text-sm text-slate-400">กำลังโหลด…</p> : rows.length === 0 ? (
         <p className="text-sm text-slate-400 border border-dashed border-slate-700 rounded-xl p-6 text-center">
           {terms.length === 0 ? 'ยังไม่มีคะแนนที่ครูบันทึกไว้' : 'ยังไม่มีคะแนนในภาคเรียนนี้'}
@@ -73,7 +78,8 @@ export function StudentGradeReport({ studentId, studentName, room }: { studentId
       ) : (
         <div id="gr-sheet" className="bg-white text-black rounded-xl p-4 sm:p-6 shadow-xl overflow-x-auto" style={{ fontFamily: "'Sarabun','TH Sarabun New','Noto Sans Thai',sans-serif" }}>
           <h3 className="text-base font-bold">รายงานผลการเรียน {termLabel(term)}{studentName ? ` — ${studentName}` : ''}</h3>
-          <p className="text-xs text-gray-600 mb-3">รหัสนักเรียน {studentId}{room ? ` · ห้อง ${room}` : ''}</p>
+          <div className="mt-2" />
+          <RegistryHeaderCard studentId={studentId} studentName={studentName} room={room} profile={reg.data} loading={reg.loading} error={reg.error} />
           <table className="w-full text-xs border-collapse min-w-[760px]">
             <thead>
               <tr className="bg-cyan-50">

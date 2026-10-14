@@ -1,4 +1,6 @@
 import { linksOf } from '../../lib/evidenceLinks';
+import { groupWithTones } from '../../lib/groupTones';
+import { useDepartments } from '../../hooks/useDepartments';
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../../store';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
@@ -34,6 +36,8 @@ export function LessonPlanReviewPanel() {
   const stageOf = (p: LessonPlan) => reviewStageFor(p, me, isHead(p.teacherStaffId));
   const rows = data.filter(p => filter === 'all' || stageOf(p)).sort((a, b) => a.teacherName.localeCompare(b.teacherName, 'th'));
   const open = data.find(p => p.id === openId);
+  const { nameOf: deptNameOf } = useDepartments();
+  const groups = useMemo(() => groupWithTones<LessonPlan>(rows, p => p.departmentId || '', k => deptNameOf(k) || k, (a, b) => a.teacherName.localeCompare(b.teacherName, 'th') || a.courseCode.localeCompare(b.courseCode, 'th')), [rows, deptNameOf]);
 
   const compliance = useMemo(() => {
     const m = new Map<string, LessonPlan[]>();
@@ -71,14 +75,21 @@ export function LessonPlanReviewPanel() {
       </div>
       {error && <p role="alert" className="text-sm text-amber-300">โหลดไม่สำเร็จ: {error}</p>}
       {loading ? <p className="text-sm text-slate-400">กำลังโหลด…</p> : rows.length === 0 ? <p className="text-sm text-slate-400">ไม่มีรายการ</p> : (
-        <ul className="space-y-2">
-          {rows.map(p => (
-            <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-700 bg-slate-900/40 p-3">
-              <div><p className="text-sm text-white">{p.teacherName} · {p.courseCode} {p.courseName}</p><p className="text-xs text-slate-400">{KIND_LABEL[p.kind]} · {STAGE_LABEL[p.stage]}</p></div>
-              <button className="px-3 py-1.5 rounded-lg text-xs bg-cyan-600 text-white cursor-pointer" onClick={() => setOpenId(p.id)}>{stageOf(p) ? 'ตรวจ' : 'ดู'}</button>
-            </li>
+        <div className="space-y-4">
+          {groups.map(g => (
+            <section key={g.key || 'none'} aria-label={g.label} className="space-y-2">
+              <p className="text-xs font-semibold"><span className={`inline-block px-2.5 py-1 rounded-full border ${g.tone.chip}`}>{g.label} · {g.items.length} รายการ</span></p>
+              <ul className="space-y-2">
+                {g.items.map(p => (
+                  <li key={p.id} className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-700 p-3 ${g.tone.row}`}>
+                    <div><p className="text-sm text-white">{p.teacherName} · {p.courseCode} {p.courseName}</p><p className="text-xs text-slate-400">{KIND_LABEL[p.kind]} · {STAGE_LABEL[p.stage]}</p></div>
+                    <button className="px-3 py-1.5 rounded-lg text-xs bg-cyan-600 text-white cursor-pointer" onClick={() => setOpenId(p.id)}>{stageOf(p) ? 'ตรวจ' : 'ดู'}</button>
+                  </li>
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
       )}
       </>}
     </div>
