@@ -1717,6 +1717,76 @@ service cloud.firestore {
       allow delete: if myStaffId() != '' && resource.data.teacherStaffId == myStaffId();
     }
 
+    // 43. บันทึก PLC (นิเทศเฟส 3) — 1 เอกสาร = 1 ครั้งที่พบกัน; ครูผู้บันทึกเขียน/แก้/ลบของตนเอง
+    // อ่านได้: เจ้าของ, หัวหน้า/รองกลุ่มสาระฯ (แผนกตน), หัวหน้างานนิเทศ, ผอ., รอง ผอ.วิชาการ (EXECUTIVE/SUPER_ADMIN ไม่เห็นรายบุคคล)
+    function plcDocOk(d) {
+      return d.keys().hasOnly(['semesterId', 'academicYear', 'term', 'authorStaffId', 'authorName', 'departmentId', 'groupName', 'topic',
+                               'meetingDate', 'step', 'members', 'summary', 'outcome', 'nextAction', 'evidenceUrl', 'createdAt', 'updatedAt'])
+        && d.keys().hasAll(['semesterId', 'authorStaffId', 'departmentId', 'groupName', 'topic', 'meetingDate', 'step', 'members', 'summary', 'evidenceUrl'])
+        && d.semesterId.matches('^[0-9]{4}_[12]$') && d.academicYear is string && d.term in ['1', '2']
+        && (d.academicYear + '_' + d.term) == d.semesterId
+        && d.authorStaffId is string && d.authorName is string && d.authorName.size() <= 160 && d.departmentId is string
+        && d.groupName is string && d.groupName.size() > 0 && d.groupName.size() <= 120
+        && d.topic is string && d.topic.size() > 0 && d.topic.size() <= 300
+        && d.meetingDate is string && d.meetingDate.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && d.step in ['PLAN', 'DO', 'CHECK', 'ACT']
+        && d.members is list && d.members.size() <= 20
+        && d.summary is string && d.summary.size() > 0 && d.summary.size() <= 2000
+        && (!('outcome' in d) || (d.outcome is string && d.outcome.size() <= 1500))
+        && (!('nextAction' in d) || (d.nextAction is string && d.nextAction.size() <= 1000))
+        && d.evidenceUrl is string && (d.evidenceUrl == '' || d.evidenceUrl.matches('^https://[^ ]{4,490}$'));
+    }
+
+    match /plc_logs/{lid} {
+      allow read: if myStaffId() != '' && (
+        resource.data.authorStaffId == myStaffId() ||
+        hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
+        supInMyDept(resource.data.departmentId)
+      );
+      allow create: if myStaffId() != '' && plcDocOk(request.resource.data)
+                       && request.resource.data.authorStaffId == myStaffId()
+                       && request.resource.data.departmentId == supStaffDept(myStaffId())
+                       && request.resource.data.createdAt == request.time
+                       && request.resource.data.updatedAt == request.time;
+      allow update: if myStaffId() != '' && resource.data.authorStaffId == myStaffId()
+                       && plcDocOk(request.resource.data)
+                       && request.resource.data.diff(resource.data).unchangedKeys().hasAll(['semesterId', 'authorStaffId', 'departmentId', 'createdAt'])
+                       && request.resource.data.updatedAt == request.time;
+      allow delete: if myStaffId() != '' && resource.data.authorStaffId == myStaffId();
+    }
+
+    // 44. บันทึกสะท้อนคิดรายภาคเรียน (นิเทศเฟส 3) — 1 ฉบับต่อครูต่อภาคเรียน id = {ปี}_{ภาค}_{staffId}; สิทธิ์อ่านเหมือน plc_logs
+    function reflDocOk(d) {
+      return d.keys().hasOnly(['semesterId', 'academicYear', 'term', 'teacherStaffId', 'teacherName', 'departmentId',
+                               'outcomes', 'strengths', 'problems', 'improvements', 'nextPlan', 'createdAt', 'updatedAt'])
+        && d.keys().hasAll(['semesterId', 'teacherStaffId', 'departmentId', 'outcomes', 'strengths', 'problems', 'improvements', 'nextPlan'])
+        && d.semesterId.matches('^[0-9]{4}_[12]$') && d.academicYear is string && d.term in ['1', '2']
+        && (d.academicYear + '_' + d.term) == d.semesterId
+        && d.teacherStaffId is string && d.teacherName is string && d.teacherName.size() <= 160 && d.departmentId is string
+        && d.outcomes is string && d.outcomes.size() <= 2000 && d.strengths is string && d.strengths.size() <= 2000
+        && d.problems is string && d.problems.size() <= 2000 && d.improvements is string && d.improvements.size() <= 2000
+        && d.nextPlan is string && d.nextPlan.size() <= 2000;
+    }
+
+    match /teaching_reflections/{rid} {
+      allow read: if myStaffId() != '' && (
+        resource.data.teacherStaffId == myStaffId() ||
+        hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
+        supInMyDept(resource.data.departmentId)
+      );
+      allow create: if myStaffId() != '' && reflDocOk(request.resource.data)
+                       && request.resource.data.teacherStaffId == myStaffId()
+                       && rid == request.resource.data.semesterId + '_' + myStaffId()
+                       && request.resource.data.departmentId == supStaffDept(myStaffId())
+                       && request.resource.data.createdAt == request.time
+                       && request.resource.data.updatedAt == request.time;
+      allow update: if myStaffId() != '' && resource.data.teacherStaffId == myStaffId()
+                       && reflDocOk(request.resource.data)
+                       && request.resource.data.diff(resource.data).unchangedKeys().hasAll(['semesterId', 'teacherStaffId', 'departmentId', 'createdAt'])
+                       && request.resource.data.updatedAt == request.time;
+      allow delete: if myStaffId() != '' && resource.data.teacherStaffId == myStaffId();
+    }
+
     // 40. สรุปสารสนเทศโรงเรียนสำหรับหน้าสาธารณะ /info — อ่านได้ทุกคนแม้ไม่ล็อกอิน (เป็นตัวเลขรวมที่ซ่อนช่อง <5 แล้วเท่านั้น
     //     ไม่มีข้อมูลรายบุคคล); client เขียนไม่ได้เด็ดขาด (Cloud Function scheduledPublicSummary/refreshPublicSummary ใช้ Admin SDK)
     //     อ่านได้เฉพาะเอกสาร 'current' เอกสารเดียว — ห้ามเพิ่มข้อมูลละเอียดลงเอกสารนี้

@@ -9,6 +9,8 @@ import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { MySupervisionPanel } from './components/supervision/MySupervisionPanel';
 import { MyLessonPlansPanel } from './components/lessonplans/MyLessonPlansPanel';
 import { EMPTY_PLAN_PICK, PlanUnitPicker, type PlanPick } from './components/teachingproject/PlanUnitPicker';
+import { PlcReflectionPanel } from './components/portfolio/PlcReflectionPanel';
+import { MyPortfolioPanel } from './components/portfolio/MyPortfolioPanel';
 import { MyTeachingProjectsPanel } from './components/teachingproject/MyTeachingProjectsPanel';
 import { MyTeachingStatsPanel } from './components/stats/TeacherStatsPanels';
 import { visibleSidebarItems, resolveActiveSidebarId } from './components/shared/portalSidebarLogic';
@@ -422,7 +424,7 @@ export function TeacherPortal() {
   const [viewingRecord, setViewingRecord] = useState<PostTeachingRecord | null>(null);
 
   // New States for Dashboard Navigation
-  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-stats'>('courses');
+  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats'>('courses');
   const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
   // ขอลากิจ/ไปราชการด้วยตนเอง — reuse SubstituteTeachingModule เต็มรูปแบบ (ไม่สร้างฟอร์มซ้ำ)
   const [showSubSelfService, setShowSubSelfService] = useState(false);
@@ -441,7 +443,7 @@ export function TeacherPortal() {
   const activityStudentCount = useTeacherActivityStudentCount();
   const availableDashboardTabs = useMemo(() => {
     const rawTabs: Array<{
-      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-stats';
+      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats';
       label: string;
       icon: React.ComponentType<{ className?: string }>;
       count: number;
@@ -465,6 +467,8 @@ export function TeacherPortal() {
       { id: 'my-supervision', label: 'ผลการนิเทศของฉัน', icon: BookOpen, count: 0 },
       { id: 'my-teaching-projects', label: 'โครงการสอนของฉัน', icon: BookOpen, count: 0 },
       { id: 'my-lesson-plans', label: 'ส่งแผนการสอน (ลิงก์)', icon: BookOpen, count: 0 },
+      { id: 'my-plc', label: 'PLC และสะท้อนคิด', icon: BookOpen, count: 0 },
+      { id: 'my-portfolio', label: 'แฟ้มสะสมงานของฉัน', icon: BookOpen, count: 0 },
       { id: 'my-stats', label: 'สถิติการสอนของฉัน (ลา/แลกคาบ/สอนแทน)', icon: Clock, count: 0 },
     ];
 
@@ -1925,6 +1929,8 @@ export function TeacherPortal() {
             {dashboardTab === 'my-supervision' && <MySupervisionPanel />}
             {dashboardTab === 'my-teaching-projects' && <MyTeachingProjectsPanel courses={lessonPlanCourses} />}
             {dashboardTab === 'my-lesson-plans' && <MyLessonPlansPanel courses={lessonPlanCourses} />}
+            {dashboardTab === 'my-plc' && <PlcReflectionPanel />}
+            {dashboardTab === 'my-portfolio' && <MyPortfolioPanel />}
             {dashboardTab === 'my-stats' && <MyTeachingStatsPanel />}
 
             {dashboardTab === 'leaderboard' && (
