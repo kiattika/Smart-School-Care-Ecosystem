@@ -20,11 +20,11 @@
       (function () {
         try {
           var p = JSON.parse(localStorage.getItem('ssc.prefs.v1') || '{}');
-          var pal = p.theme === 'navy' || p.theme === 'pink' || p.theme === 'lavender' ? p.theme : '';
-          var t = pal || p.theme === 'light' ? 'light' : p.theme === 'dark' ? 'dark' : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          var ids = ['light', 'dark', 'navy', 'pink', 'lavender'];
+          var id = ids.indexOf(p.theme) >= 0 ? p.theme : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
           var r = document.documentElement;
-          r.setAttribute('data-theme', t);
-          if (pal) r.setAttribute('data-palette', pal);
+          r.setAttribute('data-theme', id === 'dark' || id === 'navy' ? 'dark' : 'light');
+          r.setAttribute('data-palette', id);
           if (p.textScale === 'large' || p.textScale === 'xlarge') r.setAttribute('data-text-scale', p.textScale);
         } catch (e) { document.documentElement.setAttribute('data-theme', 'dark'); }
       })();

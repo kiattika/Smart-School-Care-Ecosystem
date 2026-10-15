@@ -10,7 +10,7 @@ import { saveUserPreferences, uploadMyProfilePhoto } from '../../services/userPr
 const swatch = (c: string) => <span className="w-4 h-4 rounded-full border border-white/40 shrink-0" style={{ backgroundColor: c }} aria-hidden="true" />;
 const THEME_ICON: Record<ThemeChoice, React.ReactNode> = {
   system: <Monitor className="w-4 h-4" />, light: <Sun className="w-4 h-4" />, dark: <Moon className="w-4 h-4" />,
-  navy: swatch('#1b2a4a'), pink: swatch('#9c425d'), lavender: swatch('#4a3aff'),
+  navy: swatch('#10243d'), pink: swatch('#c43d70'), lavender: swatch('#7655e8'),
 };
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ');
 

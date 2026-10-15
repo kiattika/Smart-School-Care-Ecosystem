@@ -26,7 +26,7 @@ import { UserSettingsModal } from './settings/UserSettingsModal';
 import { useMyPreferences } from '../hooks/useMyPreferences';
 import { applyPreferences, type UserPreferences } from '../lib/userPreferences';
 
-// สีของ Badge และธีมประจำแต่ละบทบาท
+// สีของ Badge และธีมประจำแต่ละบทบาท — 14 บทบาทในเอกสารโทเคนสีใช้ตัวแปร --role-… (ค่าต่อธีมใน src/lib/themeTokens.ts, แอดมินแก้ได้)
 export interface RoleVisualConfig {
   label: string;
   badgeBg: string;
@@ -50,29 +50,29 @@ export const DEFAULT_ROLE_VISUAL: RoleVisualConfig = {
 export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
   SUPER_ADMIN: {
     label: 'ผู้ดูแลระบบ',
-    badgeBg: 'bg-rose-500/10',
-    badgeText: 'text-rose-400',
-    badgeBorder: 'border-rose-500/20',
-    iconBg: 'bg-rose-500/20',
-    iconColor: 'text-rose-400',
+    badgeBg: 'bg-(--role-super-admin)/10',
+    badgeText: 'text-(--role-super-admin)',
+    badgeBorder: 'border-(--role-super-admin)/20',
+    iconBg: 'bg-(--role-super-admin)/20',
+    iconColor: 'text-(--role-super-admin)',
     description: 'ดูแลระบบความปลอดภัยและการจัดการสิทธิ์ทั้งหมด'
   },
   EXECUTIVE: {
     label: 'ผู้บริหารสถานศึกษา',
-    badgeBg: 'bg-blue-500/10',
-    badgeText: 'text-blue-400',
-    badgeBorder: 'border-blue-500/20',
-    iconBg: 'bg-blue-500/20',
-    iconColor: 'text-blue-400',
+    badgeBg: 'bg-(--role-executive)/10',
+    badgeText: 'text-(--role-executive)',
+    badgeBorder: 'border-(--role-executive)/20',
+    iconBg: 'bg-(--role-executive)/20',
+    iconColor: 'text-(--role-executive)',
     description: 'เข้าถึงข้อมูลภาพรวม อนุมัติผลการเรียน และนิเทศ'
   },
   HEAD_OF_DEPARTMENT: {
     label: 'หัวหน้ากลุ่มสาระฯ',
-    badgeBg: 'bg-amber-500/10',
-    badgeText: 'text-amber-400',
-    badgeBorder: 'border-amber-500/20',
-    iconBg: 'bg-amber-500/20',
-    iconColor: 'text-amber-400',
+    badgeBg: 'bg-(--role-head-of-department)/10',
+    badgeText: 'text-(--role-head-of-department)',
+    badgeBorder: 'border-(--role-head-of-department)/20',
+    iconBg: 'bg-(--role-head-of-department)/20',
+    iconColor: 'text-(--role-head-of-department)',
     description: 'เสนอจัดครูสอนแทน (ขั้น 1) และอนุมัติผลการเรียนในกลุ่มสาระฯ'
   },
   DEPUTY_HEAD_OF_DEPARTMENT: {
@@ -86,56 +86,56 @@ export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
   },
   ACADEMIC_HEAD: {
     label: 'หัวหน้าฝ่ายวิชาการและหลักสูตร',
-    badgeBg: 'bg-orange-500/10',
-    badgeText: 'text-orange-400',
-    badgeBorder: 'border-orange-500/20',
-    iconBg: 'bg-orange-500/20',
-    iconColor: 'text-orange-400',
+    badgeBg: 'bg-(--role-academic-head)/10',
+    badgeText: 'text-(--role-academic-head)',
+    badgeBorder: 'border-(--role-academic-head)/20',
+    iconBg: 'bg-(--role-academic-head)/20',
+    iconColor: 'text-(--role-academic-head)',
     description: 'อนุมัติงานจัดครูสอนแทน ขั้นที่ 2'
   },
   DEPUTY_DIRECTOR_ACADEMIC: {
     label: 'รองผู้อำนวยการฝ่ายวิชาการ',
-    badgeBg: 'bg-violet-500/10',
-    badgeText: 'text-violet-400',
-    badgeBorder: 'border-violet-500/20',
-    iconBg: 'bg-violet-500/20',
-    iconColor: 'text-violet-400',
+    badgeBg: 'bg-(--role-deputy-director-academic)/10',
+    badgeText: 'text-(--role-deputy-director-academic)',
+    badgeBorder: 'border-(--role-deputy-director-academic)/20',
+    iconBg: 'bg-(--role-deputy-director-academic)/20',
+    iconColor: 'text-(--role-deputy-director-academic)',
     description: 'อนุมัติงานจัดครูสอนแทน ขั้นที่ 3 และคำขอเช็คชื่อย้อนหลัง'
   },
   DIRECTOR: {
     label: 'ผู้อำนวยการสถานศึกษา',
-    badgeBg: 'bg-red-500/10',
-    badgeText: 'text-red-400',
-    badgeBorder: 'border-red-500/20',
-    iconBg: 'bg-red-500/20',
-    iconColor: 'text-red-400',
+    badgeBg: 'bg-(--role-director)/10',
+    badgeText: 'text-(--role-director)',
+    badgeBorder: 'border-(--role-director)/20',
+    iconBg: 'bg-(--role-director)/20',
+    iconColor: 'text-(--role-director)',
     description: 'อนุมัติงานจัดครูสอนแทน ขั้นสุดท้าย (ขั้นที่ 4)'
   },
   HOMEROOM_TEACHER: {
     label: 'ครูประจำชั้น',
-    badgeBg: 'bg-emerald-500/10',
-    badgeText: 'text-emerald-400',
-    badgeBorder: 'border-emerald-500/20',
-    iconBg: 'bg-emerald-500/20',
-    iconColor: 'text-emerald-400',
+    badgeBg: 'bg-(--role-homeroom-teacher)/10',
+    badgeText: 'text-(--role-homeroom-teacher)',
+    badgeBorder: 'border-(--role-homeroom-teacher)/20',
+    iconBg: 'bg-(--role-homeroom-teacher)/20',
+    iconColor: 'text-(--role-homeroom-teacher)',
     description: 'บันทึกการเข้าเรียน พฤติกรรม และดูแลนักเรียนในที่ปรึกษา'
   },
   SUBJECT_TEACHER: {
     label: 'ครูประจำวิชา',
-    badgeBg: 'bg-indigo-500/10',
-    badgeText: 'text-indigo-400',
-    badgeBorder: 'border-indigo-500/20',
-    iconBg: 'bg-indigo-500/20',
-    iconColor: 'text-indigo-400',
+    badgeBg: 'bg-(--role-subject-teacher)/10',
+    badgeText: 'text-(--role-subject-teacher)',
+    badgeBorder: 'border-(--role-subject-teacher)/20',
+    iconBg: 'bg-(--role-subject-teacher)/20',
+    iconColor: 'text-(--role-subject-teacher)',
     description: 'บันทึกคะแนนเก็บ จัดเก็บสถิติการเรียนรายห้อง'
   },
   SUPERVISORY_TEACHER: {
     label: 'ครูนิเทศ',
-    badgeBg: 'bg-teal-500/10',
-    badgeText: 'text-teal-400',
-    badgeBorder: 'border-teal-500/20',
-    iconBg: 'bg-teal-500/20',
-    iconColor: 'text-teal-400',
+    badgeBg: 'bg-(--role-supervisory-teacher)/10',
+    badgeText: 'text-(--role-supervisory-teacher)',
+    badgeBorder: 'border-(--role-supervisory-teacher)/20',
+    iconBg: 'bg-(--role-supervisory-teacher)/20',
+    iconColor: 'text-(--role-supervisory-teacher)',
     description: 'ประเมินแผนการสอน นิเทศสังเกตการณ์ชั้นเรียน'
   },
   FUND_SCHOLARSHIP: {
@@ -176,29 +176,29 @@ export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
   },
   INFIRMARY_STAFF: {
     label: 'พยาบาลโรงเรียน',
-    badgeBg: 'bg-rose-500/10',
-    badgeText: 'text-rose-400',
-    badgeBorder: 'border-rose-500/20',
-    iconBg: 'bg-rose-500/20',
-    iconColor: 'text-rose-400',
+    badgeBg: 'bg-(--role-infirmary-staff)/10',
+    badgeText: 'text-(--role-infirmary-staff)',
+    badgeBorder: 'border-(--role-infirmary-staff)/20',
+    iconBg: 'bg-(--role-infirmary-staff)/20',
+    iconColor: 'text-(--role-infirmary-staff)',
     description: 'บันทึกห้องพยาบาล จ่ายยา และตรวจสุขภาพนักเรียน'
   },
   GUIDANCE_COUNSELOR: {
     label: 'ครูแนะแนว',
-    badgeBg: 'bg-purple-500/10',
-    badgeText: 'text-purple-400',
-    badgeBorder: 'border-purple-500/20',
-    iconBg: 'bg-purple-500/20',
-    iconColor: 'text-purple-400',
+    badgeBg: 'bg-(--role-guidance-counselor)/10',
+    badgeText: 'text-(--role-guidance-counselor)',
+    badgeBorder: 'border-(--role-guidance-counselor)/20',
+    iconBg: 'bg-(--role-guidance-counselor)/20',
+    iconColor: 'text-(--role-guidance-counselor)',
     description: 'ให้คำปรึกษา เคส SDQ/EQ และระบบ TCAS พอร์ตโฟลิโอ'
   },
   FINANCE_STAFF: {
     label: 'เจ้าหน้าที่การเงิน',
-    badgeBg: 'bg-emerald-500/10',
-    badgeText: 'text-emerald-400',
-    badgeBorder: 'border-emerald-500/20',
-    iconBg: 'bg-emerald-500/20',
-    iconColor: 'text-emerald-400',
+    badgeBg: 'bg-(--role-finance-staff)/10',
+    badgeText: 'text-(--role-finance-staff)',
+    badgeBorder: 'border-(--role-finance-staff)/20',
+    iconBg: 'bg-(--role-finance-staff)/20',
+    iconColor: 'text-(--role-finance-staff)',
     description: 'จัดเก็บค่าธรรมเนียม ใบเสร็จดิจิทัล และอนุมัติเบิกงบครู'
   },
   INSTRUCTIONAL_SUPERVISOR: {
@@ -212,20 +212,20 @@ export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
   },
   PARENT: {
     label: 'ผู้ปกครอง',
-    badgeBg: 'bg-amber-500/10',
-    badgeText: 'text-amber-400',
-    badgeBorder: 'border-amber-500/20',
-    iconBg: 'bg-amber-500/20',
-    iconColor: 'text-amber-400',
+    badgeBg: 'bg-(--role-parent)/10',
+    badgeText: 'text-(--role-parent)',
+    badgeBorder: 'border-(--role-parent)/20',
+    iconBg: 'bg-(--role-parent)/20',
+    iconColor: 'text-(--role-parent)',
     description: 'ติดตามผลการเรียน การเข้าแถว และความประพฤตินักเรียน'
   },
   STUDENT: {
     label: 'นักเรียน',
-    badgeBg: 'bg-sky-500/10',
-    badgeText: 'text-sky-400',
-    badgeBorder: 'border-sky-500/20',
-    iconBg: 'bg-sky-500/20',
-    iconColor: 'text-sky-400',
+    badgeBg: 'bg-(--role-student)/10',
+    badgeText: 'text-(--role-student)',
+    badgeBorder: 'border-(--role-student)/20',
+    iconBg: 'bg-(--role-student)/20',
+    iconColor: 'text-(--role-student)',
     description: 'ตรวจสอบตารางเรียน ผลการเรียน และภารกิจการเข้าแถว'
   },
   admin: {
@@ -442,7 +442,7 @@ export function NavbarWithRoleSwitcher({
             onClick={() => setIsRoleDropdownOpen(!isRoleDropdownOpen)}
             className="flex items-center gap-1.5 sm:gap-2.5 bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 rounded-xl px-2 sm:px-3.5 py-1.5 sm:py-2 text-xs font-medium transition-all shadow-md cursor-pointer hover:border-slate-700 group"
           >
-            <div className={`w-2 h-2 rounded-full ${activeVisual.badgeBg.replace('/10', '/100')} animate-pulse shrink-0`} />
+            <div className={`w-2 h-2 rounded-full ${activeVisual.badgeText} animate-pulse shrink-0`} style={{ backgroundColor: 'currentColor' }} />
             <div className="text-left">
               <p className="text-[9px] sm:text-[10px] text-slate-400 font-normal hidden sm:block">บทบาทปัจจุบัน</p>
               <div className="flex items-center gap-1">

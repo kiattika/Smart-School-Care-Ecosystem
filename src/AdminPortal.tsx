@@ -17,7 +17,8 @@ import { IMPORT_ORDER } from './lib/importOrder';
 import { ElectiveActivityManagerPage } from './components/admin/ElectiveActivityManagerPage';
 import { HouseManagerPage } from './components/admin/HouseManagerPage';
 import { StudentIdRegistryPage } from './components/admin/StudentIdRegistryPage';
-import { BarChart3, Palette, History } from 'lucide-react';
+import { BarChart3, Palette, History, Paintbrush } from 'lucide-react';
+import { ThemeTokensPage } from './components/admin/ThemeTokensPage';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { ReferenceDataImportExport, type ReferenceImportKind } from './components/admin/ReferenceDataImportExport';
 import { AdminReferenceVillagesPage } from './components/admin/AdminReferenceVillagesPage';
@@ -62,7 +63,7 @@ const REFERENCE_CARDS: { kind: ReferenceImportKind; title: string; description: 
 const IMPORT_CARDS = IMPORT_ORDER.map((type) => ({ type, ...IMPORT_CARD_META[type] }));
 
 export function AdminPortal() {
-  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'id-registry' | 'settings' | 'periods' | 'electives' | 'houses'>('teaching-load');
+  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'id-registry' | 'settings' | 'periods' | 'electives' | 'houses' | 'ref-villages' | 'ref-schools' | 'theme-tokens'>('teaching-load');
   // ทะเบียนเลขประจำตัว: เลขที่ส่งมาจากหน้าจัดการนักเรียนเพื่อเปิดดูประวัติทันที
   const [registryFocusId, setRegistryFocusId] = useState<string | undefined>(undefined);
   const openIdRegistry = (studentId?: string) => {
@@ -98,7 +99,7 @@ export function AdminPortal() {
   };
 
   interface AdminNavItem {
-    id: 'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'id-registry' | 'settings' | 'periods' | 'electives' | 'houses' | 'ref-villages' | 'ref-schools';
+    id: 'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'id-registry' | 'settings' | 'periods' | 'electives' | 'houses' | 'ref-villages' | 'ref-schools' | 'theme-tokens';
     label: string;
     fullLabel: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -122,6 +123,7 @@ export function AdminPortal() {
     { id: 'ref-villages', label: 'รายชื่อหมู่บ้าน', fullLabel: 'จัดการรายชื่อหมู่บ้าน (ที่อยู่นักเรียน)', icon: MapPin, badge: null, color: 'text-emerald-400', activeStyle: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[inset_4px_0_0_rgba(16,185,129,1)]' },
     { id: 'ref-schools', label: 'รายชื่อโรงเรียน', fullLabel: 'จัดการรายชื่อโรงเรียน (จบจากสถานศึกษา)', icon: School, badge: null, color: 'text-sky-400', activeStyle: 'bg-sky-500/10 text-sky-400 border-sky-500/20 shadow-[inset_4px_0_0_rgba(14,165,233,1)]' },
     { id: 'settings', label: 'ปีการศึกษา & ล็อกระบบ', fullLabel: 'ตั้งค่าปีการศึกษา & ล็อกระบบ (System Lock)', icon: Settings, badge: null, color: 'text-pink-400', activeStyle: 'bg-[#ec4899]/10 text-[#ec4899] border-[#ec4899]/20 shadow-[inset_4px_0_0_rgba(236,72,153,1)]' },
+    { id: 'theme-tokens', label: 'ธีมสี', fullLabel: 'ธีมสี (Theme Color Tokens)', icon: Paintbrush, badge: null, color: 'text-violet-400', activeStyle: 'bg-violet-500/10 text-violet-400 border-violet-500/20 shadow-[inset_4px_0_0_rgba(139,92,246,1)]' },
   ];
 
   return (
@@ -344,6 +346,8 @@ export function AdminPortal() {
               <SystemSettingsAndLocksPage />
             </div>
           )}
+
+          {activeTab === 'theme-tokens' && <ThemeTokensPage />}
             </motion.div>
           </AnimatePresence>
         </PortalSidebarLayout>

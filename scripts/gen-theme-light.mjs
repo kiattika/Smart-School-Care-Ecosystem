@@ -28,52 +28,8 @@ const restore = [];
 steps.forEach((s) => restore.push(`  --color-slate-${s}: ${v('slate-' + s)};`));
 for (const h of hues) for (const n of ['200', '300', '400']) restore.push(`  --color-${h}-${n}: ${v(h + '-' + n)};`);
 
-// ───────── ธีมโทนสี (navy / pink / lavender) = โหมดสว่าง + data-palette ─────────
-// หลักการ: สเกล slate ของโหมดสว่างถูกย้อมโทนสี, สีเน้น indigo/violet เปลี่ยนเป็นสีเน้นของธีม,
-// แถบบน/แถบเมนูข้าง (data-shell) เป็นพื้นเข้มของธีมและคืนสเกลสีเดิมภายใน (ตัวหนังสือขาวอ่านได้เหมือนธีมมืด)
-// สีสถานะ (แดง/เหลือง/เขียว/ฟ้า — red, rose, amber, orange, yellow, emerald, green, cyan, sky) ไม่ถูกแตะ จึงความหมายเดิมทุกธีม
-const palettes = {
-  navy: {
-    body: '#f0f4f8', fg: '#102a43',
-    slate: { 950: '#ffffff', 900: '#e6ecf3', 800: '#d9e2ec', 700: '#c3cfdc', 500: '#4c6480', 400: '#3e5470', 300: '#2c4159', 200: '#1d3249', 100: '#102a43', 50: '#0b1e33' },
-    accent: { 700: '#1e40af', 600: '#1d4ed8', 500: '#2563eb', 400: '#1d4ed8', 300: '#1e40af', 200: '#1e3a8a' },
-    sidebar: '#1b2a4a', topbar: '#0f1a34',
-  },
-  pink: {
-    body: '#fff5f5', fg: '#4a242b',
-    slate: { 950: '#ffffff', 900: '#fbe9e9', 800: '#f7d6d6', 700: '#ebbfc2', 500: '#7a5c63', 400: '#6a4a52', 300: '#5a3a42', 200: '#4a242b', 100: '#4a242b', 50: '#35181e' },
-    accent: { 700: '#7e3249', 600: '#9c425d', 500: '#b0506c', 400: '#9c425d', 300: '#8c3a55', 200: '#7e3249' },
-    sidebar: '#9c425d', topbar: '#70243b',
-  },
-  lavender: {
-    body: '#f8f7fc', fg: '#2d2544',
-    slate: { 950: '#ffffff', 900: '#eeebf7', 800: '#e6e4f2', 700: '#d2cee6', 500: '#6b6280', 400: '#5a5170', 300: '#473e5e', 200: '#3a3150', 100: '#2d2544', 50: '#1f1830' },
-    accent: { 700: '#3a2cd0', 600: '#4a3aff', 500: '#6154ff', 400: '#4a3aff', 300: '#3a2cd0', 200: '#2f23a8' },
-    sidebar: '#4a3aff', topbar: '#2a1b60',
-  },
-};
-// แถบบน/เมนูข้างของโหมดสว่างปกติ: แถบบนสีน้ำเงินเข้ม (ตาม UI Style Guide) เมนูข้างคงโทนเทาอ่อนเดิม
-const shells = [{ sel: ':root[data-theme="light"]:not([data-palette]) [data-shell="topbar"]', bg: '#1e3a8a' }];
-let pcss = '';
-for (const [name, p] of Object.entries(palettes)) {
-  const R = `:root[data-theme="light"][data-palette="${name}"]`;
-  const lines = Object.entries(p.slate).map(([k, c]) => `  --color-slate-${k}: ${c};`);
-  for (const h of ['indigo', 'violet', 'purple']) for (const [k, c] of Object.entries(p.accent)) lines.push(`  --color-${h}-${k}: ${c};`);
-  pcss += `\n${R} {\n${lines.join('\n')}\n  --app-body-bg: ${p.body};\n  --app-body-fg: ${p.fg};\n}\n`;
-  // กล่อง bg-white (กระดาษพิมพ์) ต้องคืนสเกลเดิมเหมือนโหมดสว่างปกติ — ความจำเพาะของ .bg-white ต้องชนะสเกลโทนสี
-  pcss += `${R} .bg-white {\n  color: #0f172a;\n${restore.join('\n')}\n}\n`;
-  shells.push({ sel: `${R} [data-shell="topbar"]`, bg: p.topbar }, { sel: `${R} [data-shell="sidebar"]`, bg: p.sidebar });
-}
-// ภายในแถบเข้ม: คืนสเกลเดิม + ตัวหนังสือขาว + ชั้นโปร่งขาว (เหมือนธีมมืด)
-// ข้อความรอง (slate-400/500) บนแถบสีสด (เช่น ลาเวนเดอร์ #4a3aff) ต้องสว่างขึ้นให้ผ่าน 4.5:1
-const shellRestore = restore.filter(l => !/-(indigo|violet|purple)-/.test(l) && !/--color-slate-(400|500):/.test(l)).concat(['  --color-slate-400: #e2e8f0;', '  --color-slate-500: #e2e8f0;']);
-for (const sh of shells) {
-  const accentWhite = ['indigo', 'violet'].flatMap(h => [`  --color-${h}-200: #ffffff;`, `  --color-${h}-300: #e0e7ff;`, `  --color-${h}-400: #ffffff;`, `  --color-${h}-500: #ffffff;`]);
-  pcss += `\n${sh.sel} {\n  background-color: ${sh.bg};\n  color: #f8fafc;\n  border-color: rgb(255 255 255 / 0.14);\n${shellRestore.join('\n')}\n${accentWhite.join('\n')}\n}\n`;
-  pcss += `${sh.sel} .text-white { color: #ffffff; }\n`;
-  pcss += `${sh.sel} [class*="bg-white/"] { background-color: rgb(255 255 255 / 0.08); }\n`;
-  pcss += `${sh.sel} [class*="border-white/"], ${sh.sel} [class*="border-slate-"] { border-color: rgb(255 255 255 / 0.16); }\n`;
-}
+// ค่าสีจริงของแต่ละธีม (พื้น/การ์ด/ข้อความ/เส้นขอบ/สถานะ/บทบาท/แถบบน-เมนูข้าง) มาจากโทเคนสีตอนรัน: src/lib/themeTokens.ts
+// (แอดมินแก้ได้ที่หน้า "ธีมสี") — ไฟล์นี้เหลือแค่โครงของโหมดสว่าง (สลับสเกลที่โทเคนไม่ได้ครอบ, กระดาษขาว, ตัวหนังสือบนปุ่มสีสด)
 
 const css = `/* สร้างโดย scripts/gen-theme-light.mjs — อย่าแก้มือ */
 :root[data-theme="light"] {
@@ -101,6 +57,6 @@ ${restore.join('\n')}
 :root[data-theme="light"] [class*="divide-white/"] > :not(:last-child) { border-color: rgb(15 23 42 / 0.14); }
 :root[data-theme="light"] ::placeholder { color: var(--color-slate-500); }
 :root[data-theme="light"] .shadow-2xl, :root[data-theme="light"] .shadow-xl { --tw-shadow-color: rgb(15 23 42 / 0.15); }
-`+pcss;
+`;
 writeFileSync('src/theme-light.css', css);
 console.log('wrote src/theme-light.css', css.length, 'bytes');
