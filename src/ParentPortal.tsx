@@ -66,18 +66,19 @@ export function ParentPortal() {
     return () => unsubscribe();
   }, [user?.uid]);
 
-  // การผ่านประตูโรงเรียนจริงจาก Firestore แบบ real-time — เดิมอ่านจาก store.gateAttendanceLogs
-  // (session-local: ผู้ปกครองเห็นเฉพาะเซสชันเดียวกับที่นักเรียนเช็คอินเท่านั้น) filter ด้วย parentUid
-  const [gateAttendanceLogs, setGateAttendanceLogs] = useState<GateAttendanceRecord[]>([]);
-  useEffect(() => {
-    if (!user?.uid) { setGateAttendanceLogs([]); return; }
-    return subscribeGateAttendanceLogs(setGateAttendanceLogs, { parentUid: user.uid });
-  }, [user?.uid]);
-
   // Selected student state (ผู้ปกครองมีบุตรหลานได้หลายคน — เริ่มที่คนแรก)
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
 
   const student = linkedStudents.find(s => s.studentId === selectedStudentId) || linkedStudents[0];
+
+  // การผ่านประตูโรงเรียนจริงจาก Firestore แบบ real-time — query ด้วย studentId ของบุตรหลานที่เลือก
+  // (rules: ผู้ปกครองตัวจริงตามทะเบียน isParentOfStudent) — เดิม query ด้วย parentUid ซึ่งบันทึกจากการเช็คอิน GPS ไม่มี จึงไม่เห็นเลย
+  const [gateAttendanceLogs, setGateAttendanceLogs] = useState<GateAttendanceRecord[]>([]);
+  const gateStudentId = student?.studentId;
+  useEffect(() => {
+    if (!user?.uid || !gateStudentId) { setGateAttendanceLogs([]); return; }
+    return subscribeGateAttendanceLogs(setGateAttendanceLogs, { studentId: gateStudentId });
+  }, [user?.uid, gateStudentId]);
   const chatUnread = chatThreads.filter(t => t.studentId === student?.studentId && isThreadUnread(t, 'MEMBER')).length;
   // FIX (Task 0): เดิมอ่านจาก StudentAnalytics (session-local store, ว่างเปล่าเสมอ) → ตัวเลขที่เห็น
   // เป็น fallback 98 ตายตัวทุกครั้ง ไม่เคยเปลี่ยนตามพฤติกรรมจริง — ตอนนี้อ่านจาก students/{id}.behaviorScore

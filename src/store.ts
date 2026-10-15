@@ -42,6 +42,7 @@ import { DEFAULT_SCHOOL_GEOFENCE } from './utils/geoUtils';
 import { 
   saveSelfAssessmentRecord, 
   saveGateAttendanceRecordFirestore,
+  getStudentLinkIds,
   saveGPSCheckInLogFirestore,
   saveCheckInSelfieFirestore,
   getOwnStudentRoomFirestore,
@@ -1002,7 +1003,11 @@ export const useStore = create<StoreState>((set, get) => ({
 
     let gateLog: GateAttendanceRecord | null = null;
     if (isStudent) {
-      const parentUid = matchedStudent?.parentUid || matchedStudent?.parentId;
+      // parentUid ต้องมาจากทะเบียนจริง (students/{id}.parentUid) — store.students ว่างในเซสชันนักเรียน
+      // (เดิมอ่านจาก store → บันทึกประตูไม่มี parentUid → ผู้ปกครองมองไม่เห็นการเช็คอิน); อ่านไม่ได้ = ไม่ใส่ (ไม่เดา)
+      let parentUid: string | null | undefined = matchedStudent?.parentUid;
+      try { parentUid = (await getStudentLinkIds(log.userId)).parentUid; }
+      catch (e) { console.warn('[gps-checkin] อ่าน parentUid จากทะเบียนไม่สำเร็จ', e); }
       // studentUid ต้องเป็น auth uid ของนักเรียนที่เช็คอินจริง (rules เทียบกับ request.auth.uid)
       // rules เทียบกับ request.auth.uid — ใช้ uid ที่ล็อกอินอยู่จริงก่อน (studentUid ใน students doc อาจว่าง/ไม่ตรง ทำให้ถูกปฏิเสธ)
       const studentUid = authUid || matchedStudent?.studentUid;

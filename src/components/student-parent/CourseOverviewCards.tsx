@@ -107,7 +107,8 @@ export function CourseOverviewCards({ studentId, room, courseStats }: {
                       </span>
                     </div>
                     <div className="h-1.5 w-full rounded-full bg-slate-700 overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${p.rank.progressPct}%`, background: color }} />
+                      {/* เพิ่งขึ้นระดับพอดี (0% ในระดับนี้) ยังแสดงจุดเริ่มต้นให้เห็นว่ามีแถบ */}
+                      <div className="h-full rounded-full" style={{ width: `${p.rank.progressPct}%`, minWidth: p.points > 0 ? '0.5rem' : undefined, background: color }} />
                     </div>
                     <div className="text-[10px] text-slate-400">
                       {p.rank.next ? `อีก ${p.rank.pointsToNext} คะแนน ถึงระดับ ${rankLabel(p.rank.next)}` : 'ถึงระดับสูงสุดแล้ว'}
