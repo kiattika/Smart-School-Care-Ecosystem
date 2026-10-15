@@ -6,6 +6,8 @@ import {
   type TextScale, type ThemeChoice, type UserPreferences,
 } from '../../lib/userPreferences';
 import { saveUserPreferences, uploadMyProfilePhoto } from '../../services/userPreferencesService';
+import { uploadProfilePhoto } from '../../services/storageService';
+import { updateStudentPhotoUrl } from '../../services/firestoreService';
 
 const swatch = (c: string) => <span className="w-4 h-4 rounded-full border border-white/40 shrink-0" style={{ backgroundColor: c }} aria-hidden="true" />;
 const THEME_ICON: Record<ThemeChoice, React.ReactNode> = {
@@ -15,11 +17,12 @@ const THEME_ICON: Record<ThemeChoice, React.ReactNode> = {
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ');
 
 /**
- * ตั้งค่าส่วนตัว: ธีม, ขนาดตัวอักษร, รูปโปรไฟล์ (บุคลากร/ผู้ปกครอง — นักเรียนเปลี่ยนรูปที่หน้านักเรียนเดิม)
+ * ตั้งค่าส่วนตัว: ธีม, ขนาดตัวอักษร, รูปโปรไฟล์ (ทุกบทบาท — นักเรียนส่ง studentId มาด้วย: รูปเดียวกันถูกเขียนทั้ง
+ * user_preferences.photoUrl (แถบบน) และ students/{id}.photoUrl (หน้านักเรียน/ผู้ปกครอง/ครู) เพื่อให้เปลี่ยนที่นี่ที่เดียวแล้วตรงกันทุกจุด)
  * เปลี่ยนแล้วใช้ทันที (พรีวิว) และบันทึกขึ้นบัญชีเมื่อกด "บันทึก"; ยกเลิก = กลับค่าเดิม
  */
-export function UserSettingsModal({ uid, prefs, showPhoto, initial, onPreview, onClose }: {
-  uid: string; prefs: UserPreferences; showPhoto: boolean; initial: string;
+export function UserSettingsModal({ uid, prefs, showPhoto, studentId, initial, onPreview, onClose }: {
+  uid: string; prefs: UserPreferences; showPhoto: boolean; studentId?: string; initial: string;
   onPreview: (p: UserPreferences) => void; onClose: () => void;
 }) {
   const [draft, setDraft] = useState<UserPreferences>(prefs);
@@ -41,7 +44,14 @@ export function UserSettingsModal({ uid, prefs, showPhoto, initial, onPreview, o
     setBusy(true); setError('');
     try {
       let next = draft;
-      if (photo) next = { ...draft, photoUrl: await uploadMyProfilePhoto(uid, photo.blob) };
+      if (photo) {
+        // นักเรียน: อัปโหลดไปที่เก็บรูปโปรไฟล์นักเรียน แล้วเขียน students/{id}.photoUrl ด้วย URL เดียวกัน (ผู้ปกครอง/ครูเห็นตรงกัน)
+        const url = studentId ? await uploadProfilePhoto(uid, photo.blob) : await uploadMyProfilePhoto(uid, photo.blob);
+        if (studentId) await updateStudentPhotoUrl(studentId, url);
+        next = { ...draft, photoUrl: url };
+      } else if (studentId && prefs.photoUrl && !draft.photoUrl) {
+        await updateStudentPhotoUrl(studentId, '');
+      }
       const patch = prefsPatch(prefs, next);
       if (Object.keys(patch).length) await saveUserPreferences(uid, patch);
       saveLocalPreferences(next);

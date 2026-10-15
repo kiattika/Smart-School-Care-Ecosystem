@@ -325,7 +325,8 @@ export function NavbarWithRoleSwitcher({
   const [isGPSModalOpen, setIsGPSModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const authUid = useStore(s => s.user?.uid);
-  // ตั้งค่าส่วนตัว (ธีม/ขนาดตัวอักษร/รูป) — ใช้กับทุกบทบาท; นักเรียนเปลี่ยนรูปที่หน้านักเรียนเดิม
+  const authStudentId = useStore(s => s.user?.studentId);
+  // ตั้งค่าส่วนตัว (ธีม/ขนาดตัวอักษร/รูป) — ใช้กับทุกบทบาท รวมนักเรียน (รูปนักเรียนเปลี่ยนที่นี่ที่เดียว)
   const { prefs } = useMyPreferences(authUid);
   const previewPrefs = (p: UserPreferences) => applyPreferences(p);
   const roleDropdownRef = useRef<HTMLDivElement>(null);
@@ -617,7 +618,8 @@ export function NavbarWithRoleSwitcher({
       <UserSettingsModal
         uid={authUid}
         prefs={prefs}
-        showPhoto={activeRole !== 'STUDENT'}
+        showPhoto
+        studentId={activeRole === 'STUDENT' ? authStudentId : undefined}
         initial={user.firstName?.[0] || 'U'}
         onPreview={previewPrefs}
         onClose={() => setIsSettingsOpen(false)}

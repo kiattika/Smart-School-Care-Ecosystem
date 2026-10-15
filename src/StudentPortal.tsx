@@ -21,7 +21,6 @@ import {
   Heart,
   Shield,
   MapPin,
-  Camera,
   Activity,
   Brain,
   Award,
@@ -59,7 +58,6 @@ import { AcademicHomeworkModule } from './components/student-parent/AcademicHome
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
 import { StudentSelfAssessmentForm } from './components/StudentSelfAssessmentForm';
 import { StudentAssessmentDetailModal } from './components/StudentAssessmentDetailModal';
-import { StudentProfilePhotoEditor } from './components/student-parent/StudentProfilePhotoEditor';
 
 export function StudentPortal() {
   const { saveSelfAssessment } = useStore();
@@ -77,7 +75,6 @@ export function StudentPortal() {
 
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [viewDetailModal, setViewDetailModal] = useState(false);
-  const [showPhotoEditor, setShowPhotoEditor] = useState(false);
 
   // ประตูโรงเรียนวันนี้ (จริงจาก gate_attendance_logs ของตัวเอง — query ด้วย studentUid ให้ผ่าน rules)
   const [gateLogs, setGateLogs] = useState<GateAttendanceRecord[]>([]);
@@ -161,15 +158,6 @@ export function StudentPortal() {
               alt={student.name}
               className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-indigo-500 shadow-xl bg-slate-950"
             />
-            {user?.uid && student.studentUid === user.uid && (
-              <button
-                onClick={() => setShowPhotoEditor(true)}
-                title="เปลี่ยนรูปโปรไฟล์"
-                className="absolute -top-1.5 -left-1.5 w-7 h-7 rounded-full bg-indigo-600 hover:bg-indigo-500 border-2 border-slate-900 flex items-center justify-center text-white shadow-lg transition-colors"
-              >
-                <Camera className="w-3.5 h-3.5" />
-              </button>
-            )}
           </div>
 
           <div>
@@ -465,15 +453,6 @@ export function StudentPortal() {
 
       </div>
       </PortalSidebarLayout>
-
-      {/* เปลี่ยนรูปโปรไฟล์ (นักเรียนเจ้าของบัญชีเท่านั้น) */}
-      {showPhotoEditor && user?.uid && (
-        <StudentProfilePhotoEditor
-          student={student}
-          studentUid={user.uid}
-          onClose={() => setShowPhotoEditor(false)}
-        />
-      )}
 
       {/* Student Self-Assessment Detail Modal */}
       {viewDetailModal && student && (
