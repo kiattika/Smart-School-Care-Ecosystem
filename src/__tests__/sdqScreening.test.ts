@@ -132,3 +132,15 @@ describe('ผูกกับหน้าจอ', () => {
     expect(readSource('src/ExecutivePortal.tsx')).toContain('showNames={false}');
   });
 });
+
+describe('ปุ่มคำนวณสรุปหน้า /info ใหม่ (SUPER_ADMIN)', () => {
+  it('หน้า "ปีการศึกษา & ล็อกระบบ" มีปุ่ม เรียก callable จริง และไม่แจ้งสำเร็จถ้าเซิร์ฟเวอร์ไม่ตอบ success', () => {
+    expect(readSource('src/components/SystemSettingsAndLocksPage.tsx')).toContain('<PublicSummarySection />');
+    const svc = readSource('src/services/publicSummaryService.ts');
+    expect(svc).toContain("httpsCallable(functions, 'refreshPublicSummary')");
+    expect(svc).toContain('success !== true) throw');
+    const ui = readSource('src/components/admin/PublicSummarySection.tsx');
+    expect(ui).toContain("roles?.includes('SUPER_ADMIN')");
+    expect(ui).toContain('await refreshPublicSummary()');
+  });
+});

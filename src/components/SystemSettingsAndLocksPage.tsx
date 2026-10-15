@@ -6,6 +6,7 @@ import { StudentEmailFormatSection } from './admin/StudentEmailFormatSection';
 import { CourseRankLevelsSection } from './admin/CourseRankLevelsSection';
 import { BillingPaymentInfoSection } from './admin/BillingPaymentInfoSection';
 import { GuidanceStatusSection } from './admin/GuidanceStatusSection';
+import { PublicSummarySection } from './admin/PublicSummarySection';
 import { DatePicker } from './shared/DatePicker';
 import { TimePicker } from './shared/TimePicker';
 import { 
@@ -340,6 +341,7 @@ export function SystemSettingsAndLocksPage() {
 
           {/* 1.7 สถานะครูแนะแนว — school_settings/guidance_status (อ่านสด + ปุ่ม refreshGuidanceStatus) */}
           <GuidanceStatusSection />
+          <PublicSummarySection />
 
           {/* 1.8 เกณฑ์เครื่องหมายเชิดชูรายวิชา (แรงค์จากคะแนนกิจกรรม) — school_settings/course_rank_levels */}
           <CourseRankLevelsSection />
