@@ -21,6 +21,7 @@ import { Student, AttendanceStatus } from '../types';
 import { playCelebrationSound, playTickSound, playPointAwardSound } from '../lib/soundEffects';
 import { useStore } from '../store';
 import { useCurrentSemester } from '../hooks/useCurrentSemester';
+import { studentDisplayName } from '../lib/studentDisplayName';
 
 export interface ClassroomDeskGroup {
   id: string;
@@ -571,7 +572,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                     {/* Name & details */}
                     <div className="space-y-1.5 w-full">
                       <h3 className="font-bold text-base text-white group-hover:text-amber-300 transition-colors">
-                        {winner.title || ''}{winner.fullName || winner.name}
+                        {studentDisplayName(winner)}
                       </h3>
                       <div className="flex items-center justify-center gap-3 text-xs">
                         <span className="text-amber-300 font-semibold bg-amber-400/10 px-2.5 py-0.5 rounded-lg border border-amber-500/20">
