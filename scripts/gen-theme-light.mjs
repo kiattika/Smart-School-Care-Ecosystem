@@ -50,6 +50,10 @@ ${restore.join('\n')}
 :root[data-theme="light"] :is([class*="bg-cyan-"],[class*="bg-emerald-"],[class*="bg-rose-"],[class*="bg-blue-"],[class*="bg-indigo-"],[class*="bg-violet-"],[class*="bg-purple-"],[class*="bg-pink-"],[class*="bg-orange-"],[class*="bg-teal-"],[class*="bg-sky-"],[class*="bg-red-"],[class*="bg-green-"],[class*="bg-amber-"],[class*="bg-fuchsia-"]):is([class*="-500"],[class*="-600"],[class*="-700"],[class*="-800"]):not([class*="/"]) :is(.text-white, svg),
 :root[data-theme="light"] :is([class*="bg-cyan-"],[class*="bg-emerald-"],[class*="bg-rose-"],[class*="bg-blue-"],[class*="bg-indigo-"],[class*="bg-violet-"],[class*="bg-purple-"],[class*="bg-pink-"],[class*="bg-orange-"],[class*="bg-teal-"],[class*="bg-sky-"],[class*="bg-red-"],[class*="bg-green-"],[class*="bg-amber-"],[class*="bg-fuchsia-"]):is([class*="-500"],[class*="-600"],[class*="-700"],[class*="-800"]):not([class*="/"]).text-white { color: #ffffff; }
 
+/* ข้อความโทนอ่อนสุด text-<สี>-100 (ออกแบบสำหรับพื้นมืด เช่น กล่องหมายเหตุสีเหลือง) → ใช้เฉดเดียวกับ -200 ที่เข้มบนพื้นสว่าง
+   (ไม่เปลี่ยนตัวแปร --color-<สี>-100 เพราะ bg-/border-<สี>-100 ที่ตั้งใจให้อ่อนใช้ตัวแปรเดียวกัน) */
+${hues.map(h => `:root[data-theme="light"] .text-${h}-100 { color: var(--color-${h}-200); }`).join('\n')}
+
 /* พื้นหลังฮาร์ดโค้ด hex สีเข้ม (bg-[#0b0f19] ฯลฯ) และชั้นโปร่งขาว/ดำ */
 :root[data-theme="light"] [class*="bg-[#"] { background-color: var(--color-slate-900); }
 :root[data-theme="light"] [class*="border-white/"] { border-color: rgb(15 23 42 / 0.14); }
