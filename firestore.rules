@@ -451,7 +451,8 @@ service cloud.firestore {
                      hasRole('STUDENT_AFFAIRS') ||
                      hasRole('HOMEROOM_TEACHER') ||
                      hasRole('SUBJECT_TEACHER') ||
-                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
+                     (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid)) ||
+                     isParentOfStudent(resource.data.studentId); // ผู้ปกครองตามทะเบียน (query studentId) — บันทึก GPS เก่าไม่มี parentUid
       allow write: if hasRole('SUPER_ADMIN') ||
                       hasRole('HOMEROOM_TEACHER') ||
                       hasRole('SUBJECT_TEACHER') ||

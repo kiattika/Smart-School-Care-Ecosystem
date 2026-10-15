@@ -945,7 +945,8 @@ export async function saveGateAttendanceRecordFirestore(record: GateAttendanceRe
  */
 export function subscribeGateAttendanceLogs(
   onUpdate: (logs: GateAttendanceRecord[]) => void,
-  filter: { date?: string; parentUid?: string; studentUid?: string },
+  /** studentId = ผู้ปกครอง/นักเรียนตามทะเบียน (rules: isParentOfStudent/isSelfStudent) — ใช้ได้กับบันทึกเก่าที่ไม่มี parentUid ด้วย */
+  filter: { date?: string; parentUid?: string; studentUid?: string; studentId?: string },
 ): () => void {
   try {
     const col = collection(db, 'gate_attendance_logs');
@@ -953,6 +954,7 @@ export function subscribeGateAttendanceLogs(
     if (filter.date) clauses.push(where('date', '==', filter.date));
     if (filter.parentUid) clauses.push(where('parentUid', '==', filter.parentUid));
     if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
+    if (filter.studentId) clauses.push(where('studentId', '==', filter.studentId));
     if (clauses.length === 0) { onUpdate([]); return () => {}; }
     return onSnapshot(query(col, ...clauses), (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as GateAttendanceRecord));

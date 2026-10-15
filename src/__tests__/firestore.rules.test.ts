@@ -4014,6 +4014,21 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(getDocs(query(collection(studentDb, 'gate_attendance_logs'), where('studentUid', '==', 'gate-stu-uid'))));
     });
 
+    it('ผู้ปกครองตัวจริงตามทะเบียน LIST ด้วย studentId ได้ แม้บันทึกไม่มี parentUid (เช็คอิน GPS รุ่นเก่า); ผู้ปกครองคนอื่นไม่ได้', async () => {
+      const { parentUid: _omit, ...noParent } = LOG;
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/69501').set({ studentId: '69501', studentUid: 'gate-stu-uid', parentUid: 'gate-parent-uid', room: 'ม.5/8' });
+        await ctx.firestore().doc('students/69502').set({ studentId: '69502', studentUid: 'x', parentUid: 'other-parent', room: 'ม.5/8' });
+        await ctx.firestore().doc('gate_attendance_logs/g3').set(noParent);
+      });
+      const parentDb = asUser('gate-parent-uid', ['PARENT']).firestore();
+      const snap = await assertSucceeds(getDocs(query(collection(parentDb, 'gate_attendance_logs'), where('studentId', '==', '69501'))));
+      expect(snap.size).toBe(1);
+      await assertSucceeds(parentDb.doc('gate_attendance_logs/g3').get());
+      await assertFails(getDocs(query(collection(parentDb, 'gate_attendance_logs'), where('studentId', '==', '69502'))));
+      await assertFails(asUser('other-parent', ['PARENT']).firestore().doc('gate_attendance_logs/g3').get());
+    });
+
     it('lets a student write their own gate log (studentUid == auth.uid); denies writing for another student', async () => {
       const studentDb = asUser('gate-stu-uid', ['STUDENT']).firestore();
       await assertSucceeds(studentDb.doc('gate_attendance_logs/gs1').set(LOG));

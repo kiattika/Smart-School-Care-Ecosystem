@@ -79,7 +79,7 @@ export const QuickPointAwardModal: React.FC<Props> = ({ student, courseTitle, cu
             </span>
           </div>
           <div className="h-1.5 w-full rounded-full bg-slate-700 overflow-hidden">
-            <div className="h-full rounded-full" style={{ width: `${now.progressPct}%`, background: color }} />
+            <div className="h-full rounded-full" style={{ width: `${now.progressPct}%`, minWidth: currentPoints > 0 ? '0.5rem' : undefined, background: color }} />
           </div>
           <div className="text-[11px] text-slate-400">
             {now.next ? `อีก ${now.pointsToNext} คะแนน ถึงระดับ ${rankLabel(now.next)}` : 'ถึงระดับสูงสุดแล้ว'}

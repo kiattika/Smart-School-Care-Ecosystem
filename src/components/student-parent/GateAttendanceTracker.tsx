@@ -55,15 +55,17 @@ function GateAttendanceTrackerInner({ studentId, student: studentProp, isParentV
 
   // ประวัติผ่านประตูจริงจาก Firestore แบบ real-time — เดิมอ่านจาก store.gateAttendanceLogs
   // (session-local: ผู้ปกครองเห็นเฉพาะรายการที่เช็คอินในเซสชันเดียวกันเท่านั้น เปิดหน้าใหม่แล้วหาย)
-  // filter ฝั่ง query ให้ผ่าน firestore.rules: parentUid สำหรับผู้ปกครอง, studentUid สำหรับนักเรียน
+  // filter ฝั่ง query ให้ผ่าน firestore.rules: studentId สำหรับผู้ปกครอง (ตามทะเบียน), studentUid สำหรับนักเรียน
   const [gateAttendanceLogs, setGateAttendanceLogs] = useState<GateAttendanceRecord[]>([]);
+  // ผู้ปกครอง: query ด้วย studentId (rules ตรวจผู้ปกครองตัวจริงตามทะเบียน) — บันทึกจากการเช็คอิน GPS รุ่นเก่าไม่มี parentUid
+  const gateStudentId = studentProp?.studentId || studentId;
   useEffect(() => {
     if (!user?.uid) { setGateAttendanceLogs([]); return; }
     return subscribeGateAttendanceLogs(
       setGateAttendanceLogs,
-      isParentView ? { parentUid: user.uid } : { studentUid: user.uid },
+      isParentView ? { studentId: gateStudentId } : { studentUid: user.uid },
     );
-  }, [user?.uid, isParentView]);
+  }, [user?.uid, isParentView, gateStudentId]);
 
   const student = studentProp as Student;
   const logs = gateAttendanceLogs.filter(l => l.studentId === student.studentId);
