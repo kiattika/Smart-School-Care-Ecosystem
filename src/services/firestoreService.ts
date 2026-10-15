@@ -677,7 +677,7 @@ export async function getStudentsByClass(className: string): Promise<any[]> {
         fullName: data.fullName || data.name || `นักเรียน ${data.studentId || d.id}`,
         className: data.className || canonicalClass,
         room: data.className || canonicalClass,
-        avatar: data.avatar || data.photoUrl || '',
+        avatar: data.photoUrl || data.avatar || '',
         parentId: data.parentId || ''
       };
     });

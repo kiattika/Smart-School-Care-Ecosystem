@@ -43,7 +43,8 @@ function mapDocToStudent(id: string, data: any): Student {
   const fullName = rawFull || `${prefix}${firstName} ${lastName}`.trim() || `นักเรียน ${studentId}`;
   const attendance = data.attendance || {};
   // อย่าปล่อยให้ src="" (React จะ warn + เบราว์เซอร์โหลดหน้าซ้ำ) — ใช้รูป avatar generated เป็น fallback
-  const avatarUrl = data.avatar || data.photoUrl
+  // photoUrl (รูปที่นักเรียนเปลี่ยนใน "ตั้งค่าส่วนตัว"/แอดมินแก้) ต้องมาก่อน avatar เดิม ไม่งั้นทุกจุดที่ใช้ .avatar ค้างรูปเก่า
+  const avatarUrl = data.photoUrl || data.avatar
     || `https://api.dicebear.com/9.x/avataaars/svg?seed=${encodeURIComponent(studentId || fullName)}`;
 
   return {

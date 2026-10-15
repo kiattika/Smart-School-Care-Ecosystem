@@ -160,7 +160,7 @@ export function StudentManagementPage({ onGoToImport, onOpenIdRegistry }: { onGo
             parentEmail: data.parentEmail || '',
             parentMobile: data.parentMobile || '',
             photoUrl: data.photoUrl || data.avatar || '',
-            avatar: data.avatar || data.photoUrl || '',
+            avatar: data.photoUrl || data.avatar || '',
             status: data.status || 'ACTIVE',
             statusReason: data.statusReason || undefined,
             statusNote: data.statusNote || '',
