@@ -37,6 +37,7 @@ import { useStore } from '../store';
 import { Student, Course, GlobalCourse, UserRole } from '../types';
 import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
 import { normalizeEmail } from '../lib/normalizeEmail';
+import { buildExistingEmailIndex, staffEmailConflict } from '../lib/staffEmailConflict';
 import { IMPORT_TEMPLATES, templateFilename } from '../lib/importTemplates';
 import { summarizeUnlinkedTeachers } from '../lib/importUnlinkedSummary';
 import {
@@ -329,6 +330,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
 
     // 2. Standard / Legacy Row Validation
     const seenIds = new Set<string>();
+    const seenStaffEmails = new Map<string, string>();
+    const existingStaffEmails = buildExistingEmailIndex(realStaffList);
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const phoneRegex = /^0[0-9]{8,9}$/;
 
@@ -464,6 +467,13 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         } else if (!emailRegex.test(email)) {
           isValid = false;
           errors.push('รูปแบบอีเมลไม่ถูกต้อง');
+        } else {
+          // อีเมลซ้ำกับบุคลากรคนอื่น (คนละรหัส) → login ของคนนั้นถูกปฏิเสธ (AMBIGUOUS_RECORD) จึงไม่นำเข้า
+          const conflict = staffEmailConflict(teacherId, email, existingStaffEmails, seenStaffEmails);
+          if (conflict) {
+            isValid = false;
+            errors.push(conflict);
+          }
         }
 
         // บทบาท: ถ้า admin กรอกคอลัมน์ Roles มา → ใช้ตามนั้น
@@ -743,7 +753,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
     }
 
     // กันไม่ให้ import ก่อนข้อมูลอ้างอิงโหลดเสร็จ (COURSE→staff, PARENT→students)
-    if (importType === 'COURSE' && isStaffLoading) {
+    if ((importType === 'COURSE' || importType === 'TEACHER') && isStaffLoading) {
       setImportError('กำลังโหลดรายชื่อครูจากฐานข้อมูล กรุณารอสักครู่แล้วลองใหม่');
       return;
     }
@@ -1875,13 +1885,13 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               // COURSE ต้องรอ staff list โหลดเสร็จก่อน (ไม่งั้นจับคู่ครูพลาด);
               // PARENT ต้องรอ student IDs โหลดเสร็จก่อน (ไม่งั้น validate นักเรียนพลาด)
               const rosterLoading =
-                (importType === 'COURSE' && isStaffLoading) ||
+                ((importType === 'COURSE' || importType === 'TEACHER') && isStaffLoading) ||
                 (importType === 'PARENT' && isStudentIdsLoading);
               const parsing = !!file && !isValidated; // เลือกไฟล์แล้ว แต่ยังอ่าน/ตรวจไม่เสร็จ
               const disabled =
                 isImporting || rosterLoading || parsing || !file || validCount === 0 || !hasPermissionForCurrentType || impactBlocksImport;
               const label = rosterLoading
-                ? (importType === 'COURSE' ? 'กำลังโหลดรายชื่อครู...' : 'กำลังโหลดรายชื่อนักเรียน...')
+                ? (importType === 'COURSE' || importType === 'TEACHER' ? 'กำลังโหลดรายชื่อครู...' : 'กำลังโหลดรายชื่อนักเรียน...')
                 : parsing
                   ? 'กำลังอ่านและตรวจสอบไฟล์...'
                   : impactBlocksImport
