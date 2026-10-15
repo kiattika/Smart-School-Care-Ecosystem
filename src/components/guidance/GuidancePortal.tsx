@@ -6,6 +6,7 @@ import { StudentPicker } from '../shared/StudentPicker';
 import { AppointmentInbox } from '../appointments/AppointmentInbox';
 import { GuidanceInternshipSection } from '../internship/GuidanceInternshipSection';
 import { SdqTrendSection } from './SdqTrendSection';
+import { SdqSchoolOverviewLive } from '../sdq/SdqSchoolOverview';
 import { isLegacySdqCriteria } from '../../lib/sdq';
 import { filterSdqByYear, buildSdqTrend } from '../../lib/sdqTrend';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
@@ -390,6 +391,9 @@ export function GuidancePortal() {
                 <p className="text-[11px] text-slate-500" data-testid="sdq-without-impact">{screeningSummary.sdqWithoutImpact} ชุดในช่วงที่เลือกไม่มีข้อมูลผลกระทบ (บันทึกก่อนมีหน้าผลกระทบ) — ไม่นับในตัวเลขนี้</p>
               )}
             </div>
+
+            {/* สรุปผลคัดกรองทั้งโรงเรียน + บัญชีรายชื่อกลุ่มเสี่ยง/มีปัญหา (กดดู 3 มุมมอง / ประเมินซ้ำรอบที่ 2) */}
+            <SdqSchoolOverviewLive records={sdqAssessments} students={students} showNames loading={screeningsLoading} />
 
             {/* แนวโน้มรายด้านเทียบข้ามปีการศึกษา (2-3 ปีล่าสุด) */}
             <SdqTrendSection records={sdqAssessments} loading={screeningsLoading} />

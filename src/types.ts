@@ -807,6 +807,9 @@ export interface SDQAssessment {
   impactDomainScores?: { home: number; friends: number; classroom: number; leisure: number }; // แต่ละด้าน 0-2
   impactTotalScore?: number; // 0-10
   impactTriage?: 'NORMAL' | 'AT_RISK' | 'VULNERABLE'; // 0 ปกติ, 1-2 เสี่ยง, 3-10 มีปัญหา
+  // รอบการประเมิน: ไม่มี/1 = รอบแรก (ทุกฝ่าย 1 ครั้ง/ปี); 2 = ติดตามผลภาคเรียนที่ 2 (มุมมองครูเท่านั้น, id ลงท้าย _R2) — src/lib/sdqScreening.ts
+  round?: 1 | 2;
+  followUpReason?: string;
   assessmentDate: string;
   recommendations: string[];
 }

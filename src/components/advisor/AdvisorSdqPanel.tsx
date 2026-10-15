@@ -11,6 +11,11 @@ import { EMPTY_IMPACT_FORM, ImpactFormValues, SdqEntryForm } from '../shared/Sdq
 import { SdqStatusView } from '../shared/SdqStatusView';
 import { buildSdqRoomStatus } from '../../lib/sdqTrend';
 import { EMPTY_SDQ_ANSWERS } from '../shared/SdqQuestionnaireForm';
+import { SDQ_TRIAGE_CHIP } from '../shared/SdqStatusView';
+import { SDQ_TRIAGE_LABEL } from '../../lib/sdq';
+import { resultsOf, triangulate } from '../../lib/sdqScreening';
+import { SdqOnceNotice } from '../sdq/SdqOnceNotice';
+import { SdqStudentDetail } from '../sdq/SdqStudentDetail';
 
 /**
  * ครูที่ปรึกษากรอก SDQ ของนักเรียนในห้องตัวเอง (AdvisorPortal → เมนู "SDQ")
@@ -23,7 +28,7 @@ import { EMPTY_SDQ_ANSWERS } from '../shared/SdqQuestionnaireForm';
 export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: string; students: Student[]; studentsLoading: boolean }) {
   const user = useStore(s => s.user);
   const submitSDQAssessment = useStore(s => s.submitSDQAssessment);
-  const { academicYear, isConfigured, loading: yearLoading } = useCurrentSemester();
+  const { academicYear, term, isConfigured, loading: yearLoading } = useCurrentSemester();
   const yearReady = isConfigured && isValidAcademicYear(academicYear);
 
   const [all, setAll] = useState<SDQAssessment[]>([]);
@@ -43,11 +48,13 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
   const [showErrors, setShowErrors] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   const selected = students.find(s => s.studentId === selectedId) || null;
   const selectedDone = selected ? !!rowById.get(selected.studentId)?.byEvaluator.TEACHER : false;
 
-  const open = (id: string) => { setSelectedId(id); setAnswers(EMPTY_SDQ_ANSWERS); setImpact(EMPTY_IMPACT_FORM); setShowErrors(false); setResult(null); };
+  const open = (id: string) => { setSelectedId(id); setAnswers(EMPTY_SDQ_ANSWERS); setImpact(EMPTY_IMPACT_FORM); setShowErrors(false); setResult(null); setConfirmed(false); };
   const close = () => { setSelectedId(null); setAnswers(EMPTY_SDQ_ANSWERS); setImpact(EMPTY_IMPACT_FORM); setShowErrors(false); };
 
   const handleSave = async () => {
@@ -57,6 +64,7 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
     // ตรวจทั้ง 2 หน้า (ตอบครบ 25 ข้อ → ระบบบวก 5 ด้าน + ผลกระทบ) ก่อนบันทึก — ผิด/ไม่ครบ = แสดง error ต่อช่อง ไม่เขียน Firestore
     const built = buildSdqSubmissionFromAnswers(answers, impact, 'TEACHER');
     if (!built.ok) return;
+    if (!confirmed) { setResult({ kind: 'error', message: 'กรุณายืนยันว่าประเมินตามความเป็นจริงก่อนส่ง' }); return; }
     if (!yearReady) { setResult({ kind: 'error', message: 'ยังไม่ได้ตั้งปีการศึกษาปัจจุบัน — แจ้งผู้ดูแลระบบให้ตั้งที่หน้า "ปีการศึกษา & ล็อกระบบ"' }); return; }
     setSaving(true);
     try {
@@ -94,7 +102,7 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
             <span className="text-xs text-slate-400">ห้อง {room}</span>
           </div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2"><HeartPulse className="w-5 h-5 text-purple-400" /> แบบประเมินจุดแข็งและจุดอ่อน (SDQ) — มุมมองครู</h2>
-          <p className="text-[11px] text-slate-400 mt-1">กรอกคะแนนรายด้านของนักเรียนแต่ละคน 1 ครั้งต่อปีการศึกษา (เกณฑ์เดียวกับหน้าสุขภาพกาย-ใจของนักเรียน/ผู้ปกครอง และหน้าแนะแนว)</p>
+          <p className="text-[11px] text-slate-400 mt-1">ประเมินนักเรียนแต่ละคน 1 ครั้งต่อปีการศึกษา · ดูผลครบ 3 มุมมองและความสอดคล้องได้ที่ปุ่ม "ผล 3 มุมมอง" · ภาคเรียนที่ 2 ประเมินซ้ำได้สำหรับนักเรียนกลุ่มเสี่ยง/ดูแลใกล้ชิด</p>
         </div>
         <div className="text-right shrink-0">
           <div className="text-[10px] text-slate-400">ปีการศึกษา</div>
@@ -130,10 +138,11 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
             <p className="text-xs text-amber-300">นักเรียนคนนี้มีผลประเมินของครูที่ปรึกษาในปี {academicYear} แล้ว — แก้ไขภายหลังไม่ได้ (ติดต่อครูแนะแนวหรือผู้ดูแลระบบหากต้องแก้)</p>
           ) : (
             <>
+              <SdqOnceNotice confirmed={confirmed} onConfirmChange={setConfirmed} idPrefix="advisor-sdq" />
               <SdqEntryForm answers={answers} onAnswersChange={setAnswers} impact={impact} onImpactChange={setImpact} evaluatorType="TEACHER" disabled={saving} showErrors={showErrors} idPrefix="advisor-sdq" />
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={close} disabled={saving} className="px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5">ยกเลิก</button>
-                <button type="button" onClick={handleSave} disabled={saving || !yearReady}
+                <button type="button" onClick={handleSave} disabled={saving || !yearReady || !confirmed}
                   className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5">
                   {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} บันทึก SDQ
                 </button>
@@ -157,6 +166,7 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
                   <th className="px-4 py-2.5 font-medium">นักเรียน</th>
                   <th className="px-4 py-2.5 font-medium">ครูที่ปรึกษา (ปี {academicYear})</th>
                   <th className="px-4 py-2.5 font-medium">นักเรียน / ผู้ปกครอง</th>
+                  <th className="px-4 py-2.5 font-medium">ความสอดคล้อง 3 ฝ่าย</th>
                   <th className="px-4 py-2.5 font-medium text-right">ดำเนินการ</th>
                 </tr>
               </thead>
@@ -164,13 +174,19 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
                 {students.map((s) => {
                   const row = rowById.get(s.studentId);
                   const done = !!row?.byEvaluator.TEACHER;
-                  const chip = (t: SdqEvaluatorType) => (
-                    <span key={t} className={`px-1.5 py-0.5 rounded text-[10px] border ${row?.byEvaluator[t] ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' : 'bg-slate-800 text-slate-500 border-white/5'}`}>
-                      {t === 'STUDENT' ? 'นักเรียน' : 'ผู้ปกครอง'} {row?.byEvaluator[t] ? '✓' : '—'}
-                    </span>
-                  );
+                  const by = resultsOf(all, s.studentId, academicYear, 1);
+                  const tri = triangulate(by);
+                  const chip = (t: SdqEvaluatorType) => {
+                    const r = by[t];
+                    return (
+                      <span key={t} className={`px-1.5 py-0.5 rounded text-[10px] border ${r ? SDQ_TRIAGE_CHIP[r.triagingStatus] : 'bg-slate-800 text-slate-500 border-white/5'}`}>
+                        {t === 'STUDENT' ? 'นักเรียน' : 'ผู้ปกครอง'}: {r ? SDQ_TRIAGE_LABEL[r.triagingStatus] : '—'}
+                      </span>
+                    );
+                  };
                   return (
-                    <tr key={s.studentId} className={selectedId === s.studentId ? 'bg-purple-500/5' : 'hover:bg-white/[0.02]'}>
+                    <React.Fragment key={s.studentId}>
+                    <tr className={selectedId === s.studentId ? 'bg-purple-500/5' : 'hover:bg-white/[0.02]'}>
                       <td className="px-4 py-2.5 font-mono text-slate-400">{s.studentNo ?? '-'}</td>
                       <td className="px-4 py-2.5"><div className="font-semibold text-slate-100">{s.fullName || s.name}</div><div className="text-[10px] text-slate-500 font-mono">ID {s.studentId}</div></td>
                       <td className="px-4 py-2.5" data-testid={`sdq-status-${s.studentId}`}>
@@ -183,14 +199,25 @@ export function AdvisorSdqPanel({ room, students, studentsLoading }: { room: str
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-white/10 bg-slate-800 text-slate-300 text-[10px] font-bold"><Clock className="w-3 h-3" /> ยังไม่กรอก</span>
                         )}
                       </td>
-                      <td className="px-4 py-2.5"><div className="flex gap-1">{(['STUDENT', 'PARENT'] as const).map(chip)}</div></td>
+                      <td className="px-4 py-2.5"><div className="flex flex-wrap gap-1">{(['STUDENT', 'PARENT'] as const).map(chip)}</div></td>
+                      <td className="px-4 py-2.5 text-[11px] text-purple-300">{tri.title}</td>
                       <td className="px-4 py-2.5 text-right">
-                        <button type="button" onClick={() => open(s.studentId)}
-                          className={`px-3 py-1.5 rounded-lg text-[11px] font-bold ${done ? 'text-slate-300 bg-white/5 hover:bg-white/10' : 'text-white bg-purple-600 hover:bg-purple-500'}`}>
-                          {done ? 'ดูสถานะ' : 'กรอก SDQ'}
-                        </button>
+                        <div className="flex justify-end gap-1.5">
+                          {!done && (
+                            <button type="button" onClick={() => open(s.studentId)} className="px-3 py-1.5 rounded-lg text-[11px] font-bold text-white bg-purple-600 hover:bg-purple-500">กรอก SDQ</button>
+                          )}
+                          <button type="button" aria-expanded={detailId === s.studentId} onClick={() => setDetailId(detailId === s.studentId ? null : s.studentId)}
+                            className="px-3 py-1.5 rounded-lg text-[11px] font-bold text-slate-300 bg-white/5 hover:bg-white/10">ผล 3 มุมมอง</button>
+                        </div>
                       </td>
                     </tr>
+                    {detailId === s.studentId && (
+                      <tr><td colSpan={6} className="px-4 py-4 bg-slate-950/40">
+                        <SdqStudentDetail student={{ studentId: s.studentId, name: s.fullName || s.name, studentUid: s.studentUid }} records={all}
+                          academicYear={academicYear} term={term} yearReady={yearReady} canRound2 />
+                      </td></tr>
+                    )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

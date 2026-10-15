@@ -97,6 +97,28 @@ export function supervisionSection(rows: readonly SupervisionRow[]) {
   };
 }
 
+/**
+ * ผลคัดกรอง SDQ ทั้งโรงเรียน (ปีการศึกษาปัจจุบัน, รอบที่ 1, มุมมองครูที่ปรึกษา — ผู้ประเมินกลางเดียวกันทุกห้อง)
+ * ไม่แยกห้อง/ชั้น (ยืนยันจากโรงเรียน 15 ต.ค. 2569) — ตัวเลขรวมที่ซ่อนช่อง <5 เหมือนส่วนอื่น
+ */
+export interface SdqRow { evaluatorType?: unknown; academicYear?: unknown; round?: unknown; triagingStatus?: unknown; subscaleStatus?: unknown }
+export const SDQ_LEVELS: Record<string, string> = { NORMAL: 'ปกติ', AT_RISK: 'เสี่ยง', VULNERABLE: 'มีปัญหา' };
+export const SDQ_DIMENSIONS: Record<string, string> = { emotional: 'ด้านอารมณ์', conduct: 'ด้านความประพฤติ', hyperactivity: 'ด้านสมาธิสั้น/ไม่อยู่นิ่ง', peerProblems: 'ด้านความสัมพันธ์กับเพื่อน' };
+export function sdqSection(rows: readonly SdqRow[], academicYear: string) {
+  const mine = rows.filter((r) => r.evaluatorType === 'TEACHER' && r.academicYear === academicYear && r.round !== 2 && typeof r.triagingStatus === 'string' && SDQ_LEVELS[r.triagingStatus]);
+  const levels = (get: (r: SdqRow) => unknown, from: readonly SdqRow[]) =>
+    maskCounts(Object.fromEntries(Object.entries(SDQ_LEVELS).map(([k, label]) => [label, from.filter((r) => get(r) === k).length])));
+  const withSub = mine.filter((r) => r.subscaleStatus && typeof r.subscaleStatus === 'object');
+  return {
+    assessed: maskCell(mine.length),
+    overall: levels((r) => r.triagingStatus, mine),
+    /** จำนวน "เสี่ยง + มีปัญหา" ต่อด้าน (นับเฉพาะผลที่มีสถานะรายด้าน) */
+    concernByDimension: maskCounts(Object.fromEntries(Object.entries(SDQ_DIMENSIONS).map(([k, label]) => [
+      label, withSub.filter((r) => { const v = (r.subscaleStatus as Record<string, unknown>)[k]; return v === 'AT_RISK' || v === 'VULNERABLE'; }).length,
+    ]))),
+  };
+}
+
 export interface SubstituteRow {
   date?: unknown; status?: unknown; swapMode?: unknown; triggerType?: unknown;
   originalTeacherEmail?: unknown; substituteTeacherEmail?: unknown;
@@ -143,6 +165,8 @@ export interface PublicSummary {
   guidance: ReturnType<typeof guidanceSection>;
   supervision: (ReturnType<typeof supervisionSection> & { roundLabel: string }) | null;
   teaching: ReturnType<typeof teachingSection>;
+  /** เพิ่มภายหลัง — เอกสารเก่าไม่มี */
+  sdq?: ReturnType<typeof sdqSection>;
 }
 
 /** ครูที่ใช้งานอยู่ (ข้าม doc alias ที่ใช้อีเมลเป็น id เหมือน guidanceStatusLogic) */

@@ -33,6 +33,8 @@ export interface SdqTrendRecord {
   impactTotalScore?: number;
   impactTriage?: SdqTriage;
   impactDurationMonths?: string;
+  /** รอบการประเมิน — 2 = ติดตามผลภาคเรียนที่ 2 (sdqScreening.ts); ไม่มี = รอบ 1 */
+  round?: number;
 }
 
 /** สรุปผลกระทบ (ส่วนที่ 2) ต่อปี — นับเฉพาะชุดที่มีข้อมูลผลกระทบ */
@@ -88,6 +90,7 @@ export function buildSdqTrend(
   const latest = new Map<string, SdqTrendRecord>();
   for (const r of records) {
     if (evaluatorType !== 'ALL' && r.evaluatorType !== evaluatorType) continue;
+    if (r.round === 2) continue; // แนวโน้มข้ามปีใช้รอบที่ 1 (รอบติดตามผลแสดงแยก)
     if (!isValidAcademicYear(r.academicYear)) { legacyCount++; continue; }
     const key = `${r.studentId}|${r.evaluatorType}|${r.academicYear}`;
     const prev = latest.get(key);
@@ -177,7 +180,7 @@ export interface SdqRoomStatusRow {
 
 export function buildSdqRoomStatus(
   studentIds: readonly string[],
-  records: readonly Pick<SdqTrendRecord, 'studentId' | 'evaluatorType' | 'academicYear' | 'totalDifficultiesScore' | 'triagingStatus' | 'subscaleStatus' | 'criteriaVersion' | 'impactTotalScore' | 'impactTriage' | 'impactDurationMonths'>[],
+  records: readonly Pick<SdqTrendRecord, 'studentId' | 'evaluatorType' | 'academicYear' | 'round' | 'totalDifficultiesScore' | 'triagingStatus' | 'subscaleStatus' | 'criteriaVersion' | 'impactTotalScore' | 'impactTriage' | 'impactDurationMonths'>[],
   academicYear: string,
 ): { rows: SdqRoomStatusRow[]; teacherDone: number; total: number } {
   const rows: SdqRoomStatusRow[] = studentIds.map((studentId) => ({
@@ -187,7 +190,7 @@ export function buildSdqRoomStatus(
   }));
   const index = new Map(rows.map((r) => [r.studentId, r]));
   for (const rec of records) {
-    if (rec.academicYear !== academicYear) continue;
+    if (rec.academicYear !== academicYear || rec.round === 2) continue;
     const row = index.get(rec.studentId);
     if (!row) continue;
     row.byEvaluator[rec.evaluatorType] = true;

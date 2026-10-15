@@ -806,7 +806,8 @@ service cloud.firestore {
                      hasRole('GUIDANCE_COUNSELOR') ||
                      hasRole('HOMEROOM_TEACHER') ||
                      hasRole('EXECUTIVE') ||
-                     (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.respondentUid == request.auth.uid));
+                     (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.respondentUid == request.auth.uid)) ||
+                     isParentOfStudent(resource.data.studentId); // ผู้ปกครองเห็นภาพรวม 3 ฝ่ายของบุตรหลาน (query studentId)
 
       // studentUid ต้อง denormalize ตรงกับ students/{studentId} จริงเสมอ (ไม่ว่าใครเป็นผู้กรอก)
       // และ respondentUid ต้องเป็นผู้เขียนจริง แล้วผู้เขียนต้องเป็นหนึ่งใน 3 กลุ่มที่ยืนยันความสัมพันธ์
@@ -821,7 +822,16 @@ service cloud.firestore {
                        hasRole('GUIDANCE_COUNSELOR') ||
                        (
                          isCurrentAcademicYear(request.resource.data.academicYear) &&
-                         sdqId == request.resource.data.studentId + '_' + request.resource.data.evaluatorType + '_' + request.resource.data.academicYear &&
+                         // รอบ 1: id ตายตัว + ห้ามแอบใส่ round อื่น; รอบ 2 (ติดตามผล, sdqScreening.ts): มุมมองครู id ลงท้าย _R2
+                         // เฉพาะภาคเรียนที่ 2 และต้องมีเหตุผล (ผู้กรอกยังต้องผ่านเงื่อนไขครูที่ปรึกษาห้องนั้นด้านล่าง)
+                         ((sdqId == request.resource.data.studentId + '_' + request.resource.data.evaluatorType + '_' + request.resource.data.academicYear &&
+                           request.resource.data.get('round', 1) == 1) ||
+                          (sdqId == request.resource.data.studentId + '_TEACHER_' + request.resource.data.academicYear + '_R2' &&
+                           request.resource.data.get('round', 0) == 2 &&
+                           request.resource.data.get('followUpReason', '') is string &&
+                           request.resource.data.get('followUpReason', '').size() > 0 &&
+                           request.resource.data.get('followUpReason', '').size() <= 500 &&
+                           get(/databases/$(database)/documents/school_settings/academic_year).data.get('semester', '') == '2')) &&
                          // นักเรียนที่ยังไม่เชื่อมบัญชี (ไม่มี field studentUid) → ส่ง '' (ครูที่ปรึกษากรอกให้ได้ ไม่ต้องรอเชื่อมบัญชี);
                          // นักเรียนที่เชื่อมแล้วต้องตรงกับค่าจริงเสมอ — เทียบกับ doc ที่ไม่มีอยู่ get() จะ error = ปฏิเสธ
                          request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '') &&

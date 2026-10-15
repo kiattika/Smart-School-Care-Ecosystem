@@ -1,3 +1,4 @@
+import { SdqClassReportLive } from './components/sdq/SdqClassReport';
 import { cn, isSameRoom } from "./lib/utils";
 import { Student } from "./types";
 import React, { useState, useMemo, useEffect } from 'react';
@@ -882,6 +883,11 @@ export function AdvisorPortal() {
               </div>
               <StudentAnalyticsDashboard roomName={myRoom || 'No Room'} students={myStudents} />
               <AdvisorActivityPointsChart room={myRoom} students={myStudents} />
+              {myRoom && (
+                <div className="border-t border-white/10 pt-8">
+                  <SdqClassReportLive room={myRoom} students={myStudents.map(s => ({ studentId: s.studentId, name: s.fullName || s.name, studentNo: s.studentNo ?? null }))} />
+                </div>
+              )}
               <div className="border-t border-white/10 pt-8">
                 <AdvisorPortfolioReview homeroomClass={myRoom} />
               </div>
