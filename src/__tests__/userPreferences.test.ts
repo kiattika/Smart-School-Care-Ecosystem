@@ -131,4 +131,10 @@ describe('ธีมสว่าง + wiring', () => {
     const portal = readSource('src/StudentPortal.tsx');
     expect(portal).not.toMatch(/StudentProfilePhotoEditor|showPhotoEditor|เปลี่ยนรูปโปรไฟล์/);
   });
+  it('รูปนักเรียนทุกจุด: photoUrl มาก่อน avatar เดิมที่ชั้นข้อมูล (นักเรียนเปลี่ยนรูปแล้วเขียนแค่ photoUrl)', () => {
+    expect(readSource('src/hooks/useRealStudents.ts')).toContain('const avatarUrl = data.photoUrl || data.avatar');
+    expect(readSource('src/services/firestoreService.ts')).toContain("avatar: data.photoUrl || data.avatar || '',");
+    expect(readSource('src/components/StudentManagementPage.tsx')).toContain("avatar: data.photoUrl || data.avatar || '',");
+    expect(readSource('src/hooks/useRealStudents.ts')).not.toContain('data.avatar || data.photoUrl');
+  });
 });
