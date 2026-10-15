@@ -169,4 +169,9 @@ describe('ผูกกับโค้ดจริง', () => {
     expect(readSource('src/main.tsx')).toContain('installThemeTokens(loadCachedOverrides())');
     expect(readSource('src/App.tsx')).toContain('useThemeTokens(!!user)');
   });
+  it('ข้อความ/ไอคอนขาวบนปุ่มไล่สีทึบคงเป็นขาวในธีมสว่าง แม้คลาสมี "/" อื่น (เช่น border-white/10) แต่ไม่แตะไล่สีโปร่งใส', () => {
+    const css = buildThemeCss({});
+    expect(css).toContain('-600 to-"]');
+    expect(css).not.toMatch(/bg-gradient-to-"\]:not\(\[class\*="\/"\]\)/);
+  });
 });

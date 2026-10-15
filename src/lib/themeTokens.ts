@@ -315,7 +315,9 @@ function themeRules(theme: ThemeId, tk: Record<TokenKey, string>, overridden: Se
     css += `${line} { background-color: ${tk.lineBg}; }\n`;
     css += `${P} [class~="hover:bg-[#00A000]"]:hover, ${P} [class~="bg-[#00A000]"] { background-color: ${tk.lineHover}; }\n`;
     for (const a of ['10', '20']) css += `${P} [class~="bg-[#00B900]/${a}"] { background-color: color-mix(in srgb, ${tk.lineBg} ${a}%, transparent); }\n`;
-    css += `${line}.text-white, ${line} .text-white, ${P} [class*="bg-gradient-to-"]:not([class*="/"]).text-white, ${P} [class*="bg-gradient-to-"]:not([class*="/"]) .text-white { color: #ffffff; }\n`;
+    // ไล่สีทึบ = จุดเริ่ม/กลางเป็นเฉด 500–800 ไม่มี /โปร่งใส (ดูจาก "-600 to-" / "-500 via-"); ไม่ใช้ :not([class*="/"]) เพราะคลาสอื่นอย่าง border-white/10 ก็มี "/" ทำให้ไอคอนบนปุ่มไล่สีเป็นสีเข้ม
+    const solidGrad = `[class*="bg-gradient-to-"]:is([class*="-500 to-"],[class*="-600 to-"],[class*="-700 to-"],[class*="-800 to-"],[class*="-500 via-"],[class*="-600 via-"],[class*="-700 via-"])`;
+    css += `${line}.text-white, ${line} .text-white, ${P} ${solidGrad}.text-white, ${P} ${solidGrad} .text-white { color: #ffffff; }\n`;
   }
   // พื้นหลังฮาร์ดโค้ด bg-[#hex] (และ /80 ฯลฯ)
   for (const [hex, key] of Object.entries(HEX_CLASS_TOKEN)) {
