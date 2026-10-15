@@ -31,6 +31,7 @@ import { useStore } from '../store';
 import { useCurrentSemester } from '../hooks/useCurrentSemester';
 import { coursesInLogs, pointsByStudentForCourse } from '../lib/courseRank';
 import { cn } from '../lib/utils';
+import { studentDisplayName } from '../lib/studentDisplayName';
 import { motion } from 'motion/react';
 
 const PODIUM_COLORS = [
@@ -386,7 +387,7 @@ export const ClassroomLeaderboard: React.FC = () => {
                         />
                         <div>
                           <div className="font-bold text-white group-hover:text-amber-300 transition-colors">
-                            {student.title || ''}{student.fullName || student.name}
+                            {studentDisplayName(student)}
                           </div>
                           {student.nickname && (
                             <div className="text-[10px] text-amber-400 font-medium">
