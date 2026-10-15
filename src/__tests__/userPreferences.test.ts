@@ -120,4 +120,15 @@ describe('ธีมสว่าง + wiring', () => {
   it('ไฟล์ธีมสว่างตรงกับที่สคริปต์สร้าง (ห้ามแก้มือ)', () => {
     expect(readSource('src/theme-light.css').startsWith('/* สร้างโดย scripts/gen-theme-light.mjs')).toBe(true);
   });
+  it('รูปนักเรียนเปลี่ยนที่ "ตั้งค่าส่วนตัว" ที่เดียว: modal เขียนทั้ง prefs และ students/{id}.photoUrl, หน้านักเรียนไม่มีปุ่มกล้อง', () => {
+    const modal = readSource('src/components/settings/UserSettingsModal.tsx');
+    expect(modal).toContain('uploadProfilePhoto(uid, photo.blob)');
+    expect(modal).toContain('await updateStudentPhotoUrl(studentId, url)');
+    expect(modal).toContain("await updateStudentPhotoUrl(studentId, '')");
+    const nav = readSource('src/components/NavbarWithRoleSwitcher.tsx');
+    expect(nav).toContain("studentId={activeRole === 'STUDENT' ? authStudentId : undefined}");
+    expect(nav).not.toContain("showPhoto={activeRole !== 'STUDENT'}");
+    const portal = readSource('src/StudentPortal.tsx');
+    expect(portal).not.toMatch(/StudentProfilePhotoEditor|showPhotoEditor|เปลี่ยนรูปโปรไฟล์/);
+  });
 });
