@@ -62,3 +62,12 @@ body {
 }
 
 
+
+/* ป๊อปอัป/กล่องลอยทุกตัว (overlay: fixed inset-0 + items-center): ถ้ากล่องสูงกว่าจอโทรศัพท์ให้เลื่อนได้ทั้ง overlay
+   และ "safe center" กันกล่องที่สูงเกินถูกตัดหัว/ท้ายจนเลื่อนไปไม่ถึง (center ธรรมดา + overflow ตัดด้านบนทิ้ง) */
+.fixed.inset-0.items-center {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  align-items: center;
+  align-items: safe center;
+}
