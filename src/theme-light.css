@@ -139,6 +139,26 @@
 :root[data-theme="light"] :is([class*="bg-cyan-"],[class*="bg-emerald-"],[class*="bg-rose-"],[class*="bg-blue-"],[class*="bg-indigo-"],[class*="bg-violet-"],[class*="bg-purple-"],[class*="bg-pink-"],[class*="bg-orange-"],[class*="bg-teal-"],[class*="bg-sky-"],[class*="bg-red-"],[class*="bg-green-"],[class*="bg-amber-"],[class*="bg-fuchsia-"]):is([class*="-500"],[class*="-600"],[class*="-700"],[class*="-800"]):not([class*="/"]) :is(.text-white, svg),
 :root[data-theme="light"] :is([class*="bg-cyan-"],[class*="bg-emerald-"],[class*="bg-rose-"],[class*="bg-blue-"],[class*="bg-indigo-"],[class*="bg-violet-"],[class*="bg-purple-"],[class*="bg-pink-"],[class*="bg-orange-"],[class*="bg-teal-"],[class*="bg-sky-"],[class*="bg-red-"],[class*="bg-green-"],[class*="bg-amber-"],[class*="bg-fuchsia-"]):is([class*="-500"],[class*="-600"],[class*="-700"],[class*="-800"]):not([class*="/"]).text-white { color: #ffffff; }
 
+/* ข้อความโทนอ่อนสุด text-<สี>-100 (ออกแบบสำหรับพื้นมืด เช่น กล่องหมายเหตุสีเหลือง) → ใช้เฉดเดียวกับ -200 ที่เข้มบนพื้นสว่าง
+   (ไม่เปลี่ยนตัวแปร --color-<สี>-100 เพราะ bg-/border-<สี>-100 ที่ตั้งใจให้อ่อนใช้ตัวแปรเดียวกัน) */
+:root[data-theme="light"] .text-cyan-100 { color: var(--color-cyan-200); }
+:root[data-theme="light"] .text-emerald-100 { color: var(--color-emerald-200); }
+:root[data-theme="light"] .text-amber-100 { color: var(--color-amber-200); }
+:root[data-theme="light"] .text-rose-100 { color: var(--color-rose-200); }
+:root[data-theme="light"] .text-sky-100 { color: var(--color-sky-200); }
+:root[data-theme="light"] .text-blue-100 { color: var(--color-blue-200); }
+:root[data-theme="light"] .text-indigo-100 { color: var(--color-indigo-200); }
+:root[data-theme="light"] .text-violet-100 { color: var(--color-violet-200); }
+:root[data-theme="light"] .text-purple-100 { color: var(--color-purple-200); }
+:root[data-theme="light"] .text-pink-100 { color: var(--color-pink-200); }
+:root[data-theme="light"] .text-orange-100 { color: var(--color-orange-200); }
+:root[data-theme="light"] .text-teal-100 { color: var(--color-teal-200); }
+:root[data-theme="light"] .text-green-100 { color: var(--color-green-200); }
+:root[data-theme="light"] .text-red-100 { color: var(--color-red-200); }
+:root[data-theme="light"] .text-yellow-100 { color: var(--color-yellow-200); }
+:root[data-theme="light"] .text-lime-100 { color: var(--color-lime-200); }
+:root[data-theme="light"] .text-fuchsia-100 { color: var(--color-fuchsia-200); }
+
 /* พื้นหลังฮาร์ดโค้ด hex สีเข้ม (bg-[#0b0f19] ฯลฯ) และชั้นโปร่งขาว/ดำ */
 :root[data-theme="light"] [class*="bg-[#"] { background-color: var(--color-slate-900); }
 :root[data-theme="light"] [class*="border-white/"] { border-color: rgb(15 23 42 / 0.14); }

@@ -174,4 +174,9 @@ describe('ผูกกับโค้ดจริง', () => {
     expect(css).toContain('-600 to-"]');
     expect(css).not.toMatch(/bg-gradient-to-"\]:not\(\[class\*="\/"\]\)/);
   });
+  it('ธีมสว่างมีกฎ text-<สี>-100 → เฉด -200 (กล่องหมายเหตุสีเหลืองต้องอ่านออก) โดยไม่แตะ bg-/border-*-100', () => {
+    const css = readSource('src/theme-light.css');
+    expect(css).toContain(':root[data-theme="light"] .text-amber-100 { color: var(--color-amber-200); }');
+    expect(css).not.toMatch(/--color-amber-100:/);
+  });
 });
