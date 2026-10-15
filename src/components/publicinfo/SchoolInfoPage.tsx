@@ -14,6 +14,8 @@ interface Summary {
   guidance: { cases: PublicCell; resolved: PublicCell; byCategory: Counts };
   supervision: { roundLabel: string; observed: PublicCell; averagePercent: number | null; bands: Counts } | null;
   teaching: Record<string, { periods: PublicCell; teachers: PublicCell }>;
+  /** ผลคัดกรอง SDQ (มุมมองครูที่ปรึกษา รอบที่ 1) — เอกสารก่อนมีส่วนนี้ไม่มี */
+  sdq?: { assessed: PublicCell; overall: Counts; concernByDimension: Counts };
 }
 
 const TEACHING_LABEL: Record<string, string> = {
@@ -106,6 +108,14 @@ export function SchoolInfoPage() {
               </div>
               <Bars counts={data.guidance.byCategory} />
             </Card>
+            {data.sdq && (
+              <Card title={`ผลการคัดกรองพฤติกรรมนักเรียน (SDQ) ปีการศึกษา ${data.academicYear}`}>
+                <p className="text-xs text-slate-500 mb-2">ตามผลประเมินของครูที่ปรึกษา (รอบที่ 1) · ประเมินแล้ว {formatCell(data.sdq.assessed)} คน</p>
+                <Bars counts={data.sdq.overall} order={['ปกติ', 'เสี่ยง', 'มีปัญหา']} />
+                <p className="text-xs text-slate-600 mt-3 mb-1 font-semibold">จำนวนนักเรียนกลุ่มเสี่ยง/มีปัญหา แยกตามด้าน</p>
+                <Bars counts={data.sdq.concernByDimension} />
+              </Card>
+            )}
             <Card title="งานนิเทศการสอน">
               {data.supervision ? (
                 <>

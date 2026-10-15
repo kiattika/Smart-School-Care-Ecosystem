@@ -5,7 +5,7 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { FIRESTORE_DATABASE_ID } from './config';
 import {
   PublicSummary, activeTeacherCount, guidanceSection, infirmarySection, maskCell, semesterRange,
-  studentsSection, supervisionSection, teachingSection,
+  studentsSection, supervisionSection, teachingSection, sdqSection,
 } from './publicSummaryLogic';
 
 /**
@@ -32,8 +32,9 @@ export async function rebuildPublicSummary(): Promise<void> {
   const range = semesterRange(sem.academicYear, sem.term);
   const get = async (col: string) => (await db.collection(col).get()).docs.map((d) => ({ id: d.id, ...d.data() }) as any);
 
-  const [students, staff, visits, cases, subs, rounds] = await Promise.all([
+  const [students, staff, visits, cases, subs, rounds, sdq] = await Promise.all([
     get('students'), get('staff'), get('infirmary_visits'), get('guidance_counseling_cases'), get('substitute_assignments'), get('supervision_rounds'),
+    get('student_assessments_sdq'),
   ]);
 
   // รอบนิเทศล่าสุด (id = ปี_ภาค เรียงตามสตริงได้)
@@ -55,6 +56,7 @@ export async function rebuildPublicSummary(): Promise<void> {
     guidance: guidanceSection(cases, range),
     supervision,
     teaching: teachingSection(subs, range),
+    sdq: sdqSection(sdq, sem.academicYear),
   };
   await db.collection('public_summary').doc('current').set({ ...summary, updatedAt: FieldValue.serverTimestamp() });
 }

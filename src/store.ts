@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { selfieExpiresAt } from './lib/selfieRetention';
 import { format } from 'date-fns';
 import { isValidAcademicYear, sdqDocId } from './lib/sdq';
+import { sdqRound2DocId } from './lib/sdqScreening';
 import { nextClockValue } from './lib/appClock';
 import {
   StoreState, 
@@ -900,7 +901,8 @@ export const useStore = create<StoreState>((set, get) => ({
     const newSDQ: SDQAssessment = {
       ...sdq,
       // id ตายตัวต่อ (นักเรียน, ผู้ประเมิน, ปี) — กรอกซ้ำในปีเดียวกันชนกับเอกสารเดิม (rules ห้ามผู้กรอกแก้/ทับ)
-      id: sdqDocId(sdq.studentId, sdq.evaluatorType, sdq.academicYear),
+      // รอบที่ 2 (ติดตามผล) = มุมมองครูเท่านั้น id ลงท้าย _R2 (rules ตรวจภาคเรียนที่ 2 + เหตุผล)
+      id: sdq.round === 2 ? sdqRound2DocId(sdq.studentId, sdq.academicYear) : sdqDocId(sdq.studentId, sdq.evaluatorType, sdq.academicYear),
       assessmentDate: format(new Date(), 'yyyy-MM-dd')
     };
     await saveSDQAssessmentFirestore(newSDQ);

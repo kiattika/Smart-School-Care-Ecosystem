@@ -26,7 +26,11 @@ import { EMPTY_SDQ_ANSWERS } from '../shared/SdqQuestionnaireForm';
 import { SdqAnswers } from '../../lib/sdqQuestionnaire';
 import { SdqEntryForm, EMPTY_IMPACT_FORM, ImpactFormValues } from '../shared/SdqEntryForm';
 import { buildSdqSubmissionFromAnswers } from '../../lib/sdqSubmission';
-import { SdqStatusView } from '../shared/SdqStatusView';
+import { SdqResultCard, SdqLevelCard } from '../sdq/SdqResultCard';
+import { SdqTriangulationBox } from '../sdq/SdqTriangulationBox';
+import { SdqOnceNotice } from '../sdq/SdqOnceNotice';
+import { SDQ_EVALUATORS, hasRound1, resultsOf, triangulate } from '../../lib/sdqScreening';
+import { SDQ_TRIAGE_LABEL } from '../../lib/sdq';
 import { StudentNineQSection } from './StudentNineQSection';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { acknowledgeInfirmaryVisit, subscribeInfirmaryVisits, subscribeSDQAssessments, subscribeSemesterHealthLogs } from '../../services/firestoreService';
@@ -140,17 +144,17 @@ function HealthMentalWellbeingModuleInner({
   }, [user?.uid, isParentView]);
 
   // ผลประเมิน SDQ — real-time เช่นกัน แทน state.sdqAssessments ของ Zustand (ไม่เคยมี listener ผูกไว้)
-  // นักเรียนเจ้าของเห็นครบ 3 มุมมอง (studentUid==ตัวเอง); ผู้ปกครองเห็นเฉพาะรายการที่ตัวเองกรอกเอง
-  // (rules ยังไม่เปิดให้เห็นมุมมองอื่นของครอบครัวเดียวกัน — ดูคำอธิบาย scope ในคำตอบ)
+  // นักเรียนเจ้าของอ่านด้วย studentUid; ผู้ปกครองตัวจริงอ่านด้วย studentId ของบุตรหลาน (rules: isParentOfStudent)
+  // หน้าจอแสดงแบบ "ภาพรวม": ผลของตัวเองเต็ม ฝ่ายอื่นเฉพาะระดับ (ยืนยันจากโรงเรียน 15 ต.ค. 2569) — ดู SdqFamilyView ด้านล่าง
   const [sdqAssessments, setSdqAssessments] = useState<SDQAssessment[]>([]);
   useEffect(() => {
     if (!user?.uid) { setSdqAssessments([]); return; }
     const unsubscribe = subscribeSDQAssessments(
       setSdqAssessments,
-      isParentView ? { respondentUid: user.uid } : { studentUid: user.uid }
+      isParentView ? { studentId } : { studentUid: user.uid }
     );
     return () => unsubscribe();
-  }, [user?.uid, isParentView]);
+  }, [user?.uid, isParentView, studentId]);
 
   // น้ำหนัก/ส่วนสูงรายภาคเรียน — real-time จาก Firestore (student_semester_health) แทนตัวเลข mock
   // ตายตัวเดิม (175cm/65kg). นักเรียนกรอกเอง (ยืนยันจากโรงเรียน) — ดู SemesterHealthSelfReportForm
@@ -197,6 +201,7 @@ function HealthMentalWellbeingModuleInner({
   const [sdqSubmitSuccess, setSdqSubmitSuccess] = useState(false);
   const [saved2QError, setSaved2QError] = useState<string | null>(null);
   const [sdqSubmitError, setSdqSubmitError] = useState<string | null>(null);
+  const [sdqConfirmed, setSdqConfirmed] = useState(false);
 
   // ตัวเลขล่าสุดจาก Firestore จริง — ไม่มี fallback mock อีกต่อไป (null = ยังไม่เคยกรอก → แสดง empty state)
   const { doc: bloodDoc } = useStudentBloodType(studentId);
@@ -234,7 +239,8 @@ function HealthMentalWellbeingModuleInner({
       setSdqSubmitError('ยังไม่ได้ตั้งปีการศึกษาปัจจุบัน — ติดต่อผู้ดูแลระบบก่อนบันทึก SDQ');
       return;
     }
-    const alreadyDone = studentSDQs.some(s => s.evaluatorType === sdqEvaluator && s.academicYear === currentAcademicYear);
+    if (!sdqConfirmed) { setSdqSubmitError('กรุณายืนยันว่าตอบตามความเป็นจริงก่อนส่ง'); return; }
+    const alreadyDone = hasRound1(studentSDQs, student.studentId, sdqEvaluator, currentAcademicYear);
     if (alreadyDone) {
       setSdqSubmitError(`มีผลประเมิน SDQ ของมุมมองนี้ในปีการศึกษา ${currentAcademicYear} แล้ว — กรอกซ้ำในปีเดียวกันไม่ได้ (แก้ไขได้โดยครูแนะแนว/ผู้ดูแลระบบ)`);
       return;
@@ -684,93 +690,31 @@ function HealthMentalWellbeingModuleInner({
               </div>
             </div>
 
-            {/* 3 Columns for Student, Teacher, Parent */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {studentSDQs.map((sdq) => (
-                <div
-                  key={sdq.id}
-                  className="bg-slate-800/40 border border-slate-800 rounded-2xl p-4 space-y-3.5 hover:border-purple-500/30 transition-all"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      sdq.evaluatorType === 'STUDENT' ? 'bg-blue-500/20 text-blue-300' :
-                      sdq.evaluatorType === 'TEACHER' ? 'bg-emerald-500/20 text-emerald-300' :
-                      'bg-amber-500/20 text-amber-300'
-                    }`}>
-                      {sdq.evaluatorType === 'STUDENT' ? 'มุมมองนักเรียน' :
-                       sdq.evaluatorType === 'TEACHER' ? 'มุมมองครู' : 'มุมมองผู้ปกครอง'}
-                    </span>
-                    <span className="text-[10px] text-slate-400">{sdq.assessmentDate}</span>
+            {/* ภาพรวม 3 ฝ่าย: ผลของตัวเองเต็ม ฝ่ายอื่นเฉพาะระดับ + ความสอดคล้อง (ไม่แสดงแนวทางของครู) */}
+            {!academicYearConfigured ? (
+              <p className="text-xs text-amber-300">ยังไม่ได้ตั้งปีการศึกษาปัจจุบัน — ติดต่อผู้ดูแลระบบ</p>
+            ) : (() => {
+              const by = resultsOf<SDQAssessment>(studentSDQs, student.studentId, currentAcademicYear, 1);
+              const followUp = resultsOf<SDQAssessment>(studentSDQs, student.studentId, currentAcademicYear, 2).TEACHER;
+              return (
+                <div className="space-y-4" data-testid="sdq-family-overview">
+                  <p className="text-[11px] text-slate-400">ปีการศึกษา {currentAcademicYear} · ผลของ{isParentView ? 'ท่าน' : 'ตัวเอง'}แสดงละเอียด ส่วนผลของฝ่ายอื่นแสดงเป็นภาพรวมระดับเท่านั้น</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {SDQ_EVALUATORS.map(e => (
+                      <div key={e}>
+                        {e === sdqEvaluator && by[e] ? <SdqResultCard sdq={by[e]!} /> : <SdqLevelCard evaluator={e} sdq={by[e]} />}
+                      </div>
+                    ))}
                   </div>
-
-                  <h4 className="text-xs font-bold text-slate-200 truncate">{sdq.evaluatorName}</h4>
-
-                  {/* Subscale Progress Bars */}
-                  <div className="space-y-2 text-xs">
-                    <div>
-                      <div className="flex justify-between text-[11px] mb-1">
-                        <span className="text-slate-400">1. ด้านอารมณ์ (Emotional)</span>
-                        <span className="font-bold text-slate-200">{sdq.subscaleScores.emotional}/10</span>
-                      </div>
-                      <div className="w-full bg-slate-900 rounded-full h-1.5">
-                        <div className="bg-purple-500 h-full rounded-full" style={{ width: `${sdq.subscaleScores.emotional * 10}%` }}></div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-[11px] mb-1">
-                        <span className="text-slate-400">2. ด้านความประพฤติ (Conduct)</span>
-                        <span className="font-bold text-slate-200">{sdq.subscaleScores.conduct}/10</span>
-                      </div>
-                      <div className="w-full bg-slate-900 rounded-full h-1.5">
-                        <div className="bg-indigo-500 h-full rounded-full" style={{ width: `${sdq.subscaleScores.conduct * 10}%` }}></div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-[11px] mb-1">
-                        <span className="text-slate-400">3. ด้านสมาธิสั้น (Hyperactivity)</span>
-                        <span className="font-bold text-slate-200">{sdq.subscaleScores.hyperactivity}/10</span>
-                      </div>
-                      <div className="w-full bg-slate-900 rounded-full h-1.5">
-                        <div className="bg-blue-500 h-full rounded-full" style={{ width: `${sdq.subscaleScores.hyperactivity * 10}%` }}></div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-[11px] mb-1">
-                        <span className="text-slate-400">4. ด้านเพื่อน (Peer Problems)</span>
-                        <span className="font-bold text-slate-200">{sdq.subscaleScores.peerProblems}/10</span>
-                      </div>
-                      <div className="w-full bg-slate-900 rounded-full h-1.5">
-                        <div className="bg-teal-500 h-full rounded-full" style={{ width: `${sdq.subscaleScores.peerProblems * 10}%` }}></div>
-                      </div>
-                    </div>
-
-                    <div className="pt-1">
-                      <div className="flex justify-between text-[11px] mb-1">
-                        <span className="text-emerald-400 font-bold">5. จุดแข็งทางสังคม (Prosocial)</span>
-                        <span className="font-bold text-emerald-400">{sdq.subscaleScores.prosocial}/10</span>
-                      </div>
-                      <div className="w-full bg-slate-900 rounded-full h-1.5">
-                        <div className="bg-emerald-400 h-full rounded-full" style={{ width: `${sdq.subscaleScores.prosocial * 10}%` }}></div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-2.5 bg-slate-900/60 rounded-xl border border-slate-800 text-[11px] space-y-1">
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-400">คะแนนปัญหารวม:</span>
-                      <span className="font-extrabold text-white">{sdq.totalDifficultiesScore}/40</span>
-                    </div>
-                    {/* เดิมแสดงข้อความ "ปกติ" ตายตัวทุกใบ ไม่ว่าคะแนนเท่าไร — ตอนนี้แสดงผลแปลจริงตามเกณฑ์ของผู้ประเมินคนนั้น */}
-                    <SdqStatusView rec={sdq} />
-                  </div>
+                  <SdqTriangulationBox tri={triangulate(by)} showStaffAction={false} />
+                  {followUp && (
+                    <p className="text-[11px] text-slate-300" data-testid="sdq-followup-level">ติดตามผลภาคเรียนที่ 2 (ครูประเมินซ้ำ): <b>{SDQ_TRIAGE_LABEL[followUp.triagingStatus]}</b></p>
+                  )}
                 </div>
-              ))}
-            </div>
+              );
+            })()}
 
-            {/* Quick Interactive SDQ Save */}
+            {/* ฟอร์มของตัวเอง — 1 ครั้งต่อปีการศึกษา ส่งแล้วปิดฟอร์ม */}
             <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-4 space-y-3">
               {sdqSubmitSuccess && (
                 <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
@@ -784,24 +728,33 @@ function HealthMentalWellbeingModuleInner({
                   <span>{sdqSubmitError}</span>
                 </div>
               )}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <Sparkles className="w-5 h-5 text-purple-400 shrink-0" />
-                  <p className="text-xs text-slate-300">
-                    บันทึกผลการประเมิน SDQ ในบทบาท <span className="font-bold text-purple-300">{sdqEvaluator}</span>
-                    {academicYearConfigured && <> · ปีการศึกษา {currentAcademicYear} (1 ครั้งต่อบทบาทต่อปี)</>}
-                  </p>
-                </div>
-              </div>
-              <SdqEntryForm answers={sdqAnswers} onAnswersChange={setSdqAnswers} impact={sdqImpact} onImpactChange={setSdqImpact} evaluatorType={sdqEvaluator} showErrors={sdqShowErrors} idPrefix="hmw-sdq" />
-              <div className="flex justify-end">
-                <button
-                  onClick={handleSaveSDQ}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all shadow cursor-pointer shrink-0"
-                >
-                  บันทึกการประเมิน SDQ
-                </button>
-              </div>
+              {academicYearConfigured && hasRound1(studentSDQs, student.studentId, sdqEvaluator, currentAcademicYear) ? (
+                <p className="text-xs text-slate-300 flex items-center gap-2" data-testid="sdq-form-closed">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  {isParentView ? 'ท่าน' : 'คุณ'}ประเมิน SDQ ของปีการศึกษา {currentAcademicYear} แล้ว — แบบประเมินปิดแล้ว ประเมินได้อีกครั้งในปีการศึกษาถัดไป
+                </p>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3">
+                    <Sparkles className="w-5 h-5 text-purple-400 shrink-0" />
+                    <p className="text-xs text-slate-300">
+                      แบบประเมิน SDQ {isParentView ? 'ฉบับผู้ปกครอง' : 'ฉบับนักเรียนประเมินตนเอง'}
+                      {academicYearConfigured && <> · ปีการศึกษา {currentAcademicYear}</>}
+                    </p>
+                  </div>
+                  <SdqOnceNotice confirmed={sdqConfirmed} onConfirmChange={setSdqConfirmed} idPrefix="hmw-sdq" />
+                  <SdqEntryForm answers={sdqAnswers} onAnswersChange={setSdqAnswers} impact={sdqImpact} onImpactChange={setSdqImpact} evaluatorType={sdqEvaluator} showErrors={sdqShowErrors} idPrefix="hmw-sdq" />
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleSaveSDQ}
+                      disabled={!sdqConfirmed}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all shadow cursor-pointer shrink-0"
+                    >
+                      ส่งแบบประเมิน SDQ (ครั้งเดียวต่อปี)
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>

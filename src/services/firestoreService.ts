@@ -1604,11 +1604,13 @@ export async function saveSDQAssessmentFirestore(sdq: SDQAssessment): Promise<vo
  *    มุมมองอื่นของครอบครัวเดียวกัน — เป็นการตัดสินใจ scope แบบระมัดระวังไว้ก่อน ดูคำอธิบายในคำตอบ) */
 export function subscribeSDQAssessments(
   onUpdate: (assessments: SDQAssessment[]) => void,
-  filter: { studentUid?: string; respondentUid?: string }
+  /** studentId = ผู้ปกครองตัวจริงตามทะเบียน (rules: isParentOfStudent) เห็นผลทั้ง 3 ฝ่ายของบุตรหลาน */
+  filter: { studentUid?: string; respondentUid?: string; studentId?: string }
 ): () => void {
   try {
     const col = collection(db, 'student_assessments_sdq');
     const clauses = [];
+    if (filter.studentId) clauses.push(where('studentId', '==', filter.studentId));
     if (filter.studentUid) clauses.push(where('studentUid', '==', filter.studentUid));
     if (filter.respondentUid) clauses.push(where('respondentUid', '==', filter.respondentUid));
     if (clauses.length === 0) { onUpdate([]); return () => {}; }

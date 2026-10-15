@@ -53,6 +53,7 @@ import { ExecutiveLearnerAnalytics } from './components/ExecutiveLearnerAnalytic
 import { ExecutiveEngagementDashboard } from './components/ExecutiveEngagementDashboard';
 import { useStore } from './store';
 import { useRealStudents } from './hooks/useRealStudents';
+import { SdqSchoolOverviewLive } from './components/sdq/SdqSchoolOverview';
 import { useSchoolHomeVisitData } from './hooks/useHomeVisitData';
 import { HomeVisitSummaryPanel } from './components/homevisit/HomeVisitSummaryPanel';
 import { ActivityOverviewPanel } from './components/stats/TeacherStatsPanels';
@@ -608,6 +609,8 @@ export function ExecutivePortal() {
 
           {activeTab === 'health' && (
             <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative z-10">
+              {/* สรุปผลคัดกรอง SDQ ทั้งโรงเรียน/รายห้อง — ตัวเลขรวมเท่านั้น ไม่แสดงรายชื่อ */}
+              <SdqSchoolOverviewLive records={sdqAssessments} students={students} showNames={false} />
               {/* TASK 5 (audit): เดิม tab นี้ทั้งหมดเป็นข้อมูลปลอม — malnutrition/dental/vision % คงที่
                   (ไม่มีฟิลด์จริงในระบบเลย, ตรวจสอบแล้ว SemesterHealthRecord/height/weight/bmi มาจาก
                   mockStudentParentData.ts เท่านั้น ไม่เคยเขียนลง Firestore จริง), กราฟแจกแจงดัชนีมวลกาย

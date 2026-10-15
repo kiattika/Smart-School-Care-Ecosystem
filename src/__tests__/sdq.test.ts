@@ -201,7 +201,9 @@ describe('wiring guards', () => {
   it('the student/parent module shows the real result (no hardcoded "ปกติ (Normal)") and no hardcoded default scores', () => {
     const s = src('src/components/student-parent/HealthMentalWellbeingModule.tsx');
     expect(s).not.toContain('ปกติ (Normal)');
-    expect(s).toContain('<SdqStatusView rec={sdq} />');
+    // ผลแสดงผ่านการ์ดกลาง (SdqResultCard → SdqStatusView) และการ์ดระดับของฝ่ายอื่น
+    expect(s).toContain('<SdqResultCard sdq={by[e]!} />');
+    expect(src('src/components/sdq/SdqResultCard.tsx')).toContain('<SdqStatusView rec={sdq} />');
     expect(s).not.toMatch(/emotional:\s*2,\s*\n?\s*conduct:\s*1/);
     expect(s).toContain('useState<SdqAnswers>(EMPTY_SDQ_ANSWERS)');
     expect(s).toContain('academicYear: currentAcademicYear');
@@ -209,7 +211,8 @@ describe('wiring guards', () => {
 
   it('the store derives the id from (student, evaluator, year) and refuses a missing year', () => {
     const s = src('src/store.ts');
-    expect(s).toContain('id: sdqDocId(sdq.studentId, sdq.evaluatorType, sdq.academicYear)');
+    expect(s).toContain(': sdqDocId(sdq.studentId, sdq.evaluatorType, sdq.academicYear)');
+    expect(s).toContain("sdq.round === 2 ? sdqRound2DocId(sdq.studentId, sdq.academicYear)");
     expect(s).toContain('isValidAcademicYear(sdq.academicYear)');
   });
 

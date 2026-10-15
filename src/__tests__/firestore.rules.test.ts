@@ -3221,6 +3221,49 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         await assertFails(teacher().doc(sdqPath('TEACHER')).set(sdqDoc({ ...base, academicYear: '2568' })));
       });
 
+      // ── รอบที่ 2 (ติดตามผล ภาคเรียนที่ 2) + ผู้ปกครองเห็นภาพรวม 3 ฝ่าย (sdqScreening.ts) ──
+      it('ROUND 2: homeroom teacher re-assesses (TEACHER, _R2 id, round 2, reason) only in semester 2; students/parents cannot', async () => {
+        await seed();
+        const teacher = () => asUser(HR_TEACHER_UID, ['HOMEROOM_TEACHER'], { staffId: HR_TEACHER_UID }).firestore();
+        const r2Path = `student_assessments_sdq/${STU_ID}_TEACHER_${YEAR}_R2`;
+        const r2: Record<string, unknown> = sdqDoc({ respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER', evaluatorName: 'ครู', round: 2, followUpReason: 'อยู่ระหว่างการดูแลใกล้ชิด' });
+        // ภาคเรียนที่ 1 → ปฏิเสธ
+        await assertFails(teacher().doc(r2Path).set(r2));
+        await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('school_settings/academic_year').set({ academicYear: YEAR, semester: '2' }); });
+        // ไม่มีเหตุผล / round ผิด / evaluator ผิด → ปฏิเสธ
+        const { followUpReason: _r, ...noReason } = r2;
+        await assertFails(teacher().doc(r2Path).set(noReason));
+        await assertFails(teacher().doc(r2Path).set({ ...r2, followUpReason: '' }));
+        await assertFails(teacher().doc(r2Path).set({ ...r2, round: 1 }));
+        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc(`student_assessments_sdq/${STU_ID}_STUDENT_${YEAR}_R2`).set(
+          sdqDoc({ respondentUid: STU_UID, round: 2, followUpReason: 'x' })));
+        await assertFails(asUser(PARENT_UID, ['PARENT']).firestore().doc(r2Path).set({ ...r2, respondentUid: PARENT_UID }));
+        // ครูห้องอื่น → ปฏิเสธ; ครูที่ปรึกษาห้องนั้น → ผ่าน; ทำซ้ำ (ทับ) → ปฏิเสธ
+        await assertFails(asUser('other-hr', ['HOMEROOM_TEACHER'], { staffId: 'other-hr' }).firestore().doc(r2Path).set({ ...r2, respondentUid: 'other-hr' }));
+        await assertSucceeds(teacher().doc(r2Path).set(r2));
+        await assertFails(teacher().doc(r2Path).set({ ...r2, followUpReason: 'แก้' }));
+        // ครูแนะแนวประเมินซ้ำได้ (สิทธิ์เดิมของ GUIDANCE_COUNSELOR)
+        await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(r2Path).delete(); });
+        await assertSucceeds(asUser('gc-uid', ['GUIDANCE_COUNSELOR']).firestore().doc(r2Path).set({ ...r2, respondentUid: 'gc-uid' }));
+      });
+
+      it('ROUND 1 cannot be smuggled in as round 2 (round field must be absent/1 on the normal id)', async () => {
+        await seed();
+        await assertFails(asUser(STU_UID, ['STUDENT']).firestore().doc(sdqPath('STUDENT')).set(sdqDoc({ respondentUid: STU_UID, round: 2 })));
+      });
+
+      it('the real linked parent can LIST all three perspectives of their child by studentId; another parent cannot', async () => {
+        await seed();
+        await testEnv.withSecurityRulesDisabled(async (ctx) => {
+          await ctx.firestore().doc(sdqPath('TEACHER')).set(sdqDoc({ respondentUid: HR_TEACHER_UID, evaluatorType: 'TEACHER' }));
+          await ctx.firestore().doc(sdqPath('STUDENT')).set(sdqDoc({ respondentUid: STU_UID }));
+        });
+        const parentDb = asUser(PARENT_UID, ['PARENT']).firestore();
+        const snap = await assertSucceeds(getDocs(query(collection(parentDb, 'student_assessments_sdq'), where('studentId', '==', STU_ID))));
+        expect(snap.size).toBe(2);
+        await assertFails(getDocs(query(collection(asUser('other-parent', ['PARENT']).firestore(), 'student_assessments_sdq'), where('studentId', '==', STU_ID))));
+      });
+
       it('no school_settings/academic_year configured → respondents are refused (the year is never guessed)', async () => {
         await seed();
         await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('school_settings/academic_year').delete(); });
