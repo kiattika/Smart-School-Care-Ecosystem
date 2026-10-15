@@ -14,6 +14,24 @@
   }
 }
 
+/* สีป้ายบทบาท (ROLE_VISUALS) — ค่าเริ่มต้น = สีเดิม; ค่าต่อธีมมาจาก src/lib/themeTokens.ts (แอดมินแก้ได้ที่หน้า "ธีมสี") */
+:root {
+  --role-super-admin: var(--color-rose-400);
+  --role-executive: var(--color-blue-400);
+  --role-head-of-department: var(--color-amber-400);
+  --role-academic-head: var(--color-orange-400);
+  --role-deputy-director-academic: var(--color-violet-400);
+  --role-director: var(--color-red-400);
+  --role-homeroom-teacher: var(--color-emerald-400);
+  --role-subject-teacher: var(--color-indigo-400);
+  --role-supervisory-teacher: var(--color-teal-400);
+  --role-infirmary-staff: var(--color-rose-400);
+  --role-guidance-counselor: var(--color-purple-400);
+  --role-finance-staff: var(--color-emerald-400);
+  --role-parent: var(--color-amber-400);
+  --role-student: var(--color-sky-400);
+}
+
 /* ขนาดตัวอักษรที่ผู้ใช้เลือก (ตั้งค่าส่วนตัว) — Tailwind ใช้ rem ทั้งหมด จึงขยายทั้งหน้าพร้อมกัน */
 html[data-text-scale="large"] { font-size: 112.5%; }
 html[data-text-scale="xlarge"] { font-size: 125%; }

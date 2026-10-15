@@ -28,6 +28,7 @@ import { useAppClock } from './hooks/useAppClock';
 import { MobileApp } from './mobile/MobileApp';
 import { isMobilePath } from './lib/pwa';
 import { useMyPreferences } from './hooks/useMyPreferences';
+import { useThemeTokens } from './hooks/useThemeTokens';
 
 export default function App() {
   const { user, setUser } = useStore();
@@ -40,6 +41,8 @@ export default function App() {
 
   // ธีม/ขนาดตัวอักษรส่วนตัว — ใช้ทั้งหน้า Login (ค่าจากเครื่อง) และหลังล็อกอิน (ค่าจากบัญชี) รวมหน้ามือถือ /m
   useMyPreferences(user?.uid);
+  // โทเคนสีของธีมที่แอดมินแก้ (school_settings/theme_tokens)
+  useThemeTokens(!!user);
 
   // นาฬิกาของแอป (store.currentDate) เดินตามเวลาจริง — ทุก 30 วินาที + ทันทีเมื่อกลับมาที่แท็บ
   useAppClock();

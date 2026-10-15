@@ -747,6 +747,20 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       );
     });
 
+    // school_settings/theme_tokens — โทเคนสีของธีม (หน้า "ธีมสี" ของแอดมิน): ทุกคนที่ล็อกอินอ่าน, SUPER_ADMIN เท่านั้นเขียน/รีเซ็ต
+    it('theme_tokens: นักเรียน/ผู้ปกครองอ่านได้ แต่เขียนได้เฉพาะ SUPER_ADMIN', async () => {
+      const PATH = 'school_settings/theme_tokens';
+      const data = { overrides: { pink: { accent: '#AA3366' } }, updatedBy: 'admin-uid' };
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc(PATH).set(data));
+      for (const roles of [['STUDENT'], ['PARENT'], ['SUBJECT_TEACHER']]) {
+        await assertSucceeds(asUser('u-any', roles).firestore().doc(PATH).get());
+      }
+      await assertFails(asAnonymous().firestore().doc(PATH).get());
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc(PATH).set({ overrides: {} }));
+      await assertFails(asUser('u-stu', ['STUDENT']).firestore().doc(PATH).set({ overrides: {} }));
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc(PATH).set({ overrides: {}, updatedBy: 'admin-uid' }));
+    });
+
     // school_settings/studentEmailFormat — รูปแบบอีเมลนักเรียน {prefix}{studentId}@{domain}
     describe('studentEmailFormat', () => {
       const PATH = 'school_settings/studentEmailFormat';
