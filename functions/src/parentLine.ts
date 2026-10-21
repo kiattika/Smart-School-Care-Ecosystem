@@ -9,7 +9,7 @@ import * as admin from 'firebase-admin';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { FIRESTORE_DATABASE_ID } from './config';
 import {
-  FetchLike, LineIdentity, PARENT_CLAIMS, hashesEqual, hmacNationalId, isLocked, isValidThaiNationalId, normalizeRelationship,
+  FetchLike, LineIdentity, PARENT_CLAIMS, hashesEqual, hmacNationalId, isLocked, isValidThaiNationalId, normalizeRelationship, registryParentName,
   nextFailedState, normalizeNationalId, parentUidForLine, verifyLineIdToken,
   PARENT_AUDIT_COLLECTION, buildParentAuditEntry, validateParentSet, validateUnlinkReason, ParentAuditAction,
 } from './parentLineLogic';
@@ -100,14 +100,17 @@ async function queueVerificationUpsert(
   if (parentChanged) {
     // เปลี่ยนผู้ปกครอง → ยกเลิกการเชื่อมเดิม (ทั้งทะเบียนและ students.parentUid)
     payload.linkedParentUid = null; payload.linkedAt = null;
-    if (oldUid) batch.set(db.collection('students').doc(studentId), { parentUid: null }, { merge: true });
+    if (oldUid) batch.set(db.collection('students').doc(studentId), { parentUid: null, parentDisplayName: FieldValue.delete() }, { merge: true });
   }
   // ลบฟิลด์ hash แบบ SHA-256 เดิม (ถ้ามี) — เลิกใช้แล้ว
   payload.parentNationalIdHash = FieldValue.delete();
   batch.set(ref, payload, { merge: true });
-  // ผู้ปกครองที่เชื่อมบัญชีแล้ว (ผู้ปกครองคนเดิม) — อัปเดตป้ายความสัมพันธ์ที่ students ด้วย (นำเข้าซ้ำ = backfill)
+  // ผู้ปกครองที่เชื่อมบัญชีแล้ว (ผู้ปกครองคนเดิม) — อัปเดตป้ายความสัมพันธ์และชื่อตามทะเบียนที่ students ด้วย (นำเข้าซ้ำ/แก้ข้อมูล = backfill)
   if (existing.exists && sameParent && oldUid) {
-    batch.set(db.collection('students').doc(studentId), { parentRelationship: normalizeRelationship(r.relationship) }, { merge: true });
+    batch.set(db.collection('students').doc(studentId), {
+      parentRelationship: normalizeRelationship(r.relationship),
+      parentDisplayName: registryParentName(r.parentPrefix, r.parentFirstName, r.parentLastName) ?? FieldValue.delete(),
+    }, { merge: true });
   }
   return { hadLink: !!oldUid, parentChanged, oldUid };
 }
@@ -189,7 +192,10 @@ export const linkParentLine = functions.runWith(RUN_OPTS).https.onCall(async (da
 
   const batch = db.batch();
   batch.set(recRef, { linkedParentUid: uid, linkedAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-  batch.set(studentRef, { parentUid: uid, parentRelationship: normalizeRelationship(rec?.relationship) }, { merge: true });
+  batch.set(studentRef, {
+    parentUid: uid, parentRelationship: normalizeRelationship(rec?.relationship),
+    parentDisplayName: registryParentName(rec?.parentPrefix, rec?.parentFirstName, rec?.parentLastName) ?? FieldValue.delete(),
+  }, { merge: true });
   batch.delete(attemptsRef);
   await batch.commit();
 
@@ -220,7 +226,7 @@ export const unlinkParentLine = functions.https.onCall(async (data, context) => 
   const oldUid = (student.data()?.parentUid as string | null | undefined) || (rec.data()?.linkedParentUid as string | null | undefined) || null;
 
   const batch = db.batch();
-  if (student.exists) batch.set(studentRef, { parentUid: null }, { merge: true });
+  if (student.exists) batch.set(studentRef, { parentUid: null, parentDisplayName: FieldValue.delete() }, { merge: true });
   if (rec.exists) batch.set(recRef, { linkedParentUid: null, linkedAt: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   // ไม่มีการเชื่อมอยู่ = ไม่มีอะไรเปลี่ยน จึงไม่บันทึกประวัติ
   if (oldUid) queueAudit(batch, context, { action: 'UNLINK', studentId, reason: why.reason, hadLink: true, parentChanged: false });
