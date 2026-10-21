@@ -20,6 +20,7 @@ import { LogOut, Loader2 } from 'lucide-react';
 import { useStore } from './store';
 import { NavbarWithRoleSwitcher } from './components/NavbarWithRoleSwitcher';
 import { QuickActionHub } from './components/QuickActionHub';
+import { AppCountdownStrip } from './components/shared/AppCountdownStrip';
 import { UserRole, Role } from './types';
 import { setupAuthListener, signOutUser } from './lib/auth';
 import { describeAuthError } from './lib/authErrors';
@@ -140,6 +141,8 @@ export default function App() {
           </button>
         </div>
       )}
+
+      {showNavbar && <AppCountdownStrip />}
 
       <div className="flex-1 min-h-0 flex flex-col">
         <AnimatePresence mode="wait">

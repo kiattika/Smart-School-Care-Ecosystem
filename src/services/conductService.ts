@@ -3,6 +3,8 @@ import {
 } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { db } from '../lib/firebase';
+import { conductDecisionNotice } from '../lib/staffNotifications';
+import { notifyStaffById } from './staffNotify';
 import {
   nextConductFields, planConductEntry, validateChangeRequest, validatePoints,
   type ChangeAction, type ConductChangeRequest, type ConductEntry, type ConductInput, type OffenceLevel,
@@ -86,11 +88,13 @@ export async function resolveConduct(
   actor: Actor,
 ): Promise<void> {
   const entryRef = doc(db, ENTRIES, entryId);
+  let notice: { staffId: string; studentName: string } | null = null;
   await runTransaction(db, async tx => {
     const es = await tx.get(entryRef);
     if (!es.exists()) throw new Error('ไม่พบรายการ');
     const e = es.data();
     if (e.status !== 'PENDING') throw new Error('รายการนี้ถูกพิจารณาแล้ว');
+    notice = { staffId: String(e.createdByStaffId || ''), studentName: String(e.studentName || '') };
     const common = { decidedByStaffId: actor.staffId, decidedByName: actor.name.slice(0, 160), decidedAt: serverTimestamp(), decisionNote: d.note.trim().slice(0, 500), updatedAt: serverTimestamp() };
     if (!d.approve) { tx.update(entryRef, { status: 'REJECTED', appliedPoints: 0, level: e.level, ...common }); return; }
     const err = validatePoints(e.kind, d.level, d.appliedPoints);
@@ -104,6 +108,11 @@ export async function resolveConduct(
       lastConductEntryId: entryId, updatedAt: serverTimestamp(),
     });
   });
+  // แจ้งครูผู้ส่งรายการถึงผลการพิจารณา (non-fatal; ธุรกรรมสำเร็จแล้ว)
+  const n = notice as { staffId: string; studentName: string } | null;
+  if (n && n.staffId && n.staffId !== actor.staffId) {
+    void notifyStaffById(n.staffId, (email) => conductDecisionNotice('ENTRY', d.approve, n.studentName, actor.name, d.note, entryId, email), actor.name);
+  }
 }
 
 /** ผู้บันทึกยื่นคำร้องขอแก้/ยกเลิกรายการของตน (พร้อมเหตุผล) — งานกิจการเป็นผู้อนุมัติ */
@@ -124,11 +133,15 @@ export async function requestConductChange(entry: ConductEntry, c: { action: Cha
 export async function decideConductChange(req: ConductChangeRequest, d: { approve: boolean; note: string }, actor: Actor): Promise<void> {
   const reqRef = doc(db, CHANGES, req.id);
   const entryRef = doc(db, ENTRIES, req.entryId);
+  let studentName = '';
+  let requesterStaffId = '';
   await runTransaction(db, async tx => {
     const [rs, es] = await Promise.all([tx.get(reqRef), tx.get(entryRef)]);
     if (!rs.exists() || !es.exists()) throw new Error('ไม่พบคำร้อง/รายการ');
     if (rs.data().status !== 'PENDING') throw new Error('คำร้องนี้ถูกพิจารณาแล้ว');
     const e = es.data();
+    studentName = String(e.studentName || '');
+    requesterStaffId = String(rs.data().requestedByStaffId || '');
     const decided = { decidedByStaffId: actor.staffId, decidedByName: actor.name.slice(0, 160), decidedAt: serverTimestamp(), decisionNote: d.note.trim().slice(0, 500), updatedAt: serverTimestamp() };
     if (!d.approve) { tx.update(reqRef, { status: 'REJECTED', ...decided }); return; }
     if (e.status !== 'APPLIED') throw new Error('รายการนี้ไม่มีผลแล้ว แก้ไม่ได้');
@@ -150,4 +163,8 @@ export async function decideConductChange(req: ConductChangeRequest, d: { approv
     tx.update(reqRef, { status: 'APPROVED', ...decided });
     tx.update(studentRef, { ...nextConductFields(ss.data(), before, after), lastConductEntryId: req.entryId, updatedAt: serverTimestamp() });
   });
+  // แจ้งครูผู้ยื่นคำร้องถึงผล (non-fatal; ธุรกรรมสำเร็จแล้ว)
+  if (requesterStaffId && requesterStaffId !== actor.staffId) {
+    void notifyStaffById(requesterStaffId, (email) => conductDecisionNotice('CHANGE', d.approve, studentName, actor.name, d.note, req.id, email), actor.name);
+  }
 }

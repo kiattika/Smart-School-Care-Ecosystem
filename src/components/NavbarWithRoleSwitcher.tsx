@@ -435,7 +435,7 @@ export function NavbarWithRoleSwitcher({
         )}
         
         {/* กระดิ่งงานค้างตามบทบาทที่ใช้งานอยู่ (ไม่แสดงถ้าบทบาทนี้ไม่มีงานให้ติดตาม) */}
-        <StaffTaskBell activeRole={activeRole} />
+        <StaffTaskBell activeRole={activeRole} onSwitchRole={onRoleChange} />
 
         {/* Role Switcher Selector */}
         <div className="relative" ref={roleDropdownRef}>

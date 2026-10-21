@@ -1641,6 +1641,11 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     it('staff can send to a recipient email as themselves', async () => {
       await assertSucceeds(sender().doc(`${COL}/n1`).set(note('n1')));
     });
+    it('accepts the result kinds for lesson plan review / supervision / conduct decisions', async () => {
+      for (const [i, kind] of (['LESSON_PLAN_REVIEW', 'SUPERVISION_RESULT', 'CONDUCT_DECISION'] as const).entries()) {
+        await assertSucceeds(sender().doc(`${COL}/k${i}`).set(note(`k${i}`, { kind })));
+      }
+    });
     it('denies spoofed sender uid, bad kind, uppercase/invalid email, oversized text, pre-read, extra keys', async () => {
       await assertFails(sender().doc(`${COL}/n2`).set(note('n2', { senderUid: 'someone-else' })));
       await assertFails(sender().doc(`${COL}/n3`).set(note('n3', { kind: 'ANYTHING' })));

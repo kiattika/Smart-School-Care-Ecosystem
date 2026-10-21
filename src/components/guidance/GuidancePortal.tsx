@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../store';
+import { useConsumeBellNav } from '../../lib/bellNavigation';
 import { useRealStudents } from '../../hooks/useRealStudents';
 import { useGuidanceScreenings } from '../../hooks/useGuidanceScreenings';
 import { StudentPicker } from '../shared/StudentPicker';
@@ -45,6 +46,8 @@ export function GuidancePortal() {
   const { records: screeningRecords, loading: depressionLoading, error: depressionError } = useGuidanceScreeningRecords();
   const guidanceStatus = useGuidanceStatus();
   const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'depression' | 'appointments' | 'internship' | 'tcas'>('cases');
+  // กระดิ่งงานค้างพามาที่แท็บนี้ (นัดพบผู้ปกครอง / คัดกรองซึมเศร้า)
+  useConsumeBellNav('GUIDANCE_COUNSELOR', ['depression', 'appointments'], (t) => setActiveTab(t as typeof activeTab));
   // คำขอนัดพบจากผู้ปกครองที่ขอพบ "ครูแนะแนว" — real-time (rules: GUIDANCE_COUNSELOR + recipient == GUIDANCE)
   const [guidanceAppointments, setGuidanceAppointments] = useState<import('../../types').ParentAppointment[]>([]);
   useEffect(() => {

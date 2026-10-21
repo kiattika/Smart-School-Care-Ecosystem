@@ -1,6 +1,7 @@
 import { SdqClassReportLive } from './components/sdq/SdqClassReport';
 import { cn, isSameRoom } from "./lib/utils";
 import { Student } from "./types";
+import { useConsumeBellNav } from './lib/bellNavigation';
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from './store';
 import { useRealStudents } from "./hooks/useRealStudents";
@@ -66,6 +67,8 @@ export function AdvisorPortal() {
   const { students, loading: studentsLoading } = useRealStudents();
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq' | 'screening' | 'class-chat' | 'skip-radar' | 'health' | 'pp6'>('dashboard');
+  // กระดิ่งงานค้างพามาที่แท็บนี้ (ใบลา/นัดพบ = แดชบอร์ด, คัดกรอง = screening)
+  useConsumeBellNav('HOMEROOM_TEACHER', ['dashboard', 'screening', 'class-chat'], (t) => setActiveTab(t as typeof activeTab));
   const [assessmentModalStudent, setAssessmentModalStudent] = useState<Student | null>(null);
   const [assessmentSearch, setAssessmentSearch] = useState('');
   const [assessmentFilter, setAssessmentFilter] = useState<'ALL' | 'COMPLETED' | 'PENDING'>('ALL');

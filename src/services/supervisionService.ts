@@ -14,6 +14,8 @@ import {
   type SupervisionReadScope, type SupervisionTerm,
 } from '../lib/supervision';
 import type { EvalTemplate } from '../lib/evaluationTemplate';
+import { supervisionResultNotice } from '../lib/staffNotifications';
+import { notifyStaffById } from './staffNotify';
 
 type Unsub = () => void;
 
@@ -134,6 +136,10 @@ export async function saveSupervisionObservation(input: ObservationFormInput, op
     await setDoc(ref, { ...fields, ...stamps, createdAt: prev.data().createdAt });
   } else {
     await setDoc(ref, { ...fields, ...stamps, createdAt: serverTimestamp() });
+  }
+  // ส่งผลนิเทศแล้ว (ไม่ใช่ฉบับร่าง) → แจ้งครูผู้รับการนิเทศให้กดรับทราบ (non-fatal)
+  if (opts.submit) {
+    void notifyStaffById(input.teacher.staffId, (email) => supervisionResultNotice({ id, courseName: input.courseName, observedDate: input.observedDate }, input.supervisor.name, email), input.supervisor.name);
   }
   return id;
 }

@@ -7,6 +7,8 @@ import {
   type ScoresMap, type LessonPlan, type LessonPlanKind, type PlanQuery,
 } from '../lib/lessonPlans';
 import type { EvalTemplate } from '../lib/evaluationTemplate';
+import { lessonPlanReviewNotice } from '../lib/staffNotifications';
+import { notifyStaffById } from './staffNotify';
 
 const col = () => collection(db, 'lesson_plan_submissions');
 
@@ -97,4 +99,9 @@ export async function reviewLessonPlan(r: ReviewInput): Promise<void> {
   } else {
     await updateDoc(ref, { stage: r.decision === 'APPROVE' ? 'APPROVED' : 'REVISION', finalReview: review, updatedAt: serverTimestamp() });
   }
+  // แจ้งครูเจ้าของแผนถึงผลการตรวจ (non-fatal)
+  const p = snap.data();
+  void notifyStaffById(String(p.teacherStaffId || ''), (email) => lessonPlanReviewNotice(
+    { id: r.id, courseName: p.courseName, courseCode: p.courseCode, level: p.level }, r.stage, r.decision, r.reviewer.name, r.comment, email,
+  ), r.reviewer.name);
 }
