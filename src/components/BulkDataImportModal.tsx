@@ -38,6 +38,8 @@ import { Student, Course, GlobalCourse, UserRole } from '../types';
 import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
 import { normalizeEmail } from '../lib/normalizeEmail';
 import { buildExistingEmailIndex, staffEmailConflict } from '../lib/staffEmailConflict';
+import { buildStaffImportWrite, matchDepartmentId, type ParsedStaffRow } from '../lib/staffImportMerge';
+import { useDepartments } from '../hooks/useDepartments';
 import { IMPORT_TEMPLATES, templateFilename } from '../lib/importTemplates';
 import { summarizeUnlinkedTeachers } from '../lib/importUnlinkedSummary';
 import {
@@ -127,7 +129,9 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importError, setImportError] = useState<string | null>(null);
-  const [realStaffList, setRealStaffList] = useState<Array<{ id: string; fullName?: string; firstName?: string; lastName?: string; displayName?: string; email?: string; prefix?: string; status?: string }>>([]);
+  const [realStaffList, setRealStaffList] = useState<Array<{ id: string; fullName?: string; firstName?: string; lastName?: string; displayName?: string; email?: string; prefix?: string; status?: string; roles?: string[] }>>([]);
+  // กลุ่มสาระฯ จาก department_config (สด) — ใช้แปลงชื่อกลุ่มในไฟล์นำเข้าบุคลากรเป็นรหัส
+  const { departments: importDepartments } = useDepartments();
   const [isStaffLoading, setIsStaffLoading] = useState(false);
   const [realStudentIds, setRealStudentIds] = useState<Set<string>>(new Set());
   const [isStudentIdsLoading, setIsStudentIdsLoading] = useState(false);
@@ -172,13 +176,15 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             displayName: data.displayName || '',
             // ใช้ตัดสินว่าครูที่ถูกแทนที่ "ปิดการใช้งาน" แล้วหรือยัง (เก็บกวาดตารางได้) — ดู lib/staffStatus.ts
             status: typeof data.status === 'string' ? data.status : '',
+            // บทบาทเดิมของคนที่มี staff doc อยู่แล้ว — นำเข้าซ้ำต้องไม่เขียนทับ (ดู lib/staffImportMerge.ts)
+            roles: Array.isArray(data.roles) ? (data.roles as string[]) : [],
           };
         });
         setIsStaffLoading(false);
         // long-poll listener ยิง snapshot ซ้ำเป็นระยะแม้ข้อมูลไม่เปลี่ยน — เทียบเนื้อหาก่อน
         // ถ้าเหมือนเดิม อย่า setRealStaffList (ไม่งั้น previewData useMemo re-compute + re-render รัว ๆ
         // จนเกิดจังหวะที่กดปุ่มยืนยันไม่ติด)
-        const sig = staff.map(s => `${s.id}${s.email}${s.fullName}${s.displayName}${s.status}`).join('');
+        const sig = staff.map(s => `${s.id}${s.email}${s.fullName}${s.displayName}${s.status}${s.roles.length}`).join('');
         if (sig === staffSigRef.current) return;
         staffSigRef.current = sig;
         setRealStaffList(staff);
@@ -332,6 +338,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
     const seenIds = new Set<string>();
     const seenStaffEmails = new Map<string, string>();
     const existingStaffEmails = buildExistingEmailIndex(realStaffList);
+    const existingStaffById = new Set(realStaffList.map(x => x.id));
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const phoneRegex = /^0[0-9]{8,9}$/;
 
@@ -491,6 +498,11 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         }
         if (!department) {
           teacherWarnings.push('ℹ️ ไม่ได้ระบุกลุ่มสาระฯ — กำหนดภายหลังได้ที่หน้า "จัดการสิทธิ์บุคลากร"');
+        } else if (!matchDepartmentId(department, importDepartments)) {
+          teacherWarnings.push(`⚠️ ไม่พบกลุ่มสาระฯ "${department}" ในระบบ — ไม่กำหนดกลุ่มสาระฯ ให้ (เพิ่มที่ "จัดการกลุ่มสาระฯ" แล้วนำเข้าใหม่)`);
+        }
+        if (existingStaffById.has(teacherId)) {
+          teacherWarnings.push('ℹ️ มีบุคลากรนี้อยู่แล้ว — อัปเดตเฉพาะชื่อ/ตำแหน่ง/อีเมล/กลุ่มสาระฯ ไม่เปลี่ยนบทบาทเดิม');
         }
 
         return {
@@ -511,8 +523,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             position: position || 'ครูผู้สอน',
             email,
             roles: rolesArray,
-            // กลุ่มสาระฯ เว้นว่างได้ ('' = ยังไม่ระบุ ไม่ถือเป็น error) — กำหนดทีหลังที่หน้าจัดการสิทธิ์
-            departmentId: department || ''
+            // ข้อความกลุ่มสาระฯ ตามไฟล์ (เว้นว่างได้) — แปลงเป็นรหัสตอนเขียนด้วย matchDepartmentId
+            department: department || ''
           }
         };
       } else if (type === 'PARENT') {
@@ -926,23 +938,18 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             const teacherRef = doc(db, 'teachers', parsedData.teacherId);
             const staffRef = doc(db, 'staff', parsedData.teacherId);
 
-            const teacherPayload = {
-              id: parsedData.teacherId,
-              teacherId: parsedData.teacherId,
-              prefix: parsedData.prefix,
-              firstName: parsedData.firstName,
-              lastName: parsedData.lastName,
-              fullName: parsedData.fullName,
-              position: parsedData.position,
-              email: normalizeEmail(parsedData.email),
-              roles: parsedData.roles,
-              departmentId: parsedData.departmentId,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp()
-            };
-
-            batch.set(teacherRef, teacherPayload, { merge: true });
-            batch.set(staffRef, teacherPayload, { merge: true });
+            // คนที่มี staff doc อยู่แล้ว → อัปเดตเฉพาะข้อมูลทั่วไป (+ กลุ่มสาระฯ ถ้าจับคู่ได้) ไม่ทับ roles/assignments/status
+            // คนใหม่ → สร้างพร้อมบทบาทตามไฟล์ (ดู lib/staffImportMerge.ts)
+            const existingStaff = realStaffList.find(x => x.id === parsedData.teacherId);
+            const w = buildStaffImportWrite(
+              parsedData as ParsedStaffRow,
+              normalizeEmail(parsedData.email),
+              importDepartments,
+              existingStaff ? { id: existingStaff.id, roles: existingStaff.roles || [] } : undefined,
+              serverTimestamp(),
+            );
+            batch.set(teacherRef, w.teacher, { merge: true });
+            batch.set(staffRef, w.staff, { merge: true });
 
           } else if (importType === 'PARENT') {
             // PARENT — ไม่เขียน Firestore จาก client: ส่งให้ Cloud Function importParentVerification คำนวณ HMAC
@@ -1222,7 +1229,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   const previewData: ValidatedRow[] = useMemo(
     () => (rawParsedRows ? validateRows(rawParsedRows, importType) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rawParsedRows, importType, realStaffList, realStudentIds]
+    [rawParsedRows, importType, realStaffList, realStudentIds, importDepartments]
   );
   const isValidated = rawParsedRows !== null;
 

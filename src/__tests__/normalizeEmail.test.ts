@@ -60,7 +60,8 @@ describe('every write of email to staff / teachers / students goes through norma
   it('BulkDataImportModal: TEACHER parse + staff/teachers payload', () => {
     const s = src('components/BulkDataImportModal.tsx');
     expect(s).toContain("const email = normalizeEmail(getFieldValue(normalized, ['email', 'e-mail', 'อีเมล', 'อีเมล์']));");
-    expect(s).toContain('email: normalizeEmail(parsedData.email),');
+    // นำเข้าบุคลากรส่งอีเมลที่ normalize แล้วเข้า buildStaffImportWrite (lib/staffImportMerge.ts)
+    expect(s).toContain('normalizeEmail(parsedData.email),');
     expect(s).not.toMatch(/^\s*email: parsedData\.email,/m);
   });
 
