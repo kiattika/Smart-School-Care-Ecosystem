@@ -27,3 +27,23 @@ export function roomOptionsFromStudents(
     return ga - gb || ra - rb || a.localeCompare(b, 'th');
   });
 }
+
+/** ห้องจากตารางภาระงานสอนที่นำเข้า — schedule เก็บชั้น/ห้องเรียนไว้ที่ field `level` (`room` คือห้องกายภาพ) */
+export function roomsFromSchedules(schedules: ReadonlyArray<{ level?: unknown }>): string[] {
+  const set = new Set<string>();
+  for (const s of schedules) {
+    const v = typeof s.level === 'string' ? s.level.trim() : '';
+    if (/\d+\s*\/\s*\d+/.test(v)) set.add(v);
+  }
+  return Array.from(set);
+}
+
+/**
+ * ห้องประจำชั้นที่ผู้ดูแลพิมพ์/เลือกไว้ ตรงกับห้องที่รู้จัก (นักเรียน/ภาระงานสอนที่นำเข้า) หรือไม่ — ใช้ `isSameRoom`
+ * ยังไม่มีข้อมูลห้องที่รู้จักเลย (known ว่าง) = ตัดสินไม่ได้ คืน true (ไม่เตือนมั่ว)
+ */
+export function isKnownHomeroom(room: string, known: readonly string[], same: (a?: string, b?: string) => boolean): boolean {
+  const r = (room || '').trim();
+  if (!r || known.length === 0) return true;
+  return known.some(k => same(r, k));
+}

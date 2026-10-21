@@ -5,14 +5,11 @@ import {
   ShieldCheck, 
   UserCheck, 
   Edit2, 
-  Plus, 
-  Trash2, 
   X, 
   Check, 
   Save, 
   Info, 
   Sparkles, 
-  BookOpen, 
   GraduationCap, 
   Award, 
   HelpCircle,
@@ -38,7 +35,9 @@ import { useStore } from '../store';
 import { UserProfile, UserRole } from '../types';
 import { useDepartments } from '../hooks/useDepartments';
 import { useRealStudents } from '../hooks/useRealStudents';
-import { roomOptionsFromStudents } from '../lib/roomOptions';
+import { roomOptionsFromStudents, roomsFromSchedules, isKnownHomeroom } from '../lib/roomOptions';
+import { useAllSchedules } from '../hooks/useAllSchedules';
+import { isSameRoom } from '../lib/utils';
 import { normalizeEmail } from '../lib/normalizeEmail';
 import { isStaffActive } from '../lib/staffStatus';
 import {
@@ -194,15 +193,25 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
   const [formHomeroom, setFormHomeroom] = useState('');
   // ห้องเรียนที่เลือกได้ = ห้องที่มีนักเรียนอยู่จริงในระบบ (+ ห้องที่เลือกไว้เดิม)
   const { students: realStudentsForRooms } = useRealStudents();
-  const roomOptions = useMemo(
-    () => roomOptionsFromStudents(realStudentsForRooms, [formHomeroom]),
-    [realStudentsForRooms, formHomeroom],
+  // ห้องที่รู้จัก = ห้องของนักเรียนที่นำเข้า + ชั้น/ห้องในตารางภาระงานสอนที่นำเข้า (ภาคเรียนปัจจุบัน)
+  // ผู้ดูแลพิมพ์ห้องอื่นเองได้ (นำเข้าภาระงานสอน/นักเรียนทีหลัง) — ห้องที่ไม่ตรงจะมีคำเตือนให้ตรวจสอบภายหลัง
+  const { data: allSchedulesForRooms } = useAllSchedules();
+  const knownRooms = useMemo(
+    () => roomOptionsFromStudents(realStudentsForRooms, roomsFromSchedules(allSchedulesForRooms)),
+    [realStudentsForRooms, allSchedulesForRooms],
   );
-  const [formSubjects, setFormSubjects] = useState<{ subjectCode: string; className: string }[]>([]);
-
-  // Temp Inputs สำหรับการเพิ่มวิชาใน Modal
-  const [tempCode, setTempCode] = useState('');
-  const [tempClass, setTempClass] = useState('');
+  const roomOptions = useMemo(
+    () => roomOptionsFromStudents(realStudentsForRooms.map(x => ({ room: x.room })), [...knownRooms, formHomeroom]),
+    [realStudentsForRooms, knownRooms, formHomeroom],
+  );
+  /** ครูประจำชั้นที่ห้องไม่ตรงกับข้อมูลที่นำเข้า — ให้แอดมินตรวจ/อัปเดต */
+  const homeroomMismatches = useMemo(
+    () => staffList.filter(st =>
+      isStaffActive(st) && st.roles.includes('HOMEROOM_TEACHER') &&
+      !!st.assignments?.homeroomClass &&
+      !isKnownHomeroom(st.assignments.homeroomClass, knownRooms, isSameRoom)),
+    [staffList, knownRooms],
+  );
 
   // Toast / SweetAlert states
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -344,12 +353,6 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
     setFormRoles(staff.roles.filter(r => !NON_STAFF_ROLE_KEYS.includes(r)));
     setFormDept(staff.assignments?.departmentId || '');
     setFormHomeroom(staff.assignments?.homeroomClass || '');
-    setFormSubjects(staff.assignments?.teachingSubjects ? [...staff.assignments.teachingSubjects] : []);
-    
-    // เคลียร์ Temp Inputs
-    setTempCode('');
-    setTempClass('');
-    
     setIsModalOpen(true);
   };
 
@@ -360,32 +363,6 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
     } else {
       setFormRoles(prev => [...prev, role]);
     }
-  };
-
-  // เพิ่มวิชาสอนในตารางผู้สอน
-  const handleAddSubject = () => {
-    if (!tempCode.trim() || !tempClass) {
-      triggerToast('⚠️ กรุณากรอกรหัสวิชาและเลือกห้องเรียนเพื่อกดเพิ่ม');
-      return;
-    }
-    const cleanCode = tempCode.trim().toUpperCase();
-    
-    // เช็กว่ามีวิชาและห้องนี้แอดไปหรือยัง
-    if (formSubjects.some(s => s.subjectCode === cleanCode && s.className === tempClass)) {
-      triggerToast('⚠️ มีข้อมูลวิชานี้และห้องเรียนนี้อยู่ในรายการแล้ว');
-      return;
-    }
-
-    setFormSubjects(prev => [...prev, { subjectCode: cleanCode, className: tempClass }]);
-    setTempCode('');
-    setTempClass('');
-    triggerToast('➕ เพิ่มวิชาสอนลงตารางชั่วคราวแล้ว');
-  };
-
-  // ลบวิชาสอนในรายการ
-  const handleRemoveSubject = (index: number) => {
-    setFormSubjects(prev => prev.filter((_, i) => i !== index));
-    triggerToast('🗑️ ลบวิชาสอนออกจากรายการแล้ว');
   };
 
   // บันทึกการเปลี่ยนแปลงจาก Modal ไปยัง Firestore
@@ -407,12 +384,8 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
       triggerToast('⚠️ บทบาท "รองหัวหน้ากลุ่มสาระฯ" จำเป็นต้องระบุกลุ่มสาระฯ สังกัด');
       return;
     }
-    if (formRoles.includes('HOMEROOM_TEACHER') && !formHomeroom) {
+    if (formRoles.includes('HOMEROOM_TEACHER') && !formHomeroom.trim()) {
       triggerToast('⚠️ บทบาท "ครูประจำชั้น" จำเป็นต้องระบุห้องประจำชั้น');
-      return;
-    }
-    if (formRoles.includes('SUBJECT_TEACHER') && formSubjects.length === 0) {
-      triggerToast('⚠️ บทบาท "ครูผู้สอน" ควรมีรายละเอียดวิชาสอนอย่างน้อย 1 รายการ');
       return;
     }
 
@@ -429,13 +402,10 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
 
     // ประจำชั้น
     if (formRoles.includes('HOMEROOM_TEACHER')) {
-      updatedAssignments.homeroomClass = formHomeroom;
+      updatedAssignments.homeroomClass = formHomeroom.trim();
     }
 
-    // วิชาที่สอน
-    if (formRoles.includes('SUBJECT_TEACHER')) {
-      updatedAssignments.teachingSubjects = formSubjects;
-    }
+    // วิชา/ห้องที่สอนมาจากตารางภาระงานสอนที่นำเข้า (ไม่กรอกที่นี่) — teachingSubjects เดิมไม่ถูกแตะ (merge)
 
     // ครูนิเทศ: การจับคู่ผู้รับการนิเทศทำต่อรอบที่หน้า "นิเทศการสอน" (supervision_assignments) ไม่เก็บที่ staff อีกต่อไป
     // — คงค่า supervisoryMentees เดิม (ถ้ามี) ไว้เฉยๆ ไม่ลบ ไม่ใช้งาน
@@ -669,6 +639,17 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
         </div>
       </div>
 
+      {/* แจ้งผู้ดูแล: ห้องประจำชั้นที่ไม่ตรงกับข้อมูลนักเรียน/ภาระงานสอนที่นำเข้า (เช่น นำเข้าข้อมูลใหม่แล้วห้องเปลี่ยน) */}
+      {homeroomMismatches.length > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-300 leading-relaxed">
+          <p className="font-bold">⚠️ มีครูประจำชั้น {homeroomMismatches.length} คน ที่ห้องประจำชั้นไม่ตรงกับข้อมูลนักเรียน/ภาระงานสอนที่นำเข้า — โปรดตรวจสอบและอัปเดต</p>
+          <p className="mt-1 text-amber-200/80">
+            {homeroomMismatches.slice(0, 8).map(st => `${st.prefix}${st.firstName} ${st.lastName} (${st.assignments?.homeroomClass})`).join(' · ')}
+            {homeroomMismatches.length > 8 ? ` และอีก ${homeroomMismatches.length - 8} คน` : ''}
+          </p>
+        </div>
+      )}
+
       {/* 2. Staff Data Table */}
       <div className="border border-white/5 rounded-2xl overflow-hidden bg-slate-950/20 flex-1">
         <div className="overflow-x-auto">
@@ -780,14 +761,13 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                               ห้องประจำชั้น: {staff.assignments.homeroomClass}
                             </div>
                           )}
-                          {staff.roles.includes('SUBJECT_TEACHER') && staff.assignments?.teachingSubjects && (
-                            <div className="text-[10px] text-blue-400 flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                              วิชาสอน: {staff.assignments.teachingSubjects.length} รายการ
+                          {staff.roles.includes('HOMEROOM_TEACHER') && staff.assignments?.homeroomClass &&
+                           !isKnownHomeroom(staff.assignments.homeroomClass, knownRooms, isSameRoom) && (
+                            <div className="text-[10px] text-amber-400" title="ห้องนี้ไม่ตรงกับข้อมูลนักเรียน/ภาระงานสอนที่นำเข้า">
+                              ⚠️ ห้องไม่ตรงข้อมูลที่นำเข้า
                             </div>
                           )}
-                          {!staff.assignments?.homeroomClass && 
-                           !staff.assignments?.teachingSubjects && (
+                          {!staff.assignments?.homeroomClass && (
                             <span className="text-[10px] text-slate-500 italic block text-center w-full">ไม่มีข้อมูลการเชื่อมสิทธิ์</span>
                           )}
                         </div>
@@ -980,91 +960,26 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                       ห้องเรียนประจำชั้นที่ดูแล (Homeroom Assignment)
                     </h4>
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-400 mb-1.5">เลือกห้องเรียน</label>
-                      <select
+                      <label className="block text-[10px] font-bold text-slate-400 mb-1.5">เลือกจากรายการ หรือพิมพ์ห้องเอง (เช่น ม.5/8)</label>
+                      <input
+                        type="text"
+                        list="homeroom-room-options"
                         value={formHomeroom}
                         onChange={(e) => setFormHomeroom(e.target.value)}
-                        className="w-full bg-slate-950 border border-white/10 rounded-lg p-2.5 text-xs text-slate-200 focus:border-emerald-500 outline-none"
+                        placeholder="-- เลือกหรือพิมพ์ห้องเรียน --"
+                        className="w-full bg-slate-950 border border-white/10 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-600 focus:border-emerald-500 outline-none"
                         required={formRoles.includes('HOMEROOM_TEACHER')}
-                      >
-                        <option value="">-- กรุณาเลือกห้องเรียน --</option>
+                      />
+                      <datalist id="homeroom-room-options">
                         {roomOptions.map(room => (
-                          <option key={room} value={room}>{room}</option>
+                          <option key={room} value={room} />
                         ))}
-                      </select>
-                    </div>
-                  </div>
-                )}
-
-                {/* 3. ถ้าติ๊ก [x] ครูผู้สอน -> ให้มีปุ่มเพิ่ม "รายวิชา + ห้องเรียน" */}
-                {formRoles.includes('SUBJECT_TEACHER') && (
-                  <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-4 space-y-4">
-                    <h4 className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
-                      <BookOpen className="w-4 h-4" />
-                      วิชาและระดับห้องเรียนที่ทำการสอน (Teaching Subjects Matrix)
-                    </h4>
-
-                    {/* ตารางแสดงรายการที่เพิ่มแล้ว */}
-                    <div className="space-y-2">
-                      <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">วิชาที่รับผิดชอบปัจจุบัน ({formSubjects.length})</span>
-                      {formSubjects.length === 0 ? (
-                        <div className="text-center py-4 bg-slate-950/40 border border-white/5 rounded-lg text-[10px] text-slate-500">
-                          ยังไม่มีรายวิชาที่สอน ระบุในแบบฟอร์มเพิ่มวิชาด้านล่าง
-                        </div>
-                      ) : (
-                        <div className="divide-y divide-white/5 border border-white/5 rounded-lg overflow-hidden bg-slate-950/60 max-h-[140px] overflow-y-auto">
-                          {formSubjects.map((sub, i) => (
-                            <div key={i} className="px-3 py-2 flex items-center justify-between text-xs hover:bg-white/5">
-                              <div>
-                                <span className="font-mono font-bold text-blue-400 mr-2">{sub.subjectCode}</span>
-                                <span className="text-slate-400">สอนห้อง:</span> <span className="font-bold text-slate-200">{sub.className}</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveSubject(i)}
-                                className="p-1 hover:bg-red-500/10 text-slate-500 hover:text-red-400 rounded transition-colors"
-                                title="ลบวิชานี้"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
+                      </datalist>
+                      {formHomeroom.trim() && !isKnownHomeroom(formHomeroom, knownRooms, isSameRoom) && (
+                        <p className="mt-2 text-[10px] text-amber-400 leading-relaxed">
+                          ⚠️ ยังไม่พบห้องนี้ในข้อมูลนักเรียนหรือภาระงานสอนที่นำเข้า — บันทึกได้ แต่เมื่อนำเข้าข้อมูลเสร็จ ควรกลับมาตรวจว่าพิมพ์ตรงกับห้องในระบบ
+                        </p>
                       )}
-                    </div>
-
-                    {/* ส่วนฟอร์มเพิ่มวิชา */}
-                    <div className="bg-slate-950/50 p-3 rounded-lg border border-white/5 flex flex-col sm:flex-row gap-3 items-end">
-                      <div className="flex-1 w-full">
-                        <label className="block text-[9px] font-bold text-slate-400 mb-1">รหัสวิชา</label>
-                        <input
-                          type="text"
-                          value={tempCode}
-                          onChange={(e) => setTempCode(e.target.value)}
-                          placeholder="เช่น ว30101"
-                          className="w-full bg-slate-950 border border-white/10 rounded px-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:border-blue-500 outline-none uppercase"
-                        />
-                      </div>
-                      <div className="w-full sm:w-40">
-                        <label className="block text-[9px] font-bold text-slate-400 mb-1">ห้องเรียนที่สอน</label>
-                        <select
-                          value={tempClass}
-                          onChange={(e) => setTempClass(e.target.value)}
-                          className="w-full bg-slate-950 border border-white/10 rounded px-2.5 py-1.5 text-xs text-slate-200 focus:border-blue-500 outline-none"
-                        >
-                          <option value="">-- เลือกห้อง --</option>
-                          {roomOptions.map(room => (
-                            <option key={room} value={room}>{room}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleAddSubject}
-                        className="w-full sm:w-auto px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded flex items-center justify-center gap-1 shrink-0 h-[32px] transition-colors"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> เพิ่มรายวิชา
-                      </button>
                     </div>
                   </div>
                 )}
