@@ -1,5 +1,6 @@
 import { gradeLockDeadlines, type GradeLockLike } from './gradeLockWindow';
 import { enrollmentState, type EnrollmentWindowInput } from './enrollmentWindow';
+import { activityWindowState, ACTIVITY_WINDOW_LABELS, type ActivityWindowKind, type ActivityWindows } from './activityWindows';
 import { resolveLateRequest, type LateFlowRequest } from './lateAttendanceFlow';
 
 /**
@@ -7,7 +8,7 @@ import { resolveLateRequest, type LateFlowRequest } from './lateAttendanceFlow';
  * แหล่งใหม่: เพิ่ม builder ในไฟล์นี้ + ต่อใน `useAppCountdowns` — ห้ามทำตัวนับถอยหลังเฉพาะกิจกระจัดกระจาย
  * ตอนเปิดแอปแสดง "ใกล้สุด 3 อันดับแรก" (`topCountdowns`) ผ่าน AppCountdownStrip
  */
-export type CountdownSource = 'GRADE_LOCK' | 'CLUB_ENROLLMENT' | 'LATE_ATTENDANCE';
+export type CountdownSource = 'GRADE_LOCK' | 'CLUB_ENROLLMENT' | 'LATE_ATTENDANCE' | 'ACTIVITY_WINDOW';
 
 export interface CountdownEntry {
   id: string;
@@ -51,6 +52,24 @@ export function lateAttendanceEntries(myRequests: Array<LateFlowRequest & { id: 
       const what = [r.subjectName, r.periodNumber !== undefined ? `คาบ ${r.periodNumber}` : '', r.teachingDate].filter(Boolean).join(' ');
       out.push({ id: `late:${r.id}`, source: 'LATE_ATTENDANCE', title: `เช็คชื่อย้อนหลัง${what ? `: ${what}` : ''}`, label: 'หมดสิทธิ์ใน', targetMs: res.usableUntil });
     }
+  }
+  return out;
+}
+
+/** ช่วงเวลากิจกรรมที่แอดมินตั้ง (เฉพาะ kind ที่เกี่ยวกับผู้ใช้นี้) — มีเวลาปิด/เวลาเปิดเท่านั้นจึงแสดง (ไม่มี = ไม่แสดง) */
+export function activityWindowEntries(windows: ActivityWindows, kinds: ActivityWindowKind[], nowMs: number): CountdownEntry[] {
+  const out: CountdownEntry[] = [];
+  for (const kind of kinds) {
+    const st = activityWindowState(kind, windows, nowMs);
+    if (st.deadlineMs === null || st.deadlineKind === null || st.deadlineMs <= nowMs) continue;
+    if (st.phase !== 'OPEN' && st.phase !== 'NOT_YET') continue;
+    out.push({
+      id: `window:${kind}:${st.deadlineKind}`,
+      source: 'ACTIVITY_WINDOW',
+      title: ACTIVITY_WINDOW_LABELS[kind].title,
+      label: st.deadlineKind === 'OPENS' ? 'เปิดใน' : 'ปิดใน',
+      targetMs: st.deadlineMs,
+    });
   }
   return out;
 }

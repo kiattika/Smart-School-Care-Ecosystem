@@ -88,15 +88,23 @@ service cloud.firestore {
         && myStaffId() in get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('responsibleTeacherUids', []);
     }
 
+    function activityWindowOpen(kind) {
+      let w = exists(/databases/$(database)/documents/school_settings/activity_windows)
+        ? get(/databases/$(database)/documents/school_settings/activity_windows).data.get('windows', {}).get(kind, {})
+        : {};
+      return (w.get('opensAt', null) == null || request.time >= w.opensAt) &&
+             (w.get('closesAt', null) == null || request.time < w.closesAt);
+    }
+
     function activityEnrollmentOpen(activityId) {
-      return !exists(/databases/$(database)/documents/elective_activities_config/$(activityId)) ||
+      return activityWindowOpen('CLUB_ENROLLMENT') && (!exists(/databases/$(database)/documents/elective_activities_config/$(activityId)) ||
         (
           get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('enrollmentStatus', 'OPEN') == 'OPEN' &&
           (get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('enrollmentOpensAt', null) == null ||
             request.time >= get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.enrollmentOpensAt) &&
           (get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('enrollmentClosesAt', null) == null ||
             request.time < get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.enrollmentClosesAt)
-        );
+        ));
     }
 
     match /students/{studentId} {

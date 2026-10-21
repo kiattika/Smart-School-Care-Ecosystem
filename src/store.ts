@@ -40,6 +40,7 @@ import {
 import { substituteUpdateNotices, SUBSTITUTE_STAGE_LABEL } from './lib/staffNotifications';
 import { SUBSTITUTE_STAGE_ROLE, SUBSTITUTE_STAGE_ORDER, SUBSTITUTE_TEACHER_DECLINED_ROLE } from './types';
 import { DEFAULT_SCHOOL_GEOFENCE } from './utils/geoUtils';
+import { assertActivityWindowOpen } from './services/activityWindowService';
 import { 
   saveSelfAssessmentRecord, 
   saveGateAttendanceRecordFirestore,
@@ -898,6 +899,8 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!isValidAcademicYear(sdq.academicYear)) {
       throw new Error('ไม่พบปีการศึกษาปัจจุบัน (school_settings/academic_year) — บันทึก SDQ ไม่ได้');
     }
+    // ช่วงเวลาที่แอดมินตั้ง (school_settings/activity_windows) — รอบ 1 เท่านั้น; ไม่ตั้ง = ไม่จำกัด
+    if (sdq.round !== 2) await assertActivityWindowOpen('SDQ_ROUND1');
     const newSDQ: SDQAssessment = {
       ...sdq,
       // id ตายตัวต่อ (นักเรียน, ผู้ประเมิน, ปี) — กรอกซ้ำในปีเดียวกันชนกับเอกสารเดิม (rules ห้ามผู้กรอกแก้/ทับ)

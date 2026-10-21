@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { DeadlineCountdown } from '../shared/DeadlineCountdown';
 import { enrollmentState } from '../../lib/enrollmentWindow';
+import { useActivityWindows } from '../../hooks/useActivityWindows';
+import { activityWindowBlockMessage, isActivityWindowOpen } from '../../lib/activityWindows';
 import { Users, CheckCircle2, XCircle, Loader2, UserRound, Clock, Lock } from 'lucide-react';
 import { Student, ActivityEnrollment } from '../../types';
 import { useElectiveActivities } from '../../hooks/useElectiveActivities';
@@ -27,6 +29,10 @@ export function StudentElectiveEnrollment({ student }: { student: Student }) {
   const { configs, seatsRemaining, loading: configsLoading } = useElectiveActivities();
   const [myEnrollments, setMyEnrollments] = useState<ActivityEnrollment[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // ช่วงรับสมัครชุมนุมของทั้งโรงเรียน (แอดมินตั้ง) — ใช้ร่วมกับช่วงของแต่ละชุมนุม; rules บังคับด้วย
+  const activityWindows = useActivityWindows();
+  const globalClubOpen = isActivityWindowOpen('CLUB_ENROLLMENT', activityWindows, Date.now());
+  const globalClubMsg = activityWindowBlockMessage('CLUB_ENROLLMENT', activityWindows, Date.now());
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -84,6 +90,8 @@ export function StudentElectiveEnrollment({ student }: { student: Student }) {
         <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-3 text-xs text-indigo-300">{toast}</div>
       )}
 
+      {globalClubMsg && <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2" data-testid="club-global-window-msg">{globalClubMsg}</p>}
+
       {configsLoading ? (
         <div className="py-10 text-center text-slate-500 text-xs flex items-center justify-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin" /> กำลังโหลดรายการชุมนุม...
@@ -96,7 +104,7 @@ export function StudentElectiveEnrollment({ student }: { student: Student }) {
             const isMine = myCurrentEnrollment?.activityId === cfg.id;
             const remaining = seatsRemaining(cfg.id);
             const win = enrollmentState(cfg, Date.now());
-            const isClosed = win.phase !== 'OPEN'; // ปิดแล้ว หรือยังไม่ถึงเวลาเปิด — สมัคร/ถอนไม่ได้ (rules บังคับด้วย)
+            const isClosed = win.phase !== 'OPEN' || !globalClubOpen; // ปิดแล้ว หรือยังไม่ถึงเวลาเปิด — สมัคร/ถอนไม่ได้ (rules บังคับด้วย)
             const isFull = remaining !== null && remaining <= 0 && !isMine;
             const blockedByOther = !!myCurrentEnrollment && !isMine;
             const teacherNames = (cfg.responsibleTeacherNames || []).join(', ') || '— ไม่ได้ระบุ —';

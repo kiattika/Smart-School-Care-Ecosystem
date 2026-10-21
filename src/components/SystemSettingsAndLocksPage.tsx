@@ -7,6 +7,7 @@ import { CourseRankLevelsSection } from './admin/CourseRankLevelsSection';
 import { BillingPaymentInfoSection } from './admin/BillingPaymentInfoSection';
 import { GuidanceStatusSection } from './admin/GuidanceStatusSection';
 import { PublicSummarySection } from './admin/PublicSummarySection';
+import { ActivityWindowsSection } from './admin/ActivityWindowsSection';
 import { DatePicker } from './shared/DatePicker';
 import { TimePicker } from './shared/TimePicker';
 import { 
@@ -250,6 +251,7 @@ export function SystemSettingsAndLocksPage() {
 
           {/* 1.5 ปฏิทินโรงเรียน — วันหยุดพิเศษ + วันเปิด-ปิดภาคเรียน (school_calendar_events —
               collection แยกจาก school_settings/system_locks ด้านบนโดยตั้งใจ ดู SchoolCalendarSection.tsx) */}
+          <ActivityWindowsSection />
           <SchoolCalendarSection />
 
           {/* 1.6 รูปแบบอีเมลนักเรียน — school_settings/studentEmailFormat (client + blocking function อ่านค่าเดียวกัน) */}

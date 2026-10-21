@@ -110,17 +110,27 @@ service cloud.firestore {
         && myStaffId() in get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('responsibleTeacherUids', []);
     }
 
+    // ช่วงเวลากิจกรรมที่แอดมินตั้งรวม (school_settings/activity_windows → windows[kind].opensAt/closesAt)
+    // ไม่มีเอกสาร/ไม่มีช่วงของ kind = ผ่าน (ไม่จำกัด) — ต้องตรง src/lib/activityWindows.ts (ใช้กับชุมนุมที่ rules ตรวจเวลาอยู่แล้ว)
+    function activityWindowOpen(kind) {
+      let w = exists(/databases/$(database)/documents/school_settings/activity_windows)
+        ? get(/databases/$(database)/documents/school_settings/activity_windows).data.get('windows', {}).get(kind, {})
+        : {};
+      return (w.get('opensAt', null) == null || request.time >= w.opensAt) &&
+             (w.get('closesAt', null) == null || request.time < w.closesAt);
+    }
+
     // ชุมนุมเปิดรับสมัครอยู่จริง ณ ตอนนี้ (เวลาเซิร์ฟเวอร์): สถานะ OPEN และอยู่ในช่วงเวลา (ถ้ากำหนด)
     // ต้องตรง src/lib/enrollmentWindow.ts (enrollmentState) — ไม่มี config = ผ่าน (เหมือนเดิม)
     function activityEnrollmentOpen(activityId) {
-      return !exists(/databases/$(database)/documents/elective_activities_config/$(activityId)) ||
+      return activityWindowOpen('CLUB_ENROLLMENT') && (!exists(/databases/$(database)/documents/elective_activities_config/$(activityId)) ||
         (
           get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('enrollmentStatus', 'OPEN') == 'OPEN' &&
           (get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('enrollmentOpensAt', null) == null ||
             request.time >= get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.enrollmentOpensAt) &&
           (get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('enrollmentClosesAt', null) == null ||
             request.time < get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.enrollmentClosesAt)
-        );
+        ));
     }
 
     // 1. Students Collection
