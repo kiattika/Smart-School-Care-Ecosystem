@@ -5,6 +5,8 @@ import {
   type GradeRetake, type GraduationApproval, type RetakeInput,
 } from '../lib/gradeRetake';
 import { getStudentLinkIds } from './firestoreService';
+import { notifyStudentSide } from './studentNotify';
+import { retakeResultNotice } from '../lib/studentNotices';
 
 const RETAKES = 'grade_retakes';
 const GRADUATIONS = 'graduation_approvals';
@@ -45,6 +47,8 @@ export async function saveGradeRetake(input: RetakeInput, room: string, by: { st
     note: input.note.trim(), recordedByStaffId: by.staffId, recordedByName: by.name.slice(0, 160),
   };
   await setDoc(ref, { ...base, createdAt: prev.exists() ? prev.data().createdAt : serverTimestamp(), updatedAt: serverTimestamp() });
+  // แจ้งนักเรียน/ผู้ปกครองหลังบันทึกสำเร็จ — non-fatal (uid มาจากทะเบียนจริงที่อ่านไว้ข้างบน)
+  await notifyStudentSide({ studentId: input.studentId, studentName: '', studentUid: link.studentUid, parentUid: link.parentUid }, retakeResultNotice({ courseCode: base.courseCode, courseName: base.courseName, kind: input.kind as 'MAKEUP' | 'REPEAT', originalGrade: input.originalGrade, newGrade: input.newGrade }, prev.exists()));
   return id;
 }
 

@@ -5,6 +5,9 @@ import {
   dayEndExclusive, dayStart, periodById, validateRequestForm, validateSettingsInput,
   type InternshipForm, type InternshipRequest, type InternshipSettings, type InternshipSettingsInput, type InternshipStatus,
 } from '../lib/internship';
+import { getStudentLinkIds } from './firestoreService';
+import { notifyStudentSide } from './studentNotify';
+import { internshipDecisionNotice } from '../lib/studentNotices';
 
 const SETTINGS = 'internship_settings';
 const REQUESTS = 'internship_requests';
@@ -95,4 +98,7 @@ export async function decideInternship(r: InternshipRequest, to: 'APPROVED' | 'R
     status: to, staffNote: d.staffNote.trim(), letterNo: d.letterNo.trim(), letterDateYmd: d.letterDateYmd,
     decidedByStaffId: by.staffId, decidedByName: by.name.slice(0, 160), updatedAt: serverTimestamp(),
   });
+  // แจ้งนักเรียน (+ผู้ปกครองตามทะเบียน) หลังตัดสินสำเร็จ — non-fatal
+  const link = await getStudentLinkIds(r.studentId).catch(() => ({ studentUid: '', parentUid: null as string | null }));
+  await notifyStudentSide({ studentId: r.studentId, studentName: r.studentName, studentUid: link.studentUid, parentUid: link.parentUid }, internshipDecisionNotice(r, to, d.staffNote));
 }

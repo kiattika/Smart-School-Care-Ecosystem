@@ -73,6 +73,8 @@ export interface FundInterest {
   id: string;
   programId: string;
   studentId: string;
+  /** uid บัญชีนักเรียนที่ประทับตอนลงชื่อ (ใช้ส่งแจ้งผล) */
+  studentUid?: string;
   studentName?: string;
   room?: string;
   kind: FundKind;
