@@ -30,6 +30,7 @@ import { MobileApp } from './mobile/MobileApp';
 import { isMobilePath } from './lib/pwa';
 import { useMyPreferences } from './hooks/useMyPreferences';
 import { useThemeTokens } from './hooks/useThemeTokens';
+import { isExecutiveRole } from './lib/executiveRoles';
 
 export default function App() {
   const { user, setUser } = useStore();
@@ -96,7 +97,7 @@ export default function App() {
       let legacyRole: Role = 'teacher';
       if (role === 'SUPER_ADMIN') {
         legacyRole = 'admin';
-      } else if (role === 'EXECUTIVE') {
+      } else if (isExecutiveRole(role)) {
         legacyRole = 'executive';
       } else if (role === 'HOMEROOM_TEACHER') {
         legacyRole = 'advisor';

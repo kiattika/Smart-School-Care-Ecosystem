@@ -2,6 +2,7 @@
  * ตรรกะฝั่งหน้าจอของระบบนิเทศ (pure — ทดสอบได้) ต่อยอดจาก src/lib/supervision.ts
  */
 import { isStaffActive } from './staffStatus';
+import { hasExecutiveRole } from './executiveRoles';
 import type { ObservationQuery } from '../services/supervisionService';
 import {
   canObserve, isExOfficioSupervisor,
@@ -92,7 +93,7 @@ export function progressCounts(
  * - หัวหน้างานนิเทศ: ทั้งหมดรวมฉบับร่าง; ผอ./รองผอ.ฝ่ายวิชาการ: ทั้งหมดเฉพาะที่ส่งแล้ว
  * - หัวหน้า/รองหัวหน้ากลุ่มสาระฯ: เฉพาะกลุ่มสาระฯ ตนเอง (ที่ส่งแล้ว) — ถ้าเป็นครูนิเทศด้วย ผลที่ตนนิเทศเองดูได้ในแท็บ "ลงนิเทศ"
  * - ครูนิเทศ: เฉพาะที่ตนเองนิเทศ
- * EXECUTIVE ไม่ได้เห็นรายบุคคลในหน้าจอ (ใช้ภาพรวมเท่านั้น) — null
+ * กลุ่มผู้บริหาร (EXECUTIVE + รองผอ.งบประมาณ/บุคคล/ทั่วไป) ไม่ใช้ query นี้ — ดูรายบุคคลในหน้า "ข้อมูลครูรายบุคคล" ของ ExecutivePortal ผ่าน overviewQuery — null
  */
 export function resultsQuery(
   roles: readonly string[],
@@ -109,7 +110,7 @@ export function resultsQuery(
 /** query สำหรับภาพรวม (ไม่แสดงชื่อ): ผู้ที่อ่านทั้งโรงเรียนได้ */
 export function overviewQuery(roles: readonly string[]): ObservationQuery | null {
   if (roles.includes('INSTRUCTIONAL_SUPERVISOR')) return { scope: 'ALL', submittedOnly: false };
-  if (roles.includes('DIRECTOR') || roles.includes('DEPUTY_DIRECTOR_ACADEMIC') || roles.includes('EXECUTIVE')) {
+  if (roles.includes('DIRECTOR') || roles.includes('DEPUTY_DIRECTOR_ACADEMIC') || hasExecutiveRole(roles)) {
     return { scope: 'ALL', submittedOnly: true };
   }
   return null;

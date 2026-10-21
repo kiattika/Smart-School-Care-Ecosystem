@@ -3,6 +3,9 @@ import type { StaffStatusReason } from "../lib/staffStatusReasons";
 export type UserRole = 
   | 'SUPER_ADMIN'          // แอดมินดูแลระบบ
   | 'EXECUTIVE'            // ผู้อำนวยการ / รองผู้อำนวยการ
+  | 'DEPUTY_DIRECTOR_BUDGET'    // รองผู้อำนวยการกลุ่มบริหารงบประมาณ (สิทธิ์เท่า EXECUTIVE)
+  | 'DEPUTY_DIRECTOR_PERSONNEL' // รองผู้อำนวยการกลุ่มบริหารบุคคล (สิทธิ์เท่า EXECUTIVE)
+  | 'DEPUTY_DIRECTOR_GENERAL'   // รองผู้อำนวยการกลุ่มบริหารทั่วไป (สิทธิ์เท่า EXECUTIVE)
   | 'HEAD_OF_DEPARTMENT'   // หัวหน้ากลุ่มสาระการเรียนรู้ (Stage 1)
   | 'DEPUTY_HEAD_OF_DEPARTMENT' // รองหัวหน้ากลุ่มสาระการเรียนรู้ (ผู้นิเทศโดยตำแหน่งของกลุ่มสาระฯ)
   | 'ACADEMIC_HEAD'        // หัวหน้ากลุ่มงานวิชาการและหลักสูตร (Stage 2)
@@ -78,6 +81,21 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'EVALUATE_TEACHERS'
   ],
   EXECUTIVE: [
+    'APPROVE_GRADES',
+    'VIEW_ALL_REPORTS',
+    'EVALUATE_TEACHERS'
+  ],
+  DEPUTY_DIRECTOR_BUDGET: [
+    'APPROVE_GRADES',
+    'VIEW_ALL_REPORTS',
+    'EVALUATE_TEACHERS'
+  ],
+  DEPUTY_DIRECTOR_PERSONNEL: [
+    'APPROVE_GRADES',
+    'VIEW_ALL_REPORTS',
+    'EVALUATE_TEACHERS'
+  ],
+  DEPUTY_DIRECTOR_GENERAL: [
     'APPROVE_GRADES',
     'VIEW_ALL_REPORTS',
     'EVALUATE_TEACHERS'

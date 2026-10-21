@@ -42,6 +42,7 @@ import {
 import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
 import { useDepartments } from '../hooks/useDepartments';
 import { uploadSubstituteWorksheet } from '../services/storageService';
+import { isExecutiveRole } from '../lib/executiveRoles';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -957,7 +958,7 @@ export function SubstituteTeachingModule() {
   const canPropose = effectiveRole === 'HEAD_OF_DEPARTMENT' || isActingAsBackupApprover;
   const isApprover = APPROVAL_ROLES.includes(effectiveRole);
   const isSubTeacher = canSelfPropose; // SUBJECT_TEACHER/HOMEROOM_TEACHER — เดิมชื่อ isSubTeacher, มีความหมายเดียวกับ canSelfPropose
-  const isOversight = effectiveRole === 'SUPER_ADMIN' || effectiveRole === 'EXECUTIVE';
+  const isOversight = effectiveRole === 'SUPER_ADMIN' || isExecutiveRole(effectiveRole);
 
   // -----------------------------------------------------------------------
   return (

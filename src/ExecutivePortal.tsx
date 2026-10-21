@@ -52,6 +52,7 @@ import {
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { ExecutiveLearnerAnalytics } from './components/ExecutiveLearnerAnalytics';
 import { ExecutiveEngagementDashboard } from './components/ExecutiveEngagementDashboard';
+import { ExecutiveTeacherInfoPanel } from './components/executive/ExecutiveTeacherInfoPanel';
 import { useStore } from './store';
 import { useRealStudents } from './hooks/useRealStudents';
 import { SdqSchoolOverviewLive } from './components/sdq/SdqSchoolOverview';
@@ -199,7 +200,7 @@ export function ExecutivePortal() {
     ? Math.min(100, Math.round((todayCompletedPostTeachingCount / todayScheduledPeriodCount) * 100))
     : null;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'approvals' | 'analytics' | 'homevisit' | 'supervision' | 'activity'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'approvals' | 'analytics' | 'homevisit' | 'supervision' | 'activity' | 'teacherinfo'>('dashboard');
 
   const pendingApprovalsCount = lateAttendanceRequests.filter(r => { const x = resolveLateRequest(r, Date.now()); return x.state === 'AWAITING' || x.deputyReviewOpen; }).length;
 
@@ -211,6 +212,7 @@ export function ExecutivePortal() {
     { id: 'health', label: 'สุขภาวะ', fullLabel: 'สุขภาวะ (Health & Safety)', icon: Stethoscope, badge: null, color: 'text-emerald-400' },
     { id: 'homevisit', label: 'เยี่ยมบ้าน', fullLabel: 'สารสนเทศเยี่ยมบ้าน (Home Visit)', icon: MapIcon, badge: null, color: 'text-emerald-400' },
     { id: 'activity', label: 'สถิติการสอน', fullLabel: 'สถิติการปฏิบัติงานสอน (ลา/แลกคาบ/สอนแทน)', icon: Clock, badge: null, color: 'text-amber-400' },
+    { id: 'teacherinfo', label: 'ข้อมูลครูรายบุคคล', fullLabel: 'ข้อมูลครูรายบุคคล (แสดงชื่อ)', icon: Users, badge: null, color: 'text-cyan-400' },
     { id: 'supervision', label: 'นิเทศการสอน', fullLabel: 'ภาพรวมการนิเทศการสอน', icon: Star, badge: null, color: 'text-cyan-400' },
     { id: 'approvals', label: 'กล่องคำขอ', fullLabel: 'กล่องคำขอ (Approvals)', icon: Inbox, badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : null, color: 'text-amber-400' },
   ] as const;
@@ -276,6 +278,7 @@ export function ExecutivePortal() {
               {activeTab === 'health' && 'Student Wellness & Analytics'}
               {activeTab === 'homevisit' && 'สารสนเทศเยี่ยมบ้านระดับโรงเรียน'}
               {activeTab === 'activity' && 'สถิติการปฏิบัติงานสอนทั้งโรงเรียน (ตัวเลขรวม)'}
+              {activeTab === 'teacherinfo' && 'ข้อมูลครูรายบุคคล (เฉพาะผู้บริหาร)'}
               {activeTab === 'supervision' && 'ภาพรวมการนิเทศการสอน (ไม่แสดงรายบุคคล)'}
               {activeTab === 'approvals' && 'Approval Inbox (กล่องคำขออนุมัติ)'}
             </h2>
@@ -678,6 +681,8 @@ export function ExecutivePortal() {
           )}
 
           {activeTab === 'activity' && <div className="max-w-6xl mx-auto relative z-10"><ActivityOverviewPanel level="SCHOOL" /></div>}
+
+          {activeTab === 'teacherinfo' && <ExecutiveTeacherInfoPanel />}
 
           {activeTab === 'supervision' && <ExecutiveSupervisionOverview />}
 

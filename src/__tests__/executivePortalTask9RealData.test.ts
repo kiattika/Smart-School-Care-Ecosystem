@@ -25,7 +25,7 @@ describe('ExecutivePortal TASK 9: Engagement/Analytics tabs ใช้ข้อ�
 
   it('firestore.rules: EXECUTIVE อ่าน student_self_assessments ได้แล้ว', () => {
     const block = rulesSrc.match(/match \/student_self_assessments\/\{studentId\} \{[\s\S]*?\n {4}\}/)?.[0] || '';
-    expect(block).toContain("hasRole('EXECUTIVE')");
+    expect(block).toContain("isExec()");
   });
 
   it('ExecutivePortal: ไม่ destructure selfAssessments/activeLearningPoints/activeLearningLogs จาก useStore() อีกต่อไป', () => {
