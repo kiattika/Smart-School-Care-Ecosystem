@@ -30,6 +30,7 @@ import {
   Users,
   Landmark,
   Briefcase,
+  Compass,
   CalendarDays
 } from 'lucide-react';
 
@@ -42,6 +43,8 @@ import { AcademicHomeworkModule } from './components/student-parent/AcademicHome
 import { ParentEngagementServices } from './components/student-parent/ParentEngagementServices';
 import { StudentFundsSection } from './components/funds/StudentFundsSection';
 import { StudentInternshipSection } from './components/internship/StudentInternshipSection';
+import { StudentStudyPlanSection } from './components/studyplan/StudentStudyPlanSection';
+import { studyLevelOfRoom } from './lib/studyPlan';
 import { FamilyHomeVisitInfoForm } from './components/homevisit/FamilyHomeVisitInfoForm';
 import { ClassChatMemberView, useMemberThreads } from './components/chat/ClassChatPanel';
 import { isThreadUnread } from './lib/classChat';
@@ -86,7 +89,7 @@ export function ParentPortal() {
   const bScore = student?.behaviorScore;
   
   const [activeTab, setActiveTab] = useState<
-    'timeline' | 'gate' | 'health' | 'behavior' | 'portfolio' | 'academic' | 'billing' | 'chat' | 'appointment' | 'family' | 'scholarship' | 'loan' | 'internship'
+    'timeline' | 'gate' | 'health' | 'behavior' | 'portfolio' | 'academic' | 'billing' | 'chat' | 'appointment' | 'family' | 'scholarship' | 'loan' | 'internship' | 'studyplan'
   >('timeline');
 
 
@@ -190,6 +193,7 @@ export function ParentPortal() {
           { id: 'scholarship', label: '10. ทุนการศึกษา', icon: Award },
           { id: 'loan', label: '11. กองทุนกู้ยืม (กยศ.)', icon: Landmark },
           { id: 'internship', label: '12. คำร้องขอฝึกงาน (ดูสถานะ)', icon: Briefcase },
+          ...(studyLevelOfRoom(student.room) ? [{ id: 'studyplan', label: '13. แผนศึกษาต่อ / TCAS (ดูอย่างเดียว)', icon: Compass }] : []),
         ]}>
       {/* Main Content View */}
       <div className="transition-all duration-300">
@@ -414,6 +418,10 @@ export function ParentPortal() {
 
         {activeTab === 'internship' && (
           <StudentInternshipSection readOnly student={{ studentId: student.studentId, name: student.name }} />
+        )}
+
+        {activeTab === 'studyplan' && (
+          <StudentStudyPlanSection readOnly student={{ studentId: student.studentId, name: student.name, room: student.room }} studentUid="" />
         )}
 
         {activeTab === 'family' && user?.uid && (

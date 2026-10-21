@@ -2914,6 +2914,32 @@ service cloud.firestore {
       allow get: if docId == 'current' && (isSchoolLeader() || hasRole('SUPER_ADMIN'));
       allow list, write: if false;
     }
+    // ===== แผนศึกษาต่อ ม.3/ม.6 + TCAS (src/lib/studyPlan.ts) — student_study_plans/{studentId} =====
+    // นักเรียนเจ้าของกรอกเอง (ต้องเป็นนักเรียนชั้น ม.3 หรือ ม.6 ตามห้องในทะเบียน); ผู้ปกครองตัวจริงอ่านอย่างเดียว;
+    // ครูแนะแนวอ่านทั้งโรงเรียน, ครูที่ปรึกษาอ่านเฉพาะห้องตัวเอง, ผู้บริหาร (isSchoolLeader) อ่านเพื่อสรุปตัวเลข; ลบไม่ได้
+    // รายการสถาบัน/สาขา (choices) ตรวจที่ rules แค่จำนวน ≤3 — เนื้อหารายตัวตรวจที่ client (validateStudyPlan)
+    match /student_study_plans/{studentId} {
+      allow read: if hasRole('GUIDANCE_COUNSELOR') || isSchoolLeader() || isSelfStudent(studentId) || isParentOfStudent(studentId) ||
+                     (resource != null && isHomeroomTeacherOf(resource.data.room));
+      allow create, update: if isSelfStudent(studentId)
+        && request.resource.data.keys().hasOnly(['studentId', 'studentUid', 'room', 'level', 'academicYear', 'planType', 'choices', 'portfolioUrl', 'portfolioSent', 'note', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['studentId', 'studentUid', 'room', 'level', 'academicYear', 'planType', 'choices', 'portfolioUrl', 'portfolioSent', 'note', 'updatedAt'])
+        && request.resource.data.studentId == studentId
+        && request.resource.data.studentUid == request.auth.uid
+        && request.resource.data.room == studentField(studentId, 'room', '__none__')
+        && ((request.resource.data.level == 'M6' && request.resource.data.room.matches('(ม|M)\\.6/.*') &&
+             request.resource.data.planType in ['UNIVERSITY', 'VOCATIONAL', 'WORK', 'OTHER', 'UNDECIDED'])
+            || (request.resource.data.level == 'M3' && request.resource.data.room.matches('(ม|M)\\.3/.*') &&
+             request.resource.data.planType in ['M4_SAME_SCHOOL', 'M4_OTHER_SCHOOL', 'VOCATIONAL', 'OTHER', 'UNDECIDED']))
+        && request.resource.data.academicYear is string && request.resource.data.academicYear.size() == 4
+        && request.resource.data.choices is list && request.resource.data.choices.size() <= 3
+        && request.resource.data.portfolioUrl is string && request.resource.data.portfolioUrl.size() <= 500
+        && (request.resource.data.portfolioUrl == '' || request.resource.data.portfolioUrl.matches('https://.*'))
+        && request.resource.data.portfolioSent is bool
+        && request.resource.data.note is string && request.resource.data.note.size() <= 500
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
     // ===== ตั้งค่าส่วนตัว (src/lib/userPreferences.ts) — ธีม/ขนาดตัวอักษร/รูปโปรไฟล์ ผู้ใช้ทุกบทบาทตั้งของตนเอง =====
     // เจ้าของ (docId == auth.uid) เขียนได้เท่านั้น; บุคลากรอ่านได้ (เห็นรูปกันและกัน); ค่าใหม่ในอนาคตต้องเพิ่มใน hasOnly
     match /user_preferences/{uid} {

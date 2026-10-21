@@ -2427,6 +2427,28 @@ service cloud.firestore {
       allow get: if docId == 'current' && (isSchoolLeader() || hasRole('SUPER_ADMIN'));
       allow list, write: if false;
     }
+    match /student_study_plans/{studentId} {
+      allow read: if hasRole('GUIDANCE_COUNSELOR') || isSchoolLeader() || isSelfStudent(studentId) || isParentOfStudent(studentId) ||
+                     (resource != null && isHomeroomTeacherOf(resource.data.room));
+      allow create, update: if isSelfStudent(studentId)
+        && request.resource.data.keys().hasOnly(['studentId', 'studentUid', 'room', 'level', 'academicYear', 'planType', 'choices', 'portfolioUrl', 'portfolioSent', 'note', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['studentId', 'studentUid', 'room', 'level', 'academicYear', 'planType', 'choices', 'portfolioUrl', 'portfolioSent', 'note', 'updatedAt'])
+        && request.resource.data.studentId == studentId
+        && request.resource.data.studentUid == request.auth.uid
+        && request.resource.data.room == studentField(studentId, 'room', '__none__')
+        && ((request.resource.data.level == 'M6' && request.resource.data.room.matches('(ม|M)\\.6/.*') &&
+             request.resource.data.planType in ['UNIVERSITY', 'VOCATIONAL', 'WORK', 'OTHER', 'UNDECIDED'])
+            || (request.resource.data.level == 'M3' && request.resource.data.room.matches('(ม|M)\\.3/.*') &&
+             request.resource.data.planType in ['M4_SAME_SCHOOL', 'M4_OTHER_SCHOOL', 'VOCATIONAL', 'OTHER', 'UNDECIDED']))
+        && request.resource.data.academicYear is string && request.resource.data.academicYear.size() == 4
+        && request.resource.data.choices is list && request.resource.data.choices.size() <= 3
+        && request.resource.data.portfolioUrl is string && request.resource.data.portfolioUrl.size() <= 500
+        && (request.resource.data.portfolioUrl == '' || request.resource.data.portfolioUrl.matches('https://.*'))
+        && request.resource.data.portfolioSent is bool
+        && request.resource.data.note is string && request.resource.data.note.size() <= 500
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
     match /user_preferences/{uid} {
       allow read: if isSignedIn() && (uid == request.auth.uid
         || (hasAnyRole() && !('STUDENT' in request.auth.token.get('roles', [])) && !('PARENT' in request.auth.token.get('roles', []))));

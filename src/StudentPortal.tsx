@@ -35,6 +35,7 @@ import {
   Users,
   Landmark,
   Briefcase,
+  Compass,
   MessageSquare
 } from 'lucide-react';
 
@@ -43,6 +44,8 @@ import { GateAttendanceTracker } from './components/student-parent/GateAttendanc
 import { StudentElectiveEnrollment } from './components/student-parent/StudentElectiveEnrollment';
 import { StudentFundsSection } from './components/funds/StudentFundsSection';
 import { StudentInternshipSection } from './components/internship/StudentInternshipSection';
+import { StudentStudyPlanSection } from './components/studyplan/StudentStudyPlanSection';
+import { studyLevelOfRoom } from './lib/studyPlan';
 import { HealthMentalWellbeingModule } from './components/student-parent/HealthMentalWellbeingModule';
 import { BehaviorDisciplineModule } from './components/student-parent/BehaviorDisciplineModule';
 import { StudentDaySchedule } from './components/student-parent/StudentDaySchedule';
@@ -70,7 +73,7 @@ export function StudentPortal() {
 
   // 7 Module Tabs + Assessment + Overview
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'gate' | 'health' | 'socio' | 'behavior' | 'electives' | 'scholarship' | 'loan' | 'internship' | 'portfolio' | 'academic' | 'billing' | 'chat' | 'appointment' | 'assessment'
+    'overview' | 'gate' | 'health' | 'socio' | 'behavior' | 'electives' | 'scholarship' | 'loan' | 'internship' | 'portfolio' | 'academic' | 'billing' | 'chat' | 'appointment' | 'assessment' | 'studyplan'
   >('overview');
 
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
@@ -213,6 +216,7 @@ export function StudentPortal() {
             { id: 'scholarship', label: 'ทุนการศึกษา', icon: Award },
             { id: 'loan', label: 'กองทุนกู้ยืม (กยศ.)', icon: Landmark },
             { id: 'internship', label: 'คำร้องขอฝึกงาน', icon: Briefcase },
+            ...(studyLevelOfRoom(student.room) ? [{ id: 'studyplan', label: 'แผนศึกษาต่อ / TCAS', icon: Compass }] : []),
             { id: 'portfolio', label: '6. แฟ้มผลงาน', icon: FolderGit2 },
             { id: 'academic', label: '7. ปพ.6 & การบ้าน & สอบ', icon: BookOpen },
             { id: 'billing', label: '8. ชำระเงิน', icon: CreditCard },
@@ -396,6 +400,10 @@ export function StudentPortal() {
 
         {activeTab === 'internship' && (
           <StudentInternshipSection student={{ studentId: student.studentId, name: student.name }} />
+        )}
+
+        {activeTab === 'studyplan' && user?.uid && (
+          <StudentStudyPlanSection student={{ studentId: student.studentId, name: student.name, room: student.room }} studentUid={user.uid} />
         )}
 
         {/* 5. แฟ้มผลงาน — บันทึกผลงานเอง (Firestore + อนุมัติโดยครูที่ปรึกษา) */}

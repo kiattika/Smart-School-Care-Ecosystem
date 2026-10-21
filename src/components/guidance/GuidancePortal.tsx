@@ -1,3 +1,4 @@
+import { GuidanceStudyPlanPanel } from '../studyplan/GuidanceStudyPlanPanel';
 import { AbsenceAlertsPanel } from '../absence/AbsenceAlertsPanel';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../store';
@@ -494,12 +495,7 @@ export function GuidancePortal() {
         {activeTab === 'absence' && <AbsenceAlertsPanel scope={{ kind: 'MIN_LEVEL', minLevel: 2 }} students={students} />}
 
         {activeTab === 'tcas' && (
-          <div className="space-y-4">
-            <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-2">
-              <h3 className="text-base font-bold text-white">แผนศึกษาต่อและ TCAS พอร์ตโฟลิโอ</h3>
-              <p className="text-xs text-slate-400">ยังไม่มีข้อมูลแผนศึกษาต่อของนักเรียน — ระบบกำลังพัฒนาให้นักเรียนกรอกแผนของตนเอง</p>
-            </div>
-          </div>
+          <GuidanceStudyPlanPanel students={students.map(s => ({ studentId: s.studentId, name: s.name, room: s.room || '' }))} />
         )}
 
       </div>

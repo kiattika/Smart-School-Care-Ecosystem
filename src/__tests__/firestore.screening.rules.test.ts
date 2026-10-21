@@ -612,3 +612,58 @@ describe.skipIf(!EMULATOR_HOST)('สรุปการมาเรียน (att
     await assertFails(subjectTeacher2().doc('absence_alerts/' + SID).get());
   });
 });
+
+describe.skipIf(!EMULATOR_HOST)('แผนศึกษาต่อ ม.3/ม.6 (student_study_plans) — firestore.rules', () => {
+  const fsTs = async () => (await import('firebase/firestore')).serverTimestamp();
+  const director = () => ctx('dir-uid', ['DIRECTOR']);
+  const M6_ROOM = 'ม.6/3';
+  const plan = async (over: Record<string, unknown> = {}) => ({
+    studentId: SID, studentUid: STU_UID, room: M6_ROOM, level: 'M6', academicYear: '2569', planType: 'UNIVERSITY',
+    choices: [{ institution: 'จุฬาฯ', program: 'วิศวกรรมศาสตร์', round: 'R3' }], portfolioUrl: '', portfolioSent: false, note: '', updatedAt: await fsTs(), ...over,
+  });
+  async function seedM6() {
+    await seed('ACTIVE');
+    await testEnv.withSecurityRulesDisabled(async (c) => {
+      const db = c.firestore();
+      await db.doc(`students/${SID}`).set({ studentId: SID, studentUid: STU_UID, room: M6_ROOM, parentUid: 'par-uid' });
+      await db.doc(`staff/${HR_STAFF}`).set({ roles: ['HOMEROOM_TEACHER'], assignments: { homeroomClass: M6_ROOM } });
+    });
+  }
+
+  it('นักเรียนเจ้าของบันทึกแผนของตัวเองได้ (ม.6) และแก้ซ้ำได้', async () => {
+    await seedM6();
+    await assertSucceeds(student().doc('student_study_plans/' + SID).set(await plan()));
+    await assertSucceeds(student().doc('student_study_plans/' + SID).set(await plan({ planType: 'WORK', choices: [] })));
+  });
+
+  it('ปฏิเสธ: เขียนแทนนักเรียนคนอื่น / ห้องไม่ตรงทะเบียน / ระดับไม่ตรงห้อง / planType ผิดระดับ / ลิงก์ไม่ใช่ https / choices เกิน 3', async () => {
+    await seedM6();
+    const ref = (c: () => ReturnType<typeof student>) => c().doc('student_study_plans/' + SID);
+    await assertFails(otherStudent().doc('student_study_plans/' + SID).set(await plan()));
+    await assertFails(ref(student).set(await plan({ room: 'ม.6/9' })));
+    await assertFails(ref(student).set(await plan({ level: 'M3' })));
+    await assertFails(ref(student).set(await plan({ planType: 'M4_SAME_SCHOOL' })));
+    await assertFails(ref(student).set(await plan({ portfolioUrl: 'http://x.example/p' })));
+    await assertFails(ref(student).set(await plan({ portfolioUrl: 'javascript:alert(1)' })));
+    const c = { institution: 'a', program: 'b', round: 'R1' };
+    await assertFails(ref(student).set(await plan({ choices: [c, c, c, c] })));
+    await assertFails(ref(student).set(await plan({ updatedAt: new Date() })));
+    await assertFails(ref(student).set(await plan({ extra: 1 })));
+  });
+
+  it('นักเรียน ม.5 (ห้อง ม.5/8) บันทึกแผนไม่ได้', async () => {
+    await seed('ACTIVE');
+    await assertFails(student().doc('student_study_plans/' + SID).set(await plan({ room: ROOM })));
+  });
+
+  it('การอ่าน: แนะแนว/ผู้บริหาร/ผอ./ผู้ปกครองตัวจริง/ครูที่ปรึกษาห้องตน อ่านได้; ห้องอื่น/ครูวิชา/SUPER_ADMIN อ่านไม่ได้; ลบไม่ได้', async () => {
+    await seedM6();
+    await put('student_study_plans/' + SID, { studentId: SID, studentUid: STU_UID, room: M6_ROOM, level: 'M6', academicYear: '2569', planType: 'WORK', choices: [], portfolioUrl: '', portfolioSent: false, note: '' });
+    for (const who of [guidance, executive, director, student, homeroom]) await assertSucceeds(who().doc('student_study_plans/' + SID).get());
+    await assertSucceeds(ctx('par-uid', ['PARENT']).doc('student_study_plans/' + SID).get());
+    await assertSucceeds(homeroom().collection('student_study_plans').where('room', '==', M6_ROOM).get());
+    for (const who of [homeroomOtherRoom, subjectTeacher, superAdmin, otherStudent]) await assertFails(who().doc('student_study_plans/' + SID).get());
+    await assertFails(ctx('par-uid', ['PARENT']).doc('student_study_plans/' + SID).set(await plan()));
+    for (const who of [student, guidance, superAdmin]) await assertFails(who().doc('student_study_plans/' + SID).delete());
+  });
+});

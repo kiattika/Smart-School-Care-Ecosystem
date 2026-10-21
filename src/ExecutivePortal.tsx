@@ -53,6 +53,7 @@ import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { ExecutiveLearnerAnalytics } from './components/ExecutiveLearnerAnalytics';
 import { ExecutiveEngagementDashboard } from './components/ExecutiveEngagementDashboard';
 import { ExecutiveAttendancePanel } from './components/executive/ExecutiveAttendancePanel';
+import { ExecutiveStudyPlanPanel } from './components/studyplan/ExecutiveStudyPlanPanel';
 import { ExecutiveTeacherInfoPanel } from './components/executive/ExecutiveTeacherInfoPanel';
 import { useStore } from './store';
 import { useRealStudents } from './hooks/useRealStudents';
@@ -354,6 +355,8 @@ export function ExecutivePortal() {
               </div>
 
               <ExecutiveAttendancePanel />
+
+              <ExecutiveStudyPlanPanel />
 
               {/* 360° Care Score Dashboard
                   TASK 1/2 (audit): เดิมมี "5 KPI Pillars" + "Annual Rewards & Promotions Shortlist"
