@@ -14,6 +14,11 @@ service cloud.firestore {
       );
     }
 
+    function isExec() {
+      return hasRole('EXECUTIVE') || hasRole('DEPUTY_DIRECTOR_BUDGET') ||
+             hasRole('DEPUTY_DIRECTOR_PERSONNEL') || hasRole('DEPUTY_DIRECTOR_GENERAL');
+    }
+
     function isSelf(userId) {
       return isSignedIn() && (request.auth.uid == userId || request.auth.token.email == userId);
     }
@@ -96,7 +101,7 @@ service cloud.firestore {
 
     match /students/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      hasRole('SUBJECT_TEACHER') ||
                      hasRole('HOMEROOM_TEACHER') ||
                      hasRole('GUIDANCE_COUNSELOR') ||
@@ -170,7 +175,7 @@ service cloud.firestore {
     match /student_self_assessments/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('GUIDANCE_COUNSELOR') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      isSelfStudent(studentId) ||
                      (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass)) ||
                      isSelf(resource.data.studentId) ||
@@ -185,7 +190,7 @@ service cloud.firestore {
     match /discipline_logs/{logId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('HOMEROOM_TEACHER') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      hasRole('GUIDANCE_COUNSELOR') ||
                      (isSignedIn() && (resource.data.get('studentUid', null) == request.auth.uid ||
                                        resource.data.get('parentUid', null) == request.auth.uid));
@@ -251,7 +256,7 @@ service cloud.firestore {
 
     match /attendance_records/{recordId} {
       allow read: if hasRole('SUPER_ADMIN') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      hasRole('SUBJECT_TEACHER') ||
                      hasRole('HOMEROOM_TEACHER') ||
                      (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.studentUid == request.auth.uid || resource.data.studentId == request.auth.uid));
@@ -264,7 +269,7 @@ service cloud.firestore {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('REGISTRAR') ||
                      hasRole('REGISTRAR_ASSISTANT') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      hasRole('SUBJECT_TEACHER') ||
                      hasRole('HOMEROOM_TEACHER') ||
                      hasRole('HEAD_OF_DEPARTMENT') ||
@@ -336,7 +341,7 @@ service cloud.firestore {
 
     match /seating_assignments/{assignmentId} {
       allow read: if hasRole('SUPER_ADMIN') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      hasRole('SUBJECT_TEACHER') ||
                      hasRole('HOMEROOM_TEACHER') ||
                      (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid));
@@ -347,7 +352,7 @@ service cloud.firestore {
 
     match /gate_attendance_logs/{logId} {
       allow read: if hasRole('SUPER_ADMIN') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      hasRole('STUDENT_AFFAIRS') ||
                      hasRole('HOMEROOM_TEACHER') ||
                      hasRole('SUBJECT_TEACHER') ||
@@ -361,7 +366,7 @@ service cloud.firestore {
 
     match /detailed_leave_requests/{leaveId} {
       allow read: if hasRole('SUPER_ADMIN') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      isHomeroomTeacherOf(resource.data.homeroomClass) ||
                      (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
 
@@ -422,7 +427,7 @@ service cloud.firestore {
     }
 
     match /student_leave_days/{leaveId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('EXECUTIVE') || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER');
+      allow read: if hasRole('SUPER_ADMIN') || isExec() || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER');
       allow create: if request.resource.data.keys().hasOnly(['leaveId', 'studentId', 'homeroomClass', 'startDate', 'endDate', 'createdAt'])
                     && request.resource.data.leaveId == leaveId
                     && getAfter(/databases/$(database)/documents/detailed_leave_requests/$(leaveId)).data.status == 'APPROVED'
@@ -436,7 +441,7 @@ service cloud.firestore {
 
     match /gps_check_in_logs/{logId} {
       allow read: if hasRole('SUPER_ADMIN') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      hasRole('HOMEROOM_TEACHER') ||
                      hasRole('SUBJECT_TEACHER') ||
                      (isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.studentId == request.auth.uid || resource.data.authUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
@@ -470,7 +475,7 @@ service cloud.firestore {
                       hasRole('ACADEMIC_HEAD') ||
                       hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
                       hasRole('DIRECTOR') ||
-                      hasRole('EXECUTIVE') ||
+                      isExec() ||
                       hasRole('SUBJECT_TEACHER') ||
                       hasRole('HOMEROOM_TEACHER');
     }
@@ -493,7 +498,7 @@ service cloud.firestore {
                       hasRole('ACADEMIC_HEAD') ||
                       hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
                       hasRole('DIRECTOR') ||
-                      hasRole('EXECUTIVE') ||
+                      isExec() ||
                       hasRole('SUBJECT_TEACHER');
     }
 
@@ -527,7 +532,7 @@ service cloud.firestore {
     }
 
     match /student_screenings_2q/{studentId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('EXECUTIVE') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId) || isParentOfStudent(studentId);
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isExec() || isHomeroomOfStudent(studentId) || isSelfStudent(studentId) || isParentOfStudent(studentId);
       allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId);
     }
 
@@ -613,7 +618,7 @@ service cloud.firestore {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('GUIDANCE_COUNSELOR') ||
                      hasRole('HOMEROOM_TEACHER') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.respondentUid == request.auth.uid)) ||
                      isParentOfStudent(resource.data.studentId);
 
@@ -652,7 +657,7 @@ service cloud.firestore {
     match /billing_invoices/{invoiceId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('FINANCE_STAFF') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
 
       allow create: if (hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF')) &&
@@ -862,7 +867,7 @@ service cloud.firestore {
 
     match /active_learning_logs/{logId} {
       allow read: if hasRole('SUPER_ADMIN')
-                     || hasRole('EXECUTIVE')
+                     || isExec()
                      || ((hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER'))
                          && myStaffId() is string && myStaffId() != ''
                          && resource.data.get('teacherStaffId', '') == myStaffId())
@@ -918,7 +923,7 @@ service cloud.firestore {
       allow read: if hasRole('ACADEMIC_HEAD') ||
                      hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
                      hasRole('DIRECTOR') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      (isSignedIn() && resource.data.teacherId == request.auth.uid);
 
       allow create: if (hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER')) &&
@@ -1017,7 +1022,7 @@ service cloud.firestore {
 
     match /student_home_locations/{studentId} {
       allow read: if hasRole('SUPER_ADMIN')
-                     || hasRole('EXECUTIVE')
+                     || isExec()
                      || (isSignedIn() && resource == null)
                      || isSelfStudent(studentId)
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass));
@@ -1037,7 +1042,7 @@ service cloud.firestore {
     match /home_visit_records/{recordId} {
       allow read: if hasRole('SUPER_ADMIN')
                      || hasRole('STUDENT_AFFAIRS')
-                     || hasRole('EXECUTIVE')
+                     || isExec()
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass));
       allow create: if (hasRole('SUPER_ADMIN') || isHomeroomTeacherOf(request.resource.data.homeroomClass))
                        && request.resource.data.studentId is string
@@ -1053,7 +1058,7 @@ service cloud.firestore {
     match /home_visit_student_info/{studentId} {
       allow read: if hasRole('SUPER_ADMIN')
                      || hasRole('STUDENT_AFFAIRS')
-                     || hasRole('EXECUTIVE')
+                     || isExec()
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass))
                      || isSelfStudent(studentId);
       allow create, update: if isSignedIn()
@@ -1067,7 +1072,7 @@ service cloud.firestore {
     match /home_visit_family_info/{studentId} {
       allow read: if hasRole('SUPER_ADMIN')
                      || hasRole('STUDENT_AFFAIRS')
-                     || hasRole('EXECUTIVE')
+                     || isExec()
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass))
                      || (isSignedIn() && studentField(studentId, 'parentUid', '__none__') == request.auth.uid);
       allow create, update: if isSignedIn()
@@ -1211,7 +1216,7 @@ service cloud.firestore {
     match /infirmary_visits/{visitId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('INFIRMARY_STAFF') ||
-                     hasRole('EXECUTIVE') ||
+                     isExec() ||
                      (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
 
       allow create: if (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF')) &&
@@ -1238,7 +1243,7 @@ service cloud.firestore {
     }
 
     match /infirmary_medicines/{medicineId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') || hasRole('EXECUTIVE');
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') || isExec();
 
       allow create: if (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF'))
                     && request.resource.data.keys().hasOnly(['id', 'name', 'category', 'unit', 'stock', 'minAlert', 'active', 'lastMovementId', 'createdBy', 'createdAt', 'updatedAt'])
@@ -1270,7 +1275,7 @@ service cloud.firestore {
     }
 
     match /infirmary_stock_movements/{movementId} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') || hasRole('EXECUTIVE');
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') || isExec();
 
       allow create: if (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF'))
                     && request.resource.data.keys().hasOnly(['id', 'medicineId', 'medicineName', 'unit', 'type', 'delta', 'balanceAfter', 'note', 'visitId', 'studentId', 'byUid', 'byName', 'at'])
@@ -1481,7 +1486,7 @@ service cloud.firestore {
     match /lesson_plan_submissions/{oid} {
       allow read: if myStaffId() != '' && (
         resource.data.teacherStaffId == myStaffId() ||
-        hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
+        hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || isExec() ||
         supInMyDept(resource.data.departmentId)
       );
 
@@ -1564,7 +1569,7 @@ service cloud.firestore {
       allow read: if myStaffId() != '' && (
         resource.data.teacherStaffId == myStaffId() ||
         ('coTeacherStaffIds' in resource.data && myStaffId() in resource.data.coTeacherStaffIds) ||
-        hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
+        hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || isExec() ||
         supInMyDept(resource.data.departmentId)
       );
 
@@ -1626,7 +1631,7 @@ service cloud.firestore {
       allow read: if myStaffId() != '' && (
         resource.data.authorStaffId == myStaffId() ||
         ('memberStaffIds' in resource.data && myStaffId() in resource.data.memberStaffIds) ||
-        hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
+        hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || isExec() ||
         supInMyDept(resource.data.departmentId)
       );
       allow create: if myStaffId() != '' && plcDocOk(request.resource.data)
@@ -1749,7 +1754,7 @@ service cloud.firestore {
         );
     }
     match /blood_donations/{did} {
-      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') || hasRole('EXECUTIVE') ||
+      allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') || isExec() ||
                      (resource.data.subjectType == 'STUDENT' && (isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId))) ||
                      (resource.data.subjectType == 'STAFF' && myStaffId() != '' && resource.data.staffId == myStaffId());
       allow create: if (hasRole('INFIRMARY_STAFF') || hasRole('SUPER_ADMIN')) && donationShapeOk(request.resource.data);
@@ -1923,7 +1928,7 @@ service cloud.firestore {
         resource.data.supervisorStaffId == myStaffId() ||
         (resource.data.teacherStaffId == myStaffId() && resource.data.submitted == true) ||
         hasRole('INSTRUCTIONAL_SUPERVISOR') ||
-        ((hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('EXECUTIVE')) && resource.data.submitted == true) ||
+        ((hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || isExec()) && resource.data.submitted == true) ||
         (resource.data.submitted == true && supInMyDept(resource.data.departmentId))
       );
 
@@ -1983,7 +1988,7 @@ service cloud.firestore {
       return hasRole('REGISTRAR') && existsAfter(/databases/$(database)/documents/graduation_approvals/$(sid + '_' + studentField(sid, 'room', '')[0:3]));
     }
     function regReadScope(sid, room) {
-      return regAny() || hasRole('EXECUTIVE') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('ACADEMIC_HEAD')
+      return regAny() || isExec() || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('ACADEMIC_HEAD')
         || isHomeroomTeacherOf(room) || isSelfStudent(sid) || isParentOfStudent(sid);
     }
     function retakeShapeOk(d, rid) {
@@ -2040,7 +2045,7 @@ service cloud.firestore {
     }
 
     match /room_transfers/{tid} {
-      allow read: if regAny() || hasRole('EXECUTIVE') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('ACADEMIC_HEAD')
+      allow read: if regAny() || isExec() || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('ACADEMIC_HEAD')
                      || isHomeroomTeacherOf(resource.data.fromRoom) || isHomeroomTeacherOf(resource.data.toRoom);
       allow create: if regAny() && myStaffId() != ''
                        && request.resource.data.keys().hasOnly(['studentId','studentName','fromRoom','toRoom','fromHouseId','toHouseId','reason','status','requestedByStaffId','requestedByName','createdAt','updatedAt'])
@@ -2114,7 +2119,7 @@ service cloud.firestore {
     }
 
     match /conduct_entries/{eid} {
-      allow read: if cdAffairs() || hasRole('EXECUTIVE')
+      allow read: if cdAffairs() || isExec()
                      || (resource.data.room is string && isHomeroomTeacherOf(resource.data.room))
                      || (myStaffId() != '' && resource.data.createdByStaffId == myStaffId())
                      || (isSignedIn() && (resource.data.get('studentUid', '') == request.auth.uid || resource.data.get('parentUid', '') == request.auth.uid));

@@ -12,6 +12,7 @@ import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/
 import { auth, db } from './firebase';
 import { User, UserProfile, UserRole, Role } from '../types';
 import { AUTH_NO_PROFILE, AUTH_NO_ROLE } from './authErrors';
+import { isExecutiveRole } from './executiveRoles';
 import { parentDisplayNameOf, parentRelationshipLabel } from './parentRelationship';
 
 const googleProvider = new GoogleAuthProvider();
@@ -52,7 +53,7 @@ export async function signOutUser(): Promise<void> {
 
 function legacyRoleFor(activeRole: UserRole, roles: UserRole[]): Role {
   if (activeRole === 'SUPER_ADMIN') return 'admin';
-  if (activeRole === 'EXECUTIVE') return 'executive';
+  if (isExecutiveRole(activeRole)) return 'executive';
   if (activeRole === 'HOMEROOM_TEACHER') return 'advisor';
   if (activeRole === 'PARENT' || roles.includes('PARENT')) return 'parent';
   if (activeRole === 'STUDENT' || roles.includes('STUDENT')) return 'student';

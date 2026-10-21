@@ -52,6 +52,9 @@ import { DepartmentManagerModal } from './admin/DepartmentManagerModal';
 export const ROLE_NAMES_TH: Record<UserRole, string> = {
   SUPER_ADMIN: 'ผู้ดูแลระบบ (Admin)',
   EXECUTIVE: 'ผู้บริหารโรงเรียน',
+  DEPUTY_DIRECTOR_BUDGET: 'รองผู้อำนวยการกลุ่มบริหารงบประมาณ',
+  DEPUTY_DIRECTOR_PERSONNEL: 'รองผู้อำนวยการกลุ่มบริหารบุคคล',
+  DEPUTY_DIRECTOR_GENERAL: 'รองผู้อำนวยการกลุ่มบริหารทั่วไป',
   HEAD_OF_DEPARTMENT: 'หัวหน้ากลุ่มสาระการเรียนรู้',
   DEPUTY_HEAD_OF_DEPARTMENT: 'รองหัวหน้ากลุ่มสาระการเรียนรู้',
   ACADEMIC_HEAD: 'หัวหน้ากลุ่มงานวิชาการและหลักสูตร',
@@ -82,6 +85,9 @@ const STAFF_ROLE_ENTRIES = (Object.entries(ROLE_NAMES_TH) as [UserRole, string][
 export const ROLE_COLORS: Record<UserRole, { bg: string; text: string; border: string }> = {
   SUPER_ADMIN: { bg: 'bg-red-500/10', text: 'text-red-400', border: 'border-red-500/20' },
   EXECUTIVE: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
+  DEPUTY_DIRECTOR_BUDGET: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
+  DEPUTY_DIRECTOR_PERSONNEL: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
+  DEPUTY_DIRECTOR_GENERAL: { bg: 'bg-purple-500/10', text: 'text-purple-400', border: 'border-purple-500/20' },
   HEAD_OF_DEPARTMENT: { bg: 'bg-amber-500/10', text: 'text-amber-400', border: 'border-amber-500/20' },
   DEPUTY_HEAD_OF_DEPARTMENT: { bg: 'bg-yellow-500/10', text: 'text-yellow-400', border: 'border-yellow-500/20' },
   ACADEMIC_HEAD: { bg: 'bg-indigo-500/10', text: 'text-indigo-400', border: 'border-indigo-500/20' },

@@ -66,6 +66,33 @@ export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
     iconColor: 'text-(--role-executive)',
     description: 'เข้าถึงข้อมูลภาพรวม อนุมัติผลการเรียน และนิเทศ'
   },
+  DEPUTY_DIRECTOR_BUDGET: {
+    label: 'รองผอ.กลุ่มบริหารงบประมาณ',
+    badgeBg: 'bg-(--role-executive)/10',
+    badgeText: 'text-(--role-executive)',
+    badgeBorder: 'border-(--role-executive)/20',
+    iconBg: 'bg-(--role-executive)/20',
+    iconColor: 'text-(--role-executive)',
+    description: 'เข้าถึงข้อมูลภาพรวมและข้อมูลครูรายบุคคล (สิทธิ์เท่าผู้บริหารสถานศึกษา)'
+  },
+  DEPUTY_DIRECTOR_PERSONNEL: {
+    label: 'รองผอ.กลุ่มบริหารบุคคล',
+    badgeBg: 'bg-(--role-executive)/10',
+    badgeText: 'text-(--role-executive)',
+    badgeBorder: 'border-(--role-executive)/20',
+    iconBg: 'bg-(--role-executive)/20',
+    iconColor: 'text-(--role-executive)',
+    description: 'เข้าถึงข้อมูลภาพรวมและข้อมูลครูรายบุคคล (สิทธิ์เท่าผู้บริหารสถานศึกษา)'
+  },
+  DEPUTY_DIRECTOR_GENERAL: {
+    label: 'รองผอ.กลุ่มบริหารทั่วไป',
+    badgeBg: 'bg-(--role-executive)/10',
+    badgeText: 'text-(--role-executive)',
+    badgeBorder: 'border-(--role-executive)/20',
+    iconBg: 'bg-(--role-executive)/20',
+    iconColor: 'text-(--role-executive)',
+    description: 'เข้าถึงข้อมูลภาพรวมและข้อมูลครูรายบุคคล (สิทธิ์เท่าผู้บริหารสถานศึกษา)'
+  },
   HEAD_OF_DEPARTMENT: {
     label: 'หัวหน้ากลุ่มสาระฯ',
     badgeBg: 'bg-(--role-head-of-department)/10',
@@ -366,6 +393,12 @@ export function NavbarWithRoleSwitcher({
         return count > 0 ? `สอน ${count} รายวิชา` : '';
       case 'SUPERVISORY_TEACHER':
         return 'ผู้นิเทศการสอน';
+      case 'DEPUTY_DIRECTOR_BUDGET':
+        return 'กลุ่มบริหารงบประมาณ';
+      case 'DEPUTY_DIRECTOR_PERSONNEL':
+        return 'กลุ่มบริหารบุคคล';
+      case 'DEPUTY_DIRECTOR_GENERAL':
+        return 'กลุ่มบริหารทั่วไป';
       case 'STUDENT_AFFAIRS':
         return 'งานกิจการนักเรียน';
       case 'FUND_SCHOLARSHIP':

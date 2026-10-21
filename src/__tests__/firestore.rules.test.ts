@@ -73,6 +73,17 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(asRole('SUBJECT_TEACHER').firestore().doc('students/std-101').get());
     });
 
+    it('รองผอ. 3 กลุ่มงาน (งบประมาณ/บุคคล/ทั่วไป) อ่านเหมือน EXECUTIVE แต่เขียนไม่ได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/std-102').set({ name: 'Somying', parentUid: 'parent-102' });
+      });
+      for (const r of ['DEPUTY_DIRECTOR_BUDGET', 'DEPUTY_DIRECTOR_PERSONNEL', 'DEPUTY_DIRECTOR_GENERAL']) {
+        await assertSucceeds(asRole(r).firestore().doc('students/std-102').get());
+        await assertFails(asRole(r).firestore().doc('students/std-102').update({ name: 'X' }));
+      }
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('parent_verification_records/38501_verify').get());
+    });
+
     it('allows a linked parent (parentUid matching auth.uid) to read student record', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('students/std-101').set({ name: 'Somchai', parentUid: 'parent-alice' });
@@ -4879,7 +4890,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(all(ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR'])));
       await assertSucceeds(all(ctxOf('d1', ['DIRECTOR'])));
       await assertSucceeds(all(ctxOf('d2', ['DEPUTY_DIRECTOR_ACADEMIC'])));
-      await assertFails(all(ctxOf('ex', ['EXECUTIVE'])));
+      for (const r of ['EXECUTIVE', 'DEPUTY_DIRECTOR_BUDGET', 'DEPUTY_DIRECTOR_PERSONNEL', 'DEPUTY_DIRECTOR_GENERAL']) await assertSucceeds(all(ctxOf('ex', [r])));
       await assertFails(all(ctxOf('adm', ['SUPER_ADMIN'])));
     });
   });
@@ -4958,7 +4969,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       }
     });
 
-    it('การอ่าน: เจ้าของ; หัวหน้ากลุ่มสาระฯ เฉพาะแผนก; หัวหน้างานนิเทศ/ผอ./รอง ผอ.วิชาการ ทั้งหมด; EXECUTIVE/SUPER_ADMIN ไม่ได้', async () => {
+    it('การอ่าน: เจ้าของ; หัวหน้ากลุ่มสาระฯ เฉพาะแผนก; หัวหน้างานนิเทศ/ผอ./รอง ผอ.วิชาการ/กลุ่มผู้บริหาร (isExec) ทั้งหมด; SUPER_ADMIN ไม่ได้', async () => {
       await seed();
       await put(pid('t1'), doc0('t1', 'D1'));
       await put(pid('t2'), doc0('t2', 'D2'));
@@ -4973,7 +4984,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(all(ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR'])));
       await assertSucceeds(all(ctxOf('d1', ['DIRECTOR'])));
       await assertSucceeds(all(ctxOf('d2', ['DEPUTY_DIRECTOR_ACADEMIC'])));
-      await assertFails(all(ctxOf('ex', ['EXECUTIVE'])));
+      for (const r of ['EXECUTIVE', 'DEPUTY_DIRECTOR_BUDGET', 'DEPUTY_DIRECTOR_PERSONNEL', 'DEPUTY_DIRECTOR_GENERAL']) await assertSucceeds(all(ctxOf('ex', [r])));
       await assertFails(all(ctxOf('adm', ['SUPER_ADMIN'])));
     });
   });
@@ -5062,7 +5073,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(mUpdateDoc(mDoc(ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR']), `teaching_reflections/${SEM}_t1`), { outcomes: 'hack', updatedAt: mServerTimestamp() }));
     });
 
-    it('การอ่าน PLC/สะท้อนคิด: เจ้าของ; หัวหน้ากลุ่มสาระฯ เฉพาะแผนก; หัวหน้างานนิเทศ/ผอ./รอง ผอ.วิชาการ ทั้งหมด; EXECUTIVE/SUPER_ADMIN ไม่ได้', async () => {
+    it('การอ่าน PLC/สะท้อนคิด: เจ้าของ; หัวหน้ากลุ่มสาระฯ เฉพาะแผนก; หัวหน้างานนิเทศ/ผอ./รอง ผอ.วิชาการ ทั้งหมด; กลุ่มผู้บริหาร (isExec) อ่านได้เฉพาะ PLC; SUPER_ADMIN ไม่ได้', async () => {
       await seed();
       await put('plc_logs/c1', plc('t1', 'D1'));
       await put('plc_logs/c2', plc('t2', 'D2'));
@@ -5080,7 +5091,10 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         await assertSucceeds(all(ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR']), name));
         await assertSucceeds(all(ctxOf('d1', ['DIRECTOR']), name));
         await assertSucceeds(all(ctxOf('d2', ['DEPUTY_DIRECTOR_ACADEMIC']), name));
-        await assertFails(all(ctxOf('ex', ['EXECUTIVE']), name));
+        for (const r of ['EXECUTIVE', 'DEPUTY_DIRECTOR_BUDGET', 'DEPUTY_DIRECTOR_PERSONNEL', 'DEPUTY_DIRECTOR_GENERAL']) {
+          // กลุ่มผู้บริหารอ่าน PLC ได้ทั้งโรงเรียน; สะท้อนคิดยังเป็นส่วนตัว (ไม่ได้ขอให้เปิด)
+          if (name === 'plc_logs') await assertSucceeds(all(ctxOf('ex', [r]), name)); else await assertFails(all(ctxOf('ex', [r]), name));
+        }
         await assertFails(all(ctxOf('adm', ['SUPER_ADMIN']), name));
       }
     });

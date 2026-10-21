@@ -23,7 +23,7 @@ describe('ExecutivePortal TASK 4: GIS tab ใช้พิกัดบ้าน�
 
   it('firestore.rules: EXECUTIVE อ่าน student_home_locations ได้ทั้งโรงเรียน (ไม่ scope ห้อง)', () => {
     const block = rulesSrc.match(/match \/student_home_locations\/\{studentId\} \{[\s\S]*?\n {4}\}/)?.[0] || '';
-    expect(block).toContain("hasRole('EXECUTIVE')");
+    expect(block).toContain("isExec()");
   });
 
   it('ExecutivePortal: GIS pin ผูกกับ student_home_locations + students จริง ไม่ใช่ mockExecutiveData.gisStudents', () => {

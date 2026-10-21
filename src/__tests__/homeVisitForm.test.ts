@@ -96,7 +96,7 @@ describe('guard: การเชื่อมต่อ/ความปลอด�
     const rules = readSource('firestore.rules');
     const blk = rules.match(/match \/home_visit_records\/\{recordId\} \{[\s\S]*?\n {4}\}/)?.[0] || '';
     expect(blk).toMatch(/isHomeroomTeacherOf\(resource\.data\.homeroomClass\)/);
-    expect(blk).toMatch(/hasRole\('EXECUTIVE'\)/);
+    expect(blk).toMatch(/isExec\(\)/);
     expect(blk).toMatch(/allow delete: if false/);
     expect(blk).not.toMatch(/allow (read|write|create|update)[^;]*isSignedIn\(\)\s*;/);
   });

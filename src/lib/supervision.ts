@@ -183,6 +183,7 @@ export const EX_OFFICIO_SUPERVISOR_ROLES = ['HEAD_OF_DEPARTMENT', 'DEPUTY_HEAD_O
 /** เห็นผลรายบุคคลของครูทุกคน: ผอ./รองผอ./หัวหน้างานนิเทศ */
 export const SUPERVISION_VIEW_ALL_ROLES = [
   'INSTRUCTIONAL_SUPERVISOR', 'DIRECTOR', 'DEPUTY_DIRECTOR_ACADEMIC', 'EXECUTIVE',
+  'DEPUTY_DIRECTOR_BUDGET', 'DEPUTY_DIRECTOR_PERSONNEL', 'DEPUTY_DIRECTOR_GENERAL',
 ] as const;
 
 /** เปิดรอบ/จับคู่ผู้นิเทศ */
