@@ -515,3 +515,71 @@ describe.skipIf(!EMULATOR_HOST)('แนวทางช่วยเหลือ�
     }
   });
 });
+
+describe.skipIf(!EMULATOR_HOST)('ขาดเรียนต่อเนื่อง (absence_alerts / absence_settings / absence_followups) — firestore.rules', () => {
+  const affairs = () => ctx('aff-uid', ['STUDENT_AFFAIRS'], { staffId: 'aff-1' });
+  const fsTs = async () => (await import('firebase/firestore')).serverTimestamp();
+  const alert = (level: number, over: Record<string, unknown> = {}) => ({ studentId: SID, room: ROOM, streakDays: level === 3 ? 10 : level === 2 ? 5 : 3, level, sinceDate: '2026-10-19', lastCheckedDate: '2026-10-21', ...over });
+  const follow = (over: Record<string, unknown> = {}) => ({
+    studentId: SID, room: ROOM, action: 'CALLED_PARENT', note: 'โทรแล้ว', streakAtTime: 3, byUid: 'hr-uid', byStaffId: HR_STAFF, byName: 'ครูที่ปรึกษา', ...over,
+  });
+
+  it('absence_alerts: client เขียนไม่ได้ทุกบทบาท', async () => {
+    await seed('ACTIVE');
+    for (const who of [superAdmin, affairs, homeroom, guidance, executive]) await assertFails(who().doc('absence_alerts/' + SID).set(alert(1)));
+  });
+
+  it('absence_alerts: ครูที่ปรึกษาห้องตนเห็นทุกระดับ; ห้องอื่น/นักเรียน/SUPER_ADMIN/ครูวิชาไม่เห็น', async () => {
+    await seed('ACTIVE');
+    await put('absence_alerts/' + SID, alert(1));
+    await assertSucceeds(homeroom().doc('absence_alerts/' + SID).get());
+    await assertSucceeds(homeroom().collection('absence_alerts').where('room', '==', ROOM).get());
+    for (const who of [homeroomOtherRoom, student, superAdmin, subjectTeacher]) await assertFails(who().doc('absence_alerts/' + SID).get());
+  });
+
+  it('absence_alerts: งานกิจการ/แนะแนวเห็นเฉพาะ level >= 2; ผู้บริหารเฉพาะ level >= 3', async () => {
+    await seed('ACTIVE');
+    await put('absence_alerts/l1', alert(1)); await put('absence_alerts/l2', alert(2)); await put('absence_alerts/l3', alert(3));
+    for (const who of [affairs, guidance]) {
+      await assertFails(who().doc('absence_alerts/l1').get());
+      await assertSucceeds(who().doc('absence_alerts/l2').get());
+      await assertSucceeds(who().collection('absence_alerts').where('level', '>=', 2).get());
+      await assertFails(who().collection('absence_alerts').get());
+    }
+    await assertFails(executive().doc('absence_alerts/l2').get());
+    await assertSucceeds(executive().doc('absence_alerts/l3').get());
+  });
+
+  it('absence_settings/thresholds: งานกิจการ/SUPER_ADMIN ตั้งได้ (เลขเต็มเรียงน้อย→มาก 1..60); ครูอื่นแก้ไม่ได้; อ่านได้ตามกลุ่ม', async () => {
+    await seed('ACTIVE');
+    const ts = await fsTs();
+    const ok = (over: Record<string, unknown> = {}) => ({ watchDays: 2, weekDays: 4, severeDays: 8, updatedBy: 'aff-uid', updatedAt: ts, ...over });
+    await assertSucceeds(affairs().doc('absence_settings/thresholds').set(ok()));
+    await assertSucceeds(homeroom().doc('absence_settings/thresholds').get());
+    await assertFails(student().doc('absence_settings/thresholds').get());
+    await assertFails(homeroom().doc('absence_settings/thresholds').set(ok({ updatedBy: 'hr-uid' })));
+    for (const bad of [{ watchDays: 5 }, { weekDays: 2 }, { severeDays: 61 }, { watchDays: 0 }, { watchDays: 1.5 }, { updatedBy: 'someone' }, { extra: 1 }]) {
+      await assertFails(affairs().doc('absence_settings/thresholds').set(ok(bad)));
+    }
+    await assertFails(affairs().doc('absence_settings/thresholds').delete());
+    await assertFails(affairs().doc('absence_settings/other').set(ok()));
+  });
+
+  it('absence_followups: ครูที่ปรึกษาห้องตน/งานกิจการ/แนะแนว สร้างได้ (append-only); ห้องไม่ตรงทะเบียน/ปลอมผู้บันทึก/ครูห้องอื่นไม่ได้; แก้-ลบไม่ได้', async () => {
+    await seed('ACTIVE');
+    const ts = await fsTs();
+    await assertSucceeds(homeroom().doc('absence_followups/f1').set(follow({ createdAt: ts })));
+    await assertSucceeds(affairs().doc('absence_followups/f2').set(follow({ byUid: 'aff-uid', byStaffId: 'aff-1', createdAt: ts })));
+    await assertSucceeds(guidance().doc('absence_followups/f3').set(follow({ byUid: 'guid-uid', byStaffId: 'g-1', action: 'REFERRED_COUNSELOR', createdAt: ts })));
+    await assertFails(homeroomOtherRoom().doc('absence_followups/f4').set(follow({ byUid: 'hr2-uid', byStaffId: HR_OTHER_STAFF, createdAt: ts })));
+    await assertFails(homeroom().doc('absence_followups/f5').set(follow({ room: 'ม.6/1', createdAt: ts })));
+    await assertFails(homeroom().doc('absence_followups/f6').set(follow({ byUid: 'someone-else', createdAt: ts })));
+    await assertFails(homeroom().doc('absence_followups/f7').set(follow({ action: 'FREE_TEXT', createdAt: ts })));
+    await assertFails(homeroom().doc('absence_followups/f8').set(follow({ note: 'ก'.repeat(501), createdAt: ts })));
+    await assertFails(homeroom().doc('absence_followups/f9').set(follow({ createdAt: new Date() })));
+    await assertFails(student().doc('absence_followups/f10').set(follow({ byUid: STU_UID, createdAt: ts })));
+    await assertSucceeds(homeroom().collection('absence_followups').where('room', '==', ROOM).where('studentId', '==', SID).get());
+    await assertFails(homeroom().doc('absence_followups/f1').update({ note: 'แก้' }));
+    await assertFails(homeroom().doc('absence_followups/f1').delete());
+  });
+});

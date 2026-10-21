@@ -4,6 +4,14 @@
       "collectionGroup": "attendance_records",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "attendance_records",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "room", "order": "ASCENDING" },
         { "fieldPath": "date", "order": "DESCENDING" },
         { "fieldPath": "periodNumber", "order": "ASCENDING" }

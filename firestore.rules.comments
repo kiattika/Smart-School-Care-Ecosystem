@@ -2867,6 +2867,42 @@ service cloud.firestore {
         && request.resource.data.round == resource.data.round;
       allow delete: if false;
     }
+    // ===== ขาดเรียนต่อเนื่อง (src/lib/absenceStreak.ts; Cloud Function absenceAlerts.ts คำนวณจากเช็คโฮมรูม) =====
+    // absence_alerts: client เขียนไม่ได้ — อ่าน: ครูที่ปรึกษาของห้อง (ทุกระดับ), งานกิจการ/ครูแนะแนว (level >= 2 — query ต้อง where level >= 2),
+    // ผู้บริหาร isExec (level >= 3 — query ต้อง where level >= 3). SUPER_ADMIN ไม่มีสิทธิ์อ่านรายชื่อ
+    match /absence_alerts/{studentId} {
+      allow read: if resource != null && (
+        isHomeroomTeacherOf(resource.data.room) ||
+        ((hasRole('STUDENT_AFFAIRS') || hasRole('GUIDANCE_COUNSELOR')) && resource.data.level >= 2) ||
+        (isExec() && resource.data.level >= 3));
+      allow write: if false;
+    }
+    // เกณฑ์จำนวนวัน (เอกสารเดียว) — งานกิจการนักเรียนปรับได้ (SUPER_ADMIN ด้วย); ผู้เกี่ยวข้องอ่านได้เพื่ออธิบายในหน้าจอ
+    match /absence_settings/{docId} {
+      allow read: if docId == 'thresholds' && (hasRole('STUDENT_AFFAIRS') || hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('GUIDANCE_COUNSELOR') || isExec());
+      allow create, update: if docId == 'thresholds' && (hasRole('STUDENT_AFFAIRS') || hasRole('SUPER_ADMIN'))
+        && request.resource.data.keys().hasOnly(['watchDays', 'weekDays', 'severeDays', 'updatedAt', 'updatedBy'])
+        && request.resource.data.watchDays is int && request.resource.data.weekDays is int && request.resource.data.severeDays is int
+        && request.resource.data.watchDays >= 1 && request.resource.data.severeDays <= 60
+        && request.resource.data.watchDays < request.resource.data.weekDays && request.resource.data.weekDays < request.resource.data.severeDays
+        && request.resource.data.updatedBy == request.auth.uid && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+    // บันทึกผลการติดตาม (append-only; ไม่แก้/ลบ) — ครูที่ปรึกษาของห้อง/งานกิจการ/ครูแนะแนว สร้างได้; ห้องต้องตรงทะเบียนนักเรียน
+    match /absence_followups/{followId} {
+      allow read: if resource != null && (isHomeroomTeacherOf(resource.data.room) || hasRole('STUDENT_AFFAIRS') || hasRole('GUIDANCE_COUNSELOR'));
+      allow create: if (isHomeroomTeacherOf(request.resource.data.room) || hasRole('STUDENT_AFFAIRS') || hasRole('GUIDANCE_COUNSELOR'))
+        && request.resource.data.keys().hasOnly(['studentId', 'room', 'action', 'note', 'streakAtTime', 'byUid', 'byStaffId', 'byName', 'createdAt'])
+        && request.resource.data.keys().hasAll(['studentId', 'room', 'action', 'note', 'streakAtTime', 'byUid', 'byStaffId', 'byName', 'createdAt'])
+        && request.resource.data.studentId is string && request.resource.data.room == studentField(request.resource.data.studentId, 'room', '')
+        && request.resource.data.action in ['CALLED_PARENT', 'CALLED_STUDENT', 'HOME_VISIT', 'REFERRED_COUNSELOR', 'REFERRED_AFFAIRS', 'RETURNED', 'OTHER']
+        && request.resource.data.note is string && request.resource.data.note.size() <= 500
+        && request.resource.data.streakAtTime is int && request.resource.data.streakAtTime >= 0
+        && request.resource.data.byUid == request.auth.uid && request.resource.data.byStaffId == myStaffId()
+        && request.resource.data.byName is string && request.resource.data.byName.size() >= 1
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
     // ===== ตั้งค่าส่วนตัว (src/lib/userPreferences.ts) — ธีม/ขนาดตัวอักษร/รูปโปรไฟล์ ผู้ใช้ทุกบทบาทตั้งของตนเอง =====
     // เจ้าของ (docId == auth.uid) เขียนได้เท่านั้น; บุคลากรอ่านได้ (เห็นรูปกันและกัน); ค่าใหม่ในอนาคตต้องเพิ่มใน hasOnly
     match /user_preferences/{uid} {
