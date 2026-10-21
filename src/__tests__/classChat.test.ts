@@ -69,7 +69,7 @@ describe('guard: แยกเมนู + แชทส่วนตัว', () => 
     expect(readSource('src/AdvisorPortal.tsx')).toMatch(/id: 'class-chat'/);
   });
   it('rules: class_messages/class_chat_threads อ่านเฉพาะสมาชิก+ครูประจำชั้น ไม่รวม SUPER_ADMIN, แก้/ลบข้อความไม่ได้', () => {
-    const r = readSource('firestore.rules');
+    const r = readSource('firestore.rules.comments'); // ฉบับมีคอมเมนต์ (ใช้หาขอบเขตบล็อก)
     const a = r.indexOf('match /class_messages/');
     const b = r.indexOf('// นัดพบครูของผู้ปกครอง — สายงาน');
     const block = r.slice(a, b);

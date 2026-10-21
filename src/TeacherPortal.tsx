@@ -43,6 +43,8 @@ import { effectiveCredits } from './lib/subjectCode';
 import { courseKindOf } from './lib/teachingProject';
 import { rosterLevels, sortRoster, filterRosterByLevel, studentLevelLabel } from './lib/gradebookRoster';
 import { TeacherAttendanceStatsPanel } from './components/attendance/TeacherAttendanceStatsPanel';
+import { resolveLateRequest, toMs, CONDITION_REMINDER_TH } from './lib/lateAttendanceFlow';
+import { MyLateRequestsPanel } from './components/MyLateRequestsPanel';
 import { saveAttendanceRecord, getTodayScheduleByTeacher, getStudentsByClass, saveGradebookScore, getGradebookScoresByClass, submitLateAttendanceRequestFirestore, subscribeLateAttendanceRequests, subscribeHiddenGradebookCourses, hideGradebookCourse, unhideGradebookCourse } from './services/firestoreService';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from './lib/firebase';
@@ -179,7 +181,8 @@ export function TeacherPortal() {
   const { getStatusForDate } = useSchoolCalendar();
 
   const todayStr = format(currentDate, 'yyyy-MM-dd');
-  const leaveStudentIds = useLeaveStudentIds(todayStr);
+  const [leaveDateOverride, setLeaveDateOverride] = useState<string | null>(null);
+  const leaveStudentIds = useLeaveStudentIds(leaveDateOverride ?? todayStr);
   // ครูผู้สอน/ครูประจำชั้นเท่านั้นที่มีตารางสอน + ต้องอ่าน attendance_records
   // (role อนุมัติ เช่น DEPUTY_DIRECTOR_ACADEMIC ถูก route ไป ApprovalsPortal แล้ว — ไม่ถึงหน้านี้)
   const isTeacherRole = ['SUBJECT_TEACHER', 'HOMEROOM_TEACHER'].includes(user?.activeRole || '') || user?.role === 'teacher' || user?.role === 'advisor';
@@ -194,15 +197,27 @@ export function TeacherPortal() {
   }, [user?.uid]);
 
   // สถานะคำขอเช็คชื่อย้อนหลังของครูคนนี้ ต่อ (scheduleId + วันสอน) — ล่าสุดชนะ
+  // นาฬิกาเดินทุก 30 วินาที — ให้สถานะ (หมดอายุ/เลยกำหนด/รองทบทวนหมดเวลา) เปลี่ยนเองโดยไม่ต้องรีเฟรช
+  const [lateNow, setLateNow] = useState(() => Date.now());
+  useEffect(() => { const t = setInterval(() => setLateNow(Date.now()), 30_000); return () => clearInterval(t); }, []);
+
   const lateRequestByKey = useMemo(() => {
     const m = new Map<string, LateAttendanceRequestRecord>();
     for (const r of myLateRequests) {
       const key = `${r.scheduleId}__${r.teachingDate}`;
       const prev = m.get(key);
-      if (!prev || (r.requestedAt || '') > (prev.requestedAt || '')) m.set(key, r);
+      // requestedAt ของคำขอที่เพิ่งยื่น (รอเซิร์ฟเวอร์ยืนยัน) ยังเป็น null → ถือว่าใหม่สุด
+      const t = toMs(r.requestedAt) ?? Number.MAX_SAFE_INTEGER;
+      if (!prev || t > (toMs(prev.requestedAt) ?? Number.MAX_SAFE_INTEGER)) m.set(key, r);
     }
     return m;
   }, [myLateRequests]);
+  /** สถานะย่อสำหรับการ์ดตารางสอน (ตามเวลาปัจจุบัน) */
+  const lateStatusOf = (r: LateAttendanceRequestRecord | undefined): 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED' | null => {
+    if (!r) return null;
+    const res = resolveLateRequest(r, lateNow);
+    return res.state === 'AWAITING' ? 'PENDING' : res.state === 'OPEN' ? 'APPROVED' : res.state === 'REJECTED' ? 'REJECTED' : 'EXPIRED';
+  };
 
   // ── บันทึกการเช็คชื่อจริงของวันนี้ (attendance_records) — ใช้คำนวณ attendanceTaken แทน session-local store ──
   // เก็บ students + source ด้วย (ไม่ใช่แค่ id/periodNumber/room) เพื่อคำนวณ badge สรุปขาด/ลา/มาสาย
@@ -395,6 +410,8 @@ export function TeacherPortal() {
   const [activeCourse, setActiveCourse] = useState<Course | null>(null);
   // เข้าห้องเรียนในโหมด "เช็คชื่อย้อนหลัง" (อนุมัติแล้ว) — ล็อกกิจกรรมอื่น ทำได้แค่เช็คชื่อ
   const [retroactiveAttendanceMode, setRetroactiveAttendanceMode] = useState(false);
+  // วันสอนจริงของคำขอที่ได้รับขยายเวลาข้ามเที่ยงคืน — บันทึกเช็คชื่อลงวันนั้น ไม่ใช่วันนี้ (null = ใช้วันปัจจุบัน)
+  const [attendanceDateOverride, setAttendanceDateOverride] = useState<string | null>(null);
 
   const handleGoHome = () => {
     setView('dashboard');
@@ -743,12 +760,18 @@ export function TeacherPortal() {
   const handleLateSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!latePeriod || !lateReason.trim() || !user?.uid) return;
+    if (!user.staffId) {
+      setToast('บัญชีนี้ยังไม่ผูกรหัสบุคลากร (staffId) จึงยื่นคำขอไม่ได้ — แจ้งผู้ดูแลระบบ');
+      setTimeout(() => setToast(null), 4000);
+      return;
+    }
 
     // กันยื่นซ้ำ ถ้ามีคำขอ PENDING/APPROVED สำหรับคาบนี้อยู่แล้ว
     const key = `${latePeriod.scheduleId || latePeriod.id}__${todayStr}`;
     const existing = lateRequestByKey.get(key);
-    if (existing && (existing.status === 'PENDING' || existing.status === 'APPROVED')) {
-      setToast(existing.status === 'PENDING' ? 'มีคำขอที่รออนุมัติอยู่แล้วสำหรับคาบนี้' : 'คาบนี้ได้รับอนุมัติแล้ว เข้าเช็คชื่อย้อนหลังได้เลย');
+    const existingStatus = lateStatusOf(existing);
+    if (existingStatus === 'PENDING' || existingStatus === 'APPROVED') {
+      setToast(existingStatus === 'PENDING' ? 'มีคำขอที่รออนุมัติอยู่แล้วสำหรับคาบนี้' : 'คาบนี้ได้รับอนุมัติแล้ว เข้าเช็คชื่อย้อนหลังได้เลย');
       setShowLateModal(false);
       return;
     }
@@ -767,8 +790,8 @@ export function TeacherPortal() {
         room: latePeriod.room || '',
         teachingDate: todayStr,
         reason: lateReason.trim(),
-      });
-      setToast('ส่งคำขอเช็คชื่อย้อนหลังแล้ว รอรองผู้อำนวยการฝ่ายวิชาการอนุมัติ');
+      }, { staffId: user.staffId, roles: user.profile?.roles || [] });
+      setToast('ส่งคำขอเช็คชื่อย้อนหลังแล้ว รอหัวหน้ากลุ่มงานวิชาการ/รองผู้อำนวยการกลุ่มงานวิชาการอนุมัติ (ก่อน 24.00 น.)');
       setTimeout(() => setToast(null), 4000);
       setShowLateModal(false);
       setLateReason('');
@@ -780,6 +803,30 @@ export function TeacherPortal() {
     } finally {
       setLateSubmitting(false);
     }
+  };
+
+  // เข้าเช็คชื่อย้อนหลังของคำขอที่ได้รับขยายเวลาข้ามเที่ยงคืน (วันสอน ≠ วันนี้) — บันทึกลงวันสอนจริง
+  const enterLateRequest = (req: LateAttendanceRequestRecord) => {
+    const res = resolveLateRequest(req, Date.now());
+    if (!res.teacherMayProceed) {
+      setToast('คำขอนี้ดำเนินการต่อไม่ได้แล้ว (' + (res.state === 'REJECTED' ? 'ไม่อนุมัติ' : 'พ้นกำหนด') + ')');
+      setTimeout(() => setToast(null), 4000);
+      return;
+    }
+    const norm = (v?: string) => String(v || '').replace(/^M\./i, 'ม.').trim();
+    const course = myCourses.find(c => c.code === req.subjectCode && (norm(c.room) === norm(req.level) || norm(c.level) === norm(req.level)));
+    if (!course) {
+      setToast('ไม่พบรายวิชา/ห้องของคำขอนี้ในรายวิชาของคุณ — แจ้งผู้ดูแลระบบ');
+      setTimeout(() => setToast(null), 4000);
+      return;
+    }
+    if (res.conditionNote) { setToast(`อนุมัติแบบมีเงื่อนไข: ${res.conditionNote} — ${CONDITION_REMINDER_TH}`); setTimeout(() => setToast(null), 8000); }
+    setAttendanceDateOverride(req.teachingDate);
+    setLeaveDateOverride(req.teachingDate);
+    setActiveCourse({ ...course, periodIndex: req.periodNumber, room: req.level || course.room, level: req.level || course.level });
+    setCurrentPeriod(PERIODS[req.periodNumber] || `คาบ ${req.periodNumber}`);
+    setRetroactiveAttendanceMode(true);
+    setView('class');
   };
 
   const handleRandomSelect = () => {
@@ -884,7 +931,7 @@ export function TeacherPortal() {
       });
 
       const teacherName = user?.displayName || teacherId.split('@')[0];
-      const dateStr = format(currentDate, 'yyyy-MM-dd');
+      const dateStr = attendanceDateOverride ?? format(currentDate, 'yyyy-MM-dd');
       const roomStr = attendanceRoom.replace('/', '-');
       const periodNum = activeCourse?.periodIndex || 0;
       const recordId = `${dateStr}_${roomStr}_p${periodNum}`;
@@ -926,6 +973,8 @@ export function TeacherPortal() {
       setToast(retroactiveAttendanceMode ? 'บันทึกเช็คชื่อย้อนหลังเรียบร้อยแล้ว!' : 'บันทึกการเช็กชื่อเรียบร้อยแล้ว!');
       setTimeout(() => setToast(null), 3000);
       setRetroactiveAttendanceMode(false);
+      setAttendanceDateOverride(null);
+      setLeaveDateOverride(null);
       setView('dashboard');
     } catch (err) {
       console.error("Failed to save attendance:", err);
@@ -1247,7 +1296,7 @@ export function TeacherPortal() {
                     // ห้องกายภาพจากตารางสอนจริง (schedules.room) — ไม่มีก็ว่าง ห้ามเดาป้ายห้องจากชื่อชั้น
                     room: item.room || '',
                     attendanceTaken: isAttendanceTaken,
-                    lateRequestStatus: lateReq ? lateReq.status : null,
+                    lateRequestStatus: lateStatusOf(lateReq),
                     hasPostTeachingRecord: !!existingRecord,
                     roleLabel: item.type === 'ACTIVITY' ? 'กิจกรรม' : matchedCourse?.roleLabel || 'วิชาการ',
                     studentsCount: item.studentsCount,
@@ -1418,6 +1467,8 @@ export function TeacherPortal() {
                     </div>
                   )}
 
+                  <MyLateRequestsPanel requests={myLateRequests} nowMs={lateNow} todayStr={todayStr} onEnter={enterLateRequest} />
+
                   <TeacherScheduleList
                     periods={mappedPeriods}
                     currentDate={currentDate}
@@ -1443,7 +1494,10 @@ export function TeacherPortal() {
                       if (!periodItem) return;
                       const key = `${periodItem.scheduleId || periodItem.id}__${todayStr}`;
                       const req = lateRequestByKey.get(key);
-                      if (req?.status === 'APPROVED') {
+                      const reqStatus = lateStatusOf(req);
+                      if (reqStatus === 'APPROVED') {
+                        const cond = req ? resolveLateRequest(req, lateNow).conditionNote : null;
+                        if (cond) { setToast(`อนุมัติแบบมีเงื่อนไข: ${cond} — ${CONDITION_REMINDER_TH}`); setTimeout(() => setToast(null), 8000); }
                         // อนุมัติแล้ว → เข้าเช็คชื่อย้อนหลังได้ (โหมดเช็คชื่ออย่างเดียว)
                         if (course) {
                           setActiveCourse({ ...course, periodIndex: periodItem.periodNumber, room: periodItem.className || course.room, level: periodItem.className || course.level });
@@ -1453,8 +1507,8 @@ export function TeacherPortal() {
                         }
                         return;
                       }
-                      if (req?.status === 'PENDING') {
-                        setToast('คำขอเช็คชื่อย้อนหลังของคาบนี้กำลังรอรองผู้อำนวยการฝ่ายวิชาการอนุมัติ');
+                      if (reqStatus === 'PENDING') {
+                        setToast('คำขอเช็คชื่อย้อนหลังของคาบนี้กำลังรอหัวหน้ากลุ่มงานวิชาการ/รองผู้อำนวยการกลุ่มงานวิชาการอนุมัติ');
                         setTimeout(() => setToast(null), 4000);
                         return;
                       }
@@ -2532,7 +2586,7 @@ export function TeacherPortal() {
             <ClassroomSeatingManager
               course={activeCourse}
               students={students}
-              onBackToDashboard={() => { setActiveCourse(null); setRetroactiveAttendanceMode(false); }}
+              onBackToDashboard={() => { setActiveCourse(null); setRetroactiveAttendanceMode(false); setAttendanceDateOverride(null); setLeaveDateOverride(null); }}
               onSelectStudentDetail={(s) => setAssessmentModalStudent(s)}
               attendanceOnly={retroactiveAttendanceMode}
               overrideStudents={activeCourseIsElective ? courseStudents : undefined}
@@ -2712,7 +2766,7 @@ export function TeacherPortal() {
                   disabled={!lateReason.trim() || lateSubmitting}
                   className="w-full bg-[#3b2211] border border-amber-800/60 text-amber-400 hover:bg-[#4a2b16] disabled:opacity-50 font-bold py-3 rounded-xl transition-all shadow-[0_4px_15px_rgba(245,158,11,0.2)]"
                 >
-                  {lateSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอให้รองผู้อำนวยการฝ่ายวิชาการ'}
+                  {lateSubmitting ? 'กำลังส่ง...' : 'ส่งคำขอให้รองผู้อำนวยการกลุ่มงานวิชาการ'}
                 </button>
               </div>
             </form>

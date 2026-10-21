@@ -5,9 +5,9 @@ import { normalizeEmail } from './normalizeEmail';
  * ใช้เฉพาะ "ผลลัพธ์ที่ส่งถึงตัวบุคคล" (เช่น คำขอของฉันได้รับอนุมัติ/ถูกส่งกลับ); "งานที่รอให้ฉันทำ" อยู่ในกระดิ่งงานค้าง (staffTasks.ts)
  * ผู้รับระบุด้วยอีเมล (ตรงกับ token.email ที่ rules ใช้) — ไม่มีอีเมลผู้รับ = ไม่ส่ง (ไม่เดา/ไม่แต่งอีเมล)
  */
-export type StaffNotificationKind = 'LATE_ATTENDANCE_DECISION' | 'SUBSTITUTE_UPDATE';
+export type StaffNotificationKind = 'LATE_ATTENDANCE_DECISION' | 'LATE_ATTENDANCE_REMINDER' | 'SUBSTITUTE_UPDATE';
 
-export const STAFF_NOTIFICATION_KINDS: readonly StaffNotificationKind[] = ['LATE_ATTENDANCE_DECISION', 'SUBSTITUTE_UPDATE'];
+export const STAFF_NOTIFICATION_KINDS: readonly StaffNotificationKind[] = ['LATE_ATTENDANCE_DECISION', 'LATE_ATTENDANCE_REMINDER', 'SUBSTITUTE_UPDATE'];
 export const STAFF_NOTIFICATION_TITLE_MAX = 120;
 export const STAFF_NOTIFICATION_MESSAGE_MAX = 500;
 
@@ -35,18 +35,40 @@ export function buildStaffNotification(input: StaffNotificationDraft): StaffNoti
   };
 }
 
-export function lateAttendanceDecisionNotice(req: {
-  id: string; teacherEmail?: string; subjectName: string; level: string; periodNumber: number; teachingDate: string;
-}, decision: 'APPROVED' | 'REJECTED', approverName: string, rejectReason?: string): StaffNotificationDraft | null {
-  const what = `${req.subjectName} ${req.level} คาบ ${req.periodNumber} วันที่ ${req.teachingDate}`;
+type LateNoticeReq = {
+  id: string; teacherEmail?: string; teacherName?: string; subjectName: string; level: string; periodNumber: number; teachingDate: string;
+};
+const lateWhat = (req: LateNoticeReq) => `${req.subjectName} ${req.level} คาบ ${req.periodNumber} วันที่ ${req.teachingDate}`;
+
+/**
+ * แจ้งครูผู้ยื่นเมื่อมีการตัดสิน (ขั้นหัวหน้า/ขั้นรอง) — `level` บอกว่าใครตัดสิน; `note` = เหตุผล/เงื่อนไข
+ * decision: APPROVE = อนุมัติตามเสนอ, CONDITIONAL = อนุมัติมีเงื่อนไข, REJECT = ไม่อนุมัติ
+ */
+export function lateAttendanceDecisionNotice(req: LateNoticeReq, decision: 'APPROVE' | 'CONDITIONAL' | 'REJECT', approverName: string, note?: string, opts?: { overridesHead?: boolean }): StaffNotificationDraft | null {
+  const what = lateWhat(req);
+  let title: string;
+  let message: string;
+  if (decision === 'APPROVE') {
+    title = '✅ อนุมัติคำขอเช็คชื่อย้อนหลังแล้ว';
+    message = `${approverName} อนุมัติคำขอเช็คชื่อย้อนหลัง ${what} — เข้าเช็คชื่อย้อนหลังได้เลย (ก่อน 24.00 น.)`;
+  } else if (decision === 'CONDITIONAL') {
+    title = '⚠️ อนุมัติแบบมีเงื่อนไข — โปรดอ่านข้อความเตือน';
+    message = `${approverName} อนุมัติคำขอเช็คชื่อย้อนหลัง ${what} แบบมีเงื่อนไข: ${note || '-'}`;
+  } else {
+    title = opts?.overridesHead ? '🟨 รองผู้อำนวยการไม่อนุมัติ (แทนผลของหัวหน้า)' : '❌ ไม่อนุมัติคำขอเช็คชื่อย้อนหลัง';
+    message = `${approverName} ไม่อนุมัติคำขอเช็คชื่อย้อนหลัง ${what}${note ? ` — เหตุผล: ${note}` : ''}${opts?.overridesHead ? ' (ข้อมูลที่เช็คไปแล้วยังคงอยู่ แต่ไม่สามารถดำเนินการต่อได้)' : ''}`;
+  }
+  return buildStaffNotification({ recipientEmail: req.teacherEmail || '', kind: 'LATE_ATTENDANCE_DECISION', refId: req.id, title, message });
+}
+
+/** แจ้งครูเมื่อรองขยายเวลา (ธงแดง) */
+export function lateAttendanceExtendedNotice(req: LateNoticeReq, approverName: string, untilLabel: string): StaffNotificationDraft | null {
   return buildStaffNotification({
     recipientEmail: req.teacherEmail || '',
     kind: 'LATE_ATTENDANCE_DECISION',
     refId: req.id,
-    title: decision === 'APPROVED' ? '✅ อนุมัติคำขอเช็คชื่อย้อนหลังแล้ว' : '❌ ไม่อนุมัติคำขอเช็คชื่อย้อนหลัง',
-    message: decision === 'APPROVED'
-      ? `${approverName} อนุมัติคำขอเช็คชื่อย้อนหลัง ${what} — เข้าเช็คชื่อย้อนหลังได้เลย`
-      : `${approverName} ไม่อนุมัติคำขอเช็คชื่อย้อนหลัง ${what}${rejectReason ? ` — เหตุผล: ${rejectReason}` : ''}`,
+    title: '🚩 ขยายเวลาดำเนินการ — โปรดรีบดำเนินการ',
+    message: `${approverName} ขยายเวลาเช็คชื่อย้อนหลัง ${lateWhat(req)} ถึง ${untilLabel} — หากพ้นกำหนดต้องทำบันทึกชี้แจงผู้บังคับบัญชา`,
   });
 }
 

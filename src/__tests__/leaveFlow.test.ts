@@ -61,25 +61,39 @@ describe('สายงานใบลา (leaveFlow)', () => {
 
 describe('กระดิ่งงานค้างของบุคลากร (staffTasks)', () => {
   const leaves = [{ status: 'PENDING_PARENT' }, { status: 'PENDING_TEACHER' }, { status: 'PENDING' }, { status: 'APPROVED' }];
-  const late = [{ status: 'PENDING' }, { status: 'PENDING' }, { status: 'APPROVED' }];
+  const NOW = Date.parse('2026-10-21T03:00:00Z'); // 10:00 ไทย
+  const DEADLINE = Date.parse('2026-10-21T17:00:00Z'); // 24:00 ไทย
+  const doneStep = { decision: 'APPROVE' as const, role: 'DEPUTY_DIRECTOR_ACADEMIC' as const, byUid: 'u', byStaffId: 'D1', byName: 'รอง', at: NOW, note: '' };
+  // 2 คำขอรอพิจารณา + 1 คำขอที่รองตัดสินแล้ว (ไม่นับเป็นงานค้าง)
+  const late = [
+    { status: 'PENDING', requesterStaffId: 'T1', deadlineAt: DEADLINE },
+    { status: 'PENDING', requesterStaffId: 'T2', deadlineAt: DEADLINE },
+    { status: 'APPROVED', requesterStaffId: 'T3', deadlineAt: DEADLINE, deputyStep: doneStep },
+  ];
 
   it('ครูที่ปรึกษา: นับเฉพาะใบลาที่ถึงตัวแล้ว (ไม่นับที่ยังรอผู้ปกครอง/จบแล้ว)', () => {
     const tasks = buildStaffTasks({ activeRole: 'HOMEROOM_TEACHER', roomLeaves: leaves, lateRequests: late });
     expect(tasks).toHaveLength(1);
     expect(tasks[0]).toMatchObject({ kind: 'LEAVE', count: 2 });
   });
-  it('รองผอ.วิชาการ/SUPER_ADMIN: นับคำขอเช็คชื่อย้อนหลังที่รออนุมัติ', () => {
-    for (const role of ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN']) {
-      const tasks = buildStaffTasks({ activeRole: role, roomLeaves: leaves, lateRequests: late });
+  it('หัวหน้ากลุ่มงานวิชาการ/รองผอ.กลุ่มงานวิชาการ/ผอ.สำรอง: นับคำขอเช็คชื่อย้อนหลังที่ตัวเองตัดสินได้', () => {
+    for (const role of ['ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR']) {
+      const tasks = buildStaffTasks({ activeRole: role, roomLeaves: leaves, lateRequests: late, myRoles: [role], myStaffId: 'X1', nowMs: NOW });
       expect(tasks).toHaveLength(1);
       expect(tasks[0]).toMatchObject({ kind: 'LATE_ATTENDANCE', count: 2 });
     }
+  });
+  it('SUPER_ADMIN ไม่มีงานอนุมัติเช็คชื่อย้อนหลัง และห้ามนับคำขอของตัวเอง', () => {
+    expect(buildStaffTasks({ activeRole: 'SUPER_ADMIN', roomLeaves: leaves, lateRequests: late, myRoles: ['SUPER_ADMIN'], myStaffId: 'X1', nowMs: NOW })).toEqual([]);
+    const own = buildStaffTasks({ activeRole: 'DEPUTY_DIRECTOR_ACADEMIC', roomLeaves: [], lateRequests: late, myRoles: ['DEPUTY_DIRECTOR_ACADEMIC'], myStaffId: 'T1', nowMs: NOW });
+    expect(own[0]).toMatchObject({ count: 1 }); // คำขอ T1 ของตัวเองไม่นับ
   });
   it('บทบาทอื่นไม่ได้งานของคนอื่นไปแสดง และไม่ subscribe เกินสิทธิ์', () => {
     expect(buildStaffTasks({ activeRole: 'SUBJECT_TEACHER', roomLeaves: leaves, lateRequests: late })).toEqual([]);
     expect(staffTaskSources('SUBJECT_TEACHER')).toEqual({ leaves: false, lateRequests: false, screening: false, appointments: false, substitutes: true });
     expect(staffTaskSources('HOMEROOM_TEACHER')).toEqual({ leaves: true, lateRequests: false, screening: true, appointments: true, substitutes: true });
     expect(staffTaskSources('DEPUTY_DIRECTOR_ACADEMIC')).toEqual({ leaves: false, lateRequests: true, screening: false, appointments: false, substitutes: true });
+    expect(staffTaskSources('SUPER_ADMIN').lateRequests).toBe(false);
   });
   it('รวมจำนวนทั้งหมด', () => {
     expect(totalStaffTasks([{ kind: 'LEAVE', label: '', count: 2, where: '' }, { kind: 'LATE_ATTENDANCE', label: '', count: 3, where: '' }])).toBe(5);

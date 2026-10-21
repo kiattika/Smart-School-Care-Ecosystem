@@ -25,7 +25,7 @@ export interface SubjectPeriod {
   partnerCheckedAttendance?: boolean;
   scheduleId?: string;          // schedules/{id} — ใช้ยื่นคำขอเช็คชื่อย้อนหลัง
   level?: string;               // ระดับชั้น เช่น ม.5/8
-  lateRequestStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | null;  // สถานะคำขอเช็คชื่อย้อนหลังของครูคนนี้
+  lateRequestStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'EXPIRED' | null;  // สถานะคำขอเช็คชื่อย้อนหลังของครูคนนี้
   // คาบรวม (double/triple period ติดกัน) — ดู lib/mergeConsecutivePeriods
   periodNumberEnd?: number;        // คาบสุดท้ายของช่วง (ถ้ารวม)
   mergedCourseIds?: string[];      // courseId ของทุกคาบย่อยในช่วง

@@ -2,6 +2,7 @@ import { canTeacherDecide } from './leaveFlow';
 import { isAppointmentPending, canStaffHandleAppointment } from './appointmentFlow';
 import { SUBSTITUTE_STAGE_ROLE } from '../types';
 import { normalizeEmail } from './normalizeEmail';
+import { actorKindsFor, type LateFlowRequest } from './lateAttendanceFlow';
 
 /**
  * กระดิ่งงานค้างของบุคลากร — คำนวณสดจากข้อมูลจริงที่ครูมีสิทธิ์เห็นตามบทบาทที่ใช้งานอยู่ (activeRole)
@@ -28,7 +29,10 @@ export interface StaffTaskInput {
   /** ใบลาของห้องที่ฉันเป็นครูที่ปรึกษา (ว่างได้ถ้าไม่ใช่ครูที่ปรึกษา) */
   roomLeaves: { status: string }[];
   /** คำขอเช็คชื่อย้อนหลังทั้งหมดที่ฉันมีสิทธิ์เห็น */
-  lateRequests: { status: string }[];
+  lateRequests: LateFlowRequest[];
+  /** บทบาททั้งหมดของฉัน + เวลาปัจจุบัน — ใช้นับเฉพาะคำขอที่ "ฉันตัดสินได้จริง" (หัวหน้า/รอง/ผอ.สำรอง ตามสิทธิ์และช่วงเวลา) */
+  myRoles?: readonly string[];
+  nowMs?: number;
   /** จำนวนงานคัดกรองค้าง (นับจาก screeningTasks.ts) — ไม่ส่ง = ไม่มี */
   screening?: { twoQ: number; redFlag: number };
   /** คำขอนัดพบที่ส่งถึงฉัน (ครูที่ปรึกษา = ของห้องฉัน, ครูแนะแนว = ที่ขอพบครูแนะแนว) */
@@ -41,7 +45,8 @@ export interface StaffTaskInput {
   myStaffId?: string;
 }
 
-export const LATE_REQUEST_APPROVER_ROLES = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN'] as const;
+// SUPER_ADMIN ไม่มีสิทธิ์อนุมัติ (ดูแลข้อมูลพื้นฐานเท่านั้น); DIRECTOR สำรองระดับรอง
+export const LATE_REQUEST_APPROVER_ROLES = ['ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'] as const;
 
 /** บทบาทที่ต้องฟังใบลาห้อง / คำขอเข้าสาย — ใช้ตัดสินว่าจะ subscribe อะไร (ไม่ subscribe เกินสิทธิ์) */
 export function staffTaskSources(activeRole: string): { leaves: boolean; lateRequests: boolean; screening: boolean; appointments: boolean; substitutes: boolean } {
@@ -63,8 +68,10 @@ export function buildStaffTasks(input: StaffTaskInput): StaffTask[] {
     if (n > 0) tasks.push({ kind: 'LEAVE', label: 'ใบลานักเรียนรออนุมัติ', count: n, where: 'พอร์ทัลครูที่ปรึกษา → ภาพรวม (ส่วน A)' });
   }
   if (src.lateRequests) {
-    const n = input.lateRequests.filter(r => r.status === 'PENDING').length;
-    if (n > 0) tasks.push({ kind: 'LATE_ATTENDANCE', label: 'คำขอเช็คชื่อย้อนหลังรออนุมัติ', count: n, where: 'พอร์ทัลอนุมัติ' });
+    const actor = { roles: input.myRoles && input.myRoles.length ? input.myRoles : [input.activeRole], staffId: input.myStaffId || '' };
+    const now = input.nowMs ?? Date.now();
+    const n = input.lateRequests.filter(r => actorKindsFor(r, actor, now).length > 0).length;
+    if (n > 0) tasks.push({ kind: 'LATE_ATTENDANCE', label: 'คำขอเช็คชื่อย้อนหลังรอฉันพิจารณา', count: n, where: 'พอร์ทัลอนุมัติ' });
   }
   if (src.substitutes && input.substitutes) {
     const stageRole = (st?: string) => (st && st !== 'COMPLETED' ? (SUBSTITUTE_STAGE_ROLE as Record<string, string>)[st] : undefined);

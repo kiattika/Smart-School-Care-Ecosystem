@@ -6,7 +6,7 @@ import {
   assertSucceeds,
   assertFails,
 } from '@firebase/rules-unit-testing';
-import { collection, deleteField, getDocs, query, where, doc as mDoc, setDoc as mSetDoc, updateDoc as mUpdateDoc, deleteDoc as mDeleteDoc, getDoc as mGetDoc, serverTimestamp as mServerTimestamp, writeBatch as mWriteBatch } from 'firebase/firestore';
+import { collection, deleteField, getDocs, query, where, doc as mDoc, setDoc as mSetDoc, updateDoc as mUpdateDoc, deleteDoc as mDeleteDoc, getDoc as mGetDoc, serverTimestamp as mServerTimestamp, writeBatch as mWriteBatch, Timestamp as mTimestamp } from 'firebase/firestore';
 import { enrollInActivity, withdrawFromActivity, createBillingInvoice, createBillingInvoicesBulk, recordInfirmaryVisit, createParentNotification } from '../services/firestoreService';
 import { readSource } from './helpers/readSource';
 
@@ -1164,70 +1164,182 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
-  // 16b. late_attendance_requests — ครูขอเช็คชื่อย้อนหลัง, อนุมัติโดย DEPUTY_DIRECTOR_ACADEMIC
+  // 16b. late_attendance_requests — ครูขอเช็คชื่อย้อนหลัง, อนุมัติ 2 ขั้น ACADEMIC_HEAD + DEPUTY_DIRECTOR_ACADEMIC (DIRECTOR สำรอง)
   describe('late_attendance_requests collection', () => {
-    const seedReq = (extra: Record<string, any> = {}) =>
+    const DAY = 86_400_000;
+    const nextMidnight = () => { const n = Date.now(); return n - (((n - 17 * 3_600_000) % DAY) + DAY) % DAY + DAY; };
+    const sixPmAfter = (t: number) => t - (((t - 11 * 3_600_000) % DAY) + DAY) % DAY + DAY;
+    const REF = 'late_attendance_requests/lar-01';
+    const head = () => asUser('head-uid', ['ACADEMIC_HEAD'], { staffId: 'S_HEAD' }).firestore();
+    const deputy = () => asUser('dep-uid', ['DEPUTY_DIRECTOR_ACADEMIC'], { staffId: 'S_DEP' }).firestore();
+    const director = () => asUser('dir-uid', ['DIRECTOR'], { staffId: 'S_DIR' }).firestore();
+    const teacher = (uid = 'teacher-uid-1', staffId = 'S_T1') => asUser(uid, ['SUBJECT_TEACHER'], { staffId }).firestore();
+
+    const seedReq = (extra: Record<string, any> = {}, id = 'lar-01') =>
       testEnv.withSecurityRulesDisabled(async (ctx) => {
-        await ctx.firestore().doc('late_attendance_requests/lar-01').set({
-          id: 'lar-01', teacherId: 'teacher-uid-1', teacherName: 'ครู ก', scheduleId: 'sch_x',
-          subjectCode: 'ค32101', subjectName: 'คณิต', level: 'ม.5/8', periodNumber: 7, room: '943',
+        await ctx.firestore().doc(`late_attendance_requests/${id}`).set({
+          id, teacherId: 'teacher-uid-1', teacherName: 'ครู ก', requesterStaffId: 'S_T1', requesterLevel: 'TEACHER',
+          scheduleId: 'sch_x', subjectCode: 'ค32101', subjectName: 'คณิต', level: 'ม.5/8', periodNumber: 7, room: '943',
           teachingDate: '2026-08-31', reason: 'ลืมเช็ค', status: 'PENDING',
-          requestedAt: '2026-08-31T14:00:00.000Z', approverUid: null, approverName: null,
-          decidedAt: null, rejectReason: null, ...extra,
+          requestedAt: mTimestamp.fromMillis(Date.now() - 3_600_000),
+          deadlineAt: mTimestamp.fromMillis(nextMidnight()), ...extra,
         });
       });
+    const step = (role: string, staffId: string, uid: string, decision = 'APPROVE', note = '', reviewUntil = false) => ({
+      decision, role, byUid: uid, byStaffId: staffId, byName: 'ผู้อนุมัติ', at: mServerTimestamp(), note,
+      ...(reviewUntil ? { reviewUntil: mTimestamp.fromMillis(sixPmAfter(Date.now())) } : {}),
+    });
+    const headStep = (decision = 'APPROVE', note = '') => step('ACADEMIC_HEAD', 'S_HEAD', 'head-uid', decision, note, true);
+    const depStep = (decision = 'APPROVE', note = '') => step('DEPUTY_DIRECTOR_ACADEMIC', 'S_DEP', 'dep-uid', decision, note);
+    const storedHead = (decision = 'APPROVE') => ({ decision, role: 'ACADEMIC_HEAD', byUid: 'head-uid', byStaffId: 'S_HEAD', byName: 'หัวหน้า', at: mTimestamp.now(), note: '', reviewUntil: mTimestamp.fromMillis(Date.now() + 3_600_000) });
+    const apply = (db: any, data: Record<string, any>) => mUpdateDoc(mDoc(db, REF), data);
 
-    it('เจ้าของคำขอ + DEPUTY_DIRECTOR_ACADEMIC + SUPER_ADMIN + DIRECTOR + EXECUTIVE อ่านได้; คนอื่นอ่านไม่ได้', async () => {
+    it('เจ้าของคำขอ + ACADEMIC_HEAD + DEPUTY + DIRECTOR + EXECUTIVE อ่านได้; SUPER_ADMIN และคนอื่นอ่านไม่ได้', async () => {
       await seedReq();
-      await assertSucceeds(asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore().doc('late_attendance_requests/lar-01').get());
-      await assertSucceeds(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01').get());
-      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('late_attendance_requests/lar-01').get());
-      await assertSucceeds(asRole('DIRECTOR').firestore().doc('late_attendance_requests/lar-01').get());
-      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('late_attendance_requests/lar-01').get());
-      await assertFails(asUser('teacher-uid-2', ['SUBJECT_TEACHER']).firestore().doc('late_attendance_requests/lar-01').get());
-      await assertFails(asRole('HEAD_OF_DEPARTMENT').firestore().doc('late_attendance_requests/lar-01').get());
-      await assertFails(asAnonymous().firestore().doc('late_attendance_requests/lar-01').get());
+      await assertSucceeds(teacher().doc(REF).get());
+      await assertSucceeds(head().doc(REF).get());
+      await assertSucceeds(deputy().doc(REF).get());
+      await assertSucceeds(director().doc(REF).get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc(REF).get());
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc(REF).get());
+      await assertFails(teacher('teacher-uid-2', 'S_T2').doc(REF).get());
+      await assertFails(asRole('HEAD_OF_DEPARTMENT').firestore().doc(REF).get());
+      await assertFails(asAnonymous().firestore().doc(REF).get());
     });
 
-    it('REGRESSION: DIRECTOR อ่านได้อย่างเดียว — สร้าง/แก้ status/ลบ ไม่ได้', async () => {
-      await seedReq();
-      const dir = asRole('DIRECTOR').firestore();
-      await assertSucceeds(dir.doc('late_attendance_requests/lar-01').get());
-      await assertFails(dir.doc('late_attendance_requests/lar-01').set({ status: 'APPROVED', approverUid: 'dir-1' }, { merge: true }));
-      await assertFails(dir.doc('late_attendance_requests/lar-01').set({ status: 'REJECTED' }, { merge: true }));
-      await assertFails(dir.doc('late_attendance_requests/lar-new-by-dir').set({ teacherId: 'dir-1', scheduleId: 's', status: 'PENDING' }));
-      await assertFails(dir.doc('late_attendance_requests/lar-01').delete());
-    });
-
-    it('ครูสร้างคำขอของตัวเอง (status=PENDING) ได้; สร้างในนามคนอื่น หรือ status อื่น ไม่ได้', async () => {
-      const teacherDb = asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore();
-      await assertSucceeds(teacherDb.doc('late_attendance_requests/lar-new').set({
+    it('ครูสร้างคำขอของตัวเอง: ต้อง requesterStaffId ตรง claim, requestedAt = เวลาเซิร์ฟเวอร์, deadlineAt = 24:00 ไทยภายใน 24 ชม.', async () => {
+      const base = () => ({
         teacherId: 'teacher-uid-1', scheduleId: 's1', status: 'PENDING', reason: 'r', periodNumber: 7,
-      }));
-      await assertFails(teacherDb.doc('late_attendance_requests/lar-bad-owner').set({
-        teacherId: 'teacher-uid-2', scheduleId: 's1', status: 'PENDING',
-      }));
-      await assertFails(teacherDb.doc('late_attendance_requests/lar-bad-status').set({
-        teacherId: 'teacher-uid-1', scheduleId: 's1', status: 'APPROVED',
-      }));
+        requesterStaffId: 'S_T1', requesterLevel: 'TEACHER', requestedAt: mServerTimestamp(), deadlineAt: mTimestamp.fromMillis(nextMidnight()),
+      });
+      const db = teacher();
+      await assertSucceeds(mSetDoc(mDoc(db, 'late_attendance_requests/new-ok'), base()));
+      await assertFails(mSetDoc(mDoc(db, 'late_attendance_requests/bad-owner'), { ...base(), teacherId: 'teacher-uid-2' }));
+      await assertFails(mSetDoc(mDoc(db, 'late_attendance_requests/bad-status'), { ...base(), status: 'APPROVED' }));
+      await assertFails(mSetDoc(mDoc(db, 'late_attendance_requests/bad-staff'), { ...base(), requesterStaffId: 'S_OTHER' }));
+      await assertFails(mSetDoc(mDoc(db, 'late_attendance_requests/bad-time'), { ...base(), requestedAt: mTimestamp.fromMillis(Date.now() - 1000) }));
+      await assertFails(mSetDoc(mDoc(db, 'late_attendance_requests/bad-deadline-far'), { ...base(), deadlineAt: mTimestamp.fromMillis(nextMidnight() + DAY) }));
+      await assertFails(mSetDoc(mDoc(db, 'late_attendance_requests/bad-deadline-offset'), { ...base(), deadlineAt: mTimestamp.fromMillis(nextMidnight() - 3_600_000) }));
+      await assertFails(mSetDoc(mDoc(db, 'late_attendance_requests/pre-approved'), { ...base(), headStep: storedHead() }));
+      await assertFails(mSetDoc(mDoc(db, 'late_attendance_requests/bad-level'), { ...base(), requesterLevel: 'HEAD' }));
     });
 
-    it('REGRESSION: อนุมัติ/ปฏิเสธได้เฉพาะ DEPUTY_DIRECTOR_ACADEMIC / SUPER_ADMIN — ครูเจ้าของแก้ status เองไม่ได้', async () => {
-      await seedReq();
-      await assertSucceeds(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01')
-        .set({ status: 'APPROVED', approverUid: 'dep-1' }, { merge: true }));
-      await seedReq();
-      await assertFails(asUser('teacher-uid-1', ['SUBJECT_TEACHER']).firestore().doc('late_attendance_requests/lar-01')
-        .set({ status: 'APPROVED' }, { merge: true }));
+    it('ผู้ยื่นที่เป็นหัวหน้า/รอง ต้องประกาศระดับให้ตรงบทบาท (HEAD/DEPUTY) — แอบประกาศเป็น TEACHER ไม่ได้', async () => {
+      const mk = (level: string) => ({
+        teacherId: 'x-uid', scheduleId: 's1', status: 'PENDING', requesterStaffId: 'S_X', requesterLevel: level,
+        requestedAt: mServerTimestamp(), deadlineAt: mTimestamp.fromMillis(nextMidnight()),
+      });
+      const h = asUser('x-uid', ['SUBJECT_TEACHER', 'ACADEMIC_HEAD'], { staffId: 'S_X' }).firestore();
+      await assertSucceeds(mSetDoc(mDoc(h, 'late_attendance_requests/h-ok'), mk('HEAD')));
+      await assertFails(mSetDoc(mDoc(h, 'late_attendance_requests/h-lie'), mk('TEACHER')));
+      const d = asUser('x-uid', ['SUBJECT_TEACHER', 'DEPUTY_DIRECTOR_ACADEMIC'], { staffId: 'S_X' }).firestore();
+      await assertSucceeds(mSetDoc(mDoc(d, 'late_attendance_requests/d-ok'), mk('DEPUTY')));
+      await assertFails(mSetDoc(mDoc(d, 'late_attendance_requests/d-lie'), mk('HEAD')));
     });
 
-    it('REGRESSION: ผู้อนุมัติแก้ teacherId ของคำขอไม่ได้ (ตรึงเจ้าของ) + ลบ document ไม่ได้', async () => {
+    it('หัวหน้าอนุมัติก่อนได้ (status → APPROVED); ครู/SUPER_ADMIN/HEAD_OF_DEPARTMENT ตัดสินไม่ได้', async () => {
       await seedReq();
-      await assertFails(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01')
-        .set({ status: 'APPROVED', teacherId: 'someone-else' }, { merge: true }));
+      await assertSucceeds(apply(head(), { headStep: headStep('APPROVE'), status: 'APPROVED' }));
       await seedReq();
-      await assertFails(asRole('SUPER_ADMIN').firestore().doc('late_attendance_requests/lar-01').delete());
-      await assertFails(asRole('DEPUTY_DIRECTOR_ACADEMIC').firestore().doc('late_attendance_requests/lar-01').delete());
+      await assertFails(apply(teacher(), { headStep: headStep('APPROVE'), status: 'APPROVED' }));
+      await assertFails(apply(asUser('sa', ['SUPER_ADMIN'], { staffId: 'S_SA' }).firestore(), { headStep: step('ACADEMIC_HEAD', 'S_SA', 'sa', 'APPROVE', '', true), status: 'APPROVED' }));
+      await assertFails(apply(asUser('hod', ['HEAD_OF_DEPARTMENT'], { staffId: 'S_H' }).firestore(), { headStep: step('ACADEMIC_HEAD', 'S_H', 'hod', 'APPROVE', '', true), status: 'APPROVED' }));
+      await assertFails(apply(asUser('sa2', ['SUPER_ADMIN'], { staffId: 'S_SA' }).firestore(), { deputyStep: step('DEPUTY_DIRECTOR_ACADEMIC', 'S_SA', 'sa2'), status: 'APPROVED' }));
+    });
+
+    it('เวลาตัดสินต้องเป็นเวลาเซิร์ฟเวอร์ และ reviewUntil ต้องเป็น 18:00 ไทยถัดไป; status ต้องสอดคล้องผล; มีเงื่อนไข/ไม่อนุมัติต้องมีเหตุผล', async () => {
+      await seedReq();
+      await assertFails(apply(head(), { headStep: { ...headStep(), at: mTimestamp.fromMillis(Date.now() - 600_000) }, status: 'APPROVED' }));
+      await assertFails(apply(head(), { headStep: { ...headStep(), reviewUntil: mTimestamp.fromMillis(sixPmAfter(Date.now()) + DAY) }, status: 'APPROVED' }));
+      await assertFails(apply(head(), { headStep: headStep('APPROVE'), status: 'REJECTED' }));
+      await assertFails(apply(head(), { headStep: headStep('CONDITIONAL', ''), status: 'APPROVED' }));
+      await assertFails(apply(head(), { headStep: headStep('REJECT', ''), status: 'REJECTED' }));
+      await assertSucceeds(apply(head(), { headStep: headStep('CONDITIONAL', 'ตรงเวลาด้วย'), status: 'APPROVED' }));
+    });
+
+    it('หัวหน้าตัดสินแทนชื่อคนอื่นไม่ได้ (byUid/byStaffId ต้องตรงตัวตนจริง)', async () => {
+      await seedReq();
+      await assertFails(apply(head(), { headStep: { ...headStep(), byStaffId: 'S_FAKE' }, status: 'APPROVED' }));
+      await assertFails(apply(head(), { headStep: { ...headStep(), byUid: 'someone' }, status: 'APPROVED' }));
+    });
+
+    it('ห้ามอนุมัติคำขอของตัวเอง; คำขอของหัวหน้า → ข้ามขั้นหัวหน้า รอง/ผอ.ตัดสิน; คำขอของรอง → ผอ.เท่านั้น', async () => {
+      await seedReq({ requesterLevel: 'HEAD', requesterStaffId: 'S_HEAD', teacherId: 'head-uid' });
+      await assertFails(apply(head(), { headStep: headStep(), status: 'APPROVED' })); // ตัวเอง
+      await assertSucceeds(apply(deputy(), { deputyStep: depStep(), status: 'APPROVED' }));
+      await seedReq({ requesterLevel: 'DEPUTY', requesterStaffId: 'S_DEP', teacherId: 'dep-uid' });
+      await assertFails(apply(deputy(), { deputyStep: depStep(), status: 'APPROVED' })); // ตัวเอง
+      await assertFails(apply(head(), { headStep: headStep(), status: 'APPROVED' })); // หัวหน้าไม่ใช่ผู้ตัดสินคำขอของรอง
+      const dirOther = asUser('dep2', ['DEPUTY_DIRECTOR_ACADEMIC'], { staffId: 'S_DEP2' }).firestore();
+      await assertFails(apply(dirOther, { deputyStep: step('DEPUTY_DIRECTOR_ACADEMIC', 'S_DEP2', 'dep2'), status: 'APPROVED' })); // รองด้วยกันไม่ได้
+      await assertSucceeds(apply(director(), { deputyStep: step('DIRECTOR', 'S_DIR', 'dir-uid'), status: 'APPROVED' }));
+    });
+
+    it('รองอนุมัติก่อน → หัวหน้าตัดสินซ้ำไม่ได้; ตัดสินได้ครั้งเดียวต่อขั้น', async () => {
+      await seedReq();
+      await assertSucceeds(apply(deputy(), { deputyStep: depStep(), status: 'APPROVED' }));
+      await assertFails(apply(head(), { headStep: headStep(), status: 'APPROVED' }));
+      await assertFails(apply(deputy(), { deputyStep: depStep('REJECT', 'x'), status: 'REJECTED' }));
+      await seedReq({}, 'lar-02');
+      await assertSucceeds(mUpdateDoc(mDoc(head(), 'late_attendance_requests/lar-02'), { headStep: headStep(), status: 'APPROVED' }));
+      await assertFails(mUpdateDoc(mDoc(head(), 'late_attendance_requests/lar-02'), { headStep: headStep('REJECT', 'แก้ใจ'), status: 'REJECTED' }));
+    });
+
+    it('หัวหน้าอนุมัติแล้ว รองล้างผลได้ภายในหน้าต่างทบทวน (ไม่อนุมัติ/มีเงื่อนไข/ตามเสนอ) แต่เลย 18:00 ไม่ได้', async () => {
+      await seedReq({ headStep: storedHead(), status: 'APPROVED' });
+      await assertSucceeds(apply(deputy(), { deputyStep: depStep('REJECT', 'ไม่เหมาะสม'), status: 'REJECTED' }));
+      await seedReq({ headStep: storedHead(), status: 'APPROVED' });
+      await assertSucceeds(apply(deputy(), { deputyStep: depStep('CONDITIONAL', 'ระวังเวลา'), status: 'APPROVED' }));
+      // หมดหน้าต่างทบทวนแล้ว
+      await seedReq({ headStep: { ...storedHead(), reviewUntil: mTimestamp.fromMillis(Date.now() - 1000) }, status: 'APPROVED' });
+      await assertFails(apply(deputy(), { deputyStep: depStep('REJECT', 'ช้าไป'), status: 'REJECTED' }));
+    });
+
+    it('คนเดียวที่มีทั้งสองบทบาทตัดสินสองขั้นไม่ได้', async () => {
+      await seedReq({ headStep: { ...storedHead(), byStaffId: 'S_BOTH', byUid: 'both-uid' }, status: 'APPROVED' });
+      const both = asUser('both-uid', ['ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC'], { staffId: 'S_BOTH' }).firestore();
+      await assertFails(apply(both, { deputyStep: step('DEPUTY_DIRECTOR_ACADEMIC', 'S_BOTH', 'both-uid'), status: 'APPROVED' }));
+    });
+
+    it('เลย 24:00 แล้ว ตัดสินไม่ได้ (หมดอายุ) และคำขอรุ่นเก่าที่ไม่มี deadlineAt ตัดสินไม่ได้', async () => {
+      await seedReq({ deadlineAt: mTimestamp.fromMillis(Date.now() - 1000) });
+      await assertFails(apply(head(), { headStep: headStep(), status: 'APPROVED' }));
+      await assertFails(apply(deputy(), { deputyStep: depStep(), status: 'APPROVED' }));
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc(REF).set({ id: 'lar-01', teacherId: 'teacher-uid-1', scheduleId: 's', status: 'PENDING', requestedAt: '2026-08-31T14:00:00.000Z' });
+      });
+      await assertFails(apply(deputy(), { deputyStep: depStep(), status: 'APPROVED' }));
+    });
+
+    it('แก้ field อื่นพร้อมกันไม่ได้ (teacherId/scheduleId/deadlineAt ถูกตรึง)', async () => {
+      await seedReq();
+      await assertFails(apply(head(), { headStep: headStep(), status: 'APPROVED', teacherId: 'someone-else' }));
+      await assertFails(apply(head(), { headStep: headStep(), status: 'APPROVED', deadlineAt: mTimestamp.fromMillis(nextMidnight() + DAY) }));
+      await assertFails(apply(head(), { headStep: headStep(), status: 'APPROVED', reason: 'แก้เหตุผล' }));
+    });
+
+    it('รอง/ผอ.ขยายเวลาให้ครูได้ครั้งเดียว ไม่เกิน 24 ชม. เฉพาะคำขอที่อนุมัติแล้ว; หัวหน้า/ครูขยายไม่ได้', async () => {
+      const ext = (hours: number, over: Record<string, any> = {}) => ({
+        extendedUntil: mTimestamp.fromMillis(nextMidnight() + hours * 3_600_000),
+        extendedBy: { byUid: 'dep-uid', byStaffId: 'S_DEP', byName: 'รอง', role: 'DEPUTY_DIRECTOR_ACADEMIC', at: mServerTimestamp(), ...over },
+      });
+      await seedReq({ headStep: storedHead(), status: 'APPROVED' });
+      await assertSucceeds(apply(deputy(), ext(12)));
+      await assertFails(apply(deputy(), ext(6))); // ขยายซ้ำไม่ได้
+      await seedReq({ headStep: storedHead(), status: 'APPROVED' });
+      await assertFails(apply(deputy(), ext(25))); // เกิน 24 ชม.
+      await assertFails(apply(head(), ext(6, { byUid: 'head-uid', byStaffId: 'S_HEAD', role: 'DEPUTY_DIRECTOR_ACADEMIC' }))); // หัวหน้าขยายไม่ได้
+      await assertFails(apply(teacher(), ext(6)));
+      await seedReq({}); // ยังไม่อนุมัติ
+      await assertFails(apply(deputy(), ext(6)));
+    });
+
+    it('ลบ document ไม่ได้เลย (เก็บเป็นหลักฐาน)', async () => {
+      await seedReq();
+      await assertFails(head().doc(REF).delete());
+      await assertFails(deputy().doc(REF).delete());
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc(REF).delete());
+      await assertFails(teacher().doc(REF).delete());
     });
   });
 

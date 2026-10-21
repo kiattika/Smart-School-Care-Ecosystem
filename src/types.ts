@@ -227,15 +227,29 @@ export type LateAttendanceStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
 /**
  * คำขอ "เช็คชื่อย้อนหลัง" ของครูผู้สอน (เก็บใน Firestore collection `late_attendance_requests`)
- * (แทน action เดิมใน store ที่เขียนแค่ local state — คำขอหายข้าม session)
- * ผู้อนุมัติ: DEPUTY_DIRECTOR_ACADEMIC (รองผู้อำนวยการฝ่ายวิชาการ) — ยืนยันจากทางโรงเรียน
- * document ไม่ถูกลบตอนอนุมัติ/ปฏิเสธ — เปลี่ยนแค่ status เพื่อเก็บประวัติ
+ * ผู้อนุมัติ 2 ขั้น: ACADEMIC_HEAD (หัวหน้ากลุ่มงานวิชาการและหลักสูตร) + DEPUTY_DIRECTOR_ACADEMIC (รองผู้อำนวยการกลุ่มงานวิชาการ),
+ * DIRECTOR สำรองระดับรอง — รายละเอียด/ตรรกะอยู่ที่ src/lib/lateAttendanceFlow.ts ที่เดียว
+ * document ไม่ถูกลบ — ผลการตัดสินเก็บเป็น headStep / deputyStep; `status` เป็นค่าย่อ (PENDING/APPROVED/REJECTED) ไว้ให้รายงานเดิม
+ * เวลาตัดสิน/ยื่นเป็นเวลาเซิร์ฟเวอร์ (Firestore Timestamp); คำขอรุ่นเก่าอาจเป็น ISO string — อ่านผ่าน toMs()
  */
+export interface LateAttendanceStepRecord {
+  decision: 'APPROVE' | 'CONDITIONAL' | 'REJECT';
+  role: 'ACADEMIC_HEAD' | 'DEPUTY_DIRECTOR_ACADEMIC' | 'DIRECTOR';
+  byUid: string;
+  byStaffId: string;
+  byName: string;
+  at: any;                  // Timestamp (เวลาเซิร์ฟเวอร์)
+  note: string;             // เหตุผล/เงื่อนไข (บังคับเมื่อ CONDITIONAL/REJECT)
+  reviewUntil?: any;        // เฉพาะขั้นหัวหน้า — รองทบทวนได้ถึง 18:00
+}
+
 export interface LateAttendanceRequestRecord {
   id: string;
-  teacherId: string;        // Firebase Auth UID จริงของครูที่ยื่นเอง (ไม่ใช่อีเมล, ไม่ใช่ staff doc id) — เขียน/อ่านด้วย user.uid ถูกต้องแล้ว
+  teacherId: string;        // Firebase Auth UID จริงของครูที่ยื่นเอง (ไม่ใช่อีเมล, ไม่ใช่ staff doc id)
   teacherName: string;
   teacherEmail?: string;
+  requesterStaffId?: string;   // claim staffId ของผู้ยื่น — กันอนุมัติตัวเอง (คำขอรุ่นเก่าไม่มี)
+  requesterLevel?: 'TEACHER' | 'HEAD' | 'DEPUTY';
   scheduleId: string;       // อ้างอิง schedules/{id}
   subjectCode: string;
   subjectName: string;
@@ -245,11 +259,13 @@ export interface LateAttendanceRequestRecord {
   teachingDate: string;     // YYYY-MM-DD ของคาบที่ขอเช็คย้อนหลัง
   reason: string;
   status: LateAttendanceStatus;
-  requestedAt: string;      // ISO string
-  approverUid: string | null;
-  approverName: string | null;
-  decidedAt: string | null; // ISO string
-  rejectReason: string | null;
+  requestedAt: any;         // Timestamp เซิร์ฟเวอร์ (รุ่นเก่า: ISO string)
+  deadlineAt?: any;         // 24:00 ไทยของวันสอน — ครูใช้สิทธิ์ได้ก่อนเวลานี้ (รุ่นเก่าไม่มี)
+  headStep?: LateAttendanceStepRecord | null;
+  deputyStep?: LateAttendanceStepRecord | null;
+  extendedUntil?: any;      // รองขยายเวลาให้ครู (ไม่เกิน deadlineAt + 24 ชม.) → ธงแดง
+  extendedBy?: { byUid: string; byStaffId: string; byName: string; role: 'DEPUTY_DIRECTOR_ACADEMIC' | 'DIRECTOR'; at: any } | null;
+  expiredNotifiedAt?: any;  // ตั้งโดย Cloud Function เมื่อแจ้งครูว่าคำขอหมดอายุแล้ว
 }
 
 export interface GlobalCourse {

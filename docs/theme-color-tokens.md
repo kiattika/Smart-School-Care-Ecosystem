@@ -81,7 +81,7 @@
 | **SUPER_ADMIN** (ผู้ดูแลระบบ) | Rose | `text-rose-400 / bg-rose-500/10` | `#E11D48` | `#FB7185` | `#FDA4AF` | `#BE185D` | `#FDA4AF` |
 | **EXECUTIVE** (ผู้บริหารสถานศึกษา) | Blue | `text-blue-400 / bg-blue-500/10` | `#2563EB` | `#60A5FA` | `#93C5FD` | `#2563EB` | `#6D5AE6` |
 | **HEAD_OF_DEPARTMENT** (หัวหน้ากลุ่มสาระฯ) | Amber | `text-amber-400 / bg-amber-500/10` | `#B45309` | `#FBBF24` | `#FCD34D` | `#B45309` | `#B45309` |
-| **ACADEMIC_HEAD** (หัวหน้าฝ่ายวิชาการฯ) | Orange | `text-orange-400 / bg-orange-500/10` | `#C2410C` | `#FB923C` | `#FDBA74` | `#C2410C` | `#C2410C` |
+| **ACADEMIC_HEAD** (หัวหน้ากลุ่มงานวิชาการฯ) | Orange | `text-orange-400 / bg-orange-500/10` | `#C2410C` | `#FB923C` | `#FDBA74` | `#C2410C` | `#C2410C` |
 | **DEPUTY_DIRECTOR_ACADEMIC** (รอง ผอ. วิชาการ) | Violet | `text-violet-400 / bg-violet-500/10` | `#7C3AED` | `#A78BFA` | `#C4B5FD` | `#7C3AED` | `#8B5CF6` |
 | **DIRECTOR** (ผู้อำนวยการสถานศึกษา) | Red | `text-red-400 / bg-red-500/10` | `#DC2626` | `#F87171` | `#FDA4AF` | `#DC2626` | `#DC2626` |
 | **HOMEROOM_TEACHER** (ครูประจำชั้น) | Emerald | `text-emerald-400 / bg-emerald-500/10` | `#047857` | `#34D399` | `#6EE7B7` | `#047857` | `#047857` |

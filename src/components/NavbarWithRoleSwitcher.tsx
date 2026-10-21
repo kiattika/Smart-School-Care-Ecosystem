@@ -85,7 +85,7 @@ export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
     description: 'ผู้นิเทศโดยตำแหน่งของกลุ่มสาระฯ และดูผลนิเทศของกลุ่มสาระฯ'
   },
   ACADEMIC_HEAD: {
-    label: 'หัวหน้าฝ่ายวิชาการและหลักสูตร',
+    label: 'หัวหน้ากลุ่มงานวิชาการและหลักสูตร',
     badgeBg: 'bg-(--role-academic-head)/10',
     badgeText: 'text-(--role-academic-head)',
     badgeBorder: 'border-(--role-academic-head)/20',
@@ -94,7 +94,7 @@ export const ROLE_VISUALS: Record<string, RoleVisualConfig> = {
     description: 'อนุมัติงานจัดครูสอนแทน ขั้นที่ 2'
   },
   DEPUTY_DIRECTOR_ACADEMIC: {
-    label: 'รองผู้อำนวยการฝ่ายวิชาการ',
+    label: 'รองผู้อำนวยการกลุ่มงานวิชาการ',
     badgeBg: 'bg-(--role-deputy-director-academic)/10',
     badgeText: 'text-(--role-deputy-director-academic)',
     badgeBorder: 'border-(--role-deputy-director-academic)/20',

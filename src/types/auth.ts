@@ -5,8 +5,8 @@ export type UserRole =
   | 'EXECUTIVE'            // ผู้อำนวยการ / รองผู้อำนวยการ
   | 'HEAD_OF_DEPARTMENT'   // หัวหน้ากลุ่มสาระการเรียนรู้ (Stage 1)
   | 'DEPUTY_HEAD_OF_DEPARTMENT' // รองหัวหน้ากลุ่มสาระการเรียนรู้ (ผู้นิเทศโดยตำแหน่งของกลุ่มสาระฯ)
-  | 'ACADEMIC_HEAD'        // หัวหน้าฝ่ายวิชาการและหลักสูตร (Stage 2)
-  | 'DEPUTY_DIRECTOR_ACADEMIC' // รองผู้อำนวยการฝ่ายวิชาการ (Stage 3)
+  | 'ACADEMIC_HEAD'        // หัวหน้ากลุ่มงานวิชาการและหลักสูตร (Stage 2)
+  | 'DEPUTY_DIRECTOR_ACADEMIC' // รองผู้อำนวยการกลุ่มงานวิชาการ (Stage 3)
   | 'DIRECTOR'             // ผู้อำนวยการโรงเรียน (Stage 4)
   | 'HOMEROOM_TEACHER'     // ครูประจำชั้น
   | 'SUBJECT_TEACHER'      // ครูผู้สอน / ครูประจำวิชา

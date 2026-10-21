@@ -19,6 +19,7 @@ import {
   subscribeAllSelfAssessments,
 } from './services/firestoreService';
 import { isNonStudentSession } from './utils/teacherLoadReportParser';
+import { resolveLateRequest, toMs, LATE_STATE_LABEL_TH } from './lib/lateAttendanceFlow';
 import { LateAttendanceRequestRecord, StudentHomeLocation, TwoQuestionScreening, SDQAssessment, InfirmaryVisit, ActiveLearningRecord, StudentSelfAssessment } from './types';
 import {
   LayoutDashboard,
@@ -151,7 +152,7 @@ export function ExecutivePortal() {
     };
   }, [screenings2Q, sdqAssessments, infirmaryVisits]);
 
-  // คำขอเช็คชื่อย้อนหลัง — อ่านจาก Firestore สด (อนุมัติจริงทำที่หน้ารองผู้อำนวยการฝ่ายวิชาการ)
+  // คำขอเช็คชื่อย้อนหลัง — อ่านจาก Firestore สด (อนุมัติจริงทำที่หน้ารองผู้อำนวยการกลุ่มงานวิชาการ)
   const [lateAttendanceRequests, setLateAttendanceRequests] = useState<LateAttendanceRequestRecord[]>([]);
   useEffect(() => subscribeLateAttendanceRequests(setLateAttendanceRequests), []);
 
@@ -200,7 +201,7 @@ export function ExecutivePortal() {
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'approvals' | 'analytics' | 'homevisit' | 'supervision' | 'activity'>('dashboard');
 
-  const pendingApprovalsCount = lateAttendanceRequests.filter(r => r.status === 'PENDING').length;
+  const pendingApprovalsCount = lateAttendanceRequests.filter(r => { const x = resolveLateRequest(r, Date.now()); return x.state === 'AWAITING' || x.deputyReviewOpen; }).length;
 
   const navItems = [
     { id: 'dashboard', label: 'ภาพรวม', fullLabel: 'ภาพรวม (Dashboard)', icon: Activity, badge: null, color: 'text-emerald-400' },
@@ -695,24 +696,30 @@ export function ExecutivePortal() {
                 </div>
               ) : (
                 <div className="grid gap-4">
-                  {lateAttendanceRequests.map(request => (
+                  {lateAttendanceRequests.map(request => {
+                    const lateRes = resolveLateRequest(request, Date.now());
+                    const lateWaiting = lateRes.state === 'AWAITING' || lateRes.deputyReviewOpen;
+                    return (
                     <div key={request.id} className={cn(
                       "bg-[#0f1219] border rounded-2xl p-6 shadow-xl transition-colors",
-                      request.status === 'PENDING' ? "border-amber-500/30" : "border-white/5 opacity-60"
+                      lateWaiting ? "border-amber-500/30" : "border-white/5 opacity-60"
                     )}>
                       <div className="flex flex-col md:flex-row justify-between gap-6">
                         <div className="flex-1 space-y-4">
                           <div className="flex items-center gap-3">
                             <span className={cn(
                               "px-3 py-1 text-xs font-bold rounded-lg uppercase tracking-wider",
-                              request.status === 'PENDING' ? "bg-amber-500/20 text-amber-400" :
-                              request.status === 'APPROVED' ? "bg-emerald-500/20 text-emerald-400" :
-                              "bg-red-500/20 text-red-400"
+                              lateRes.state === 'AWAITING' ? "bg-amber-500/20 text-amber-400" :
+                              lateRes.state === 'OPEN' ? "bg-emerald-500/20 text-emerald-400" :
+                              lateRes.state === 'REJECTED' ? "bg-red-500/20 text-red-400" : "bg-slate-500/20 text-slate-300"
                             )}>
-                              {request.status}
+                              {LATE_STATE_LABEL_TH[lateRes.state]}
                             </span>
+                            {lateRes.outcome === 'CONDITIONAL' && <span className="px-2 py-1 text-xs font-bold rounded-lg bg-sky-500/20 text-sky-300">มีเงื่อนไข</span>}
+                            {lateRes.yellowFlag && <span className="px-2 py-1 text-xs font-bold rounded-lg bg-yellow-400/15 text-yellow-300">ธงเหลือง</span>}
+                            {lateRes.redFlag && <span className="px-2 py-1 text-xs font-bold rounded-lg bg-red-500/20 text-red-400">ธงแดง</span>}
                             <span className="text-sm text-slate-400 flex items-center gap-2">
-                              <Clock className="w-4 h-4" /> {request?.requestedAt ? new Date(request.requestedAt).toLocaleString('th-TH') : '-'}
+                              <Clock className="w-4 h-4" /> {toMs(request?.requestedAt) ? new Date(toMs(request.requestedAt) as number).toLocaleString('th-TH') : '-'}
                             </span>
                           </div>
 
@@ -735,25 +742,25 @@ export function ExecutivePortal() {
                             <div className="text-xs text-slate-500 mb-2 font-bold uppercase tracking-wider">Reason provided</div>
                             <p className="text-sm text-slate-300 leading-relaxed">{request.reason}</p>
                           </div>
-                          {request.status !== 'PENDING' && (
-                            <p className="text-xs text-slate-400">
-                              {request.status === 'APPROVED' ? 'อนุมัติโดย' : 'ปฏิเสธโดย'} {request.approverName || '-'}
-                              {request.decidedAt ? ` · ${new Date(request.decidedAt).toLocaleString('th-TH')}` : ''}
-                              {request.status === 'REJECTED' && request.rejectReason ? ` — ${request.rejectReason}` : ''}
+                          {[request.headStep, request.deputyStep].map((st, i) => st && (
+                            <p key={i} className="text-xs text-slate-400">
+                              {i === 0 ? 'หัวหน้า' : 'รอง/ผอ.'}: {st.decision === 'APPROVE' ? 'อนุมัติตามเสนอ' : st.decision === 'CONDITIONAL' ? 'อนุมัติแบบมีเงื่อนไข' : 'ไม่อนุมัติ'} · {st.byName}
+                              {st.note ? ` — ${st.note}` : ''}
                             </p>
-                          )}
+                          ))}
                         </div>
 
-                        {request.status === 'PENDING' && (
+                        {lateWaiting && (
                           <div className="flex md:flex-col gap-2 justify-center shrink-0 w-full md:w-52 text-center">
                             <span className="px-3 py-2 bg-amber-500/10 border border-amber-500/25 text-amber-300 rounded-xl text-xs font-bold">
-                              รอรองผู้อำนวยการฝ่ายวิชาการอนุมัติ
+                              {lateRes.deputyReviewOpen ? 'รอรองผู้อำนวยการกลุ่มงานวิชาการทบทวน' : 'รอหัวหน้ากลุ่มงานวิชาการ / รองผู้อำนวยการกลุ่มงานวิชาการอนุมัติ'}
                             </span>
                           </div>
                         )}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -104,7 +104,7 @@ describe('guard: ห้ามลบประวัติคะแนนควา
 
 describe('guard: ครูที่ปรึกษาไม่มีช่องแก้โปรไฟล์/เชื่อมผู้ปกครองนักเรียน', () => {
   it('rules: HOMEROOM_TEACHER แก้ students ได้เฉพาะแคชสถิติเช็คชื่อ (ไม่ใช่ bare hasRole)', () => {
-    const r = readSource('firestore.rules');
+    const r = readSource('firestore.rules.comments'); // ฉบับมีคอมเมนต์ (ใช้หาขอบเขตบล็อก)
     const i = r.indexOf('match /students/{studentId}');
     const upd = r.slice(r.indexOf('allow update:', i), r.indexOf('// ทะเบียนเลขประจำตัวนักเรียน', i));
     expect(upd).not.toMatch(/hasRole\('SUPER_ADMIN'\) \|\| hasRole\('HOMEROOM_TEACHER'\)/);

@@ -74,7 +74,7 @@ export function StaffTaskBell({ activeRole }: { activeRole: string }) {
     return () => document.removeEventListener('mousedown', onDown);
   }, [isOpen]);
 
-  const tasks = buildStaffTasks({ activeRole, roomLeaves, lateRequests, screening, appointments, substitutes, myEmail: user?.email || '', myStaffId: user?.staffId });
+  const tasks = buildStaffTasks({ activeRole, roomLeaves, lateRequests, screening, appointments, substitutes, myEmail: user?.email || '', myStaffId: user?.staffId, myRoles: user?.profile?.roles || [] });
   const unread = messages.filter(m => !m.readAt);
   const total = totalStaffTasks(tasks) + unread.length;
 
