@@ -12,7 +12,7 @@ import { collection, doc, getDoc, getDocs, limit, query, where } from 'firebase/
 import { auth, db } from './firebase';
 import { User, UserProfile, UserRole, Role } from '../types';
 import { AUTH_NO_PROFILE, AUTH_NO_ROLE } from './authErrors';
-import { parentRelationshipLabel } from './parentRelationship';
+import { parentDisplayNameOf, parentRelationshipLabel } from './parentRelationship';
 
 const googleProvider = new GoogleAuthProvider();
 // hd = แค่ hint ให้หน้าเลือกบัญชีของ Google (UX) — การบังคับโดเมน/ทะเบียนจริงอยู่ที่
@@ -64,13 +64,15 @@ function legacyRoleFor(activeRole: UserRole, roles: UserRole[]): Role {
  * (คัดลอกลง students.parentRelationship ตอนเชื่อมบัญชี — parent_verification_records อ่านไม่ได้จาก client)
  * query ด้วย parentUid ตรง rules; อ่านไม่ได้/ไม่มีค่า = "ผู้ปกครอง" (ไม่ทำให้ login ล้ม)
  */
-async function parentPositionLabel(uid: string): Promise<string> {
+async function parentRegistryInfo(uid: string): Promise<{ position: string; name: string }> {
   try {
     const snap = await getDocs(query(collection(db, 'students'), where('parentUid', '==', uid), limit(1)));
-    return parentRelationshipLabel(snap.docs[0]?.data()?.parentRelationship);
+    const data = snap.docs[0]?.data();
+    // name = ชื่อตามทะเบียน (students.parentDisplayName) — ไม่มี = '' แล้วใช้ชื่อบัญชี LINE ตามเดิม
+    return { position: parentRelationshipLabel(data?.parentRelationship), name: parentDisplayNameOf(data?.parentDisplayName) };
   } catch (err) {
-    console.warn('[auth] อ่านความสัมพันธ์ผู้ปกครองไม่ได้', err);
-    return parentRelationshipLabel(undefined);
+    console.warn('[auth] อ่านข้อมูลผู้ปกครองจากทะเบียนไม่ได้', err);
+    return { position: parentRelationshipLabel(undefined), name: '' };
   }
 }
 
@@ -107,13 +109,16 @@ export async function buildAppUser(fbUser: FirebaseUser): Promise<User> {
     userProfile = { ...(staffSnap.data() as UserProfile), id: staffId, roles };
   } else {
     // นักเรียน (และผู้ปกครองในอนาคต) ไม่มี staff doc — profile จากตัวตน Firebase Auth จริง
+    const parentInfo = !roles.includes('STUDENT') && roles.includes('PARENT') ? await parentRegistryInfo(fbUser.uid) : null;
+    // ผู้ปกครอง: ชื่อตามทะเบียนก่อน (ถ้าโรงเรียนตั้งไว้) ไม่งั้นชื่อโปรไฟล์ LINE; ไม่มีทั้งสอง = อีเมล/ว่าง (ไม่แต่งชื่อ)
+    const fullName = (parentInfo?.name || fbUser.displayName || '').trim();
     userProfile = {
       id: studentId || fbUser.uid,
       email: fbUser.email || '',
       prefix: '',
-      firstName: fbUser.displayName?.split(' ')[0] || fbUser.email || '',
-      lastName: fbUser.displayName?.split(' ').slice(1).join(' ') || '',
-      position: roles.includes('STUDENT') ? 'นักเรียน' : roles.includes('PARENT') ? await parentPositionLabel(fbUser.uid) : '',
+      firstName: fullName.split(' ')[0] || fbUser.email || '',
+      lastName: fullName.split(' ').slice(1).join(' ') || '',
+      position: roles.includes('STUDENT') ? 'นักเรียน' : parentInfo ? parentInfo.position : '',
       roles,
     };
   }
@@ -122,7 +127,8 @@ export async function buildAppUser(fbUser: FirebaseUser): Promise<User> {
   return {
     uid: fbUser.uid,
     email: fbUser.email || '',
-    displayName: fbUser.displayName || `${userProfile.prefix || ''}${userProfile.firstName} ${userProfile.lastName}`.trim(),
+    displayName: staffId ? (fbUser.displayName || `${userProfile.prefix || ''}${userProfile.firstName} ${userProfile.lastName}`.trim())
+      : `${userProfile.prefix || ''}${userProfile.firstName} ${userProfile.lastName}`.trim() || fbUser.displayName || '',
     avatar: fbUser.photoURL || undefined,
     role: legacyRoleFor(activeRole, roles),
     activeRole,

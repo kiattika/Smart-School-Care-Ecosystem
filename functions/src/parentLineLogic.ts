@@ -83,6 +83,21 @@ export function normalizeRelationship(raw: unknown): string | null {
   return (PARENT_RELATIONSHIPS as readonly string[]).includes(v) ? v : null;
 }
 
+/**
+ * ชื่อผู้ปกครองตามทะเบียน (คำนำหน้า+ชื่อ นามสกุล) — คัดลอกลง students.parentDisplayName ตอนเชื่อมบัญชี/นำเข้าซ้ำ
+ * เพื่อให้ Navbar ของผู้ปกครองแสดงชื่อตามทะเบียนแทนชื่อโปรไฟล์ LINE (client อ่าน parent_verification_records ไม่ได้)
+ * ไม่มีชื่อหรือไม่มีนามสกุล = null (ไม่เดา → client ใช้ชื่อจากบัญชี LINE ตามเดิม)
+ * รูปแบบตรงกับ parentDisplayName() ใน src/lib/parentAdmin.ts (มี test เทียบ)
+ */
+export function registryParentName(prefix: unknown, firstName: unknown, lastName: unknown): string | null {
+  const s = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const first = s(firstName);
+  const last = s(lastName);
+  if (!first || !last) return null;
+  const full = `${s(prefix)}${first} ${last}`.trim();
+  return full.length <= 160 ? full : null;
+}
+
 // ---------- แอดมิน: ตั้ง/เปลี่ยนผู้ปกครองรายบุคคล + ประวัติการแก้ไข ----------
 export const PARENT_AUDIT_COLLECTION = 'parent_admin_audit';
 export const AUDIT_REASON_MAX = 300;
