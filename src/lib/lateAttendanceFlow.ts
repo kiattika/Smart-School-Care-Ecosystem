@@ -186,6 +186,37 @@ export function actorKindsFor(req: LateFlowRequest, actor: LateActor, nowMs: num
   return out;
 }
 
+/**
+ * เหตุผลที่ผู้ใช้ "ตัดสินคำขอนี้ไม่ได้" ณ now (ไว้แสดงแทนที่ปุ่มที่หายไป) — null = ตัดสินได้ (actorKindsFor ไม่ว่าง)
+ * เป็นข้อความช่วยฝั่ง UI เท่านั้น ด่านจริงคือ firestore.rules; ลำดับตรวจเรียงจากสาเหตุที่ผู้ใช้แก้ไม่ได้ก่อน
+ */
+export function cannotDecideReason(req: LateFlowRequest, actor: LateActor, nowMs: number): string | null {
+  if (actorKindsFor(req, actor, nowMs).length > 0) return null;
+  if (!actor.staffId) return 'บัญชีนี้ไม่ได้เชื่อมกับทะเบียนบุคลากร จึงตัดสินคำขอไม่ได้';
+  if (actor.staffId === req.requesterStaffId) return 'คำขอของท่านเอง — อนุมัติเองไม่ได้ ต้องให้ผู้อนุมัติท่านอื่นพิจารณา';
+  const isHead = actor.roles.includes('ACADEMIC_HEAD');
+  const isDeputy = actor.roles.includes('DEPUTY_DIRECTOR_ACADEMIC');
+  const isDirector = actor.roles.includes('DIRECTOR');
+  if (!isHead && !isDeputy && !isDirector) return 'บทบาทของท่านไม่มีสิทธิ์ตัดสินคำขอนี้ (ผู้อนุมัติคือหัวหน้า/รองผู้อำนวยการกลุ่มงานวิชาการ และผู้อำนวยการสำรอง)';
+  const deadline = toMs(req.deadlineAt);
+  if (deadline == null) return 'คำขอรุ่นเก่าไม่มีกำหนดเวลา ตัดสินไม่ได้ — ให้ครูยื่นคำขอใหม่';
+  if (nowMs >= deadline) return 'เลยกำหนด 24.00 น. ของวันสอนแล้ว ตัดสินไม่ได้';
+  if (req.deputyStep) return 'รอง/ผอ. ตัดสินแล้ว ซึ่งเป็นผลสุดท้าย';
+  const level = req.requesterLevel ?? 'TEACHER';
+  if (!!req.headStep && req.headStep.byStaffId === actor.staffId) {
+    return 'ท่านตัดสินขั้นหัวหน้าไปแล้ว — ขั้นรอง/ผอ. ต้องเป็นผู้อื่น (คนเดียวทำสองขั้นไม่ได้)';
+  }
+  if (isHead && !isDeputy && !isDirector) {
+    if (level !== 'TEACHER') return 'คำขอของหัวหน้า/รองกลุ่มงาน — รองผู้อำนวยการหรือผู้อำนวยการเป็นผู้ตัดสิน';
+    if (req.headStep) return 'หัวหน้าตัดสินแล้ว — ขั้นต่อไปเป็นของรอง/ผู้อำนวยการ';
+  }
+  if (req.headStep && !resolveLateRequest(req, nowMs).deputyReviewOpen) {
+    return 'พ้นเวลาทบทวนของรอง/ผอ. (18.00 น.) แล้ว ผลของหัวหน้ายืนตามเดิม';
+  }
+  if (isDeputy && !isDirector && level === 'DEPUTY') return 'คำขอของรอง — ผู้อำนวยการเป็นผู้ตัดสิน';
+  return 'ท่านตัดสินคำขอนี้ไม่ได้ในขั้นตอนปัจจุบัน';
+}
+
 /** รองขยายเวลาได้เมื่อ: อนุมัติแล้ว (ไม่ใช่ปฏิเสธ), ยังไม่ขยาย, ยังไม่เลย 24:00 */
 export function mayExtend(req: LateFlowRequest, actor: LateActor, nowMs: number): boolean {
   if (!actor.staffId || actor.staffId === req.requesterStaffId) return false;

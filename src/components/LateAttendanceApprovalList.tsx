@@ -5,7 +5,7 @@ import { cn } from '../lib/utils';
 import { LateAttendanceRequestRecord } from '../types';
 import { lateAttendanceDecisionNotice, lateAttendanceExtendedNotice } from '../lib/staffNotifications';
 import {
-  actorKindsFor, mayExtend, resolveLateRequest, toMs, LATE_STATE_LABEL_TH, CONDITION_REMINDER_TH,
+  actorKindsFor, cannotDecideReason, mayExtend, resolveLateRequest, toMs, LATE_STATE_LABEL_TH, CONDITION_REMINDER_TH,
   type LateActorKind, type LateDecision,
 } from '../lib/lateAttendanceFlow';
 import {
@@ -118,6 +118,8 @@ export function LateAttendanceApprovalList({ readOnly = false }: { readOnly?: bo
   const renderCard = ({ r: req, res }: { r: LateAttendanceRequestRecord; res: ReturnType<typeof resolveLateRequest> }) => {
     const kinds = readOnly ? [] : actorKindsFor(req, actor, now);
     const canExtend = !readOnly && mayExtend(req, actor, now);
+    // รายการที่ยังรอดำเนินการแต่ผู้ใช้ตัดสินไม่ได้ — บอกเหตุผลแทนปุ่มที่หายไป
+    const blockedReason = !readOnly && kinds.length === 0 && (res.state === 'AWAITING' || res.deputyReviewOpen) ? cannotDecideReason(req, actor, now) : null;
     const tone =
       res.state === 'OPEN' ? 'bg-emerald-950/20 border-emerald-800/40' :
       res.state === 'REJECTED' ? 'bg-red-950/20 border-red-800/40' :
@@ -171,6 +173,9 @@ export function LateAttendanceApprovalList({ readOnly = false }: { readOnly?: bo
                 <span title="ขยายเวลา — ครูต้องรีบดำเนินการ" className="px-2 py-1 rounded text-[11px] font-bold border bg-red-500/10 text-red-400 border-red-500/30 flex items-center gap-1"><Flag className="w-3 h-3" /> ธงแดง</span>
               )}
             </div>
+            {blockedReason && (
+              <p data-testid="late-cannot-decide" className="max-w-xs text-right text-[11px] text-slate-400">ท่านตัดสินคำขอนี้ไม่ได้: {blockedReason}</p>
+            )}
             {kinds.length > 0 && (
               <div className="flex flex-wrap justify-end gap-2">
                 {(['APPROVE', 'CONDITIONAL', 'REJECT'] as LateDecision[])
