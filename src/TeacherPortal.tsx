@@ -61,6 +61,7 @@ import { ActivityEnrollment } from './types';
 import { format, setHours, setMinutes, isWithinInterval, isBefore, isAfter } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { useStore } from './store';
+import { useConsumeBellNav } from './lib/bellNavigation';
 import { AttendanceStatus, Course, GlobalCourse, PostTeachingRecord, SubstituteAssignment, Student, LateAttendanceRequestRecord } from './types';
 import { Minus, Plus, BookOpen, Users, ArrowLeft, PlusCircle, X, Clock, Settings, CheckCircle, XCircle, Sparkles, Calendar, CalendarOff, FileText, AlertTriangle, ChevronRight, ChevronLeft, AlertOctagon, Eye, Satellite, Radio, MapPin, ShieldCheck, Crosshair } from 'lucide-react';
 import clsx from 'clsx';
@@ -453,6 +454,8 @@ export function TeacherPortal() {
 
   // New States for Dashboard Navigation
   const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats' | 'conduct'>('courses');
+  // กระดิ่งงานค้างพามาที่แท็บนี้ (คำขอสอนแทนรอยืนยัน / ผลคำขอเช็คชื่อย้อนหลังของฉัน) — ออกจากห้องเรียนกลับหน้าแดชบอร์ดก่อน
+  useConsumeBellNav(user?.activeRole || 'SUBJECT_TEACHER', ['substitutions', 'courses', 'my-lesson-plans', 'my-supervision', 'conduct'], (t) => { setView('dashboard'); setDashboardTab(t as typeof dashboardTab); });
   const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
   // ขอลากิจ/ไปราชการด้วยตนเอง — reuse SubstituteTeachingModule เต็มรูปแบบ (ไม่สร้างฟอร์มซ้ำ)
   const [showSubSelfService, setShowSubSelfService] = useState(false);

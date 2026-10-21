@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ClipboardCheck, Repeat, Clock, Users, Palette, BookOpen, BarChart3 } from 'lucide-react';
 import { useStore } from './store';
+import { useConsumeBellNav } from './lib/bellNavigation';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
 import { LateAttendanceApprovalList } from './components/LateAttendanceApprovalList';
@@ -75,6 +76,8 @@ export function ApprovalsPortal() {
   const extraTabs = EXTRA_TAB_ROLES[activeRole] || [];
 
   const [tab, setTab] = useState<'substitute' | 'late-attendance' | 'elective' | 'house' | 'supervision' | 'activity'>('substitute');
+  // กระดิ่งงานค้างพามาที่แท็บนี้ (เฉพาะแท็บที่บทบาทนี้เห็นจริง)
+  useConsumeBellNav(activeRole, [...(canSeeLateAttendance ? ['late-attendance'] : []), 'substitute'], (t) => setTab(t as typeof tab));
 
   // นับคำขอเช็คชื่อย้อนหลังที่รออนุมัติ (สำหรับ badge)
   const [lateRequests, setLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
