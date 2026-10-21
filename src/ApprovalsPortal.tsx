@@ -4,6 +4,7 @@ import { useStore } from './store';
 import { useConsumeBellNav } from './lib/bellNavigation';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
+import { SubstituteTeachingAnalyticsModule } from './components/SubstituteTeachingAnalyticsModule';
 import { LateAttendanceApprovalList } from './components/LateAttendanceApprovalList';
 import { ElectiveActivityManagerPage } from './components/admin/ElectiveActivityManagerPage';
 import { HouseManagerPage } from './components/admin/HouseManagerPage';
@@ -75,7 +76,7 @@ export function ApprovalsPortal() {
   const lateAttendanceReadOnly = !LATE_ATTENDANCE_APPROVER_ROLES.includes(activeRole);
   const extraTabs = EXTRA_TAB_ROLES[activeRole] || [];
 
-  const [tab, setTab] = useState<'substitute' | 'late-attendance' | 'elective' | 'house' | 'supervision' | 'activity'>('substitute');
+  const [tab, setTab] = useState<'substitute' | 'late-attendance' | 'elective' | 'house' | 'supervision' | 'activity' | 'sub-analytics'>('substitute');
   // กระดิ่งงานค้างพามาที่แท็บนี้ (เฉพาะแท็บที่บทบาทนี้เห็นจริง)
   // แท็บเริ่มต้นของงานนิเทศแบบฝัง (กระดิ่ง "มีแผนรอตรวจ" พาไปแท็บ "ตรวจแผนการสอน")
   const [supervisionStart, setSupervisionStart] = useState<'plans' | ''>('');
@@ -138,6 +139,7 @@ export function ApprovalsPortal() {
           items={[
             { id: 'substitute', label: 'งานจัดครูสอนแทน', icon: Repeat, badge: pendingSubCount },
             ...([...ACTIVITY_DEPT_ROLES, ...ACTIVITY_SCHOOL_ROLES].includes(activeRole) ? [{ id: 'activity', label: ACTIVITY_SCHOOL_ROLES.includes(activeRole) ? 'สถิติการสอนทั้งโรงเรียน' : 'สถิติการสอนกลุ่มสาระฯ', icon: BarChart3 }] : []),
+            ...([...ACTIVITY_DEPT_ROLES, ...ACTIVITY_SCHOOL_ROLES].includes(activeRole) ? [{ id: 'sub-analytics', label: 'วิเคราะห์สอนแทน & PA', icon: BarChart3 }] : []),
             ...(SUPERVISION_TAB_ROLES.includes(activeRole) ? [{ id: 'supervision', label: 'งานนิเทศการสอน', icon: BookOpen }] : []),
             ...(canSeeLateAttendance ? [{ id: 'late-attendance', label: 'เช็คชื่อย้อนหลัง', icon: Clock, badge: pendingLateCount }] : []),
             // แท็บเพิ่มเติมตามสิทธิ์จริงใน firestore.rules — ตอนนี้มีแค่ ACADEMIC_HEAD (elective_activities_config/house_config)
@@ -151,6 +153,7 @@ export function ApprovalsPortal() {
           </div>
         )}
         {tab === 'activity' && <ActivityOverviewPanel level={ACTIVITY_SCHOOL_ROLES.includes(activeRole) ? 'SCHOOL' : 'DEPARTMENT'} />}
+        {tab === 'sub-analytics' && <SubstituteTeachingAnalyticsModule views={ACTIVITY_SCHOOL_ROLES.includes(activeRole) ? ['EXECUTIVE'] : ['HOD']} />}
         {tab === 'supervision' && <SupervisionEmbedded startTab={supervisionStart || undefined} />}
         {tab === 'elective' && extraTabs.includes('elective') && <ElectiveActivityManagerPage />}
         {tab === 'house' && extraTabs.includes('house') && <HouseManagerPage />}

@@ -75,11 +75,11 @@ describe('guard: หน้าแอดมิน/ผู้บริหารไ�
     expect(src).toMatch(/computeGradeEngagement\(/);
     expect(src).toMatch(/new Blob\(/);
   });
-  it('SystemSettingsAndLocksPage: ไม่มีคำร้อง/วันที่/ปีสมมติ และรอผลเขียนก่อนแจ้งสำเร็จ', () => {
+  it('SystemSettingsAndLocksPage: ไม่มีวันที่/ปีสมมติและไม่มีระบบคำร้องแก้คะแนนค้าง และรอผลเขียนก่อนแจ้งสำเร็จ', () => {
     const src = readSource('src/components/SystemSettingsAndLocksPage.tsx');
     expect(src).not.toMatch(/teacher-somchai|teacher-somjai|teacher-mana|2026-0[0-9]-[0-9]{2}|useState\('2569'\)/);
     expect(src).not.toMatch(/Firestore save handled/);
-    expect(src).toMatch(/useState<ExceptionRequest\[\]>\(\[\]\)/);
+    expect(src).not.toMatch(/ExceptionRequest|grade_exceptions/); // เอาระบบคำร้องแก้คะแนนย้อนหลังออกแล้ว (ไม่มี UI ฝั่งครู)
   });
   it('ตัวเลือกห้องเรียนไม่ฝังตายตัว', () => {
     expect(readSource('src/components/StaffRoleManagementPage.tsx')).not.toMatch(/ROOM_OPTIONS/);

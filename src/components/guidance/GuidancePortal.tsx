@@ -492,20 +492,9 @@ export function GuidancePortal() {
 
         {activeTab === 'tcas' && (
           <div className="space-y-4">
-            <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-              <h3 className="text-base font-bold text-white">ระบบแนะแนวศึกษาต่อและเตรียมพอร์ตโฟลิโอ (TCAS Portfolio)</h3>
-              <p className="text-xs text-slate-400">ติดตามความพร้อมของนักเรียนระดับชั้น ม.6 ในการสมัครเข้ามหาวิทยาลัยผ่านรอบที่ 1 (Portfolio)</p>
-
-              <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-white">เป้าหมายยอดสมัคร TCAS รอบที่ 1 ปี 2569</span>
-                  <span className="text-xs text-purple-400 font-mono font-bold">ส่งพอร์ตแล้ว 125 คน</span>
-                </div>
-                <div className="w-full bg-slate-800 h-3 rounded-full overflow-hidden">
-                  <div className="bg-purple-500 h-full w-[78%]"></div>
-                </div>
-                <span className="text-xs text-slate-400">นักเรียนผ่านการตรวจรับรองผลงานจากครูแนะแนวแล้ว 78%</span>
-              </div>
+            <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-2">
+              <h3 className="text-base font-bold text-white">แผนศึกษาต่อและ TCAS พอร์ตโฟลิโอ</h3>
+              <p className="text-xs text-slate-400">ยังไม่มีข้อมูลแผนศึกษาต่อของนักเรียน — ระบบกำลังพัฒนาให้นักเรียนกรอกแผนของตนเอง</p>
             </div>
           </div>
         )}

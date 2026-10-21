@@ -10,8 +10,6 @@ import { StudentManagementPage } from './components/StudentManagementPage';
 import { ParentManagementPage } from './components/admin/ParentManagementPage';
 import { SystemSettingsAndLocksPage } from './components/SystemSettingsAndLocksPage';
 import { AdminPeriodsConfigPage } from './components/admin/AdminPeriodsConfigPage';
-import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
-import { SubstituteTeachingAnalyticsModule } from './components/SubstituteTeachingAnalyticsModule';
 import { TeachingLoadTable } from './components/TeachingLoadTable';
 import { BulkDataImportModal, ImportType } from './components/BulkDataImportModal';
 import { IMPORT_ORDER } from './lib/importOrder';
@@ -64,7 +62,7 @@ const REFERENCE_CARDS: { kind: ReferenceImportKind; title: string; description: 
 const IMPORT_CARDS = IMPORT_ORDER.map((type) => ({ type, ...IMPORT_CARD_META[type] }));
 
 export function AdminPortal() {
-  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'parents' | 'id-registry' | 'settings' | 'periods' | 'electives' | 'houses' | 'ref-villages' | 'ref-schools' | 'theme-tokens'>('teaching-load');
+  const [activeTab, setActiveTab] = useState<'teaching-load' | 'import' | 'users' | 'students' | 'parents' | 'id-registry' | 'settings' | 'periods' | 'electives' | 'houses' | 'ref-villages' | 'ref-schools' | 'theme-tokens'>('teaching-load');
   // ทะเบียนเลขประจำตัว: เลขที่ส่งมาจากหน้าจัดการนักเรียนเพื่อเปิดดูประวัติทันที
   const [registryFocusId, setRegistryFocusId] = useState<string | undefined>(undefined);
   const openIdRegistry = (studentId?: string) => {
@@ -100,7 +98,7 @@ export function AdminPortal() {
   };
 
   interface AdminNavItem {
-    id: 'teaching-load' | 'import' | 'absence-sub' | 'sub-analytics' | 'users' | 'students' | 'parents' | 'id-registry' | 'settings' | 'periods' | 'electives' | 'houses' | 'ref-villages' | 'ref-schools' | 'theme-tokens';
+    id: 'teaching-load' | 'import' | 'users' | 'students' | 'parents' | 'id-registry' | 'settings' | 'periods' | 'electives' | 'houses' | 'ref-villages' | 'ref-schools' | 'theme-tokens';
     label: string;
     fullLabel: string;
     icon: React.ComponentType<{ className?: string }>;
@@ -113,8 +111,6 @@ export function AdminPortal() {
   const adminNavItems: AdminNavItem[] = [
     { id: 'teaching-load', label: 'ตารางภาระงานสอน', fullLabel: 'ตารางภาระงานสอนครู (Teaching Load)', icon: Layers, badge: null, color: 'text-blue-400', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
     { id: 'import', label: 'ระบบนำเข้าข้อมูลขนาดใหญ่', fullLabel: 'ระบบนำเข้าข้อมูลขนาดใหญ่ (Bulk Data Import)', icon: Upload, badge: null, color: 'text-blue-400', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
-    { id: 'absence-sub', label: 'ลาสอน & ครูสอนแทน', fullLabel: 'ลาสอน & จัดครูสอนแทน (Substitute)', icon: Clock, badge: null, color: 'text-amber-400', badgeColor: 'bg-amber-500', activeStyle: 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-[inset_4px_0_0_rgba(245,158,11,1)]' },
-    { id: 'sub-analytics', label: 'วิเคราะห์สอนแทน & PA', fullLabel: 'วิเคราะห์งานสอนแทน & PA', icon: BarChart3, badge: null, color: 'text-indigo-400', activeStyle: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 shadow-[inset_4px_0_0_rgba(99,102,241,1)]' },
     { id: 'users', label: 'จัดการสิทธิ์บุคลากร', fullLabel: 'จัดการสิทธิ์บุคลากร (User RBAC)', icon: Users, badge: null, color: 'text-blue-400', activeStyle: 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_4px_0_0_rgba(59,130,246,1)]' },
     { id: 'students', label: 'จัดการนักเรียน', fullLabel: 'จัดการข้อมูลนักเรียน (Student Roster)', icon: GraduationCap, badge: null, color: 'text-purple-400', activeStyle: 'bg-purple-500/10 text-purple-400 border-purple-500/20 shadow-[inset_4px_0_0_rgba(168,85,247,1)]' },
     { id: 'parents', label: 'จัดการผู้ปกครอง', fullLabel: 'จัดการผู้ปกครอง (เชื่อมบัญชี LINE)', icon: ShieldCheck, badge: null, color: 'text-purple-400', activeStyle: 'bg-purple-500/10 text-purple-400 border-purple-500/20 shadow-[inset_4px_0_0_rgba(168,85,247,1)]' },
@@ -283,17 +279,7 @@ export function AdminPortal() {
                 </div>
               )}
 
-          {activeTab === 'absence-sub' && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <SubstituteTeachingModule />
-            </div>
-          )}
 
-          {activeTab === 'sub-analytics' && (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <SubstituteTeachingAnalyticsModule />
-            </div>
-          )}
 
           {activeTab === 'users' && (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
