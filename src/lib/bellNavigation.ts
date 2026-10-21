@@ -57,6 +57,10 @@ export function taskTarget(kind: StaffTaskKind, activeRole: string, myRoles: rea
   switch (kind) {
     case 'LEAVE':
       return { role: 'HOMEROOM_TEACHER', tab: 'dashboard' };
+    case 'CONDUCT_REVIEW':
+      return { role: 'STUDENT_AFFAIRS', tab: 'review' };
+    case 'CONDUCT_CHANGE':
+      return { role: 'STUDENT_AFFAIRS', tab: 'changes' };
     case 'CHAT_UNREAD':
       return { role: 'HOMEROOM_TEACHER', tab: 'class-chat' };
     case 'APPOINTMENT':

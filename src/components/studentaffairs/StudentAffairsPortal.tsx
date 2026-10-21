@@ -4,6 +4,7 @@ import { PortalSidebarLayout } from '../shared/PortalSidebarLayout';
 import { useRealStudents } from '../../hooks/useRealStudents';
 import { ConductChangesPanel, ConductReviewPanel } from './ConductReviewPanel';
 import { StudentConductPanel } from './StudentConductPanel';
+import { useConsumeBellNav } from '../../lib/bellNavigation';
 import { AbsentTodayPanel, HomeVisitOversightPanel } from './OversightPanels';
 
 type Tab = 'review' | 'changes' | 'student' | 'homevisit' | 'absent';
@@ -12,6 +13,7 @@ type Tab = 'review' | 'changes' | 'student' | 'homevisit' | 'absent';
 export function StudentAffairsPortal() {
   const { students } = useRealStudents();
   const [tab, setTab] = useState<Tab>('review');
+  useConsumeBellNav('STUDENT_AFFAIRS', ['review', 'changes'], (t) => setTab(t as Tab));
   const nameOf = (id: string) => students.find(s => s.studentId === id)?.name || id;
   return (
     <PortalSidebarLayout
