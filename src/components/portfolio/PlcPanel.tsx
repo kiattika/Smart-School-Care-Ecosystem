@@ -4,6 +4,8 @@ import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { usePlcLogs } from '../../hooks/usePlcAndReflections';
 import { deletePlcLog, savePlcLog } from '../../services/plcService';
 import { semesterIdOf } from '../../lib/lessonPlans';
+import { PlcGuidanceCard } from './TeachingGuidanceCard';
+import { plcProgress } from '../../lib/teachingGuidance';
 import { PLC_STEPS, PLC_STEP_LABEL, emptyPlc, groupPlcCycles, isCycleComplete, validatePlc, type PlcContent, type PlcLog } from '../../lib/plc';
 import { staffDepartmentId, type StaffRow } from '../../lib/supervisionView';
 import { DatePicker } from '../shared/DatePicker';
@@ -60,6 +62,7 @@ export function PlcPanel() {
         <p className="text-white font-medium">บันทึก PLC ภาคเรียน {sem.label}</p>
         <p className="text-slate-400 mt-1">ลงทุกครั้งที่กลุ่มพบกัน ระบุขั้นของวงจร (วางแผน → ปฏิบัติ → ตรวจสอบ → ปรับปรุง) ชื่อกลุ่มและประเด็นเดียวกันจะรวมเป็นวงจรเดียว</p>
       </div>
+      <PlcGuidanceCard progress={plcProgress(cycles)} />
       {error && <p role="alert" className="text-sm text-amber-300">โหลดข้อมูลไม่สำเร็จ: {error}</p>}
       {!editing && <button className="px-3 py-1.5 rounded-lg text-xs bg-cyan-600 text-white cursor-pointer" onClick={() => { setPendingLink(false); setEditing({ content: emptyPlc() }); }}>+ บันทึกการพบกันครั้งใหม่</button>}
       {editing && (
