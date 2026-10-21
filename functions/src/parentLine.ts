@@ -11,6 +11,7 @@ import { FIRESTORE_DATABASE_ID } from './config';
 import {
   FetchLike, LineIdentity, PARENT_CLAIMS, hashesEqual, hmacNationalId, isLocked, isValidThaiNationalId, normalizeRelationship,
   nextFailedState, normalizeNationalId, parentUidForLine, verifyLineIdToken,
+  PARENT_AUDIT_COLLECTION, buildParentAuditEntry, validateParentSet, validateUnlinkReason, ParentAuditAction,
 } from './parentLineLogic';
 
 if (!admin.apps.length) {
@@ -65,6 +66,70 @@ async function issueToken(uid: string, displayName: string): Promise<string> {
   return auth.createCustomToken(uid, { ...PARENT_CLAIMS, roles: [...PARENT_CLAIMS.roles] });
 }
 
+interface VerificationInput {
+  studentId: string; parentPrefix?: unknown; parentFirstName?: unknown; parentLastName?: unknown;
+  parentMobile?: unknown; relationship?: unknown;
+}
+
+/**
+ * เขียนทะเบียนยืนยันตัวตนผู้ปกครอง 1 รายการ "ลงใน batch ที่ส่งมา" (ผู้เรียก commit เอง จึงผูกกับประวัติแก้ไขให้ atomic ได้)
+ * — ใช้ร่วมกันระหว่างนำเข้าเป็นกลุ่มและแอดมินตั้งผู้ปกครองรายคน เพื่อให้กติกา "เปลี่ยนผู้ปกครอง = ยกเลิกการเชื่อมเดิม" เป็นชุดเดียว
+ */
+async function queueVerificationUpsert(
+  batch: FirebaseFirestore.WriteBatch, r: VerificationInput, hmac: string,
+): Promise<{ hadLink: boolean; parentChanged: boolean; oldUid: string | null }> {
+  const studentId = r.studentId;
+  const ref = db.collection('parent_verification_records').doc(`${studentId}_verify`);
+  const existing = await ref.get();
+  const prev = existing.exists ? existing.data() || {} : {};
+  const sameParent = prev.parentNationalIdHmac === hmac;
+  const payload: Record<string, unknown> = {
+    id: `${studentId}_verify`,
+    studentId,
+    parentPrefix: String(r.parentPrefix ?? ''),
+    parentFirstName: String(r.parentFirstName ?? ''),
+    parentLastName: String(r.parentLastName ?? ''),
+    parentNationalIdHmac: hmac,
+    parentMobile: String(r.parentMobile ?? ''),
+    relationship: String(r.relationship ?? ''),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  if (!existing.exists) { payload.linkedParentUid = null; payload.linkedAt = null; payload.createdAt = FieldValue.serverTimestamp(); }
+  const oldUid = (prev.linkedParentUid as string | null | undefined) || null;
+  const parentChanged = existing.exists && !sameParent;
+  if (parentChanged) {
+    // เปลี่ยนผู้ปกครอง → ยกเลิกการเชื่อมเดิม (ทั้งทะเบียนและ students.parentUid)
+    payload.linkedParentUid = null; payload.linkedAt = null;
+    if (oldUid) batch.set(db.collection('students').doc(studentId), { parentUid: null }, { merge: true });
+  }
+  // ลบฟิลด์ hash แบบ SHA-256 เดิม (ถ้ามี) — เลิกใช้แล้ว
+  payload.parentNationalIdHash = FieldValue.delete();
+  batch.set(ref, payload, { merge: true });
+  // ผู้ปกครองที่เชื่อมบัญชีแล้ว (ผู้ปกครองคนเดิม) — อัปเดตป้ายความสัมพันธ์ที่ students ด้วย (นำเข้าซ้ำ = backfill)
+  if (existing.exists && sameParent && oldUid) {
+    batch.set(db.collection('students').doc(studentId), { parentRelationship: normalizeRelationship(r.relationship) }, { merge: true });
+  }
+  return { hadLink: !!oldUid, parentChanged, oldUid };
+}
+
+/** ผู้ปกครองคนเดิมไม่มีบุตรหลานคนอื่นในระบบแล้ว → เพิกถอน session (สิทธิ์ข้อมูลถูกตัดที่ทะเบียนอยู่แล้ว ส่วนนี้กัน claims ค้าง) */
+async function revokeIfOrphan(oldUid: string | null): Promise<void> {
+  if (!oldUid) return;
+  const remaining = await db.collection('students').where('parentUid', '==', oldUid).limit(1).get();
+  if (!remaining.empty) return;
+  try { await auth.revokeRefreshTokens(oldUid); } catch { /* บัญชีอาจไม่มีแล้ว */ }
+}
+
+function queueAudit(batch: FirebaseFirestore.WriteBatch, context: functions.https.CallableContext, p: {
+  action: ParentAuditAction; studentId: string; reason: string; hadLink: boolean; parentChanged: boolean; relationship?: string | null;
+}): void {
+  const token = (context.auth?.token || {}) as Record<string, unknown>;
+  batch.set(db.collection(PARENT_AUDIT_COLLECTION).doc(), {
+    ...buildParentAuditEntry({ ...p, byUid: context.auth?.uid || '', byEmail: String(token.email || '') }),
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
+
 /** SUPER_ADMIN — นำเข้าทะเบียนผู้ปกครอง: คำนวณ HMAC ฝั่งเซิร์ฟเวอร์ ไม่เก็บเลขบัตรดิบ */
 export const importParentVerification = functions.runWith(RUN_OPTS).https.onCall(async (data, context) => {
   requireSuperAdmin(context);
@@ -82,36 +147,9 @@ export const importParentVerification = functions.runWith(RUN_OPTS).https.onCall
     if (!studentId || studentId.includes('/')) { errors.push({ studentId, reason: 'รหัสนักเรียนไม่ถูกต้อง' }); continue; }
     if (!isValidThaiNationalId(r?.parentNationalId)) { errors.push({ studentId, reason: 'เลขบัตรประชาชนไม่ถูกต้อง' }); continue; }
     const hmac = hmacNationalId(String(r.parentNationalId), key);
-    const ref = db.collection('parent_verification_records').doc(`${studentId}_verify`);
-    const existing = await ref.get();
-    const prev = existing.exists ? existing.data() || {} : {};
-    const sameParent = prev.parentNationalIdHmac === hmac;
-    const payload: Record<string, unknown> = {
-      id: `${studentId}_verify`,
-      studentId,
-      parentPrefix: String(r.parentPrefix ?? ''),
-      parentFirstName: String(r.parentFirstName ?? ''),
-      parentLastName: String(r.parentLastName ?? ''),
-      parentNationalIdHmac: hmac,
-      parentMobile: String(r.parentMobile ?? ''),
-      relationship: String(r.relationship ?? ''),
-      updatedAt: FieldValue.serverTimestamp(),
-    };
-    if (!existing.exists) { payload.linkedParentUid = null; payload.linkedAt = null; payload.createdAt = FieldValue.serverTimestamp(); }
-    if (existing.exists && !sameParent) {
-      // เปลี่ยนผู้ปกครอง → ยกเลิกการเชื่อมเดิม (ทั้งทะเบียนและ students.parentUid)
-      payload.linkedParentUid = null; payload.linkedAt = null;
-      if (prev.linkedParentUid) {
-        await db.collection('students').doc(studentId).set({ parentUid: null }, { merge: true });
-      }
-    }
-    // ลบฟิลด์ hash แบบ SHA-256 เดิม (ถ้ามี) — เลิกใช้แล้ว
-    payload.parentNationalIdHash = FieldValue.delete();
-    await ref.set(payload, { merge: true });
-    // ผู้ปกครองที่เชื่อมบัญชีแล้ว (ผู้ปกครองคนเดิม) — อัปเดตป้ายความสัมพันธ์ที่ students ด้วย (นำเข้าซ้ำ = backfill)
-    if (existing.exists && sameParent && prev.linkedParentUid) {
-      await db.collection('students').doc(studentId).set({ parentRelationship: normalizeRelationship(r.relationship) }, { merge: true });
-    }
+    const batch = db.batch();
+    await queueVerificationUpsert(batch, { ...r, studentId }, hmac);
+    await batch.commit();
     written++;
   }
   return { written, errors };
@@ -169,11 +207,13 @@ export const signInParentLine = functions.runWith(RUN_OPTS).https.onCall(async (
   return { customToken: await issueToken(uid, line.name) };
 });
 
-/** SUPER_ADMIN — ยกเลิกการเชื่อมบัญชี LINE ของนักเรียน (เช่น เปลี่ยนผู้ปกครอง/ลงผิดคน) */
+/** SUPER_ADMIN — ยกเลิกการเชื่อมบัญชี LINE ของนักเรียน (เช่น เปลี่ยนผู้ปกครอง/ลงผิดคน) — ต้องระบุเหตุผล และบันทึกประวัติใน batch เดียวกัน */
 export const unlinkParentLine = functions.https.onCall(async (data, context) => {
   requireSuperAdmin(context);
   const studentId = String(data?.studentId ?? '').trim();
   if (!studentId || studentId.includes('/')) throw new functions.https.HttpsError('invalid-argument', 'รหัสนักเรียนไม่ถูกต้อง');
+  const why = validateUnlinkReason(data?.reason);
+  if (!why.ok) throw new functions.https.HttpsError('invalid-argument', why.message);
   const studentRef = db.collection('students').doc(studentId);
   const recRef = db.collection('parent_verification_records').doc(`${studentId}_verify`);
   const [student, rec] = await Promise.all([studentRef.get(), recRef.get()]);
@@ -182,13 +222,35 @@ export const unlinkParentLine = functions.https.onCall(async (data, context) => 
   const batch = db.batch();
   if (student.exists) batch.set(studentRef, { parentUid: null }, { merge: true });
   if (rec.exists) batch.set(recRef, { linkedParentUid: null, linkedAt: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  // ไม่มีการเชื่อมอยู่ = ไม่มีอะไรเปลี่ยน จึงไม่บันทึกประวัติ
+  if (oldUid) queueAudit(batch, context, { action: 'UNLINK', studentId, reason: why.reason, hadLink: true, parentChanged: false });
   await batch.commit();
 
-  if (oldUid) {
-    const remaining = await db.collection('students').where('parentUid', '==', oldUid).limit(1).get();
-    if (remaining.empty) {
-      try { await auth.revokeRefreshTokens(oldUid); } catch { /* บัญชีอาจไม่มีแล้ว — ข้อมูลถูกตัดสิทธิ์ที่ทะเบียนอยู่ดี */ }
-    }
-  }
+  await revokeIfOrphan(oldUid);
   return { unlinked: !!oldUid };
+});
+
+/**
+ * SUPER_ADMIN — ตั้ง/เปลี่ยนผู้ปกครองของนักเรียนรายคน (ข้อมูลยืนยันตัวตนสำหรับเชื่อมบัญชี LINE)
+ * เลขบัตรประชาชนส่งมาทาง HTTPS แล้วถูกแปลงเป็น HMAC ทันที ไม่เก็บ/ไม่ลง log/ไม่อยู่ในประวัติ;
+ * เปลี่ยนเป็นคนละเลขบัตร = ยกเลิกการเชื่อมเดิมอัตโนมัติ (กติกาเดียวกับนำเข้าเป็นกลุ่ม)
+ */
+export const setStudentParent = functions.runWith({ secrets: ['PARENT_ID_PEPPER'] }).https.onCall(async (data, context) => {
+  requireSuperAdmin(context);
+  const v = validateParentSet(data);
+  if (!v.ok) throw new functions.https.HttpsError('invalid-argument', v.message);
+  const input = v.value;
+  const key = pepper();
+  if (!(await db.collection('students').doc(input.studentId).get()).exists) {
+    throw new functions.https.HttpsError('failed-precondition', 'ไม่พบนักเรียนรหัสนี้ในระบบ');
+  }
+  const batch = db.batch();
+  const res = await queueVerificationUpsert(batch, input, hmacNationalId(input.parentNationalId, key));
+  queueAudit(batch, context, {
+    action: 'SET_PARENT', studentId: input.studentId, reason: input.reason,
+    hadLink: res.hadLink, parentChanged: res.parentChanged, relationship: input.relationship,
+  });
+  await batch.commit();
+  if (res.parentChanged) await revokeIfOrphan(res.oldUid);
+  return { parentChanged: res.parentChanged, unlinked: res.parentChanged && res.hadLink };
 });
