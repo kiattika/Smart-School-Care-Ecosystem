@@ -84,7 +84,7 @@ describe('parentLine callables (source guards)', () => {
     expect(src).toContain("secrets: ['LINE_CHANNEL_ID', 'PARENT_ID_PEPPER']");
   });
   it('admin callables require SUPER_ADMIN; sign-in re-checks students.parentUid; never stores raw id', () => {
-    expect(src.match(/requireSuperAdmin\(context\)/g)?.length).toBe(2);
+    expect(src.match(/requireSuperAdmin\(context\)/g)?.length).toBe(3); // import + unlink + setStudentParent
     expect(src).toContain("where('parentUid', '==', uid)");
     expect(src).not.toMatch(/parentNationalId:\s*(r\.|nationalId)/);
     expect(parentUidForLine('U1')).toBe('line_U1');

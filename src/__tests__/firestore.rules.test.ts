@@ -1343,6 +1343,27 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
     });
   });
 
+  // 17.1 parent_admin_audit — ประวัติแอดมินยกเลิกการเชื่อม/ตั้งผู้ปกครอง: SUPER_ADMIN อ่านได้อย่างเดียว (เขียนผ่าน Cloud Functions)
+  describe('parent_admin_audit collection', () => {
+    const entry = { action: 'UNLINK', studentId: '38501', byUid: 'u1', byEmail: 'a@utd.ac.th', reason: 'เปลี่ยนผู้ปกครอง', hadLink: true, parentChanged: false, relationship: null };
+
+    it('SUPER_ADMIN reads but cannot write/update/delete (client never writes the audit trail)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('parent_admin_audit/a1').set(entry); });
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('parent_admin_audit/a1').get());
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc('parent_admin_audit/a2').set(entry));
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc('parent_admin_audit/a1').update({ reason: 'แก้ย้อนหลัง' }));
+      await assertFails(asRole('SUPER_ADMIN').firestore().doc('parent_admin_audit/a1').delete());
+    });
+
+    it('REGRESSION: everyone else (teachers, executive, parent, student) cannot read or write', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc('parent_admin_audit/a1').set(entry); });
+      for (const db of [asRole('HOMEROOM_TEACHER'), asRole('EXECUTIVE'), asRole('SUBJECT_TEACHER'), asUser('parent-alice', ['PARENT']), asUser('stu-1', ['STUDENT'])]) {
+        await assertFails(db.firestore().doc('parent_admin_audit/a1').get());
+        await assertFails(db.firestore().doc('parent_admin_audit/a3').set(entry));
+      }
+    });
+  });
+
   // 17. parent_verification_records - SUPER_ADMIN only (PDPA-sensitive identity data)
   describe('parent_verification_records collection', () => {
     it('allows SUPER_ADMIN to read but NOT write parent verification records (writes go through Cloud Functions)', async () => {

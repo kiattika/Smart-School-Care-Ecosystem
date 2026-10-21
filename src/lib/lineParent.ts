@@ -85,7 +85,17 @@ export async function importParentRecords(records: ParentImportRecord[]): Promis
   return { written, errors };
 }
 
-export async function unlinkParent(studentId: string): Promise<boolean> {
-  const res = await httpsCallable<{ studentId: string }, { unlinked: boolean }>(functions, 'unlinkParentLine')({ studentId });
+export async function unlinkParent(studentId: string, reason: string): Promise<boolean> {
+  const res = await httpsCallable<{ studentId: string; reason: string }, { unlinked: boolean }>(functions, 'unlinkParentLine')({ studentId, reason });
   return res.data.unlinked;
+}
+
+/** SUPER_ADMIN — ตั้ง/เปลี่ยนผู้ปกครองรายคน (เซิร์ฟเวอร์คำนวณ HMAC + บันทึกประวัติ; เลขบัตรไม่ถูกเก็บ) */
+export interface SetStudentParentPayload {
+  studentId: string; parentPrefix: string; parentFirstName: string; parentLastName: string;
+  parentNationalId: string; parentMobile: string; relationship: string; reason: string;
+}
+export async function setStudentParent(payload: SetStudentParentPayload): Promise<{ parentChanged: boolean; unlinked: boolean }> {
+  const res = await httpsCallable<SetStudentParentPayload, { parentChanged: boolean; unlinked: boolean }>(functions, 'setStudentParent')(payload);
+  return res.data;
 }

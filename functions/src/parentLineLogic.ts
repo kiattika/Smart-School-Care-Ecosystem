@@ -82,3 +82,56 @@ export function normalizeRelationship(raw: unknown): string | null {
   const v = typeof raw === 'string' ? raw.trim() : '';
   return (PARENT_RELATIONSHIPS as readonly string[]).includes(v) ? v : null;
 }
+
+// ---------- แอดมิน: ตั้ง/เปลี่ยนผู้ปกครองรายบุคคล + ประวัติการแก้ไข ----------
+export const PARENT_AUDIT_COLLECTION = 'parent_admin_audit';
+export const AUDIT_REASON_MAX = 300;
+
+export interface ParentSetInput {
+  studentId: string; parentPrefix: string; parentFirstName: string; parentLastName: string;
+  parentNationalId: string; parentMobile: string; relationship: string; reason: string;
+}
+
+/** ตรวจ/ปรับรูปข้อมูลที่แอดมินกรอก — ผิด = คืนข้อความภาษาไทยให้แสดงตรง ๆ (ไม่เดาค่าแทน) */
+export function validateParentSet(raw: unknown): { ok: true; value: ParentSetInput } | { ok: false; message: string } {
+  const d = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === 'string' ? v.trim() : '');
+  const studentId = str(d.studentId);
+  if (!studentId || studentId.includes('/')) return { ok: false, message: 'รหัสนักเรียนไม่ถูกต้อง' };
+  const parentFirstName = str(d.parentFirstName);
+  const parentLastName = str(d.parentLastName);
+  if (!parentFirstName || !parentLastName) return { ok: false, message: 'กรุณากรอกชื่อและนามสกุลผู้ปกครอง' };
+  if (parentFirstName.length > 80 || parentLastName.length > 80) return { ok: false, message: 'ชื่อหรือนามสกุลยาวเกินไป' };
+  const parentPrefix = str(d.parentPrefix);
+  if (parentPrefix.length > 20) return { ok: false, message: 'คำนำหน้ายาวเกินไป' };
+  const relationship = normalizeRelationship(d.relationship);
+  if (!relationship) return { ok: false, message: `ความสัมพันธ์ต้องเป็น ${PARENT_RELATIONSHIPS.join(' / ')} เท่านั้น` };
+  const mobile = str(d.parentMobile).replace(/[\s-]/g, '');
+  if (!/^0\d{8,9}$/.test(mobile)) return { ok: false, message: 'เบอร์โทรศัพท์ต้องเป็นตัวเลข 9-10 หลักขึ้นต้นด้วย 0' };
+  if (!isValidThaiNationalId(d.parentNationalId)) return { ok: false, message: 'เลขบัตรประชาชนผู้ปกครองไม่ถูกต้อง' };
+  const reason = str(d.reason);
+  if (!reason) return { ok: false, message: 'กรุณาระบุเหตุผลในการเปลี่ยนแปลง' };
+  if (reason.length > AUDIT_REASON_MAX) return { ok: false, message: `เหตุผลต้องไม่เกิน ${AUDIT_REASON_MAX} ตัวอักษร` };
+  return { ok: true, value: { studentId, parentPrefix, parentFirstName, parentLastName, parentNationalId: normalizeNationalId(d.parentNationalId), parentMobile: mobile, relationship, reason } };
+}
+
+/** เหตุผลของการยกเลิกการเชื่อม (บังคับกรอก) */
+export function validateUnlinkReason(raw: unknown): { ok: true; reason: string } | { ok: false; message: string } {
+  const reason = typeof raw === 'string' ? raw.trim() : '';
+  if (!reason) return { ok: false, message: 'กรุณาระบุเหตุผลในการยกเลิกการเชื่อมบัญชี' };
+  if (reason.length > AUDIT_REASON_MAX) return { ok: false, message: `เหตุผลต้องไม่เกิน ${AUDIT_REASON_MAX} ตัวอักษร` };
+  return { ok: true, reason };
+}
+
+export type ParentAuditAction = 'UNLINK' | 'SET_PARENT';
+
+/** รายการประวัติ — ห้ามมีเลขบัตร/HMAC/เบอร์/ชื่อผู้ปกครอง/uid ของผู้ปกครอง (เก็บแค่ว่าใครทำอะไรกับนักเรียนคนไหน เพราะอะไร) */
+export function buildParentAuditEntry(p: {
+  action: ParentAuditAction; studentId: string; byUid: string; byEmail: string; reason: string;
+  hadLink: boolean; parentChanged: boolean; relationship?: string | null;
+}): Record<string, unknown> {
+  return {
+    action: p.action, studentId: p.studentId, byUid: p.byUid, byEmail: p.byEmail, reason: p.reason,
+    hadLink: p.hadLink, parentChanged: p.parentChanged, relationship: p.relationship ?? null,
+  };
+}

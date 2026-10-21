@@ -1256,6 +1256,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // 23.1 parent_admin_audit — ประวัติการยกเลิกการเชื่อม/ตั้งผู้ปกครองโดยแอดมิน (callable unlinkParentLine / setStudentParent เขียนใน batch เดียวกับการเปลี่ยนแปลง)
+    //      ไม่มีเลขบัตร/HMAC/เบอร์/ชื่อผู้ปกครอง — อ่านเฉพาะ SUPER_ADMIN, client เขียน/แก้/ลบไม่ได้
+    match /parent_admin_audit/{auditId} {
+      allow read: if hasRole('SUPER_ADMIN');
+      allow write: if false;
+    }
+
     // 24. Student Portfolio Entries — นักเรียนบันทึกผลงานเอง (รางวัล/อบรม/ฝึกงาน/จิตอาสา)
     //     ต้องผ่านการอนุมัติจากครูที่ปรึกษาก่อนแสดงให้ผู้ปกครอง/แดชบอร์ดวิชาการ
     match /student_portfolio_entries/{entryId} {
