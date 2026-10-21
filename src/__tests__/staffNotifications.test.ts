@@ -21,12 +21,17 @@ describe('staffNotifications (ข้อความถึงบุคลาก�
   });
   it('คำขอเช็คชื่อย้อนหลัง: ส่งถึงครูผู้ยื่น พร้อมเหตุผลเมื่อไม่อนุมัติ', () => {
     const req = { id: 'r1', teacherEmail: 'T@school.ac.th', subjectName: 'ฟิสิกส์', level: 'ม.4', periodNumber: 2, teachingDate: '2026-10-01' };
-    const ok = lateAttendanceDecisionNotice(req, 'APPROVED', 'รองผอ.')!;
+    const ok = lateAttendanceDecisionNotice(req, 'APPROVE', 'รองผอ.')!;
     expect(ok.recipientEmail).toBe('t@school.ac.th');
     expect(ok.title).toContain('อนุมัติ');
-    const no = lateAttendanceDecisionNotice(req, 'REJECTED', 'รองผอ.', 'เกินกำหนด')!;
+    const no = lateAttendanceDecisionNotice(req, 'REJECT', 'รองผอ.', 'เกินกำหนด')!;
     expect(no.message).toContain('เกินกำหนด');
-    expect(lateAttendanceDecisionNotice({ ...req, teacherEmail: undefined }, 'APPROVED', 'x')).toBeNull();
+    expect(lateAttendanceDecisionNotice({ ...req, teacherEmail: undefined }, 'APPROVE', 'x')).toBeNull();
+    const cond = lateAttendanceDecisionNotice(req, 'CONDITIONAL', 'หัวหน้า', 'เช็คชื่อให้ตรงเวลา')!;
+    expect(cond.title).toContain('เงื่อนไข');
+    expect(cond.message).toContain('เช็คชื่อให้ตรงเวลา');
+    const over = lateAttendanceDecisionNotice(req, 'REJECT', 'รอง', 'ไม่เหมาะสม', { overridesHead: true })!;
+    expect(over.title).toContain('แทนผลของหัวหน้า');
   });
   it('สอนแทน: ครูยืนยัน/ปฏิเสธ → แจ้งเฉพาะผู้เสนอ; ปฏิเสธขั้นอนุมัติ → ผู้เสนอ+ครูสอนแทน+ครูเจ้าของคาบ; ไม่แจ้งตัวเอง ไม่ซ้ำ', () => {
     const c = substituteUpdateNotices(sub, { type: 'TEACHER_CONFIRMED' }, 'ครูแทน', 'sub@school.ac.th');
@@ -88,7 +93,7 @@ describe('guard: ข้อความอนุมัติ + แจ้งเต
     expect(src).toMatch(/if \(!parentUid && !studentUid\)/);
   });
   it('รายการอนุมัติเรียก sendStaffNotifications หลังบันทึกสำเร็จ (ไม่กลืน error ของงานหลัก)', () => {
-    expect(readSource('src/components/LateAttendanceApprovalList.tsx')).toMatch(/sendStaffNotifications\(\[lateAttendanceDecisionNotice/);
+    expect(readSource('src/components/LateAttendanceApprovalList.tsx')).toMatch(/sendStaffNotifications\(\s*\[lateAttendanceDecisionNotice/);
     const store = readSource('src/store.ts');
     expect(store).toMatch(/substituteUpdateNotices\(/);
     expect((store.match(/sendStaffNotifications\(/g) || []).length).toBeGreaterThanOrEqual(2);

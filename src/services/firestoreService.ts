@@ -4,6 +4,10 @@ import { infirmaryVisitNotice } from '../lib/studentNotices';
 import { applyStockChange, type DispenseLine, type StockMovementType } from '../lib/infirmaryStock';
 import { deriveEmergencyContacts } from '../lib/emergencyContacts';
 import { chatThreadId, normalizeChatText, senderRoleFor } from '../lib/classChat';
+import {
+  LATE_NOTE_MAX, nextBangkokMidnight, requesterLevelOf, reviewUntilFor, storedStatusFor, toMs,
+  type LateDecision, type LateStepRole,
+} from '../lib/lateAttendanceFlow';
 import type { ChatChannel, ChatSenderRole, ChatSide } from '../lib/classChat';
 import { 
   collection, 
@@ -1454,28 +1458,29 @@ export function subscribePostTeachingRecords(onUpdate: (records: PostTeachingRec
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Late Attendance Requests — ครูขอเช็คชื่อย้อนหลัง (Firestore: late_attendance_requests)
- * ผู้อนุมัติ: DEPUTY_DIRECTOR_ACADEMIC / SUPER_ADMIN
- * ไม่ลบ document ตอนอนุมัติ/ปฏิเสธ — merge เปลี่ยนแค่ status เพื่อเก็บประวัติ
+ * ผู้อนุมัติ 2 ขั้น ACADEMIC_HEAD + DEPUTY_DIRECTOR_ACADEMIC (DIRECTOR สำรอง) — ตรรกะอยู่ที่ src/lib/lateAttendanceFlow.ts
+ * ไม่ลบ document — เวลายื่น/ตัดสิน/ขยายเป็นเวลาเซิร์ฟเวอร์ (serverTimestamp ← rules บังคับ at == request.time)
  * ──────────────────────────────────────────────────────────────────────────── */
 
 const LATE_ATTENDANCE_COL = 'late_attendance_requests';
 
 export async function submitLateAttendanceRequestFirestore(
   req: Omit<LateAttendanceRequestRecord,
-    'id' | 'status' | 'requestedAt' | 'approverUid' | 'approverName' | 'decidedAt' | 'rejectReason'>
+    'id' | 'status' | 'requestedAt' | 'deadlineAt' | 'requesterStaffId' | 'requesterLevel' | 'headStep' | 'deputyStep' | 'extendedUntil' | 'extendedBy'>,
+  requester: { staffId: string; roles: readonly string[] },
 ): Promise<string> {
   // random id → ทุกครั้งที่ยื่นคือ create ใหม่ (rule อนุญาตให้ครู create ของตัวเองเท่านั้น)
   const id = `lar_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const ref = doc(db, LATE_ATTENDANCE_COL, id);
-  const payload: LateAttendanceRequestRecord = {
+  // กำหนดใช้สิทธิ์ = 24:00 ไทยถัดไป (rules ตรวจว่าอยู่ภายใน 24 ชม. และตรงเวลา 17:00 UTC); ใช้นาฬิกา client เพียงเลือก "เที่ยงคืนไหน" — rules กันเบี้ยว
+  const payload = {
     ...(stripUndefined(req as Record<string, any>) as any),
     id,
     status: 'PENDING',
-    requestedAt: new Date().toISOString(),
-    approverUid: null,
-    approverName: null,
-    decidedAt: null,
-    rejectReason: null,
+    requesterStaffId: requester.staffId,
+    requesterLevel: requesterLevelOf(requester.roles),
+    requestedAt: serverTimestamp(),
+    deadlineAt: Timestamp.fromMillis(nextBangkokMidnight(Date.now())),
   };
   try {
     await setDoc(ref, payload);
@@ -1485,25 +1490,60 @@ export async function submitLateAttendanceRequestFirestore(
   return id;
 }
 
-export async function decideLateAttendanceRequestFirestore(
-  id: string,
-  decision: 'APPROVED' | 'REJECTED',
-  approver: { uid: string; name: string },
-  rejectReason?: string
-): Promise<void> {
+export interface LateDecisionInput {
+  kind: 'HEAD' | 'DEPUTY' | 'DIRECTOR';
+  decision: LateDecision;
+  note: string;
+  approver: { uid: string; staffId: string; name: string };
+}
+
+/** ตัดสินคำขอ (ขั้นหัวหน้า หรือ ขั้นรอง/ผอ.สำรอง) — rules เป็นด่านจริง (เวลา/สิทธิ์/ห้ามตัวเอง/ห้ามสองขั้น) */
+export async function decideLateAttendanceRequestFirestore(id: string, input: LateDecisionInput): Promise<void> {
   const ref = doc(db, LATE_ATTENDANCE_COL, id);
+  const role: LateStepRole = input.kind === 'HEAD' ? 'ACADEMIC_HEAD' : input.kind === 'DIRECTOR' ? 'DIRECTOR' : 'DEPUTY_DIRECTOR_ACADEMIC';
+  const step: Record<string, unknown> = {
+    decision: input.decision,
+    role,
+    byUid: input.approver.uid,
+    byStaffId: input.approver.staffId,
+    byName: input.approver.name,
+    at: serverTimestamp(),
+    note: input.note.trim().slice(0, LATE_NOTE_MAX),
+  };
+  if (input.kind === 'HEAD') {
+    // 18:00 ไทยถัดไปหลังเวลาตัดสิน — rules คำนวณจาก request.time เทียบ; ที่นี่ประมาณจากนาฬิกา client แล้ว rules ตรวจซ้ำ
+    // (ถ้านาฬิกาเพี้ยน rules ปฏิเสธ → ผู้ใช้เห็นข้อผิดพลาดแทนที่จะได้เวลาผิดเงียบ ๆ)
+    step.reviewUntil = Timestamp.fromMillis(reviewUntilFor(Date.now()));
+  }
   try {
-    // merge — เก็บ field เดิม (teacherId/scheduleId/reason ฯลฯ) ไว้ครบ เปลี่ยนแค่สถานะ
-    await setDoc(ref, {
-      status: decision,
-      approverUid: approver.uid,
-      approverName: approver.name,
-      decidedAt: new Date().toISOString(),
-      rejectReason: decision === 'REJECTED' ? (rejectReason || 'ไม่ระบุเหตุผล') : null,
-    }, { merge: true });
+    await updateDoc(ref, {
+      [input.kind === 'HEAD' ? 'headStep' : 'deputyStep']: step,
+      status: storedStatusFor(input.decision),
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `${LATE_ATTENDANCE_COL}/${id}`);
   }
+}
+
+/** รอง/ผอ.สำรองขยายเวลาให้ครูอีก hours ชม. (1–24) นับจาก 24:00 ของวันสอน → ธงแดง */
+export async function extendLateAttendanceRequestFirestore(
+  id: string,
+  deadlineAtMs: number,
+  hours: number,
+  approver: { uid: string; staffId: string; name: string; role: 'DEPUTY_DIRECTOR_ACADEMIC' | 'DIRECTOR' },
+): Promise<number> {
+  const h = Math.min(24, Math.max(1, Math.round(hours)));
+  const untilMs = deadlineAtMs + h * 3_600_000;
+  const ref = doc(db, LATE_ATTENDANCE_COL, id);
+  try {
+    await updateDoc(ref, {
+      extendedUntil: Timestamp.fromMillis(untilMs),
+      extendedBy: { byUid: approver.uid, byStaffId: approver.staffId, byName: approver.name, role: approver.role, at: serverTimestamp() },
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `${LATE_ATTENDANCE_COL}/${id}`);
+  }
+  return untilMs;
 }
 
 /** real-time listener; ส่ง filter.teacherId เพื่อดูเฉพาะคำขอของครูคนนั้น (ผ่าน firestore.rules) */
@@ -1516,7 +1556,7 @@ export function subscribeLateAttendanceRequests(
     const ref = filter?.teacherId ? query(col, where('teacherId', '==', filter.teacherId)) : col;
     return onSnapshot(ref, (snapshot) => {
       const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as LateAttendanceRequestRecord));
-      list.sort((a, b) => (b.requestedAt || '').localeCompare(a.requestedAt || ''));
+      list.sort((a, b) => (toMs(b.requestedAt) ?? 0) - (toMs(a.requestedAt) ?? 0));
       onUpdate(list);
     }, (error) => {
       console.warn('[subscribeLateAttendanceRequests] Listener error:', error.message);

@@ -46,7 +46,7 @@ describe('guard: คลังยาไม่ใช้ข้อมูลตัว
     expect(s).toMatch(/subscribeInfirmaryMedicines/);
   });
   it('rules: ยอดยาแก้ได้เมื่อมี movement คู่ (getAfter), movement แก้/ลบไม่ได้, ผู้ปกครอง/นักเรียนอ่านไม่ได้', () => {
-    const r = readSource('firestore.rules');
+    const r = readSource('firestore.rules.comments'); // ฉบับมีคอมเมนต์ (ใช้หาขอบเขตบล็อก)
     const a = r.indexOf('match /infirmary_medicines/');
     const b = r.indexOf('// 32. Semester Health Log');
     const block = r.slice(a, b);

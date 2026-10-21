@@ -82,7 +82,7 @@ describe('guard: หน้าสาธารณะ', () => {
   const root = path.resolve(__dirname, '../..');
   const src = (rel: string) => readSource(path.join(root, rel));
   it('firestore.rules: public_summary อ่านได้เฉพาะ get เอกสาร current โดยไม่ต้องล็อกอิน, เขียนไม่ได้', () => {
-    const rules = src('firestore.rules');
+    const rules = src('firestore.rules.comments'); // อ่านฉบับมีคอมเมนต์ เพื่อหาขอบเขตบล็อก
     const block = rules.slice(rules.indexOf('match /public_summary/{docId}'), rules.indexOf('// Default Deny All Catch-All'));
     expect(block).toContain("allow get: if docId == 'current';");
     expect(block).toContain('allow list, write: if false;');

@@ -1,4 +1,5 @@
 rules_version = '2';
+// สร้างอัตโนมัติจาก firestore.rules.comments (npm run rules:build) — ห้ามแก้ไฟล์นี้โดยตรง
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -17,8 +18,6 @@ service cloud.firestore {
       return isSignedIn() && (request.auth.uid == userId || request.auth.token.email == userId);
     }
 
-    // school_settings/billing_payment: บัญชี/พร้อมเพย์ที่โรงเรียนรับโอน (ผู้ปกครองสร้าง QR จากค่านี้) — whitelist field + รูปแบบ
-    // ให้ตรงกับ src/lib/billingPaymentInfo.ts + promptPay.ts (PHONE = 10 หลักขึ้นต้น 0, NATIONAL_ID = 13 หลัก, EWALLET = 15 หลัก)
     function isValidBillingPaymentInfo(d) {
       return d.keys().hasOnly(['promptPayType', 'promptPayId', 'accountName', 'bankName', 'bankAccountNo', 'note', 'updatedAt', 'updatedBy'])
         && d.keys().hasAll(['promptPayType', 'promptPayId', 'accountName', 'bankName', 'bankAccountNo', 'note'])
@@ -34,8 +33,6 @@ service cloud.firestore {
         && d.note is string && d.note.size() <= 300;
     }
 
-    // school_settings/studentEmailFormat: ต้องมี prefix + domain ครบ (string, ตัวพิมพ์เล็ก) ผ่าน pattern เดียวกับ
-    // functions/src/studentEmailFormat.ts และ src/lib/studentEmailFormat.ts และไม่มี field อื่นนอกจาก updatedAt/updatedBy
     function isValidStudentEmailFormat(d) {
       return d.keys().hasOnly(['prefix', 'domain', 'updatedAt', 'updatedBy'])
         && d.keys().hasAll(['prefix', 'domain'])
@@ -44,29 +41,22 @@ service cloud.firestore {
         && d.domain.matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$');
     }
 
-    // ปีการศึกษาที่ส่งมาต้องเป็นสตริง 4 หลักและตรงกับ school_settings/academic_year (ที่ admin ตั้งไว้) — doc ไม่มี = false
     function isCurrentAcademicYear(year) {
       return year is string && year.matches('^[0-9]{4}$')
         && exists(/databases/$(database)/documents/school_settings/academic_year)
         && get(/databases/$(database)/documents/school_settings/academic_year).data.academicYear == year;
     }
 
-    // มีบทบาทอย่างน้อย 1 อย่างใน custom claims — claims ออกโดย blocking functions
-    // (beforeUserCreated/beforeUserSignedIn) เท่านั้น: signed-in แต่ไม่มี roles = ไม่ใช่บุคลากร/นักเรียนในทะเบียน
     function hasAnyRole() {
       return isSignedIn()
         && request.auth.token.get('roles', []) is list
         && request.auth.token.get('roles', []).size() > 0;
     }
 
-    // staff doc id ของผู้ใช้ (teacherId จากไฟล์ import — ไม่ใช่ Auth UID) จาก claim staffId
     function myStaffId() {
       return request.auth.token.get('staffId', '');
     }
 
-    // ครูที่ปรึกษา (HOMEROOM_TEACHER) ของห้องที่ระบุ — เทียบ staff/{claims.staffId}.assignments.homeroomClass
-    // (เดิมอ่าน staff/{auth.uid} ซึ่งไม่ตรงกับ staff ที่ import จริง — key เป็น teacherId)
-    // ใช้ .get(k, default) กัน field ไม่มี
     function isHomeroomTeacherOf(roomValue) {
       return hasRole('HOMEROOM_TEACHER')
         && myStaffId() is string && myStaffId() != ''
@@ -74,29 +64,18 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/staff/$(myStaffId())).data.get('assignments', {}).get('homeroomClass', '') == roomValue;
     }
 
-    // ค่าจาก students/{studentId} จริง — ใช้ตอน create เพื่อกันนักเรียน denormalize ผิด
     function studentField(sid, key, fallback) {
       return get(/databases/$(database)/documents/students/$(sid)).data.get(key, fallback);
     }
 
-    // นักเรียนเจ้าของ sid (5 หลัก) จริง — เทียบผ่าน students/{sid}.studentUid ไม่ใช่เทียบ
-    // request.auth.uid กับ sid ตรงๆ (sid เป็นรหัสนักเรียน 5 หลัก ไม่ใช่ Firebase Auth UID เด็ดขาด
-    // เทียบตรงจะไม่มีวันจริงสำหรับนักเรียนจริงสักคน — ดู student_screenings_2q/phq9 ด้านล่าง)
     function isSelfStudent(sid) {
       return isSignedIn() && studentField(sid, 'studentUid', '__none__') == request.auth.uid;
     }
 
-    // ผู้ปกครองตัวจริงของ sid — เทียบผ่านทะเบียน students/{sid}.parentUid (ตั้งโดย Cloud Function linkParentLine เท่านั้น)
     function isParentOfStudent(sid) {
       return isSignedIn() && studentField(sid, 'parentUid', '__none__') == request.auth.uid;
     }
 
-    // ครูรับผิดชอบของชุมนุม (elective_activities_config) นี้จริง — เทียบ responsibleTeacherUid
-    // ใช้ให้ครูถอนชื่อนักเรียนออกจากชุมนุม/กิจกรรม ELECTIVE ของตัวเองเท่านั้น (activity_enrollments)
-    // (เดิมเทียบผ่าน schedules/{scheduleId}.teacherId — ออกแบบใหม่แล้วชุมนุมไม่ผูกกับ schedules อีกต่อไป)
-    // รองรับครูร่วมสอนหลายคนต่อชุมนุม — responsibleTeacherUids เป็น array (เดิมเป็นค่าเดียว)
-    // ⚠️ ชื่อฟิลด์มีคำว่า Uid แต่เก็บ staff doc id (teacherId) ไม่ใช่ Auth UID — เทียบด้วย myStaffId() เท่านั้น
-    // ไม่มี fallback ไป request.auth.uid; ไม่มี claim staffId (นักเรียน/ผู้ปกครอง) = ไม่ผ่าน
     function isResponsibleTeacherOfActivity(activityId) {
       return isSignedIn()
         && myStaffId() is string && myStaffId() != ''
@@ -104,8 +83,6 @@ service cloud.firestore {
         && myStaffId() in get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('responsibleTeacherUids', []);
     }
 
-    // ชุมนุมเปิดรับสมัครอยู่จริง ณ ตอนนี้ (เวลาเซิร์ฟเวอร์): สถานะ OPEN และอยู่ในช่วงเวลา (ถ้ากำหนด)
-    // ต้องตรง src/lib/enrollmentWindow.ts (enrollmentState) — ไม่มี config = ผ่าน (เหมือนเดิม)
     function activityEnrollmentOpen(activityId) {
       return !exists(/databases/$(database)/documents/elective_activities_config/$(activityId)) ||
         (
@@ -117,10 +94,6 @@ service cloud.firestore {
         );
     }
 
-    // 1. Students Collection
-    // อ่านทะเบียนนักเรียนได้: บุคลากรที่ต้องใช้รายชื่อทั้งโรงเรียน (ครู/ผู้บริหาร/แนะแนว/พยาบาล/การเงิน/ศึกษานิเทศก์)
-    // + ผู้ปกครองอ่านได้เฉพาะบุตรหลานตัวเอง (ต้อง query where('parentUid','==', uid) เพื่อให้ list ผ่าน)
-    // + นักเรียนอ่านได้เฉพาะ record ของตัวเอง (ต้อง query where('studentUid','==', uid) เพื่อให้ list ผ่าน)
     match /students/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('EXECUTIVE') ||
@@ -136,22 +109,13 @@ service cloud.firestore {
                      (isSignedIn() && resource.data.parentUid == request.auth.uid) ||
                      (isSignedIn() && resource.data.studentUid == request.auth.uid);
       allow create: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
-      // นักเรียนห้ามลบถาวรทุกกรณี (บันทึกการเช็คชื่อ/ผลประเมิน/ประวัติอ้างถึง) — เปลี่ยนสถานะแทน
-      // (status/statusReason ดู src/lib/studentStatus.ts + ทะเบียนเลขประจำตัว student_id_registry)
       allow delete: if false;
-      // TASK (รูปโปรไฟล์นักเรียน): นักเรียนแก้รูปของตัวเองได้เท่านั้น — จำกัดให้แตะได้แค่ photoUrl/
-      // photoUpdatedAt (ตรวจ "ตัวเอง" ผ่าน isSelfStudent() เดียวกับที่ใช้ที่อื่น: students/{id}.studentUid
-      // == auth.uid) ห้ามแก้ field อื่นของทะเบียนนักเรียน
-      // ครูที่ปรึกษา (HOMEROOM_TEACHER) แก้ทะเบียนนักเรียนโดยตรงไม่ได้ — ได้เฉพาะแคชสถิติเช็คชื่อด้านล่าง
-      // (รูป/ชื่อเล่น/ที่อยู่ นักเรียนกรอกเอง; parentUid เชื่อมผ่าน LINE หรือ SUPER_ADMIN; คะแนนความประพฤติผ่าน conduct_entries)
       allow update: if hasRole('SUPER_ADMIN') ||
                        (
                          hasRole('HOMEROOM_TEACHER') &&
                          request.resource.data.diff(resource.data).affectedKeys()
                            .hasOnly(['attendanceStats', 'attendanceStatsUpdatedAt', 'courseAttendanceStats'])
                        ) ||
-                       // ครูผู้สอนเช็คชื่อแล้ว sync ยอดสรุป (derived cache) ในทรานแซกชันเดียวกับ attendance_records —
-                       // แตะได้แค่ field สถิติเหล่านี้เท่านั้น (ห้ามแก้ทะเบียนนักเรียนอื่น)
                        (
                          hasRole('SUBJECT_TEACHER') &&
                          request.resource.data.diff(resource.data).affectedKeys()
@@ -161,7 +125,6 @@ service cloud.firestore {
                          isSelfStudent(studentId) &&
                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['photoUrl', 'photoUpdatedAt'])
                        ) ||
-                       // งานทะเบียนวัดผล (ตัวจริง): ซ่อนนักเรียนที่จบ — แตะได้เฉพาะฟิลด์สถานะ และต้องมี graduation_approvals ของนักเรียนคนนี้ในชุดเขียนเดียวกัน
                        (
                          hasRole('REGISTRAR') &&
                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusReason', 'statusNote', 'statusChangedAt', 'statusChangedBy', 'updatedAt']) &&
@@ -170,9 +133,7 @@ service cloud.firestore {
                          request.resource.data.statusChangedAt == request.time &&
                          existsAfter(/databases/$(database)/documents/graduation_approvals/$(studentId + '_' + resource.data.get('room', '')[0:3]))
                        ) ||
-                       // คะแนนความประพฤติ: ครู/งานกิจการ ปรับแคชคะแนนได้เฉพาะคู่กับรายการ conduct_entries ในชุดเขียนเดียวกัน (ตัวเลขต้องตรงบัญชีเป๊ะ)
                        (cdStaff() && cdStudentTouch(studentId)) ||
-                       // งานทะเบียนวัดผล/ผู้ช่วย: ดำเนินการย้ายห้องที่คณะกรรมการอนุมัติแล้ว (room_transfers.status APPROVED → APPLIED ในชุดเขียนเดียวกัน)
                        (
                          regAny() &&
                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['room', 'houseId', 'roomTransferId', 'updatedAt']) &&
@@ -188,9 +149,6 @@ service cloud.firestore {
                        );
     }
 
-    // ทะเบียนเลขประจำตัวนักเรียน: student_id_registry/{studentId} = { studentId, entries: [{heldBy, from, to, reason}] }
-    // ประวัติผู้ถือเลข — เขียนโดยแอดมิน/ครูประจำชั้นผ่านการเปลี่ยนสถานะ/เพิ่มนักเรียนเท่านั้น; ห้ามลบ และห้ามทำให้ประวัติสั้นลง
-    // (ข้อมูลระบุตัวบุคคล → อ่านได้เฉพาะ SUPER_ADMIN/HOMEROOM_TEACHER ไม่เปิด bare isSignedIn())
     match /student_id_registry/{registryId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('REGISTRAR');
       allow create: if ((hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER')) || regGraduating(registryId)) &&
@@ -202,7 +160,6 @@ service cloud.firestore {
                        request.resource.data.entries.size() >= resource.data.entries.size();
       allow delete: if false;
 
-      // สำเนาเอกสารนักเรียนเดิมก่อนที่เลขประจำตัวถูกออกให้คนใหม่ (เพิ่มได้อย่างเดียว ห้ามแก้/ลบ)
       match /archived_records/{archiveId} {
         allow read: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
         allow create: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
@@ -210,13 +167,7 @@ service cloud.firestore {
       }
     }
 
-    // 2. Mental Health & Counseling Self-Assessments (PHQ-9, SDQ)
     match /student_self_assessments/{studentId} {
-      // TASK 9 (ExecutivePortal Learner Analytics): เพิ่ม EXECUTIVE อ่านได้ทั้งโรงเรียน — ฝั่ง UI
-      // (ExecutiveLearnerAnalytics.tsx) รวมเป็นกราฟแจกแจง/เปอร์เซ็นต์เท่านั้น ไม่โชว์ผลรายบุคคล
-      // นักเรียนเจ้าของเทียบผ่าน students/{studentId}.studentUid (isSelfStudent) — เดิมเทียบ auth.uid กับรหัสนักเรียน
-      // ตรงๆ ซึ่งไม่มีวันจริง ทำให้นักเรียนจริงบันทึก/อ่านแบบประเมินของตัวเองไม่ได้ (ข้อมูลหายหลังส่ง)
-      // ครูที่ปรึกษาอ่านได้เฉพาะห้องตัวเอง (homeroomClass denormalize ตอนนักเรียนบันทึก — ตรวจกับ students.room)
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('GUIDANCE_COUNSELOR') ||
                      hasRole('EXECUTIVE') ||
@@ -231,41 +182,24 @@ service cloud.firestore {
       allow delete: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
     }
 
-    // 3. Discipline & Behavior Logs
     match /discipline_logs/{logId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('HOMEROOM_TEACHER') || 
-                     hasRole('EXECUTIVE') || 
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('HOMEROOM_TEACHER') ||
+                     hasRole('EXECUTIVE') ||
                      hasRole('GUIDANCE_COUNSELOR') ||
-                     // นักเรียน/ผู้ปกครองอ่านประวัติคะแนนความประพฤติของตัวเอง/บุตรหลานได้ (ผูกด้วย uid ในเอกสาร
-                     // ที่ updateBehaviorScoreAndTriggerAlert เขียน — รายการเก่าที่ไม่มี field นี้ = อ่านไม่ได้)
                      (isSignedIn() && (resource.data.get('studentUid', null) == request.auth.uid ||
                                        resource.data.get('parentUid', null) == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('SUBJECT_TEACHER') || 
+      allow write: if hasRole('SUPER_ADMIN') ||
+                      hasRole('SUBJECT_TEACHER') ||
                       hasRole('HOMEROOM_TEACHER');
     }
 
-    // 4. Parent Notifications
-    // FIX (ระบบแจ้งเตือนรวมศูนย์): เดิม write เป็น role-based ล้วน (SUPER_ADMIN/HOMEROOM_TEACHER/
-    // SUBJECT_TEACHER) แต่การแจ้งเตือนหลายจุด (เช่น สแกนเข้า-ออกประตูโรงเรียน, ยื่นใบลา) ริเริ่มจาก
-    // ตัวนักเรียน/ผู้ปกครองเอง (ดู GateAttendanceTracker.tsx) — เพิ่มช่องให้ STUDENT/PARENT สร้างแจ้งเตือน
-    // ได้เฉพาะที่ parentUid ตรงกับผู้ปกครองจริงของ studentId ที่ระบุเท่านั้น (verify ผ่าน studentField()
-    // กันสร้างแจ้งเตือนส่งให้ parentUid ใครก็ได้) และเพิ่มช่องให้เจ้าของกด "อ่านแล้ว" เอง (แก้ได้แค่ status)
     match /parent_notifications/{notifId} {
-      // TASK: เพิ่ม studentUid ให้นักเรียนเจ้าของเรื่องอ่านแจ้งเตือนของตัวเองได้ด้วย (เดิมอ่านได้เฉพาะ
-      // ผู้ปกครองที่ผูกไว้ผ่าน parentUid/parentId เท่านั้น) — ไม่กระทบ scope เดิมของผู้ปกครองเลย เป็นการ
-      // เพิ่มเงื่อนไข OR ใหม่เท่านั้น
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('HOMEROOM_TEACHER') ||
                      (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid)) ||
                      (isSignedIn() && resource.data.studentUid == request.auth.uid);
 
-      // FIX: ตรวจแค่ "parentUid ที่ประกาศตรงกับพ่อแม่จริงของ studentId" ไม่พอ (ใครก็ประกาศ studentId/
-      // parentUid ที่ถูกต้องของคนอื่นได้) ต้องตรวจด้วยว่า "ผู้เขียนเอง" เป็นตัวนักเรียนคนนั้นจริง
-      // (isSelfStudent) หรือเป็นผู้ปกครองจริงของนักเรียนคนนั้น (auth.uid ตรงกับ parentUid จริง) เท่านั้น
-      // TASK: studentUid ถ้าใส่มาด้วย ต้องตรงกับค่าจริงจาก students/{studentId}.studentUid เท่านั้น
-      // (ห้ามประกาศ studentUid ของคนอื่นเพื่อแอบให้คนอื่นอ่านแจ้งเตือนได้ — ใช้กับทุก branch รวม role-based)
       allow create: if (
                        !('studentUid' in request.resource.data) ||
                        request.resource.data.studentUid == null ||
@@ -286,7 +220,6 @@ service cloud.firestore {
                        )
                      );
 
-      // ผู้ปกครอง หรือ นักเรียนเจ้าของเรื่องเอง กด "อ่านแล้ว"/"อ่านทั้งหมด" เอง — แก้ได้เฉพาะ field status เท่านั้น
       allow update: if hasRole('SUPER_ADMIN') ||
                        hasRole('HOMEROOM_TEACHER') ||
                        hasRole('SUBJECT_TEACHER') ||
@@ -304,43 +237,37 @@ service cloud.firestore {
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
-    // 5. Parent-Teacher Conferences
     match /parent_conferences/{confId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('HOMEROOM_TEACHER') || 
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('HOMEROOM_TEACHER') ||
                      (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid));
       allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER');
     }
 
-    // 6. Timetables & Schedules
     match /schedules/{scheduleId} {
       allow read: if isSignedIn();
       allow write: if hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER');
     }
 
-    // 7. Attendance Records
     match /attendance_records/{recordId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('EXECUTIVE') || 
-                     hasRole('SUBJECT_TEACHER') || 
-                     hasRole('HOMEROOM_TEACHER') || 
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('EXECUTIVE') ||
+                     hasRole('SUBJECT_TEACHER') ||
+                     hasRole('HOMEROOM_TEACHER') ||
                      (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.studentUid == request.auth.uid || resource.data.studentId == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('SUBJECT_TEACHER') || 
+      allow write: if hasRole('SUPER_ADMIN') ||
+                      hasRole('SUBJECT_TEACHER') ||
                       hasRole('HOMEROOM_TEACHER');
     }
 
-    // 8. Gradebook Scores
     match /gradebook_scores/{scoreId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
+      allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('REGISTRAR') ||
-                     hasRole('REGISTRAR_ASSISTANT') || 
-                     hasRole('EXECUTIVE') || 
-                     hasRole('SUBJECT_TEACHER') || 
-                     hasRole('HOMEROOM_TEACHER') || 
-                     hasRole('HEAD_OF_DEPARTMENT') || 
-                     // นักเรียนเจ้าของ/ผู้ปกครองตัวจริง ตามทะเบียน students (query ต้องกรอง studentId) — เดิมเทียบ studentId กับ auth.uid
-                     // ซึ่งไม่มีวันจริง (studentId = รหัส 5 หลัก) นักเรียน/ผู้ปกครองจึงอ่านคะแนนตัวเองไม่ได้
+                     hasRole('REGISTRAR_ASSISTANT') ||
+                     hasRole('EXECUTIVE') ||
+                     hasRole('SUBJECT_TEACHER') ||
+                     hasRole('HOMEROOM_TEACHER') ||
+                     hasRole('HEAD_OF_DEPARTMENT') ||
                      (resource.data.studentId is string && (isSelfStudent(resource.data.studentId) || isParentOfStudent(resource.data.studentId))) ||
                      (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.studentUid == request.auth.uid || resource.data.studentId == request.auth.uid));
       allow write: if hasRole('SUPER_ADMIN') ||
@@ -348,10 +275,6 @@ service cloud.firestore {
                       hasRole('HEAD_OF_DEPARTMENT');
     }
 
-    // 8.1 Gradebook hidden courses (TASK 3) — คาบกิจกรรมที่ไม่ต้องประเมิน (เช่น PLC, พักกลางวัน)
-    // ครูซ่อนออกจาก dropdown สมุดบันทึกคะแนนของตัวเองได้ (ไม่ลบข้อมูลจริง แค่ preference ส่วนตัว
-    // ต่อครูคนเดียว) doc id = `${teacherUid}_${courseId}` — เจ้าของ (teacherUid ตรงกับ auth.uid) เท่านั้น
-    // อ่าน/เขียนได้ ไม่ใช่ preference ระดับโรงเรียนที่ต้องให้ SUPER_ADMIN คุม
     match /gradebook_hidden_courses/{docId} {
       allow read: if isSignedIn() && resource.data.teacherUid == request.auth.uid;
       allow create: if isSignedIn() && request.resource.data.teacherUid == request.auth.uid;
@@ -359,65 +282,48 @@ service cloud.firestore {
       allow update: if false;
     }
 
-    // 9. Admin Periods Configuration
     match /admin_periods_config/{periodId} {
       allow read: if isSignedIn();
       allow write: if hasRole('SUPER_ADMIN');
     }
 
-    // 9.1 School Calendar (วันหยุดพิเศษ + วันเปิด-ปิดภาคเรียน) — แยกจาก school_settings/system_locks
     match /school_calendar_events/{eventId} {
       allow read: if isSignedIn();
       allow write: if hasRole('SUPER_ADMIN');
     }
 
-    // 10. School Settings (periods_config, etc.)
     match /school_settings/{settingId} {
       allow read: if isSignedIn();
-      // studentEmailFormat มี block เฉพาะด้านล่าง (ตรวจรูปแบบข้อมูลด้วย) — ต้องกันออกจาก wildcard นี้
-      // เพราะ rules หลาย match block ใช้ OR กัน: ถ้าไม่กัน SUPER_ADMIN เขียนค่าอะไรก็ได้ผ่านทางนี้ ข้ามการตรวจรูปแบบ
       allow write: if hasRole('SUPER_ADMIN') && settingId != 'studentEmailFormat' && settingId != 'guidance_status' && settingId != 'billing_payment';
     }
 
-    // 10.2 สถานะ "มีครูแนะแนวที่ใช้งานอยู่" — cache ที่ Cloud Functions คำนวณ (functions/src/guidanceStatus.ts) ใช้ตัดสินสิทธิ์อ่าน 9Q/8Q
-    // ของครูที่ปรึกษา: client เขียนไม่ได้เด็ดขาด (แม้ SUPER_ADMIN) — Admin SDK ข้าม rules อยู่แล้ว ห้ามลบ settingId != 'guidance_status' ด้านบน
     match /school_settings/guidance_status {
       allow read: if isSignedIn();
       allow write: if false;
     }
 
-    // 10.1 รูปแบบอีเมลนักเรียน {prefix}{studentId}@{domain} — client สร้างอีเมลตอนเพิ่มนักเรียน และ blocking function
-    // (beforeUserCreated/SignedIn) ใช้จับคู่ตอน login จึงตรวจรูปแบบที่นี่ด้วย (admin SDK ของ function ข้าม rules —
-    // function เองก็ sanitize + fallback เป็น it / utd.ac.th ถ้าค่าผิด) อ่านได้ทุกคนที่ signed-in เหมือน school_settings อื่น
     match /school_settings/studentEmailFormat {
       allow read: if isSignedIn();
       allow create, update: if hasRole('SUPER_ADMIN') && isValidStudentEmailFormat(request.resource.data);
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
-    // 10.3 บัญชีรับโอนเงินของโรงเรียน — อ่านได้ทุกคนที่ signed-in (ผู้ปกครอง/นักเรียนต้องเห็นเพื่อโอน) แก้ได้เฉพาะ SUPER_ADMIN
-    // และต้องผ่าน isValidBillingPaymentInfo — ห้ามลบ settingId != 'billing_payment' ใน wildcard ด้านบน
     match /school_settings/billing_payment {
       allow read: if isSignedIn();
       allow create, update: if hasRole('SUPER_ADMIN') && isValidBillingPaymentInfo(request.resource.data);
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
-    // 11. Staff Directory
     match /staff/{staffId} {
-      // ต้องมี roles ใน claims — signed-in เฉยๆ (ไม่อยู่ในทะเบียน) อ่านรายชื่อบุคลากรไม่ได้
       allow read: if hasAnyRole();
       allow write: if hasRole('SUPER_ADMIN');
     }
 
-    // 12. Teachers Directory
     match /teachers/{teacherId} {
-      // ต้องมี roles ใน claims — เหมือน staff
       allow read: if hasAnyRole();
       allow write: if hasRole('SUPER_ADMIN');
     }
 
-    // 13. Seating Layouts & Subcollections (groups, seats)
     match /seating_layouts/{layoutId} {
       allow read: if isSignedIn();
       allow write: if hasRole('SUPER_ADMIN') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER');
@@ -428,23 +334,17 @@ service cloud.firestore {
       }
     }
 
-    // 14. Seating Assignments (History and Active)
     match /seating_assignments/{assignmentId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('EXECUTIVE') || 
-                     hasRole('SUBJECT_TEACHER') || 
-                     hasRole('HOMEROOM_TEACHER') || 
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('EXECUTIVE') ||
+                     hasRole('SUBJECT_TEACHER') ||
+                     hasRole('HOMEROOM_TEACHER') ||
                      (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('SUBJECT_TEACHER') || 
+      allow write: if hasRole('SUPER_ADMIN') ||
+                      hasRole('SUBJECT_TEACHER') ||
                       hasRole('HOMEROOM_TEACHER');
     }
 
-    // 15. Gate Attendance Logs
-    // record มี studentUid/parentUid denormalize ไว้ (ดู store.recordGateAttendance) — ครูที่ปรึกษา
-    // query ทั้งวันได้ (HOMEROOM_TEACHER), ผู้ปกครอง query where('parentUid','==',uid), นักเรียน
-    // query where('studentUid','==',uid) — studentId เป็นรหัส 5 หลัก ไม่ใช่ auth.uid จึงต้องเทียบ
-    // ผ่าน studentUid/parentUid ที่ denormalize มา
     match /gate_attendance_logs/{logId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('EXECUTIVE') ||
@@ -452,27 +352,19 @@ service cloud.firestore {
                      hasRole('HOMEROOM_TEACHER') ||
                      hasRole('SUBJECT_TEACHER') ||
                      (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid)) ||
-                     isParentOfStudent(resource.data.studentId); // ผู้ปกครองตามทะเบียน (query studentId) — บันทึก GPS เก่าไม่มี parentUid
+                     isParentOfStudent(resource.data.studentId);
       allow write: if hasRole('SUPER_ADMIN') ||
                       hasRole('HOMEROOM_TEACHER') ||
                       hasRole('SUBJECT_TEACHER') ||
                       (isSignedIn() && (request.resource.data.studentId == request.auth.uid || request.resource.data.studentUid == request.auth.uid || request.resource.data.userId == request.auth.uid));
     }
 
-    // 16. Detailed Leave Requests
     match /detailed_leave_requests/{leaveId} {
-      // สายงาน (ตรงกับ src/lib/leaveFlow.ts):
-      //   นักเรียนยื่น → PENDING_PARENT → (ผู้ปกครองรับทราบ) → PENDING_TEACHER → (ครูที่ปรึกษาห้องนั้น) → APPROVED/REJECTED
-      //   ผู้ปกครองยื่น → PENDING_TEACHER ทันที; นักเรียนที่ยังไม่มีผู้ปกครองเชื่อมบัญชี → PENDING_TEACHER + noParentLinked
-      // อ่าน: เจ้าของ (นักเรียน/ผู้ปกครอง) + ครูที่ปรึกษาห้องนั้น + SUPER_ADMIN/EXECUTIVE — query ต้องกรองด้วย
-      // studentUid / parentUid / homeroomClass ตามผู้ดู
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('EXECUTIVE') ||
                      isHomeroomTeacherOf(resource.data.homeroomClass) ||
                      (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
 
-      // สร้าง: ฟิลด์ครบ/ไม่เกิน + uid/ห้อง/ผู้ปกครองต้องตรง students/{studentId} จริง + สถานะเริ่มต้นตามผู้ยื่นเท่านั้น
-      // (ห้ามยื่นเป็นสถานะ APPROVED/REJECTED เอง)
       allow create: if request.resource.data.keys().hasOnly([
                          'id', 'studentId', 'studentUid', 'parentUid', 'homeroomClass', 'leaveType', 'startDate', 'endDate',
                          'totalDays', 'reason', 'status', 'submittedByRole', 'submittedByUid', 'submittedBy', 'submittedAt',
@@ -494,7 +386,6 @@ service cloud.firestore {
                     && request.resource.data.submittedByUid == request.auth.uid
                     && request.resource.data.parentAcknowledgedAt == null
                     && (
-                      // นักเรียนยื่นเอง: มีผู้ปกครองเชื่อมบัญชี → รอผู้ปกครอง; ไม่มี → ส่งครูเลยพร้อมธงบอกเหตุผล
                       (isSelfStudent(request.resource.data.studentId)
                         && request.resource.data.submittedByRole == 'student'
                         && ((request.resource.data.parentUid != null
@@ -503,7 +394,6 @@ service cloud.firestore {
                             || (request.resource.data.parentUid == null
                               && request.resource.data.status == 'PENDING_TEACHER'
                               && request.resource.data.noParentLinked == true)))
-                      // ผู้ปกครองตัวจริงของนักเรียนยื่นแทน: ส่งถึงครูที่ปรึกษาทันที
                       || (request.resource.data.parentUid != null
                         && request.auth.uid == request.resource.data.parentUid
                         && request.resource.data.submittedByRole == 'parent'
@@ -512,7 +402,6 @@ service cloud.firestore {
                     );
 
       allow update: if (
-                        // ผู้ปกครองตัวจริงกด "รับทราบ" ใบที่นักเรียนยื่น: รอผู้ปกครอง → รอครู เท่านั้น
                         isSignedIn() && resource.data.parentUid != null && request.auth.uid == resource.data.parentUid
                         && resource.data.status == 'PENDING_PARENT'
                         && request.resource.data.status == 'PENDING_TEACHER'
@@ -521,7 +410,6 @@ service cloud.firestore {
                         && request.resource.data.parentAcknowledgedAt is string
                         && request.resource.data.parentAcknowledgedBy == request.auth.uid
                       ) || (
-                        // ครูที่ปรึกษาห้องนั้น (หรือ SUPER_ADMIN) ตัดสิน เฉพาะใบที่ผ่านขั้นผู้ปกครองแล้ว (ข้ามขั้นไม่ได้)
                         (hasRole('SUPER_ADMIN') || isHomeroomTeacherOf(resource.data.homeroomClass))
                         && resource.data.status == 'PENDING_TEACHER'
                         && request.resource.data.status in ['APPROVED', 'REJECTED']
@@ -530,13 +418,9 @@ service cloud.firestore {
                         && request.resource.data.decidedBy is string && request.resource.data.decidedBy.size() > 0
                         && request.resource.data.teacherRemarks is string && request.resource.data.teacherRemarks.size() <= 500
                       );
-      // ลบไม่ได้ (เป็นหลักฐานการลา)
       allow delete: if false;
     }
 
-    // 16b. วันที่นักเรียนลาที่อนุมัติแล้ว — สำเนา "ไม่มีเหตุผลการลา" ให้ครูผู้สอนเห็นสถานะ "ลา" ตอนเช็คชื่อ
-    // เหตุผล/ประเภทการลา (อาจเป็นข้อมูลสุขภาพ) อยู่ใน detailed_leave_requests ซึ่งครูประจำวิชาอ่านไม่ได้
-    // สร้างได้เฉพาะพร้อมกับการอนุมัติใบลาจริง (batch เดียวกัน — ตรวจด้วย getAfter) และข้อมูลต้องตรงใบลา; แก้/ลบไม่ได้
     match /student_leave_days/{leaveId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('EXECUTIVE') || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER');
       allow create: if request.resource.data.keys().hasOnly(['leaveId', 'studentId', 'homeroomClass', 'startDate', 'endDate', 'createdAt'])
@@ -550,21 +434,18 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // 17. GPS Check-in Logs
     match /gps_check_in_logs/{logId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('EXECUTIVE') || 
-                     hasRole('HOMEROOM_TEACHER') || 
-                     hasRole('SUBJECT_TEACHER') || 
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('EXECUTIVE') ||
+                     hasRole('HOMEROOM_TEACHER') ||
+                     hasRole('SUBJECT_TEACHER') ||
                      (isSignedIn() && (resource.data.userId == request.auth.uid || resource.data.studentId == request.auth.uid || resource.data.authUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('HOMEROOM_TEACHER') || 
-                      hasRole('SUBJECT_TEACHER') || 
+      allow write: if hasRole('SUPER_ADMIN') ||
+                      hasRole('HOMEROOM_TEACHER') ||
+                      hasRole('SUBJECT_TEACHER') ||
                       (isSignedIn() && (request.resource.data.userId == request.auth.uid || request.resource.data.studentId == request.auth.uid || request.resource.data.authUid == request.auth.uid));
     }
 
-    // 17b. รูปเซลฟี่เช็คอิน — แยกจาก gps_check_in_logs เพื่อให้เอกสารเช็คอินเล็ก และหมดอายุเองด้วย Firestore TTL (expireAt, 30 วัน)
-    // อ่านได้: เจ้าของ, SUPER_ADMIN, ครูที่ปรึกษาของห้องนั้น (homeroomClass ต้องไม่ว่าง) — สร้างได้แค่เจ้าของ ห้ามแก้ ลบได้เฉพาะ SUPER_ADMIN
     match /gps_checkin_selfies/{logId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      (isSignedIn() && resource.data.authUid == request.auth.uid) ||
@@ -582,17 +463,8 @@ service cloud.firestore {
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
-    // 18. Substitute Teaching Assignments & Post Teaching Records
-    // TODO(security): ตอนนี้ write เป็น role-based ล้วน (ยังบังคับลำดับ 4 ขั้นที่ layer นี้ไม่ได้).
-    //   หลัง workflow ฝั่ง client verify ผ่าน emulator แล้ว ให้เพิ่มการตรวจ:
-    //   - อนุมัติได้เฉพาะเมื่อ request.resource.data.currentApprovalStage ตรงกับ role ผู้เขียน
-    //     (STAGE_1→HEAD_OF_DEPARTMENT, STAGE_2→ACADEMIC_HEAD, STAGE_3→DEPUTY_DIRECTOR_ACADEMIC, STAGE_4→DIRECTOR)
-    //   - currentApprovalStage เดินหน้าได้ทีละขั้น (ห้ามข้าม), ห้าม downgrade
-    //   - SUBJECT_TEACHER แก้ได้เฉพาะ field ชุด completion* / isCompleted / completedAt เท่านั้น
     match /substitute_assignments/{assignmentId} {
       allow read: if isSignedIn();
-      // SUBJECT_TEACHER/HOMEROOM_TEACHER เขียนได้เพื่อรองรับครูขอลากิจ/ไปราชการด้วยตนเอง
-      // (สถานะเริ่มต้นล็อกที่ STAGE_1_HEAD_OF_DEPARTMENT เสมอในโค้ด client — ดู proposeSubstituteAssignment)
       allow write: if hasRole('SUPER_ADMIN') ||
                       hasRole('HEAD_OF_DEPARTMENT') ||
                       hasRole('ACADEMIC_HEAD') ||
@@ -603,9 +475,6 @@ service cloud.firestore {
                       hasRole('HOMEROOM_TEACHER');
     }
 
-    // log การนำเข้าภาระงานสอน (Bulk Import COURSE): ใครนำเข้า เปลี่ยนครู/เก็บกวาดตารางอะไร และใครเคยเป็นผู้บันทึก
-    // เพิ่มอย่างเดียว (append-only) — SUPER_ADMIN สร้างได้โดยระบุ importedByUid เป็นของตัวเองเท่านั้น; แก้/ลบไม่ได้ทุกบทบาท
-    // อ่านได้เฉพาะผู้ดูแลระบบและผู้บริหารฝ่ายวิชาการ (ไม่เปิดให้ signed-in ทั่วไป)
     match /schedule_import_logs/{logId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('ACADEMIC_HEAD') ||
@@ -619,67 +488,32 @@ service cloud.firestore {
 
     match /post_teaching_records/{recordId} {
       allow read: if isSignedIn();
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('HEAD_OF_DEPARTMENT') || 
-                      hasRole('ACADEMIC_HEAD') || 
-                      hasRole('DEPUTY_DIRECTOR_ACADEMIC') || 
-                      hasRole('DIRECTOR') || 
-                      hasRole('EXECUTIVE') || 
+      allow write: if hasRole('SUPER_ADMIN') ||
+                      hasRole('HEAD_OF_DEPARTMENT') ||
+                      hasRole('ACADEMIC_HEAD') ||
+                      hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
+                      hasRole('DIRECTOR') ||
+                      hasRole('EXECUTIVE') ||
                       hasRole('SUBJECT_TEACHER');
     }
 
-    // 19. Student Health & Mental Screenings (2Q, PHQ-9, SDQ)
-    // FIX: doc id {studentId} คือรหัสนักเรียน 5 หลัก (ดู save2QScreeningFirestore/savePHQ9ScreeningFirestore
-    // ใน firestoreService.ts) ไม่ใช่ Firebase Auth UID — isSelf(studentId) เดิมเทียบ auth.uid กับรหัส 5 หลัก
-    // ตรงๆ จึงไม่มีวันจริงเลย ทำให้นักเรียนทำแบบคัดกรองของตัวเองไม่ผ่าน rules เงียบๆ (เห็นเหมือนบันทึกสำเร็จ
-    // ฝั่ง UI เพราะ optimistic local state แต่ Firestore ปฏิเสธจริง) แก้เป็น isSelfStudent() ที่เทียบผ่าน
-    // students/{studentId}.studentUid จริงแทน — ไม่ได้เปลี่ยนว่าใครมีสิทธิ์ (ยังเป็นเจ้าของตัวเอง/
-    // ครูประจำชั้น/ครูแนะแนว/แอดมินเหมือนเดิม) แค่แก้วิธีตรวจว่า "ตัวเอง" ให้ตรงกับที่ระบบตั้งใจไว้จริง
-    // TASK 5 (ExecutivePortal Health, ยืนยันจากผู้ใช้): เพิ่ม EXECUTIVE อ่านได้ทั้งโรงเรียน เพื่อสรุป
-    // ภาพรวมระดับโรงเรียน (นับจำนวน ไม่ระบุตัวบุคคล) — Firestore ไม่มี field-level redaction ฝั่ง UI
-    // ต้องรวมเป็นตัวเลขสรุปเท่านั้น ห้ามโชว์ผลรายบุคคล
-    // ═══ คัดกรองซึมเศร้า/ฆ่าตัวตาย ตามลำดับ 2Q → 9Q → 8Q (คู่มือกรมสุขภาพจิต/สพฐ.) ═══
-    // ข้อมูลอ่อนไหวที่สุดของเด็ก. Firestore ไม่มีสิทธิ์ระดับ field (ครูที่ปรึกษาต้องเห็นแค่ "ระดับความเสี่ยง"
-    // ไม่เห็นคำตอบ/คะแนนดิบ) จึงแยกเอกสารตามระดับการมองเห็น:
-    //   student_screenings_2q            2Q ล่าสุด (นักเรียนทำเองอิสระได้) — ครูแนะแนว + ครูที่ปรึกษาของห้องอ่านเต็ม
-    //   student_screenings_9q            9Q "สรุป": riskLevel + ธงแดงข้อ 9 (ไม่มีคะแนน/คำตอบ)   ← เขียนผ่าน callable submitNineQ เท่านั้น
-    //   student_screenings_9q_detail     9Q คำตอบรายข้อ + คะแนนรวม — ครูแนะแนวเสมอ; ครูที่ปรึกษาเฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่  ← เช่นกัน
-    //   student_screening_progress       ฐานที่ใช้ทำ 9Q ไปแล้ว (usedBasisIds) — ไม่มีคะแนน นักเรียนอ่านของตัวเองได้  ← เช่นกัน
-    //     └ grants/{grantId}             ใบอนุญาตที่ครูเปิดให้นักเรียนทำ 9Q (ครูเขียนจาก client ได้ — ไม่มีคะแนน)
-    //   student_screenings_8q            8Q คะแนน/คำตอบ (ครูกรอกแทนนักเรียน) — สิทธิ์เหมือน 9Q detail; rules ตรวจคะแนน/ระดับ/ส่งต่อด่วนซ้ำเอง
-    //   student_8q_case_flags            8Q "มีเคสอยู่ในการดูแล ใช่/ไม่" (ไม่มีคะแนน) — ครูที่ปรึกษาเห็นได้เสมอ
-    //   student_screening_notices/{sid}/entries  บันทึก "แจ้งผู้ปกครองแล้ว" (ใครแจ้ง/เมื่อไร/วิธีไหน) append-only
-    // นักเรียนอ่านได้เฉพาะ 2Q ของตัวเอง (+ progress/grants ของตัวเอง) — ห้ามอ่าน 9Q/8Q ทุกชนิด
-    // ครูที่ปรึกษา = HOMEROOM_TEACHER "ของห้องนั้น" (เทียบ staff.assignments.homeroomClass กับ students/{id}.room)
-
-    // ห้องของนักเรียนอยู่ในความดูแลของครูที่ปรึกษาคนนี้
     function isHomeroomOfStudent(sid) {
       return isHomeroomTeacherOf(studentField(sid, 'room', '__none__'));
     }
 
-    // มีครูแนะแนวที่ใช้งานอยู่ในระบบไหม — rules ค้นหา staff ตาม role ด้วย query ไม่ได้ จึงอ่านจาก cache
-    // school_settings/guidance_status ที่ Cloud Functions คำนวณให้ (functions/src/guidanceStatus.ts; client เขียนไม่ได้)
-    // ⚠️ fail-closed: doc ไม่มี/ไม่มีฟิลด์ = ถือว่า "มีครูแนะแนว" (ครูที่ปรึกษาเห็นแค่ระดับ) ไม่ใช่ "ไม่มี" (เห็นเต็ม)
     function hasActiveGuidanceCounselor() {
       return !exists(/databases/$(database)/documents/school_settings/guidance_status)
         || get(/databases/$(database)/documents/school_settings/guidance_status).data.get('hasActiveCounselor', true) == true;
     }
 
-    // ครูที่ปรึกษาของห้องนี้ที่ "ทำแทนครูแนะแนว" ได้ — เฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่เลย
     function isHomeroomActingAsCounselor(sid) {
       return isHomeroomOfStudent(sid) && !hasActiveGuidanceCounselor();
     }
 
-    // ผู้เขียน 8Q (ครูกรอกแทนนักเรียน ไม่ใช่นักเรียน): ครูแนะแนวเสมอ; ครูที่ปรึกษาเฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่
-    // ⚠️ ทางฉุกเฉิน: บันทึกได้ "เสมอ" ไม่ต้องมี 9Q ≥7/ธงแดงมาก่อน (เงื่อนไขนั้นเป็นแค่เหตุผลที่ระบบแนะนำให้ทำ 8Q — ไม่ใช่ตัวบล็อก)
-    // เพราะครูที่เจอเด็กวิกฤตต้องบันทึกได้ทันที
     function canWriteEightQ(sid) {
       return hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomActingAsCounselor(sid);
     }
 
-    // 8Q: rules คำนวณคะแนน/ระดับ/ส่งต่อด่วนซ้ำจากคำตอบดิบเอง (ไม่เชื่อค่าที่ client ส่งมา) — ผู้กรอกเป็นครู (ผู้มีสิทธิ์อ่านผลอยู่แล้ว)
-    // จึงไม่ต้องใช้ Cloud Function เหมือน 9Q ที่นักเรียนส่งเอง. คะแนนต่อข้อ: 1,2,6,8,9,4,10,4; ข้อ 3 ตอบ "มี" + ควบคุมความคิดไม่ได้ = +8
-    // ระดับ: 0 NONE, 1-8 LOW, 9-16 MODERATE, ≥17 SEVERE (= ส่งต่อโรงพยาบาลด่วน)
     function eightQIntegrityOk(d) {
       let a = d.answers;
       let base = (a[0] ? 1 : 0) + (a[1] ? 2 : 0) + (a[2] ? 6 : 0) + (a[3] ? 8 : 0) + (a[4] ? 9 : 0) + (a[5] ? 4 : 0) + (a[6] ? 10 : 0) + (a[7] ? 4 : 0);
@@ -692,54 +526,40 @@ service cloud.firestore {
         && d.urgentReferral == (d.totalScore >= 17);
     }
 
-    // 2Q: นักเรียนทำเองอิสระได้ (ไม่จำกัดรอบ); ครูแนะแนวและครูที่ปรึกษาของห้องอ่านเต็มเสมอ
-    // EXECUTIVE อ่านได้เพื่อสรุปภาพรวมโรงเรียน (นับจำนวน ไม่ระบุตัวบุคคล — ฝั่ง UI ต้องรวมเป็นตัวเลขเท่านั้น)
     match /student_screenings_2q/{studentId} {
-      // ผู้ปกครองอ่านได้อย่างเดียว (เห็นผลของบุตรหลาน ทำแบบคัดกรองเองไม่ได้) — UI แสดงเฉพาะระดับ ไม่แสดงคำตอบรายข้อ
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || hasRole('EXECUTIVE') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId) || isParentOfStudent(studentId);
       allow write: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId);
     }
 
-    // PHQ-9 สากลเดิม (เลิกใช้แล้ว — แทนด้วย 9Q ไทย): เก็บข้อมูลเก่าไว้อ่านได้เฉพาะครูแนะแนว/แอดมิน
-    // ห้ามเขียนเพิ่ม ห้ามนักเรียน/ครูที่ปรึกษา/ผู้บริหารอ่าน
     match /student_screenings_phq9/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
       allow write: if false;
     }
 
-    // 9Q — สรุป (ระดับความเสี่ยง + ธงแดงข้อ 9 เท่านั้น ไม่มีคะแนนรวม/คำตอบ): ครูที่ปรึกษาของห้องอ่านได้เสมอ
-    // ⚠️ client เขียนไม่ได้เด็ดขาด (แม้ครูแนะแนว/SUPER_ADMIN) — ต้องผ่าน callable submitNineQ (Admin SDK ข้าม rules) ซึ่งคำนวณ
-    // riskLevel/ธงแดงเองจากคำตอบดิบ + ตรวจสิทธิ์/ฐานการทำเอง (functions/src/nineQSubmit.ts) ไม่เชื่อค่าที่ client ส่ง
     match /student_screenings_9q/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId);
       allow write: if false;
     }
 
-    // 9Q — รายละเอียด (คำตอบรายข้อ + คะแนนรวม): ครูแนะแนวเสมอ; ครูที่ปรึกษาเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่เท่านั้น — เขียนผ่าน submitNineQ เท่านั้น
     match /student_screenings_9q_detail/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomActingAsCounselor(studentId);
       allow write: if false;
     }
 
-    // ฐานที่ใช้ทำ 9Q ไปแล้ว — นักเรียนอ่านของตัวเองได้ (เพื่อรู้ว่าทำฐานนี้ไปแล้ว) ไม่มีคะแนน/ระดับใดๆ — เขียนผ่าน submitNineQ เท่านั้น
     match /student_screening_progress/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId);
       allow write: if false;
 
-      // ใบอนุญาตให้นักเรียนทำ 9Q — ครูแนะแนว/ครูที่ปรึกษาของห้องเปิดให้ (นักเรียนเปิดเองไม่ได้); นักเรียนอ่านของตัวเอง
       match /grants/{grantId} {
         allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId) || isSelfStudent(studentId);
         allow create: if (hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId))
           && request.resource.data.keys().hasOnly(['openedByUid', 'openedByName', 'openedByRole', 'openedAt', 'note'])
           && request.resource.data.openedByUid == request.auth.uid;
-        // เพิกถอนใบอนุญาตที่ยังไม่ถูกใช้ (ลบ) — ครูแนะแนว/ครูที่ปรึกษาของห้อง; แก้ไขไม่ได้
         allow delete: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId);
         allow update: if false;
       }
     }
 
-    // 8Q — คะแนน/คำตอบ (ครูกรอกแทนนักเรียนระหว่างพูดคุย ไม่มีหน้าจอให้นักเรียนทำเอง — นักเรียนอ่าน/เขียนไม่ได้เด็ดขาด)
-    // entryPath: AFTER_9Q = ทำตามลำดับปกติ (9Q ≥7/ธงแดง) | EMERGENCY = ทางฉุกเฉิน ประเมินทันทีโดยไม่ต้องรอ 9Q (เก็บไว้ตรวจย้อนหลัง)
     match /student_screenings_8q/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomActingAsCounselor(studentId);
       allow create, update: if canWriteEightQ(studentId)
@@ -751,8 +571,6 @@ service cloud.firestore {
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
-    // 8Q — "มีเคสอยู่ในการดูแล ใช่/ไม่" เท่านั้น (ไม่มีคะแนน) ครูที่ปรึกษาของห้องเห็นได้เสมอแม้มีครูแนะแนว
-    // hasCase ต้องตรงกับ 8Q ที่เขียนใน batch เดียวกัน (คะแนน > 0) — กันตั้งค่าไม่ตรงกับผลจริง
     match /student_8q_case_flags/{studentId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId);
       allow create, update: if canWriteEightQ(studentId)
@@ -764,10 +582,7 @@ service cloud.firestore {
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
-    // บันทึก "แจ้งผู้ปกครองแล้ว" — ไม่ส่งแจ้งเตือนอัตโนมัติ ครูกรอกเองหลังติดต่อจริง; append-only (แก้ไม่ได้)
-    // การแจ้งเรื่อง 8Q: ครูแนะแนวเสมอ; ครูที่ปรึกษาเฉพาะเมื่อไม่มีครูแนะแนวที่ใช้งานอยู่
     match /student_screening_notices/{studentId}/entries/{entryId} {
-      // ผู้ปกครองอ่านได้ (เห็นว่าครูแจ้งถึงตนเมื่อไร/อย่างไร) — UI ไม่แสดงช่อง note ภายใน
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId) || isParentOfStudent(studentId);
       allow create: if (hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId))
         && request.resource.data.keys().hasOnly(['scope', 'screeningId', 'notifiedByUid', 'notifiedByName', 'notifiedAt', 'method', 'note'])
@@ -779,8 +594,6 @@ service cloud.firestore {
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
-    // บันทึก "พบนักเรียนแล้ว" หลัง 9Q ธงแดง — ครูแนะแนว/ครูที่ปรึกษาของห้องเขียนหลังพบจริง; append-only (แก้ไม่ได้)
-    // ใช้ปิดงานในกระดิ่ง (คู่กับ "แจ้งผู้ปกครองแล้ว") ไม่มีผลคัดกรองใดๆ อยู่ในเอกสารนี้
     match /student_screening_followups/{studentId}/entries/{entryId} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId);
       allow create: if (hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR') || isHomeroomOfStudent(studentId))
@@ -796,34 +609,18 @@ service cloud.firestore {
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
-    // FIX (ยืนยันจากโรงเรียน): SDQ กรอกได้ 3 กลุ่ม — นักเรียนประเมินตนเอง/ผู้ปกครอง/ครูที่ปรึกษา
-    // ของห้องนั้นจริง (ต่างจาก 2Q/PHQ-9 ที่นักเรียนประเมินตนเองอย่างเดียว) เดิม rule เช็คแค่
-    // self-attestation (request.resource.data.evaluatorId == auth.uid) — ผู้เขียนระบุ uid ตัวเองใน
-    // เอกสารเฉยๆ ไม่เคยตรวจว่าเป็นความสัมพันธ์จริงกับนักเรียนคนนั้นเลย (ผู้ปกครอง/ครูคนไหนก็เขียนให้
-    // เด็กคนไหนก็ได้แค่ใส่ evaluatorId เป็น uid ตัวเอง) แก้เป็นตรวจสอบจริงผ่าน students/{studentId}
     match /student_assessments_sdq/{sdqId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('GUIDANCE_COUNSELOR') ||
                      hasRole('HOMEROOM_TEACHER') ||
                      hasRole('EXECUTIVE') ||
                      (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.respondentUid == request.auth.uid)) ||
-                     isParentOfStudent(resource.data.studentId); // ผู้ปกครองเห็นภาพรวม 3 ฝ่ายของบุตรหลาน (query studentId)
+                     isParentOfStudent(resource.data.studentId);
 
-      // studentUid ต้อง denormalize ตรงกับ students/{studentId} จริงเสมอ (ไม่ว่าใครเป็นผู้กรอก)
-      // และ respondentUid ต้องเป็นผู้เขียนจริง แล้วผู้เขียนต้องเป็นหนึ่งใน 3 กลุ่มที่ยืนยันความสัมพันธ์
-      // จริงได้: (1) ตัวนักเรียนเอง (2) ผู้ปกครองของนักเรียนคนนั้นจริง (3) ครูที่ปรึกษาของห้องนั้นจริง
-      //
-      // ปีการศึกษา + กันกรอกซ้ำ (ผู้กรอก 3 กลุ่ม — SUPER_ADMIN/GUIDANCE_COUNSELOR ไม่ถูกจำกัดตรงนี้ ตามเดิม):
-      //  - academicYear ต้องตรงกับ school_settings/academic_year ปัจจุบันจริง (ไม่มีตั้งค่า = ปฏิเสธ ไม่เดาปีให้)
-      //  - doc id ต้องเป็น {studentId}_{evaluatorType}_{academicYear} ตายตัว → 1 ชุดต่อ (นักเรียน, ผู้ประเมิน, ปี)
-      //    rules ค้นเอกสารซ้ำด้วย query ไม่ได้ แต่ id ตายตัวทำให้การสร้างซ้ำคือการ "ทับ doc เดิม" = update ซึ่งผู้กรอก
-      //    ทำไม่ได้ (allow update ด้านล่างเฉพาะ SUPER_ADMIN/GUIDANCE_COUNSELOR) และสร้างด้วย id อื่นก็ไม่ผ่านเงื่อนไข id
       allow create: if hasRole('SUPER_ADMIN') ||
                        hasRole('GUIDANCE_COUNSELOR') ||
                        (
                          isCurrentAcademicYear(request.resource.data.academicYear) &&
-                         // รอบ 1: id ตายตัว + ห้ามแอบใส่ round อื่น; รอบ 2 (ติดตามผล, sdqScreening.ts): มุมมองครู id ลงท้าย _R2
-                         // เฉพาะภาคเรียนที่ 2 และต้องมีเหตุผล (ผู้กรอกยังต้องผ่านเงื่อนไขครูที่ปรึกษาห้องนั้นด้านล่าง)
                          ((sdqId == request.resource.data.studentId + '_' + request.resource.data.evaluatorType + '_' + request.resource.data.academicYear &&
                            request.resource.data.get('round', 1) == 1) ||
                           (sdqId == request.resource.data.studentId + '_TEACHER_' + request.resource.data.academicYear + '_R2' &&
@@ -832,13 +629,8 @@ service cloud.firestore {
                            request.resource.data.get('followUpReason', '').size() > 0 &&
                            request.resource.data.get('followUpReason', '').size() <= 500 &&
                            get(/databases/$(database)/documents/school_settings/academic_year).data.get('semester', '') == '2')) &&
-                         // นักเรียนที่ยังไม่เชื่อมบัญชี (ไม่มี field studentUid) → ส่ง '' (ครูที่ปรึกษากรอกให้ได้ ไม่ต้องรอเชื่อมบัญชี);
-                         // นักเรียนที่เชื่อมแล้วต้องตรงกับค่าจริงเสมอ — เทียบกับ doc ที่ไม่มีอยู่ get() จะ error = ปฏิเสธ
                          request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '') &&
                          request.resource.data.respondentUid == request.auth.uid &&
-                         // ผู้กรอกต้องกรอกได้เฉพาะ "มุมมองของตัวเอง" — นักเรียนกรอกได้แค่ STUDENT, ผู้ปกครองแค่ PARENT,
-                         // ครูที่ปรึกษาแค่ TEACHER (กันนักเรียนกรอกแทนครู/ผู้ปกครองแล้วล็อกการกรอกของจริงทั้งปี
-                         // เพราะ doc id ตายตัวต่อ (นักเรียน, ผู้ประเมิน, ปี))
                          (
                            (request.resource.data.evaluatorType == 'STUDENT' &&
                             isSelfStudent(request.resource.data.studentId)) ||
@@ -849,17 +641,9 @@ service cloud.firestore {
                          )
                        );
 
-      // แก้ไข/ลบผลประเมินที่ส่งไปแล้ว: เฉพาะ SUPER_ADMIN/GUIDANCE_COUNSELOR เท่านั้น (ผู้กรอกเดิม
-      // แก้ย้อนหลังเองไม่ได้ — ป้องกันการแก้ผลหลังส่ง เหมือน guidance_counseling_cases/infirmary_visits)
       allow update, delete: if hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR');
     }
 
-    // 20. Billing Invoices, Messages, and Appointments
-    // FIX (เฟส 2 การเงิน — TASK 1): เดิมไม่มีฟีเจอร์สร้างใบแจ้งหนี้อยู่เลย และ read/write เดิมเทียบ
-    // resource.data.studentId == auth.uid ตรงๆ (studentId เป็นรหัสนักเรียน 5 หลัก ไม่ใช่ Firebase
-    // Auth UID เด็ดขาด — บั๊กเดียวกับที่พบใน student_screenings_2q/phq9 มาก่อน) แก้เป็นเทียบผ่าน
-    // studentUid ที่ denormalize+validate จริงตอนสร้างแทน — เขียน/แก้ไข เฉพาะ FINANCE_STAFF/
-    // SUPER_ADMIN เท่านั้น (การชำระเงินของเจ้าของเอง ดู TASK 3 ที่จะเพิ่ม allow update แยกต่างหาก)
     match /billing_counters/{academicYear} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF');
       allow write: if hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF');
@@ -871,19 +655,12 @@ service cloud.firestore {
                      hasRole('EXECUTIVE') ||
                      (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid));
 
-      // studentUid/parentUid ต้อง denormalize ตรงกับ students/{studentId} จริงเสมอ (กันเจ้าหน้าที่
-      // การเงินพิมพ์ผิดแล้วส่งบิลไปให้ผู้ปกครองคนละครอบครัวเห็น) และ createdBy ต้องเป็นผู้เขียนจริง
       allow create: if (hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF')) &&
                        request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__') &&
                        request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', '__none__') &&
                        request.resource.data.createdBy == request.auth.uid &&
                        request.resource.data.status == 'PENDING';
 
-      // ขั้นตอนชำระเงิน (src/lib/billingPayment.ts):
-      //  - เจ้าหน้าที่การเงินแก้ไขได้เต็มที่ (เช่น ปรับยอด/กำหนดชำระ ตรวจสลิป) แต่ห้ามย้ายเจ้าของ
-      //    และการ "เปลี่ยนเป็น" PAID ต้องลงชื่อผู้ตรวจ (verifiedBy) เป็นตัวเองเสมอ
-      //  - ผู้ปกครอง/นักเรียนเจ้าของบิล ทำได้อย่างเดียว: แนบสลิป PENDING/OVERDUE → VERIFYING
-      //    (แตะได้เฉพาะ field ของสลิป ห้ามตั้ง PAID/ห้ามแก้ยอด) และ URL ต้องเป็นไฟล์ใน Firebase Storage
       allow update: if (
                          (hasRole('SUPER_ADMIN') || hasRole('FINANCE_STAFF')) &&
                          request.resource.data.studentUid == resource.data.studentUid &&
@@ -911,21 +688,16 @@ service cloud.firestore {
     }
 
     match /parent_teacher_messages/{msgId} {
-      allow read: if hasRole('SUPER_ADMIN') || 
-                     hasRole('HOMEROOM_TEACHER') || 
-                     hasRole('SUBJECT_TEACHER') || 
+      allow read: if hasRole('SUPER_ADMIN') ||
+                     hasRole('HOMEROOM_TEACHER') ||
+                     hasRole('SUBJECT_TEACHER') ||
                      (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.parentId == request.auth.uid || resource.data.studentId == request.auth.uid || resource.data.senderId == request.auth.uid || resource.data.receiverId == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('HOMEROOM_TEACHER') || 
-                      hasRole('SUBJECT_TEACHER') || 
+      allow write: if hasRole('SUPER_ADMIN') ||
+                      hasRole('HOMEROOM_TEACHER') ||
+                      hasRole('SUBJECT_TEACHER') ||
                       (isSignedIn() && (request.resource.data.parentUid == request.auth.uid || request.resource.data.parentId == request.auth.uid || request.resource.data.senderId == request.auth.uid || request.resource.data.studentId == request.auth.uid));
     }
 
-    // แชทห้องเรียนแบบแยกช่องส่วนตัว (src/lib/classChat.ts)
-    //   channel PARENT  = ครูประจำชั้น ↔ ผู้ปกครอง (memberUid = students/{sid}.parentUid)
-    //   channel STUDENT = ครูประจำชั้น ↔ นักเรียน   (memberUid = students/{sid}.studentUid)
-    // อ่านได้เฉพาะสมาชิกของช่องนั้น + ครูประจำชั้นของห้อง (ไม่รวม SUPER_ADMIN โดยตั้งใจ — เป็นข้อความส่วนตัว)
-    // query ต้องกรองด้วย memberUid == uid หรือ room == ห้องของครู
     function chatMemberUidOf(sid, channel) {
       return channel == 'PARENT' ? studentField(sid, 'parentUid', null) : studentField(sid, 'studentUid', null);
     }
@@ -937,7 +709,6 @@ service cloud.firestore {
         && d.room == studentField(d.studentId, 'room', '__none__');
     }
 
-    // ครูที่ปรึกษาที่เลือกคุยด้วย: '' / ไม่มีฟิลด์ = ท่านใดก็ได้ (แบบเดิม); ระบุ = ต้องเป็นครูที่ปรึกษาของห้องนั้นจริง
     function chatTargetOk(d) {
       let t = d.get('targetStaffId', '');
       return t is string && (t == '' || (
@@ -945,7 +716,6 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/staff/$(t)).data.get('roles', []).hasAny(['HOMEROOM_TEACHER'])
         && get(/databases/$(database)/documents/staff/$(t)).data.get('assignments', {}).get('homeroomClass', '') == d.room));
     }
-    // ครูคนนี้เป็นผู้รับห้องสนทนานี้ได้ไหม (อ่านได้ทั้งห้อง แต่ส่ง/ตอบได้เฉพาะครูที่ถูกเลือก หรือเมื่อเลือก "ใครก็ได้")
     function chatTeacherMayReply(d) {
       return isHomeroomTeacherOf(d.room) && (d.get('targetStaffId', '') == '' || d.get('targetStaffId', '') == myStaffId());
     }
@@ -972,7 +742,6 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // สรุปห้องสนทนาต่อ (นักเรียน, ช่อง) — id = {studentId}_{channel}; ใช้ทำรายการ + จุดแจ้งเตือนยังไม่อ่าน
     match /class_chat_threads/{threadId} {
       allow read: if isSignedIn() && (resource.data.memberUid == request.auth.uid || isHomeroomTeacherOf(resource.data.room));
       allow create: if isSignedIn()
@@ -986,7 +755,6 @@ service cloud.firestore {
                     && chatIdentityOk(request.resource.data)
                     && chatTargetOk(request.resource.data)
                     && (chatTeacherMayReply(request.resource.data) || request.auth.uid == request.resource.data.memberUid);
-      // แก้ได้เฉพาะ: ข้อความล่าสุด + เวลาอ่านของ "ฝั่งตัวเอง" (ฝั่งสมาชิกแตะ teacherLastReadAt ไม่ได้ และกลับกัน)
       allow update: if isSignedIn()
                     && ((request.auth.uid == resource.data.memberUid
                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
@@ -997,11 +765,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // นัดพบครูของผู้ปกครอง — สายงาน (ตรงกับ src/lib/appointmentFlow.ts):
-    //   ผู้ปกครองขอนัด → REQUESTED → (ครูผู้รับ) CONFIRMED | DECLINED ; CONFIRMED → (ครูผู้รับ) COMPLETED ; REQUESTED|CONFIRMED → (ผู้ปกครอง) CANCELLED
-    // ผู้รับ: HOMEROOM = ครูที่ปรึกษาของ homeroomClass นั้น, GUIDANCE = ครูแนะแนว. ข้อความส่วนตัว → อ่านได้เฉพาะเจ้าของ (parentUid/studentUid) + ผู้รับ + SUPER_ADMIN
-    // query ต้องกรองด้วย parentUid / studentUid / (homeroomClass + recipient=='HOMEROOM') / (recipient=='GUIDANCE') ตามผู้ดู
-    // อ่าน: ครูแนะแนวทุกคนเห็นนัด GUIDANCE และครูที่ปรึกษาทุกคนของห้องเห็นนัด HOMEROOM (query เดิมใช้ได้); ตอบ/ปิดงาน: เฉพาะครูที่ผู้ปกครองระบุ (targetStaffId) — '' / ไม่มี = ใครก็ได้
     function canReadAppointment(d) {
       return hasRole('SUPER_ADMIN')
         || (d.recipient == 'HOMEROOM' && isHomeroomTeacherOf(d.homeroomClass))
@@ -1028,7 +791,6 @@ service cloud.firestore {
       allow read: if canReadAppointment(resource.data)
                   || (isSignedIn() && (resource.data.parentUid == request.auth.uid || resource.data.studentUid == request.auth.uid));
 
-      // สร้าง: เฉพาะผู้ปกครองตัวจริงของนักเรียน (เทียบ students/{studentId}) เริ่มที่ REQUESTED เท่านั้น
       allow create: if request.resource.data.keys().hasOnly([
                          'id', 'studentId', 'studentUid', 'parentUid', 'homeroomClass', 'recipient', 'topic', 'preferredDate',
                          'timeSlot', 'meetingType', 'status', 'requestedBy', 'requestedAt', 'updatedAt', 'targetStaffId'])
@@ -1051,7 +813,6 @@ service cloud.firestore {
                     && request.resource.data.requestedBy is string && request.resource.data.requestedBy.size() > 0;
 
       allow update: if (
-                        // ครูผู้รับ ตอบรับ/ปฏิเสธ คำขอที่ยังรออยู่ (ยืนยันต้องระบุสถานที่/ลิงก์)
                         canHandleAppointment(resource.data)
                         && resource.data.status == 'REQUESTED'
                         && request.resource.data.status in ['CONFIRMED', 'DECLINED']
@@ -1062,30 +823,22 @@ service cloud.firestore {
                         && request.resource.data.locationOrLink is string && request.resource.data.locationOrLink.size() <= 300
                         && (request.resource.data.status == 'DECLINED' || request.resource.data.locationOrLink.size() >= 1)
                       ) || (
-                        // ครูผู้รับ ปิดงาน "พบกันแล้ว" เฉพาะนัดที่ยืนยันแล้ว
                         canHandleAppointment(resource.data)
                         && resource.data.status == 'CONFIRMED'
                         && request.resource.data.status == 'COMPLETED'
                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'completedAt', 'updatedAt'])
                       ) || (
-                        // ผู้ปกครองตัวจริงยกเลิกนัดที่ยังไม่จบ
                         isSignedIn() && request.auth.uid == resource.data.parentUid
                         && resource.data.status in ['REQUESTED', 'CONFIRMED']
                         && request.resource.data.status == 'CANCELLED'
                         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt', 'updatedAt'])
                       );
-      // ลบไม่ได้ (เป็นหลักฐานการนัด)
       allow delete: if false;
     }
 
-    // ข้อความแจ้งผลการอนุมัติระหว่างบุคลากร (เช่น คำขอเช็คชื่อย้อนหลังของฉันได้รับอนุมัติ / การจัดครูสอนแทนถูกส่งกลับ)
-    // ผู้รับระบุด้วยอีเมล (lowercase ตรงกับ token.email) — อ่านได้เฉพาะผู้รับ; บุคลากรคนใดก็ส่งได้แต่ต้องลงชื่อผู้ส่งเป็นตัวเอง
-    // (นักเรียน/ผู้ปกครองส่งไม่ได้); ผู้รับแก้ได้เฉพาะ readAt (ทำเครื่องหมายอ่านแล้ว); ลบไม่ได้ (เป็นหลักฐาน)
-    // ข้อความ "ผลลัพธ์" เท่านั้น — งานที่รอให้ทำอยู่ในกระดิ่งงานค้างที่คำนวณสด (src/lib/staffTasks.ts)
     match /staff_notifications/{notifId} {
       allow read: if isSignedIn() && request.auth.token.get('email', '') is string
                   && resource.data.recipientEmail == request.auth.token.get('email', '').lower();
-      // หมายเหตุ: ห้ามใช้ !hasRole(...) ตรงนี้ — hasRole อ่าน token.primaryRole ซึ่งอาจไม่มี field → error เมื่อสาขา roles เป็น false (ผลคือปฏิเสธทุกคน)
       allow create: if hasAnyRole()
                     && !('STUDENT' in request.auth.token.get('roles', [])) && !('PARENT' in request.auth.token.get('roles', []))
                     && request.resource.data.keys().hasOnly(['id', 'recipientEmail', 'kind', 'title', 'message', 'refId', 'senderUid', 'senderName', 'createdAt', 'readAt'])
@@ -1093,7 +846,7 @@ service cloud.firestore {
                     && request.resource.data.id == notifId
                     && request.resource.data.recipientEmail is string && request.resource.data.recipientEmail.matches('^[^@\\s]+@[^@\\s]+$')
                     && request.resource.data.recipientEmail == request.resource.data.recipientEmail.lower()
-                    && request.resource.data.kind in ['LATE_ATTENDANCE_DECISION', 'SUBSTITUTE_UPDATE']
+                    && request.resource.data.kind in ['LATE_ATTENDANCE_DECISION', 'LATE_ATTENDANCE_REMINDER', 'SUBSTITUTE_UPDATE']
                     && request.resource.data.title is string && request.resource.data.title.size() >= 1 && request.resource.data.title.size() <= 120
                     && request.resource.data.message is string && request.resource.data.message.size() >= 1 && request.resource.data.message.size() <= 500
                     && request.resource.data.refId is string && request.resource.data.refId.size() <= 200
@@ -1107,12 +860,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 21. คะแนนกิจกรรมรายวิชา (Active Learning) — คะแนนต่อวิชาจากกิจกรรมในคาบ (สุ่มตอบ/ทำงานกลุ่ม) ใช้ประกอบจิตพิสัย/เครื่องหมายเชิดชูรายวิชา
-    //     ไม่ใช่คะแนนความประพฤติ. อ่านได้: SUPER_ADMIN, EXECUTIVE (สรุปภาพรวม — ฝั่ง UI รวมเป็นตัวเลข), ครูผู้ให้คะแนน (teacherStaffId == claim staffId),
-    //     นักเรียนเจ้าของ (เทียบ students/{studentId}.studentUid ไม่ใช่สำเนาในเอกสาร — query ต้อง where studentId==รหัสนักเรียน),
-    //     ผู้ปกครองของนักเรียน (students.parentUid), ครูที่ปรึกษาของห้อง (homeroomClass).
-    //     ไม่เปิดให้ signed-in ทั่วไปอ่านอีก (เดิม bare isSignedIn() ทำให้ทุกคนเห็นคะแนนทุกคนทุกวิชา)
-    //     เขียน: ครูสร้างได้เฉพาะ log ที่ระบุตนเองเป็นผู้ให้ (teacherStaffId) ; แก้/ลบได้เฉพาะ SUPER_ADMIN (เป็นหลักฐานการให้คะแนน)
     match /active_learning_logs/{logId} {
       allow read: if hasRole('SUPER_ADMIN')
                      || hasRole('EXECUTIVE')
@@ -1120,10 +867,8 @@ service cloud.firestore {
                          && myStaffId() is string && myStaffId() != ''
                          && resource.data.get('teacherStaffId', '') == myStaffId())
                      || (resource.data.get('studentId', null) is string && isSelfStudent(resource.data.studentId))
-                     // ผู้ปกครองของนักเรียนคนนั้น — เทียบ students/{studentId}.parentUid (registry) ไม่ใช่สำเนาใน log; query ต้อง where studentId==บุตร
                      || (resource.data.get('studentId', null) is string && isSignedIn()
                          && studentField(resource.data.studentId, 'parentUid', '__none__') == request.auth.uid)
-                     // ครูที่ปรึกษาของห้อง — เทียบ homeroomClass ที่ denormalize ตอนให้คะแนน (create ตรวจกับ students.room); query ต้อง where homeroomClass==ห้องฉัน
                      || (resource.data.get('homeroomClass', '') != '' && isHomeroomTeacherOf(resource.data.homeroomClass));
       allow create: if hasRole('SUPER_ADMIN')
                        || ((hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER'))
@@ -1140,53 +885,108 @@ service cloud.firestore {
       allow update, delete: if hasRole('SUPER_ADMIN');
     }
 
-    // 23. Late Attendance Requests — ครูผู้สอนขอ "เช็คชื่อย้อนหลัง" เมื่อลืมเช็คในคาบ
-    // ผู้อนุมัติ: DEPUTY_DIRECTOR_ACADEMIC (รองผู้อำนวยการฝ่ายวิชาการ) / SUPER_ADMIN — ยืนยันจากทางโรงเรียน
-    // document ไม่ถูกลบตอนอนุมัติ/ปฏิเสธ (allow delete: if false) — เก็บประวัติ เปลี่ยนแค่ status
+    function lateStepOk(s, role, kind) {
+      return s.keys().hasOnly(['decision', 'role', 'byUid', 'byStaffId', 'byName', 'at', 'note', 'reviewUntil'])
+        && s.keys().hasAll(['decision', 'role', 'byUid', 'byStaffId', 'byName', 'at', 'note'])
+        && s.decision in ['APPROVE', 'CONDITIONAL', 'REJECT']
+        && s.role == role && hasRole(role)
+        && s.byUid == request.auth.uid
+        && s.byStaffId == myStaffId() && myStaffId() != ''
+        && s.byName is string && s.byName.size() >= 1 && s.byName.size() <= 120
+        && s.at == request.time
+        && s.note is string && s.note.size() <= 300
+        && (s.decision == 'APPROVE' || s.note.size() >= 1)
+        && ((kind == 'HEAD'
+              && s.keys().hasAll(['reviewUntil'])
+              && s.reviewUntil.toMillis() == request.time.toMillis() - ((request.time.toMillis() - 39600000) % 86400000) + 86400000)
+            || (kind != 'HEAD' && !s.keys().hasAny(['reviewUntil'])));
+    }
+
+    function lateStatusFor(s) {
+      return s.decision == 'REJECT' ? 'REJECTED' : 'APPROVED';
+    }
+
+    function lateNotSelf(d) {
+      return myStaffId() != '' && d.get('requesterStaffId', '') != myStaffId();
+    }
+
+    function lateBeforeDeadline(d) {
+      return d.get('deadlineAt', null) != null && request.time < d.deadlineAt;
+    }
+
     match /late_attendance_requests/{reqId} {
-      // DIRECTOR อ่านได้เพื่อกำกับดูแล (read-only) — การอนุมัติจริงจบที่ DEPUTY_DIRECTOR_ACADEMIC
-      allow read: if hasRole('SUPER_ADMIN') ||
+      allow read: if hasRole('ACADEMIC_HEAD') ||
                      hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
                      hasRole('DIRECTOR') ||
                      hasRole('EXECUTIVE') ||
                      (isSignedIn() && resource.data.teacherId == request.auth.uid);
 
-      // ครูสร้างคำขอของตัวเองได้เท่านั้น และต้องเริ่มที่สถานะ PENDING
       allow create: if (hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER')) &&
                        request.resource.data.teacherId == request.auth.uid &&
-                       request.resource.data.status == 'PENDING';
+                       request.resource.data.status == 'PENDING' &&
+                       !('headStep' in request.resource.data) && !('deputyStep' in request.resource.data) &&
+                       !('extendedUntil' in request.resource.data) &&
+                       myStaffId() != '' &&
+                       request.resource.data.requesterStaffId == myStaffId() &&
+                       ((request.resource.data.requesterLevel == 'DEPUTY' && hasRole('DEPUTY_DIRECTOR_ACADEMIC')) ||
+                        (request.resource.data.requesterLevel == 'HEAD' && hasRole('ACADEMIC_HEAD') && !('DEPUTY_DIRECTOR_ACADEMIC' in request.auth.token.get('roles', []))) ||
+                        (request.resource.data.requesterLevel == 'TEACHER' && !('ACADEMIC_HEAD' in request.auth.token.get('roles', [])) && !('DEPUTY_DIRECTOR_ACADEMIC' in request.auth.token.get('roles', [])))) &&
+                       request.resource.data.requestedAt == request.time &&
+                       request.resource.data.deadlineAt is timestamp &&
+                       request.resource.data.deadlineAt > request.time &&
+                       request.resource.data.deadlineAt.toMillis() - request.time.toMillis() <= 86400000 &&
+                       request.resource.data.deadlineAt.toMillis() % 86400000 == 61200000;
 
-      // อนุมัติ/ปฏิเสธ (แก้ status): เฉพาะรองผอ.วิชาการ / SUPER_ADMIN
-      // ห้ามแก้ teacherId / scheduleId (ตรึงไว้ให้ตรงกับของเดิม)
-      allow update: if (hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('SUPER_ADMIN')) &&
-                       request.resource.data.teacherId == resource.data.teacherId &&
-                       request.resource.data.scheduleId == resource.data.scheduleId;
+      allow update: if (
+          hasRole('ACADEMIC_HEAD') &&
+          resource.data.get('requesterLevel', 'TEACHER') == 'TEACHER' &&
+          lateNotSelf(resource.data) && lateBeforeDeadline(resource.data) &&
+          !('headStep' in resource.data) && !('deputyStep' in resource.data) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['headStep', 'status']) &&
+          lateStepOk(request.resource.data.headStep, 'ACADEMIC_HEAD', 'HEAD') &&
+          request.resource.data.status == lateStatusFor(request.resource.data.headStep)
+        ) || (
+          (hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('DIRECTOR')) &&
+          lateNotSelf(resource.data) && lateBeforeDeadline(resource.data) &&
+          !('deputyStep' in resource.data) &&
+          (!('headStep' in resource.data) || request.time <= resource.data.headStep.reviewUntil) &&
+          (!('headStep' in resource.data) || resource.data.headStep.byStaffId != myStaffId()) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deputyStep', 'status']) &&
+          (request.resource.data.deputyStep.role == 'DIRECTOR' || resource.data.get('requesterLevel', 'TEACHER') != 'DEPUTY') &&
+          lateStepOk(request.resource.data.deputyStep, request.resource.data.deputyStep.role, 'DEPUTY') &&
+          request.resource.data.deputyStep.role in ['DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'] &&
+          request.resource.data.status == lateStatusFor(request.resource.data.deputyStep)
+        ) || (
+          (hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('DIRECTOR')) &&
+          lateNotSelf(resource.data) && lateBeforeDeadline(resource.data) &&
+          resource.data.status == 'APPROVED' &&
+          !('extendedUntil' in resource.data) &&
+          (resource.data.get('requesterLevel', 'TEACHER') != 'DEPUTY' || hasRole('DIRECTOR')) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['extendedUntil', 'extendedBy']) &&
+          request.resource.data.extendedUntil.toMillis() > resource.data.deadlineAt.toMillis() &&
+          request.resource.data.extendedUntil.toMillis() <= resource.data.deadlineAt.toMillis() + 86400000 &&
+          request.resource.data.extendedBy.keys().hasOnly(['byUid', 'byStaffId', 'byName', 'role', 'at']) &&
+          request.resource.data.extendedBy.byUid == request.auth.uid &&
+          request.resource.data.extendedBy.byStaffId == myStaffId() &&
+          request.resource.data.extendedBy.at == request.time &&
+          request.resource.data.extendedBy.role in ['DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'] &&
+          hasRole(request.resource.data.extendedBy.role)
+        );
 
       allow delete: if false;
     }
 
-    // 22. Parent Verification Records (identity matching for LINE/LIFF account linking)
-    // ข้อมูลอ่อนไหวตาม PDPA (hash เลขบัตร ปชช. + เบอร์โทร) — ใช้เทียบยืนยันฝั่ง backend เท่านั้น
-    // SUPER_ADMIN อ่านได้ (ดูสถานะการเชื่อมบัญชี) — เขียนจาก client ไม่ได้เลย: เขียนผ่าน Cloud Functions
-    // (importParentVerification / linkParentLine / unlinkParentLine) ที่คำนวณ HMAC ด้วย secret ฝั่งเซิร์ฟเวอร์เท่านั้น
-    // parent_link_attempts (ตัวนับกรอกผิด) ไม่มี match = ปฏิเสธทุกคน เข้าถึงได้ผ่าน Admin SDK เท่านั้น
     match /parent_verification_records/{recordId} {
       allow read: if hasRole('SUPER_ADMIN');
       allow write: if false;
     }
 
-    // 24. Student Portfolio Entries — นักเรียนบันทึกผลงานเอง (รางวัล/อบรม/ฝึกงาน/จิตอาสา)
-    //     ต้องผ่านการอนุมัติจากครูที่ปรึกษาก่อนแสดงให้ผู้ปกครอง/แดชบอร์ดวิชาการ
     match /student_portfolio_entries/{entryId} {
-      // นักเรียนเห็นของตัวเองทุกสถานะ; ครูที่ปรึกษาห้องนั้นเห็นทั้งหมด;
-      // ผู้ปกครองเห็นเฉพาะ APPROVED ของบุตรหลาน (query where('parentUid','==',uid) + where('status','==','APPROVED'))
       allow read: if hasRole('SUPER_ADMIN')
                      || (isSignedIn() && resource.data.studentUid == request.auth.uid)
                      || isHomeroomTeacherOf(resource.data.homeroomClass)
                      || (resource.data.status == 'APPROVED' && isSignedIn() && resource.data.parentUid == request.auth.uid);
 
-      // นักเรียนสร้างได้เฉพาะของตัวเอง + status เริ่มต้น PENDING เท่านั้น + ยังไม่มีผลรีวิว
-      // homeroomClass / parentUid ต้องตรงกับ students/{studentId} จริง (กัน denormalize มั่ว)
       allow create: if isSignedIn()
                        && request.resource.data.studentUid == request.auth.uid
                        && request.resource.data.status == 'PENDING'
@@ -1196,7 +996,6 @@ service cloud.firestore {
                        && request.resource.data.homeroomClass == studentField(request.resource.data.studentId, 'room', '__none__')
                        && request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__');
 
-      // ครูที่ปรึกษา/SUPER_ADMIN แก้ได้เฉพาะฟิลด์รีวิว — ห้ามแก้เนื้อหาที่นักเรียนกรอก
       allow update: if (hasRole('SUPER_ADMIN') || isHomeroomTeacherOf(resource.data.homeroomClass))
                        && request.resource.data.studentUid == resource.data.studentUid
                        && request.resource.data.studentId == resource.data.studentId
@@ -1211,24 +1010,13 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 25. Student Home Locations — พิกัด GPS + ภาพบ้านนักเรียน (วางแผนออกเยี่ยมบ้าน)
-    //     อ่อนไหวเรื่องความปลอดภัยที่อยู่อาศัย: เจ้าของ + ครูที่ปรึกษาห้องนั้น + SUPER_ADMIN เท่านั้น
-    //     **ผู้ปกครองและครูวิชาอื่นเข้าถึงไม่ได้**
     match /student_home_locations/{studentId} {
-      // resource == null = doc ยังไม่ถูกสร้าง (นักเรียนเปิดหน้าก่อนบันทึกครั้งแรก) —
-      // ต้องยอมให้ get ผ่านแบบ "ไม่มีข้อมูล" ไม่งั้น rule error (Null value) แล้ว listener พัง
-      // TASK 4 (ExecutivePortal GIS, ยืนยันจากผู้ใช้): เพิ่ม EXECUTIVE อ่านได้ทั้งโรงเรียน (ไม่ scope ห้อง)
-      // เพราะ Firestore ไม่มี field-level redaction — ฝั่ง UI ต้องรวมเป็นสรุป/จุดพิกัดเท่านั้น
-      // ห้ามโชว์ชื่อ-นามสกุลนักเรียนรายคนในแผนที่ผู้บริหาร
       allow read: if hasRole('SUPER_ADMIN')
                      || hasRole('EXECUTIVE')
                      || (isSignedIn() && resource == null)
-                     // เจ้าของตัดสินจากทะเบียน students/{id}.studentUid (ค่าจริง) ไม่ใช่สำเนาในเอกสารนี้ —
-                     // ผูกบัญชีนักเรียนใหม่ (uid เปลี่ยน) แล้วสำเนา uid เก่าไม่ทำให้เจ้าของอ่านไม่ได้
                      || isSelfStudent(studentId)
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass));
 
-      // นักเรียนเขียนของตัวเองเท่านั้น; homeroomClass ต้องตรงกับ students/{studentId} จริง
       allow create, update: if isSignedIn()
                        && request.resource.data.studentUid == request.auth.uid
                        && request.resource.data.studentId == studentId
@@ -1241,10 +1029,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 25.1 บันทึกการเยี่ยมบ้าน (แบบ สพฐ. 5 ตอน): home_visit_records/{studentId}_{ปีการศึกษา}
-    //      ข้อมูลอ่อนไหวเรื่องครอบครัว/ที่อยู่อาศัย — อ่านได้เฉพาะ SUPER_ADMIN, EXECUTIVE และครูที่ปรึกษาห้องนั้น
-    //      เขียนได้เฉพาะครูที่ปรึกษาห้องนั้น (หรือ SUPER_ADMIN); homeroomClass ต้องตรง students/{id}.room จริง
-    //      ผู้ปกครอง/นักเรียน/ครูวิชาอื่นเข้าถึงไม่ได้; ห้ามลบ (เก็บเป็นหลักฐาน)
     match /home_visit_records/{recordId} {
       allow read: if hasRole('SUPER_ADMIN')
                      || hasRole('STUDENT_AFFAIRS')
@@ -1261,16 +1045,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 25.2 ข้อมูลเยี่ยมบ้านฝั่งนักเรียน (แบบ สพฐ. ข้อ 1-3, 9-11, 17-18, 20, 24): home_visit_student_info/{studentId}
-    //      นักเรียนเจ้าของเขียน/อ่านของตัวเอง (studentUid ตรง students/{id}); ครูที่ปรึกษาห้องนั้น/SUPER_ADMIN/EXECUTIVE อ่านได้
-    //      homeroomClass ต้องตรง students/{id}.room จริง; ผู้ปกครอง/ครูวิชาอื่นอ่านไม่ได้; ห้ามลบ
     match /home_visit_student_info/{studentId} {
       allow read: if hasRole('SUPER_ADMIN')
                      || hasRole('STUDENT_AFFAIRS')
                      || hasRole('EXECUTIVE')
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass))
-                     // เจ้าของตัดสินจากทะเบียน students/{id}.studentUid (ค่าจริง) ไม่ใช่สำเนาในเอกสารนี้ —
-                     // ผูกบัญชีนักเรียนใหม่ (uid เปลี่ยน) แล้วสำเนา uid เก่าในเอกสารไม่ทำให้เจ้าของอ่านไม่ได้
                      || isSelfStudent(studentId);
       allow create, update: if isSignedIn()
                        && request.resource.data.studentId == studentId
@@ -1280,15 +1059,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 25.3 ข้อมูลเยี่ยมบ้านฝั่งผู้ปกครอง (ข้อ 7-8, 13, 15-16, 22-24): home_visit_family_info/{studentId}
-    //      ผู้ปกครองที่ผูก parentUid กับนักเรียนเขียน/อ่านได้ (ตรง students/{id}.parentUid); ครูที่ปรึกษาห้องนั้น/SUPER_ADMIN/EXECUTIVE อ่านได้
-    //      นักเรียน/ครูวิชาอื่นอ่านไม่ได้ (มีข้อมูลรายได้/ครัวเรือน); ห้ามลบ
     match /home_visit_family_info/{studentId} {
       allow read: if hasRole('SUPER_ADMIN')
                      || hasRole('STUDENT_AFFAIRS')
                      || hasRole('EXECUTIVE')
                      || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass))
-                     // ผู้ปกครองตัดสินจากทะเบียน students/{id}.parentUid (ค่าจริง) ไม่ใช่สำเนาในเอกสารนี้
                      || (isSignedIn() && studentField(studentId, 'parentUid', '__none__') == request.auth.uid);
       allow create, update: if isSignedIn()
                        && request.resource.data.studentId == studentId
@@ -1298,10 +1073,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 25.3.1 ข้อมูลส่วนหัว ปพ.6 ของนักเรียน (ให้งานทะเบียน/ครูที่ปรึกษา/ผู้ปกครองตรวจความถูกต้อง): student_registry_profiles/{studentId}
-    //      ⚠️ มีเลขประจำตัวประชาชน = ข้อมูลอ่อนไหว PDPA — แยกจากแบบเยี่ยมบ้านเพื่อจำกัดผู้อ่านให้น้อยที่สุด
-    //      อ่าน (get รายคน): นักเรียนเจ้าของ / ผู้ปกครองตัวจริง (ตามทะเบียน) / ครูที่ปรึกษาห้องนั้น / SUPER_ADMIN เท่านั้น (EXECUTIVE และครูวิชาอื่นอ่านไม่ได้; list ปิด)
-    //      เขียน: นักเรียนเจ้าของเท่านั้น (studentUid/homeroomClass ตรงทะเบียน), nationalId ว่างหรือ 13 หลัก (checksum ตรวจที่ client); ห้ามลบ
     match /student_registry_profiles/{studentId} {
       allow get: if hasRole('SUPER_ADMIN')
                     || (resource != null && isHomeroomTeacherOf(resource.data.homeroomClass))
@@ -1316,7 +1087,7 @@ service cloud.firestore {
                        && request.resource.data.studentUid == studentField(studentId, 'studentUid', '__none__')
                        && request.resource.data.homeroomClass == studentField(studentId, 'room', '__none__')
                        && request.resource.data.nationalId is string && request.resource.data.nationalId.matches('^([0-9]{13})?$')
-                       && request.resource.data.get('fatherName', '') is string && request.resource.data.get('fatherName', '').size() <= 120   // รุ่นเก่า (ชื่อบิดา/มารดามาจาก student_parent_names แล้ว)
+                       && request.resource.data.get('fatherName', '') is string && request.resource.data.get('fatherName', '').size() <= 120
                        && request.resource.data.get('motherName', '') is string && request.resource.data.get('motherName', '').size() <= 120
                        && request.resource.data.enrolledAt is string && request.resource.data.enrolledAt.size() <= 10
                        && request.resource.data.gender in ['M', 'F', '']
@@ -1329,8 +1100,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 25.3.2 สำเนาชื่อบิดา/มารดา (จากแบบเยี่ยมบ้านฝั่งผู้ปกครอง) ไว้แสดงในส่วนหัว ปพ.6: student_parent_names/{studentId}
-    //      เขียน: ผู้ปกครองตัวจริงเท่านั้น (ตามทะเบียน) พร้อมการบันทึกแบบเยี่ยมบ้าน; อ่าน: ผู้ปกครอง/นักเรียนเจ้าของ/ครูที่ปรึกษาห้องนั้น/SUPER_ADMIN; เก็บเฉพาะชื่อ (ไม่มีรายได้/ครัวเรือน); ห้ามลบ
     match /student_parent_names/{sid} {
       allow get: if hasRole('SUPER_ADMIN') || isParentOfStudent(sid) || isSelfStudent(sid) || isHomeroomOfStudent(sid);
       allow list: if false;
@@ -1346,9 +1115,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 25.4 ข้อมูลอ้างอิงที่แอดมินแก้ไขได้: รายชื่อโรงเรียน (reference_schools) / หมู่บ้าน (reference_villages)
-    //      เก็บเฉพาะส่วนที่ต่างจากข้อมูลชุดหลักในแอป (เพิ่มใหม่/แก้/ซ่อน) — ไม่ใช่ข้อมูลอ่อนไหว: ผู้ที่ล็อกอินอ่านได้ (ฟอร์มนักเรียนใช้เลือก)
-    //      เขียน/ลบ: SUPER_ADMIN เท่านั้น (ห้าม bare isSignedIn() ที่ write)
     match /reference_schools/{refId} {
       allow read: if isSignedIn();
       allow create, update: if hasRole('SUPER_ADMIN')
@@ -1364,19 +1130,14 @@ service cloud.firestore {
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
-    // 26. Department config — กลุ่มสาระฯ/กลุ่มงาน (แอดมินจัดการ)
     match /department_config/{deptId} {
       allow read: if isSignedIn();
       allow write: if hasRole('SUPER_ADMIN');
     }
 
-    // 27. Elective activity config — ชุมนุม/กิจกรรมตามความสนใจ (ELECTIVE, สมัครเอง มีที่นั่งจำกัด)
-    // ที่แอดมินงานชุมนุมสร้างชื่อ+จำนวนรับ+ครูรับผิดชอบเองตรงๆ (ออกแบบใหม่ — ไม่ผูกกับ subjectCode
-    // ที่ import จากตารางสอนอีกต่อไป)
     match /elective_activities_config/{configId} {
       allow read: if isSignedIn();
       allow write: if hasRole('SUPER_ADMIN') || hasRole('ACADEMIC_HEAD');
-      // ครูรับผิดชอบชุมนุมนั้น ตั้ง/แก้ "ช่วงเวลารับสมัคร + เปิด/ปิด" ของชุมนุมตัวเองได้เท่านั้น (แตะฟิลด์อื่นไม่ได้)
       allow update: if isResponsibleTeacherOfActivity(configId)
                        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['enrollmentStatus', 'enrollmentOpensAt', 'enrollmentClosesAt'])
                        && request.resource.data.get('enrollmentStatus', 'OPEN') in ['OPEN', 'CLOSED']
@@ -1384,16 +1145,9 @@ service cloud.firestore {
                        && (request.resource.data.get('enrollmentClosesAt', null) == null || request.resource.data.enrollmentClosesAt is timestamp);
     }
 
-    // 28. Activity enrollments — การสมัคร/ถอนชุมนุมของนักเรียน (ไม่ลบ doc จริง mark removedAt แทน)
-    // read กว้าง (isSignedIn) เพราะนักเรียนต้องเห็นจำนวนที่สมัครแล้วของ "คนอื่น" ด้วยเพื่อคำนวณที่นั่ง
-    // เหลือ — ไม่ใช่ข้อมูลอ่อนไหวระดับเดียวกับสุขภาพจิต/การเงิน (แค่ว่าใครสมัครชุมนุมอะไร)
     match /activity_enrollments/{enrollmentId} {
       allow read: if isSignedIn();
 
-      // สมัคร: สร้าง doc ของตัวเองเท่านั้น ต้องยังไม่ถอน (removedAt/removedBy ต้องเป็น null ตอนสร้าง)
-      // และชุมนุมนั้นต้องยังเปิดรับสมัครอยู่ (enrollmentStatus == 'OPEN') — ปิดรับสมัครแล้วห้ามสมัครใหม่
-      // ผ่าน Firestore ตรงๆ แม้จะข้าม UI มา (ปุ่ม "สมัคร" ฝั่ง UI ก็ disable ไว้แล้วเช่นกัน) — เช็ค
-      // exists() ก่อนเสมอ กัน get() พังตอน activityId ไม่มี config จริง (ให้ผ่านเหมือนเดิม ไม่ใช่ error)
       allow create: if hasRole('STUDENT')
                        && request.resource.data.studentUid == request.auth.uid
                        && request.resource.data.removedAt == null
@@ -1401,11 +1155,7 @@ service cloud.firestore {
                        && studentField(request.resource.data.studentId, 'studentUid', '__none__') == request.auth.uid
                        && activityEnrollmentOpen(request.resource.data.activityId);
 
-      // ถอน: แก้ได้เฉพาะ removedAt/removedBy/removedReason เท่านั้น — นักเรียนถอนตัวเอง
-      // (removedBy ต้องเป็น null) หรือครูรับผิดชอบชุมนุมนั้นถอน (removedBy ต้องเป็น uid ตัวเอง)
       allow update: if (
-                         // นักเรียนสมัครใหม่หลังถอน: doc ต้องเคยถอนแล้ว, กลับเป็น active (removedAt/By/Reason = null),
-                         // แตะได้เฉพาะ enrolledAt + ฟิลด์สถานะ, และชุมนุมต้องยังเปิดรับสมัคร
                          hasRole('STUDENT')
                          && resource.data.studentUid == request.auth.uid
                          && resource.data.removedAt != null
@@ -1430,10 +1180,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 28.1 Activity enrollment counts — ตัวนับที่นั่งต่อ activityId (derived, sync คู่กับ
-    // activity_enrollments เสมอในทรานแซกชันเดียวกัน — ดู enrollInActivity/withdrawFromActivity)
-    // จำเป็นเพราะ Firestore transaction อ่านได้แค่ document เดียว query ไม่ได้ ใช้ตัวนับนี้แทน
-    // การนับจริงจาก activity_enrollments เพื่อตรวจที่นั่งแบบ atomic กัน race condition
     match /activity_enrollment_counts/{activityId} {
       allow read: if isSignedIn();
       allow write: if (hasRole('STUDENT') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER') || hasRole('SUPER_ADMIN'))
@@ -1441,36 +1187,22 @@ service cloud.firestore {
                       && request.resource.data.count >= 0;
     }
 
-    // 29. House config (คณะสี) — รากฐานสำหรับระบบคะแนนถ้วยในอนาคต ยังไม่มีการคำนวณคะแนนตอนนี้
     match /house_config/{houseId} {
       allow read: if isSignedIn();
       allow write: if hasRole('SUPER_ADMIN') || hasRole('ACADEMIC_HEAD');
     }
 
-    // 30. Guidance Counseling Cases — เนื้อหาการให้คำปรึกษาจิตวิทยาของผู้เยาว์ ข้อมูลอ่อนไหวที่สุด
-    // ในระบบ ตั้งใจให้เข้มงวดกว่า collection สุขภาพจิตอื่นๆ ทุกตัว: GUIDANCE_COUNSELOR/SUPER_ADMIN
-    // เท่านั้น — ครูประจำชั้น ครูวิชาอื่น ผู้ปกครอง และตัวนักเรียนเจ้าของเคส "ห้ามอ่านได้" ทั้งหมด
-    // (ต่างจาก student_screenings_2q/phq9/student_assessments_sdq ที่ยังให้ HOMEROOM_TEACHER/
-    // self อ่านได้ — เคสนี้คือบันทึกการให้คำปรึกษาจริง ไม่ใช่แค่ผลคัดกรอง)
     match /guidance_counseling_cases/{caseId} {
-      // เห็นเฉพาะ "ครูเจ้าของเคส" (counselorUid == uid ผู้เขียน) — ครูแนะแนวคนอื่นก็อ่านไม่ได้
-      // SUPER_ADMIN คงไว้เพื่อดูแลระบบ/กู้เคสที่เจ้าของลาออก
       allow read: if hasRole('SUPER_ADMIN') ||
                      (hasRole('GUIDANCE_COUNSELOR') && resource.data.counselorUid == request.auth.uid);
-      // counselorUid ต้องตรงกับผู้เขียนจริงเสมอตอนสร้าง กันปลอมชื่อผู้บันทึก
       allow create: if (hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR')) &&
                        request.resource.data.counselorUid == request.auth.uid;
-      // เจ้าของเคสแก้ได้เฉพาะสถานะ/เวลา (ย้ายเจ้าของเคสไม่ได้)
       allow update: if hasRole('SUPER_ADMIN') ||
                        (hasRole('GUIDANCE_COUNSELOR') && resource.data.counselorUid == request.auth.uid &&
                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'lastSessionDate']));
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
-    // 31. Infirmary Visits — ห้องพยาบาล บันทึกอาการ/การรักษา ตั้งใจให้ "เห็นได้" โดยผู้ปกครองและ
-    // นักเรียนเจ้าของ (ต่างจาก guidance_counseling_cases ด้านบนที่ปิดไม่ให้อ่านเลย) —
-    // studentUid/parentUid ต้องตรงกับ students/{studentId} จริงเสมอ กันพยาบาลพิมพ์ผิดแล้วส่ง
-    // ข้อมูลไปให้ผู้ปกครองคนละครอบครัวเห็น (ดู studentField())
     match /infirmary_visits/{visitId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('INFIRMARY_STAFF') ||
@@ -1481,8 +1213,6 @@ service cloud.firestore {
                        request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__') &&
                        request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', '__none__');
 
-      // พยาบาล/แอดมินแก้เนื้อหาได้แต่ห้ามย้ายเจ้าของ (studentUid/parentUid ต้องคงเดิม) —
-      // ผู้ปกครองเจ้าของ (parentUid ตรง) แก้ได้เฉพาะ "กดรับทราบ" (parentAcknowledged/acknowledgedAt) เท่านั้น
       allow update: if (
                         (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF')) &&
                         request.resource.data.studentUid == resource.data.studentUid &&
@@ -1495,8 +1225,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 31b. คลังยา/เวชภัณฑ์ห้องพยาบาล — แก้ยอดคงเหลือได้ก็ต่อเมื่อมี "รายการเคลื่อนไหว" (append-only) คู่กันใน batch/transaction
-    // เดียวกันเท่านั้น (existsAfter/getAfter ผ่าน field lastMovementId) ยอดห้ามติดลบ; ข้อมูลไม่เกี่ยวผู้ปกครอง/นักเรียน
     function stockMovementOk(med, oldStock) {
       let mv = getAfter(/databases/$(database)/documents/infirmary_stock_movements/$(med.lastMovementId));
       return mv.data.medicineId == med.id
@@ -1533,7 +1261,7 @@ service cloud.firestore {
                             && request.resource.data.lastMovementId != resource.data.get('lastMovementId', null)
                             && stockMovementOk(request.resource.data, resource.data.stock)));
 
-      allow delete: if false; // ปิดการใช้งาน (active=false) แทนการลบ — ประวัติเบิกจ่ายยังอ้างถึง
+      allow delete: if false;
     }
 
     match /infirmary_stock_movements/{movementId} {
@@ -1551,31 +1279,20 @@ service cloud.firestore {
                         || request.resource.data.type == 'ADJUST')
                     && request.resource.data.balanceAfter is int && request.resource.data.balanceAfter >= 0
                     && request.resource.data.at is string
-                    // ต้องมาพร้อมการอัปเดตยอดของยานั้นจริง (ชี้กลับด้วย lastMovementId)
                     && getAfter(/databases/$(database)/documents/infirmary_medicines/$(request.resource.data.medicineId)).data.lastMovementId == movementId;
 
       allow update, delete: if false;
     }
 
-    // 32. Semester Health Log — น้ำหนัก/ส่วนสูงรายภาคเรียน
-    // ยืนยันจากโรงเรียน: นักเรียนกรอกเอง "ภาคเรียนละ 1 ครั้ง" (ลดภาระงานพยาบาลที่ดูแลทั้งโรงเรียน)
-    // doc id = {studentId}_{academicYear}_{term} → กรอกซ้ำภาคเรียนเดิมชนกับ doc เดิม create ไม่ผ่าน
-    // (exists) = บังคับ 1 ครั้ง/ภาคเรียนที่ layer นี้ด้วย. พยาบาล (INFIRMARY_STAFF) บันทึกแทน/แก้ไข
-    // ได้กรณีพิเศษ (นักเรียนลืมกรอก/กรอกผิด). ครูที่ปรึกษา/แนะแนว/ผู้ปกครอง อ่านได้
     match /student_semester_health/{docId} {
       allow read: if hasRole('SUPER_ADMIN') ||
                      hasRole('INFIRMARY_STAFF') ||
                      hasRole('HOMEROOM_TEACHER') ||
                      hasRole('GUIDANCE_COUNSELOR') ||
                      (isSignedIn() && (resource.data.studentUid == request.auth.uid || resource.data.parentUid == request.auth.uid)) ||
-                     // ตัดสินจากทะเบียน students/{id} จริง ไม่ใช่สำเนา studentUid/parentUid ในเอกสาร — สำเนาเก่าค้างได้เมื่อผูกบัญชีใหม่/ผู้ปกครองเชื่อมทีหลัง
-                     // (query ต้อง where('studentId','==',id))
                      isSelfStudent(resource.data.studentId) ||
                      isParentOfStudent(resource.data.studentId);
 
-      // studentUid/parentUid ต้อง denormalize ตรงกับ students/{studentId} จริงเสมอ (กันส่งข้อมูล
-      // ไปให้ครอบครัวอื่นเห็น) + docId ต้องเป็น {studentId}_{academicYear}_{term} เป๊ะ
-      // (กันนักเรียนตั้ง id มั่วเพื่อกรอกหลายครั้งต่อภาคเรียน)
       allow create: if request.resource.data.studentUid == studentField(request.resource.data.studentId, 'studentUid', '__none__') &&
                        request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', null) &&
                        docId == request.resource.data.studentId + '_' + request.resource.data.academicYear + '_' + request.resource.data.term &&
@@ -1588,14 +1305,10 @@ service cloud.firestore {
                          )
                        );
 
-      // แก้ไข/บันทึกแทน: พยาบาล/แอดมิน เท่านั้น (นักเรียนแก้ย้อนหลังเองไม่ได้) — ห้ามย้ายเจ้าของ
       allow update: if (hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF')) &&
                        request.resource.data.studentId == resource.data.studentId &&
                        request.resource.data.studentUid == resource.data.studentUid;
 
-      // เอกสารค้างของ "บัญชีเก่า": นักเรียนถูกผูกบัญชีใหม่ (students/{id}.studentUid เปลี่ยน) แต่เอกสารภาคเรียนนี้ยังมี studentUid เดิม
-      // → นักเรียนตัวจริงมองไม่เห็น/เขียนทับไม่ได้ ทั้งที่ยังไม่เคยบันทึกด้วยบัญชีนี้ — อนุญาตให้นักเรียนตัวจริงตามทะเบียนเขียนทับได้ "ครั้งเดียว"
-      // (หลังเขียน studentUid ตรงบัญชีนี้ จึงกลับไปเป็นล็อกตามปกติ); ต้องเป็นภาคเรียนเดิม/รหัสเอกสารเดิม ห้ามแตะเอกสารของบัญชีปัจจุบัน
       allow update: if isSelfStudent(resource.data.studentId) &&
                        resource.data.studentUid != request.auth.uid &&
                        request.resource.data.studentId == resource.data.studentId &&
@@ -1610,12 +1323,6 @@ service cloud.firestore {
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
-    // 33. Student Health Profile — โรคประจำตัว / แพ้ยา-อาหาร / ความต้องการดูแลพิเศษในชั้นเรียน (1 doc ต่อนักเรียน, id = studentId)
-    // ครอบครัว (นักเรียนเจ้าของ หรือผู้ปกครองตัวจริงตามทะเบียน) เป็นคนกรอก/แก้; พยาบาล (INFIRMARY_STAFF) "ยืนยัน" ได้อย่างเดียว
-    // — การแก้ของครอบครัวล้างการยืนยันเสมอ (verifiedAt/By ต้องเป็น null) จึงไม่มีทางที่ข้อมูลใหม่ติดตรา "พยาบาลยืนยันแล้ว"
-    // อ่านได้: แอดมิน/พยาบาล/ครูที่ปรึกษาของห้อง (ต้องรู้ข้อควรระวังในชั้นเรียน)/นักเรียนเจ้าของ/ผู้ปกครอง — ไม่เปิดให้คนอื่น
-    // ⚠️ rules ตรวจรูปร่าง (ฟิลด์ที่อนุญาต, ขนาดรายการ ≤ 20, ตรา/ผู้เขียน/เวลา) แต่วนตรวจฟิลด์ในแต่ละรายการไม่ได้ — ฝั่ง client ตรวจเอง
-    // (src/lib/healthProfile.ts validateHealthProfile)
     match /student_health_profiles/{sid} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') ||
                      isSelfStudent(sid) || isParentOfStudent(sid) || isHomeroomOfStudent(sid);
@@ -1637,7 +1344,6 @@ service cloud.firestore {
                        && request.resource.data.verifiedByName == null;
 
       allow update: if (
-                         // ครอบครัวแก้รายการ → ล้างตรายืนยัน, เจ้าของ/ทะเบียนห้ามเปลี่ยน
                          (isSelfStudent(sid) || isParentOfStudent(sid))
                          && request.resource.data.keys().hasOnly(['studentId', 'studentUid', 'parentUid', 'chronicIllnesses', 'allergies', 'specialCare',
                                                                  'updatedAt', 'updatedByUid', 'updatedByRole', 'verifiedAt', 'verifiedByUid', 'verifiedByName'])
@@ -1654,7 +1360,6 @@ service cloud.firestore {
                          && request.resource.data.verifiedByUid == null
                          && request.resource.data.verifiedByName == null
                        ) || (
-                         // พยาบาล/แอดมิน: ยืนยันได้อย่างเดียว (แตะรายการข้อมูลไม่ได้)
                          (hasRole('INFIRMARY_STAFF') || hasRole('SUPER_ADMIN'))
                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['verifiedAt', 'verifiedByUid', 'verifiedByName'])
                          && request.resource.data.verifiedAt == request.time
@@ -1665,10 +1370,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 35. หมู่เลือด student_blood_type/{studentId} — หมู่เลือดไม่เปลี่ยนตลอดชีวิต
-    //     นักเรียนเจ้าของ/ผู้ปกครองตัวจริง "เลือกได้ครั้งเดียว" (create ตอนยังไม่มีเอกสารเท่านั้น — update ไม่ได้)
-    //     แก้ภายหลังได้เฉพาะพยาบาล (INFIRMARY_STAFF)/SUPER_ADMIN; ลบไม่ได้; ค่าต้องเป็น A/B/AB/O
-    //     studentUid/parentUid ต้องตรงทะเบียน students/{id} จริง; อ่าน: แอดมิน/พยาบาล/ครูที่ปรึกษา/นักเรียน/ผู้ปกครอง
     match /student_blood_type/{sid} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') ||
                      isSelfStudent(sid) || isParentOfStudent(sid) || isHomeroomOfStudent(sid);
@@ -1696,10 +1397,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 34. ผู้ติดต่อฉุกเฉิน student_emergency_contacts/{studentId}
-    //     สำเนาเฉพาะ ชื่อ/ความสัมพันธ์/เบอร์ ที่สกัดจากแบบเยี่ยมบ้านฝั่งผู้ปกครอง (บิดา/มารดา/ผู้ปกครอง) ให้พยาบาลใช้ติดต่อตอนฉุกเฉิน
-    //     เพราะ home_visit_family_info มีรายได้/ครัวเรือน (พยาบาลอ่านไม่ได้ — ห้ามเปิดสิทธิ์นั้น)
-    //     เขียน: ผู้ปกครองตัวจริงของนักเรียนเท่านั้น (พร้อมการบันทึกแบบเยี่ยมบ้านใน batch เดียว); อ่าน: พยาบาล/แอดมิน/ครูที่ปรึกษา/ผู้ปกครอง; ลบไม่ได้
     match /student_emergency_contacts/{sid} {
       allow read: if hasRole('SUPER_ADMIN') || hasRole('INFIRMARY_STAFF') || isParentOfStudent(sid) || isHomeroomOfStudent(sid);
       allow create, update: if isParentOfStudent(sid)
@@ -1712,11 +1409,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 41. แผนการสอน/โครงการสอน (นิเทศเฟส 2) — lesson_plan_submissions: ครูแปะลิงก์ https ต่อรายวิชา/ภาคเรียน
-    //     (ตรรกะ/ข้อความอยู่ src/lib/lessonPlans.ts) ตรวจ 2 ขั้น: หัวหน้า/รองหัวหน้ากลุ่มสาระฯ (SUBMITTED → DEPT_APPROVED)
-    //     แล้วหัวหน้างานนิเทศ (DEPT_APPROVED → APPROVED); ขอแก้ไข (REVISION) ครูแก้ลิงก์แล้วส่งใหม่ = เริ่มขั้นแรกอีกครั้ง
-    //     อ่าน: เจ้าของ / หัวหน้างานนิเทศ / ผอ. / รองผอ.วิชาการ / หัวหน้า-รองหัวหน้ากลุ่มสาระฯ ของกลุ่มสาระฯ นั้น (EXECUTIVE ไม่เห็นรายบุคคล)
-    //     หัวหน้ากลุ่มสาระฯ ตรวจแผนของตัวเองไม่ได้ — แผนของหัวหน้ากลุ่ม (หรือครูที่ไม่มีกลุ่มสาระฯ) ขั้นแรกให้หัวหน้างานนิเทศตรวจ
     function lpTeacherIsHead(tid) {
       return exists(/databases/$(database)/documents/staff/$(tid))
         && ('HEAD_OF_DEPARTMENT' in get(/databases/$(database)/documents/staff/$(tid)).data.get('roles', []));
@@ -1725,7 +1417,6 @@ service cloud.firestore {
       return tid != myStaffId() && (supInMyDept(dept) ||
         (hasRole('INSTRUCTIONAL_SUPERVISOR') && (dept == '' || lpTeacherIsHead(tid))));
     }
-    // แบบประเมินแผน 15 ข้อ (scores: q1–q15 ข้อละ 1–5 — ข้อความข้ออยู่ใน src/lib/lessonPlans.ts PLAN_CRITERIA) + ความเห็น
     function lpScoresOk(r) {
       return r.scores is map && r.scores.size() == 15 && r.scores.keys().hasOnly(['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'q7', 'q8', 'q9', 'q10', 'q11', 'q12', 'q13', 'q14', 'q15']) &&
         r.scores.q1 in [1, 2, 3, 4, 5] &&
@@ -1744,8 +1435,6 @@ service cloud.firestore {
         r.scores.q14 in [1, 2, 3, 4, 5] &&
         r.scores.q15 in [1, 2, 3, 4, 5];
     }
-    // แบบประเมินที่แอดมินแก้ได้ (เวอร์ชัน ≥ 2): รายการข้ออยู่ใน evaluation_template_versions/LESSON_PLAN_{n}.ids — เวอร์ชัน 1 = 15 ข้อด้านบน (ไม่มีเอกสาร)
-    // ผลที่บันทึกใหม่ต้องใช้เวอร์ชันปัจจุบันเท่านั้น (ตัวชี้ evaluation_templates/LESSON_PLAN); review ที่ไม่มี templateVersion = เวอร์ชัน 1
     function lpTplCurrent() {
       return exists(/databases/$(database)/documents/evaluation_templates/LESSON_PLAN)
         ? get(/databases/$(database)/documents/evaluation_templates/LESSON_PLAN).data.currentVersion : 1;
@@ -1802,7 +1491,6 @@ service cloud.firestore {
                        && request.resource.data.updatedAt == request.time;
 
       allow update: if (
-          // ครูเจ้าของ: แก้ลิงก์/ประเภท/หมายเหตุ ได้ตอนรอตรวจขั้นแรกหรือถูกขอแก้ไข แล้วส่งใหม่
           myStaffId() != '' && resource.data.teacherStaffId == myStaffId()
           && resource.data.stage in ['SUBMITTED', 'REVISION']
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['kind', 'url', 'urls', 'note', 'stage', 'updatedAt'])
@@ -1810,7 +1498,6 @@ service cloud.firestore {
           && lpContentOk(request.resource.data)
           && request.resource.data.updatedAt == request.time
         ) || (
-          // ขั้นที่ 1: หัวหน้า/รองหัวหน้ากลุ่มสาระฯ
           myStaffId() != '' && lpDeptStageActor(resource.data.departmentId, resource.data.teacherStaffId)
           && resource.data.stage == 'SUBMITTED'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stage', 'deptReview', 'updatedAt'])
@@ -1818,7 +1505,6 @@ service cloud.firestore {
           && lpReviewOk(request.resource.data.deptReview, request.resource.data.stage, 'DEPT_APPROVED')
           && request.resource.data.updatedAt == request.time
         ) || (
-          // ขั้นที่ 2: หัวหน้างานนิเทศ
           myStaffId() != '' && hasRole('INSTRUCTIONAL_SUPERVISOR') && resource.data.teacherStaffId != myStaffId()
           && resource.data.stage == 'DEPT_APPROVED'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stage', 'finalReview', 'updatedAt'])
@@ -1830,15 +1516,11 @@ service cloud.firestore {
       allow delete: if myStaffId() != '' && resource.data.teacherStaffId == myStaffId() && resource.data.stage in ['SUBMITTED', 'REVISION'];
     }
 
-    // 42. โครงการสอนรายสัปดาห์ (นิเทศเฟส 2.5) — 1 ฉบับต่อ (ภาคเรียน, ครู, รหัสวิชา) ใช้ร่วมทุกห้องที่ครูคนนั้นสอนรหัสเดียวกัน
-    // ครูเจ้าของเขียนเอง (ฉบับร่างบันทึกซ้ำได้); หัวหน้า/รองกลุ่มสาระฯ (แผนกตน), หัวหน้างานนิเทศ, ผอ., รอง ผอ.วิชาการ อ่านได้อย่างเดียว
-    // รายการย่อย (units/indicators/assessment) ตรวจได้แค่ชนิด/จำนวน — ความถูกต้องรายแถวตรวจที่ client (src/lib/teachingProject.ts)
     function tpDocOk(d) {
       return d.keys().hasOnly(['semesterId', 'academicYear', 'term', 'teacherStaffId', 'teacherName', 'departmentId', 'courseKey',
                                'courseCode', 'courseName', 'kind', 'levelLabel', 'credits', 'hoursPerWeek', 'courseType',
                                'description', 'indicators', 'units', 'assessment', 'assessmentNote', 'coTeacherStaffIds', 'coTeacherNames', 'createdAt', 'updatedAt'])
         && d.keys().hasAll(['semesterId', 'teacherStaffId', 'departmentId', 'courseKey', 'courseCode', 'kind', 'description', 'indicators', 'units', 'assessment'])
-        // ครูร่วมสอน (แชร์ฉบับเดียวกัน): รายชื่อ staff id ≤10 + สำเนาชื่อเรียงคู่กัน — รุ่นเก่าไม่มี field นี้
         && d.get('coTeacherStaffIds', []) is list && d.get('coTeacherStaffIds', []).size() <= 10
         && d.get('coTeacherNames', []) is list && d.get('coTeacherNames', []).size() == d.get('coTeacherStaffIds', []).size()
         && d.semesterId.matches('^[0-9]{4}_[12]$') && d.academicYear is string && d.term in ['1', '2']
@@ -1856,8 +1538,6 @@ service cloud.firestore {
         && d.assessment is list && d.assessment.size() <= 20;
     }
 
-    // สัดส่วนคะแนนรายวิชา (เต็ม 4 ช่อง รวม 100) — เก็บต่อครู+วิชา id = {staffId}__{courseId}
-    // เจ้าของเท่านั้นอ่าน/เขียน (แอดมินอ่านได้); ไม่ลบ (ตั้งใหม่ทับ)
     match /course_score_settings/{sid} {
       function csOk(d) {
         return d.keys().hasOnly(['ownerStaffId','courseId','maxPreMidterm','maxMidterm','maxPostMidterm','maxFinal','updatedAt'])
@@ -1875,7 +1555,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ครูร่วมสอน (`coTeacherStaffIds` ที่เจ้าของเลือก) อ่าน+แก้เนื้อหาฉบับเดียวกันได้ แต่แก้รายชื่อครูร่วม/ชื่อเจ้าของ/ลบไม่ได้
     match /teaching_projects/{pid} {
       allow read: if myStaffId() != '' && (
         resource.data.teacherStaffId == myStaffId() ||
@@ -1909,9 +1588,6 @@ service cloud.firestore {
       allow delete: if myStaffId() != '' && resource.data.teacherStaffId == myStaffId();
     }
 
-    // 43. บันทึก PLC (นิเทศเฟส 3) — 1 เอกสาร = 1 ครั้งที่พบกัน; ครูผู้บันทึกเขียน/แก้/ลบของตนเอง
-    // อ่านได้: เจ้าของ, หัวหน้า/รองกลุ่มสาระฯ (แผนกตน), หัวหน้างานนิเทศ, ผอ., รอง ผอ.วิชาการ (EXECUTIVE/SUPER_ADMIN ไม่เห็นรายบุคคล)
-    // รายการลิงก์ https (ตรวจทีละตำแหน่งถึง 10 — ขนาดจำกัดด้วย size() <= max จึงไม่มีตำแหน่งเกิน)
     function httpsAt(l, i) { return l.size() <= i || (l[i] is string && l[i].matches('^https://[^ ]{4,490}$')); }
     function httpsListOk(l, max) {
       return l is list && l.size() <= max
@@ -1944,7 +1620,6 @@ service cloud.firestore {
     match /plc_logs/{lid} {
       allow read: if myStaffId() != '' && (
         resource.data.authorStaffId == myStaffId() ||
-        // สมาชิกที่ผู้บันทึกเลือกจากทะเบียนบุคลากร เห็นบันทึกเดียวกัน (อ่านอย่างเดียว — แก้/ลบได้เฉพาะผู้บันทึก)
         ('memberStaffIds' in resource.data && myStaffId() in resource.data.memberStaffIds) ||
         hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') ||
         supInMyDept(resource.data.departmentId)
@@ -1961,7 +1636,6 @@ service cloud.firestore {
       allow delete: if myStaffId() != '' && resource.data.authorStaffId == myStaffId();
     }
 
-    // 44. บันทึกสะท้อนคิดรายภาคเรียน (นิเทศเฟส 3) — 1 ฉบับต่อครูต่อภาคเรียน id = {ปี}_{ภาค}_{staffId}; สิทธิ์อ่านเหมือน plc_logs
     function reflDocOk(d) {
       return d.keys().hasOnly(['semesterId', 'academicYear', 'term', 'teacherStaffId', 'teacherName', 'departmentId',
                                'outcomes', 'strengths', 'problems', 'improvements', 'nextPlan', 'createdAt', 'updatedAt'])
@@ -1993,21 +1667,15 @@ service cloud.firestore {
       allow delete: if myStaffId() != '' && resource.data.teacherStaffId == myStaffId();
     }
 
-    // 40. สรุปสารสนเทศโรงเรียนสำหรับหน้าสาธารณะ /info — อ่านได้ทุกคนแม้ไม่ล็อกอิน (เป็นตัวเลขรวมที่ซ่อนช่อง <5 แล้วเท่านั้น
-    //     ไม่มีข้อมูลรายบุคคล); client เขียนไม่ได้เด็ดขาด (Cloud Function scheduledPublicSummary/refreshPublicSummary ใช้ Admin SDK)
-    //     อ่านได้เฉพาะเอกสาร 'current' เอกสารเดียว — ห้ามเพิ่มข้อมูลละเอียดลงเอกสารนี้
     match /public_summary/{docId} {
       allow get: if docId == 'current';
       allow list, write: if false;
     }
 
-    // Default Deny All Catch-All for unknown paths
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // 36. ตรวจสายตา/การได้ยินประจำปี student_checkups/{studentId}_{academicYear} — พยาบาล/แอดมินบันทึกเท่านั้น
-    //     นักเรียน/ผู้ปกครอง/ครูที่ปรึกษาอ่านได้ตามทะเบียนจริง (query ต้อง where('studentId','==',id)); ลบไม่ได้
     function checkupShapeOk(d) {
       return d.keys().hasOnly(['studentId', 'academicYear', 'examDate', 'visionLeft', 'visionRight', 'visionResult', 'hearingResult', 'note', 'recordedByUid', 'recordedByName', 'recordedAt'])
         && d.studentId is string && d.academicYear is string && d.academicYear.size() == 4
@@ -2035,7 +1703,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // 37. ประวัติวัคซีน student_vaccinations/{id} — พยาบาล/แอดมินบันทึก/แก้ (ถ่ายจากสมุดสุขภาพ/รพ.สต.); ลบเฉพาะ SUPER_ADMIN
     function vaccinationShapeOk(d) {
       return d.keys().hasOnly(['studentId', 'vaccine', 'doseDate', 'place', 'note', 'recordedByUid', 'recordedByName', 'recordedAt'])
         && d.studentId is string
@@ -2059,8 +1726,6 @@ service cloud.firestore {
       allow delete: if hasRole('SUPER_ADMIN');
     }
 
-    // 38. ประวัติบริจาคโลหิต blood_donations/{id} — นักเรียน (subjectType STUDENT + studentId) และบุคลากร (STAFF + staffId)
-    //     พยาบาล/แอดมินบันทึก; อ่าน: พยาบาล/แอดมิน/ผู้บริหาร + นักเรียนเจ้าของ/ผู้ปกครอง (ตามทะเบียน) + บุคลากรเจ้าของ (claim staffId); ลบเฉพาะ SUPER_ADMIN
     function donationShapeOk(d) {
       return d.keys().hasOnly(['subjectType', 'studentId', 'staffId', 'donorName', 'donatedAt', 'place', 'note', 'recordedByUid', 'recordedByName', 'recordedAt'])
         && d.subjectType in ['STUDENT', 'STAFF']
@@ -2089,31 +1754,17 @@ service cloud.firestore {
                        && request.resource.data.get('staffId', '') == resource.data.get('staffId', '');
       allow delete: if hasRole('SUPER_ADMIN');
     }
-    // ──────────────────────────────────────────────────────────────────────────────
-    // 39. ระบบนิเทศการสอน — supervision_rounds / supervision_assignments / supervision_observations
-    //     (ตรรกะ/เกณฑ์อยู่ src/lib/supervision.ts — แบบสังเกตการสอน 20 ข้อ เต็ม 100, ต้องตรงกัน)
-    //     สิทธิ์อ่านผลสังเกตการสอน (รายบุคคล):
-    //       • ผู้นิเทศเจ้าของผล (supervisorStaffId) — รวมฉบับร่าง
-    //       • ครูผู้รับการนิเทศ — เฉพาะที่ส่งแล้ว (submitted == true)
-    //       • หัวหน้างานนิเทศ (INSTRUCTIONAL_SUPERVISOR) — ทั้งหมดรวมฉบับร่าง (ติดตามความคืบหน้า)
-    //       • ผอ./รองผอ.วิชาการ/EXECUTIVE — ที่ส่งแล้วทั้งหมด
-    //       • หัวหน้า/รองหัวหน้ากลุ่มสาระฯ — ที่ส่งแล้วของกลุ่มสาระฯ ตนเอง (departmentId ตรง staff ของตนเอง)
-    //     ❌ SUPER_ADMIN อ่านผลรายบุคคลไม่ได้โดยตั้งใจ (จัดการรอบ/จับคู่ได้อย่างเดียว)
-    //     ผู้นิเทศ = ครูนิเทศที่ถูกจับคู่ หรือหัวหน้า/รองหัวหน้ากลุ่มสาระฯ ของกลุ่มสาระฯ เดียวกับครู (โดยตำแหน่ง)
-    //     ส่งแล้วแก้ไม่ได้ (ล็อกคะแนน) — ครูผู้รับการนิเทศแตะได้แค่รับทราบ/ความเห็นตอบกลับ; ลบได้เฉพาะฉบับร่างของผู้นิเทศเอง
     function supExOfficio() {
       return hasRole('HEAD_OF_DEPARTMENT') || hasRole('DEPUTY_HEAD_OF_DEPARTMENT');
     }
     function supManage() {
       return hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('SUPER_ADMIN');
     }
-    // departmentId ของ staff ที่ระบุ (ไม่มี = '')
     function supStaffDept(sid) {
       return exists(/databases/$(database)/documents/staff/$(sid))
         ? get(/databases/$(database)/documents/staff/$(sid)).data.get('assignments', {}).get('departmentId', '')
         : '';
     }
-    // หัวหน้า/รองหัวหน้ากลุ่มสาระฯ ที่สังกัดกลุ่มสาระฯ นี้จริง
     function supInMyDept(dept) {
       return supExOfficio() && myStaffId() != '' && dept is string && dept != '' && supStaffDept(myStaffId()) == dept;
     }
@@ -2121,11 +1772,6 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/supervision_rounds/$(rid))
         && get(/databases/$(database)/documents/supervision_rounds/$(rid)).data.status == 'OPEN';
     }
-    // รูปทรงคะแนน (ใช้ทั้งฉบับร่างและส่งแล้ว): เป็น map และมีเฉพาะ key ของแบบ 20 ข้อ
-    // ค่าคะแนนรายข้อตรวจตอน "ส่งแล้ว" เท่านั้น (supSubmittedOk) — ฉบับร่างไม่ถูกใช้คำนวณ/แสดงต่อใคร และการกดส่งตรวจครบอีกครั้ง
-    // (แยกเพื่อไม่ให้เกินเพดาน 1,000 expressions ต่อการประเมิน rules)
-    // แบบนิเทศที่แอดมินแก้ได้ (เวอร์ชัน ≥ 2): รายการข้ออยู่ใน evaluation_template_versions/SUPERVISION_{n}.ids — เวอร์ชัน 1 = 20 ข้อด้านล่าง (ไม่มีเอกสาร)
-    // ผลสร้างใหม่ต้องใช้เวอร์ชันปัจจุบัน (ตัวชี้ evaluation_templates/SUPERVISION); ฉบับร่างที่ค้างอยู่แก้ต่อด้วยเวอร์ชันเดิมได้จนส่ง
     function supTplCurrent() {
       return exists(/databases/$(database)/documents/evaluation_templates/SUPERVISION)
         ? get(/databases/$(database)/documents/evaluation_templates/SUPERVISION).data.currentVersion : 1;
@@ -2140,7 +1786,6 @@ service cloud.firestore {
       return d.templateVersion == 1 ? supScoresShapeOk(d.scores)
         : (d.scores is map && d.scores.keys().hasOnly(supTplIds(d.templateVersion)));
     }
-    // เวอร์ชัน ≥ 2 ส่งแล้ว: ครบทุกข้อ ค่า 1–5; คะแนนรวมรวมใน rules ไม่ได้ (วนลูปไม่ได้) จึงตรวจเฉพาะช่วงที่เป็นไปได้ + percent สอดคล้อง total + ผลสรุปตรง percent
     function supSubmittedTplOk(d) {
       let n = supTplIds(d.templateVersion).size();
       return d.scores.size() == n && d.scores.values().hasOnly([1, 2, 3, 4, 5])
@@ -2148,8 +1793,6 @@ service cloud.firestore {
         && d.percent is number && math.abs(d.percent * (n * 5) - d.total * 100) <= n * 5 * 0.01
         && d.band == (d.percent >= 91 ? 'ดีมาก' : (d.percent >= 81 ? 'ดี' : (d.percent >= 71 ? 'พอใช้' : (d.percent >= 61 ? 'ควรปรับปรุง' : 'ไม่ผ่าน'))));
     }
-    // ส่งแล้ว: ตอบครบ 20 ข้อ (key ครบ + ค่าเป็น 1–5) + คะแนนรวม/เปอร์เซ็นต์/ผลสรุปต้องตรงกับคะแนนรายข้อ
-    // (เกณฑ์ ≥91 ดีมาก, ≥81 ดี, ≥71 พอใช้, ≥61 ควรปรับปรุง, ต่ำกว่านั้น ไม่ผ่าน)
     function supSubmittedOk(d) {
       return d.templateVersion == 1 ? supSubmittedV1Ok(d) : supSubmittedTplOk(d);
     }
@@ -2207,9 +1850,6 @@ service cloud.firestore {
         && d.teacherReply is string && d.teacherReply.size() <= 1000;
     }
 
-    // แบบประเมินที่แก้ได้ (แบบนิเทศ SUPERVISION / แบบประเมินแผนการสอน LESSON_PLAN) — ดู src/lib/evaluationTemplate.ts
-    // เวอร์ชันเป็นเอกสารสร้างครั้งเดียวห้ามแก้/ลบ (ผลเก่าอ้างเวอร์ชันนี้); ตัวชี้เวอร์ชันปัจจุบันขยับได้ทีละ +1 พร้อมสร้างเวอร์ชันนั้นในคำขอเดียวกัน
-    // รายละเอียดรายข้อ (id/ข้อความ/หมวด) ตรวจที่ client (validateTemplateDraft) — rules คุมเฉพาะ id ที่ใช้เป็นคีย์คะแนน
     function etKind(k) { return k in ['SUPERVISION', 'LESSON_PLAN']; }
     match /evaluation_template_versions/{vid} {
       allow read: if myStaffId() != '';
@@ -2302,7 +1942,6 @@ service cloud.firestore {
                            ? !('submittedAt' in request.resource.data)
                            : (supSubmittedOk(request.resource.data) && request.resource.data.submittedAt == request.time));
 
-      // ผู้นิเทศแก้ฉบับร่างของตนเอง / กดส่ง (ส่งแล้วล็อก)
       allow update: if (
           myStaffId() != '' && resource.data.supervisorStaffId == myStaffId()
           && resource.data.submitted == false
@@ -2321,7 +1960,6 @@ service cloud.firestore {
               ? !('submittedAt' in request.resource.data)
               : (supSubmittedOk(request.resource.data) && request.resource.data.submittedAt == request.time))
         ) || (
-          // ครูผู้รับการนิเทศ: กดรับทราบ + ความเห็นตอบกลับ (ครั้งเดียว หลังส่งแล้ว)
           myStaffId() != '' && resource.data.teacherStaffId == myStaffId()
           && resource.data.submitted == true && resource.data.acknowledged == false
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acknowledged', 'acknowledgedAt', 'teacherReply', 'updatedAt'])
@@ -2334,12 +1972,8 @@ service cloud.firestore {
       allow delete: if myStaffId() != '' && resource.data.supervisorStaffId == myStaffId() && resource.data.submitted == false;
     }
 
-    // ───────── งานทะเบียนวัดผล: ผลแก้ตัว/เรียนซ้ำ + อนุมัติจบหลักสูตร ─────────
-    // REGISTRAR = เพิ่ม/แก้/ลบ; REGISTRAR_ASSISTANT = เพิ่ม/แก้ (ลบไม่ได้, อนุมัติจบไม่ได้); SUPER_ADMIN ทำได้ทั้งหมด
-    // ไม่ทับ/ไม่แก้ gradebook_scores ของครู — แสดงคู่กัน และเกรดเฉลี่ยใช้เกรดใหม่ (คำนวณฝั่งหน้าเว็บ)
     function regAny() { return hasRole('SUPER_ADMIN') || hasRole('REGISTRAR') || hasRole('REGISTRAR_ASSISTANT'); }
     function regFull() { return hasRole('SUPER_ADMIN') || hasRole('REGISTRAR'); }
-    // งานทะเบียน (ตัวจริง) อัปเดตทะเบียนเลขประจำตัวได้เฉพาะตอนอนุมัติจบของนักเรียนคนนั้นในชุดเขียนเดียวกัน
     function regGraduating(sid) {
       return hasRole('REGISTRAR') && existsAfter(/databases/$(database)/documents/graduation_approvals/$(sid + '_' + studentField(sid, 'room', '')[0:3]));
     }
@@ -2400,8 +2034,6 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // ย้ายห้อง: ยื่นคำขอ (งานทะเบียน/ผู้ช่วย) → บันทึกมติคณะกรรมการ (งานทะเบียนตัวจริง) → ดำเนินการย้าย (อัปเดต students ในชุดเขียนเดียวกัน)
-    // ประวัติห้อง/คณะสีเดิมเก็บในเอกสารนี้ — ไม่ลบ/ไม่แก้ย้อนหลัง
     match /room_transfers/{tid} {
       allow read: if regAny() || hasRole('EXECUTIVE') || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC') || hasRole('ACADEMIC_HEAD')
                      || isHomeroomTeacherOf(resource.data.fromRoom) || isHomeroomTeacherOf(resource.data.toRoom);
@@ -2420,7 +2052,6 @@ service cloud.firestore {
                        && request.resource.data.requestedByName is string && request.resource.data.requestedByName.size() <= 160
                        && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
       allow update: if myStaffId() != '' && (
-        // บันทึกมติคณะกรรมการ (ตัวจริงเท่านั้น)
         (regFull() && resource.data.status == 'PENDING'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','decisionCommittee','decisionDate','decisionNote','decidedByStaffId','decidedByName','decidedAt','updatedAt'])
           && request.resource.data.status in ['APPROVED', 'REJECTED']
@@ -2431,7 +2062,6 @@ service cloud.firestore {
           && request.resource.data.decidedByName is string && request.resource.data.decidedByName.size() <= 160
           && request.resource.data.decidedAt == request.time && request.resource.data.updatedAt == request.time)
         ||
-        // ดำเนินการย้าย (ต้องย้ายนักเรียนจริงในชุดเขียนเดียวกัน)
         (regAny() && resource.data.status == 'APPROVED'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','effectiveDate','appliedByStaffId','appliedByName','appliedAt','updatedAt'])
           && request.resource.data.status == 'APPLIED'
@@ -2446,10 +2076,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ───────── คะแนนความประพฤติ (ระเบียบการปกครองนักเรียน 2569) — ดู src/lib/conduct.ts ─────────
-    // ครูทุกคนเพิ่ม/หักได้ไม่เกิน 5 ต่อครั้ง (มีผลทันที); เกิน 5 → PENDING ให้งานกิจการ (STUDENT_AFFAIRS) พิจารณา; หักตามระดับ เบา ≤5/กลาง ≤10/ร้ายแรง ≤20
-    // แก้/ยกเลิกได้เฉพาะงานกิจการ และต้องมีคำร้องจากผู้บันทึกรายการนั้น (conduct_change_requests) — ไม่ลบจริง
-    // students.behaviorScore เป็นแคช: ต้องเขียนพร้อมรายการในชุดเดียว และตัวเลขต้องตรงบัญชี (cdStudentTouch)
     function cdPath(id) { return /databases/$(database)/documents/conduct_entries/$(id); }
     function cdAffairs() { return hasRole('SUPER_ADMIN') || hasRole('STUDENT_AFFAIRS'); }
     function cdStaff() { return cdAffairs() || hasRole('HOMEROOM_TEACHER') || hasRole('SUBJECT_TEACHER'); }
@@ -2477,7 +2103,6 @@ service cloud.firestore {
         && n.behaviorScore == cdClamp(base + added - ded)
         && n.riskLevel in ['NORMAL', 'WARNING', 'CRITICAL'];
     }
-    // รายการนี้ต้องมีการปรับแคชของนักเรียนในชุดเดียวกัน (อ้างรหัสรายการนี้)
     function cdTouchesStudent(sid, eid) {
       return existsAfter(/databases/$(database)/documents/students/$(sid))
         && getAfter(/databases/$(database)/documents/students/$(sid)).data.get('lastConductEntryId', '') == eid;
@@ -2509,7 +2134,6 @@ service cloud.firestore {
                            || (request.resource.data.status == 'PENDING' && request.resource.data.appliedPoints == 0));
       allow update: if cdAffairs() && myStaffId() != '' && request.resource.data.updatedAt == request.time
                        && (
-                         // พิจารณารายการที่ส่งมา
                          (resource.data.status == 'PENDING'
                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','appliedPoints','level','decidedByStaffId','decidedByName','decidedAt','decisionNote','updatedAt'])
                           && request.resource.data.decidedByStaffId == myStaffId() && request.resource.data.decidedAt == request.time
@@ -2520,7 +2144,6 @@ service cloud.firestore {
                                   && cdPointsOk(resource.data.kind, request.resource.data.level, request.resource.data.appliedPoints)
                                   && cdTouchesStudent(resource.data.studentId, eid))))
                          ||
-                         // แก้คะแนน/ยกเลิก ตามคำร้องที่อนุมัติในชุดเดียวกัน
                          (resource.data.status == 'APPLIED'
                           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','appliedPoints','lastChangeRequestId','updatedAt'])
                           && request.resource.data.lastChangeRequestId is string
@@ -2571,10 +2194,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ===== ทุนการศึกษา / กยศ. (src/lib/fundPrograms.ts) — งานกองทุนและทุนการศึกษา (FUND_SCHOLARSHIP) =====
-    // fund_programs: งานกองทุนประกาศ/แก้ (ลบได้เฉพาะฉบับร่าง); นักเรียน/ผู้ปกครองอ่านเฉพาะที่ประกาศแล้ว; แนะแนวอ่านทั้งหมด (ออกหนังสือ)
-    // fund_interests: นักเรียน/ผู้ปกครองตัวจริงลงชื่อสนใจ (ต้องเปิดอยู่ตามเวลาเซิร์ฟเวอร์) ถอนได้เสมอ; งานกองทุนบันทึกผลคัดเลือก; ลบไม่ได้
-    // ลิงก์ใน links ตรวจ https ที่ client เท่านั้น (rules วนลูปไม่ได้) — UI render ผ่าน isHttpsLink เสมอ
     function fundStaff() { return hasRole('SUPER_ADMIN') || hasRole('FUND_SCHOLARSHIP'); }
     function fundOpen(pid) {
       let p = get(/databases/$(database)/documents/fund_programs/$(pid)).data;
@@ -2634,7 +2253,6 @@ service cloud.firestore {
                     && request.resource.data.kind == get(/databases/$(database)/documents/fund_programs/$(request.resource.data.programId)).data.kind
                     && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
       allow update: if (
-                         // นักเรียนเท่านั้น (ผู้ปกครองอ่านอย่างเดียว): ถอนความสนใจได้เสมอ; ลงชื่อใหม่หลังถอนได้เมื่อโครงการยังเปิดรับ
                          isSelfStudent(resource.data.studentId)
                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'note', 'updatedAt'])
                          && request.resource.data.note is string && request.resource.data.note.size() <= 500
@@ -2642,7 +2260,6 @@ service cloud.firestore {
                          && ((resource.data.status == 'INTERESTED' && request.resource.data.status == 'WITHDRAWN')
                              || (resource.data.status == 'WITHDRAWN' && request.resource.data.status == 'INTERESTED' && fundOpen(resource.data.programId)))
                        ) || (
-                         // งานกองทุน: บันทึกผลคัดเลือก
                          fundStaff()
                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'staffNote', 'decidedByStaffId', 'decidedByName', 'updatedAt'])
                          && ((resource.data.status == 'INTERESTED' && request.resource.data.status in ['SHORTLISTED', 'AWARDED', 'NOT_SELECTED'])
@@ -2654,9 +2271,6 @@ service cloud.firestore {
                        );
       allow delete: if false;
     }
-    // ===== คำร้องขอฝึกงาน (src/lib/internship.ts) — งานแนะแนวตั้งค่า/อนุมัติ, นักเรียนยื่นเอง =====
-    // internship_settings/current: ช่วงฝึกงาน, ข้อความเหตุผล, แบบหนังสือตอบรับ, ช่วงเวลารับคำร้อง (เขียนได้เฉพาะแนะแนว/แอดมิน)
-    // internship_requests/{studentId}: 1 คำร้องต่อนักเรียน; ช่วงฝึกงานต้องตรง (id,label,startYmd,endYmd) กับที่ตั้งไว้ใน settings
     function guidanceStaff() { return hasRole('SUPER_ADMIN') || hasRole('GUIDANCE_COUNSELOR'); }
     function internshipSettings() { return get(/databases/$(database)/documents/internship_settings/current).data; }
     function internshipOpen() {
@@ -2708,13 +2322,11 @@ service cloud.firestore {
         && internshipOpen() && internshipBodyOk(request.resource.data)
         && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
       allow update: if (
-          // นักเรียนยกเลิกคำร้องที่ยังรอพิจารณา
           isSelfStudent(resource.data.studentId)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
           && resource.data.status == 'SUBMITTED' && request.resource.data.status == 'CANCELLED'
           && request.resource.data.updatedAt == request.time
         ) || (
-          // นักเรียนแก้คำร้องที่รอพิจารณา หรือยื่นใหม่หลังถูกปฏิเสธ/ยกเลิก (เฉพาะช่วงที่เปิดรับ)
           isSelfStudent(resource.data.studentId)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['companyName', 'companyAddress', 'headName', 'headPosition',
                'periodId', 'periodLabel', 'startYmd', 'endYmd', 'status', 'updatedAt'])
@@ -2723,7 +2335,6 @@ service cloud.firestore {
           && internshipOpen() && internshipBodyOk(request.resource.data)
           && request.resource.data.updatedAt == request.time
         ) || (
-          // งานแนะแนว: อนุมัติ/ไม่อนุมัติ และบันทึกเลขที่/วันที่หนังสือ (อนุมัติแล้วแก้ได้เฉพาะเลขที่/วันที่/หมายเหตุ)
           guidanceStaff()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'staffNote', 'letterNo', 'letterDateYmd', 'decidedByStaffId', 'decidedByName', 'updatedAt'])
           && ((resource.data.status == 'SUBMITTED' && request.resource.data.status in ['APPROVED', 'REJECTED'])
@@ -2737,8 +2348,6 @@ service cloud.firestore {
         );
       allow delete: if false;
     }
-    // ===== ตั้งค่าส่วนตัว (src/lib/userPreferences.ts) — ธีม/ขนาดตัวอักษร/รูปโปรไฟล์ ผู้ใช้ทุกบทบาทตั้งของตนเอง =====
-    // เจ้าของ (docId == auth.uid) เขียนได้เท่านั้น; บุคลากรอ่านได้ (เห็นรูปกันและกัน); ค่าใหม่ในอนาคตต้องเพิ่มใน hasOnly
     match /user_preferences/{uid} {
       allow read: if isSignedIn() && (uid == request.auth.uid
         || (hasAnyRole() && !('STUDENT' in request.auth.token.get('roles', [])) && !('PARENT' in request.auth.token.get('roles', []))));

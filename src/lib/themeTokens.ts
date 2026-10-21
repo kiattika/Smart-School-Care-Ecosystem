@@ -76,7 +76,7 @@ export const TOKEN_DEFS: readonly TokenDef[] = [
   role('roleSuperAdmin', 'SUPER_ADMIN (ผู้ดูแลระบบ)', 'Rose'),
   role('roleExecutive', 'EXECUTIVE (ผู้บริหารสถานศึกษา)', 'Blue'),
   role('roleHeadOfDepartment', 'HEAD_OF_DEPARTMENT (หัวหน้ากลุ่มสาระฯ)', 'Amber'),
-  role('roleAcademicHead', 'ACADEMIC_HEAD (หัวหน้าฝ่ายวิชาการฯ)', 'Orange'),
+  role('roleAcademicHead', 'ACADEMIC_HEAD (หัวหน้ากลุ่มงานวิชาการฯ)', 'Orange'),
   role('roleDeputyDirectorAcademic', 'DEPUTY_DIRECTOR_ACADEMIC (รอง ผอ. วิชาการ)', 'Violet'),
   role('roleDirector', 'DIRECTOR (ผู้อำนวยการสถานศึกษา)', 'Red'),
   role('roleHomeroomTeacher', 'HOMEROOM_TEACHER (ครูประจำชั้น)', 'Emerald'),

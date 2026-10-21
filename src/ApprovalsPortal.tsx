@@ -10,6 +10,7 @@ import { ActivityOverviewPanel } from './components/stats/TeacherStatsPanels';
 import { SupervisionEmbedded } from './components/supervision/SupervisionWorkspace';
 import { subscribeLateAttendanceRequests } from './services/firestoreService';
 import { LateAttendanceRequestRecord } from './types';
+import { resolveLateRequest } from './lib/lateAttendanceFlow';
 
 /**
  * ApprovalsPortal — หน้าสำหรับ role ระดับบริหารที่ทำหน้าที่ "อนุมัติ" เท่านั้น
@@ -52,15 +53,16 @@ const SUPERVISION_TAB_ROLES = ['HEAD_OF_DEPARTMENT', 'DEPUTY_HEAD_OF_DEPARTMENT'
 // ภาพรวมสถิติการปฏิบัติงานสอน (ลา/แลกคาบ/สอนแทน): กลุ่มสาระฯ ตนเอง หรือทั้งโรงเรียน (ตัวเลขรวม ไม่ระบุชื่อ)
 const ACTIVITY_DEPT_ROLES = ['HEAD_OF_DEPARTMENT', 'DEPUTY_HEAD_OF_DEPARTMENT'];
 const ACTIVITY_SCHOOL_ROLES = ['DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'];
-const LATE_ATTENDANCE_VIEWER_ROLES = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN', 'EXECUTIVE', 'DIRECTOR'];
+const LATE_ATTENDANCE_VIEWER_ROLES = ['ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'EXECUTIVE', 'DIRECTOR'];
 // role ที่อนุมัติ/ปฏิเสธได้จริง — นอกเหนือจากนี้ (เช่น DIRECTOR) เห็นอย่างเดียว
-const LATE_ATTENDANCE_APPROVER_ROLES = ['DEPUTY_DIRECTOR_ACADEMIC', 'SUPER_ADMIN'];
+// (SUPER_ADMIN ไม่มีสิทธิ์อนุมัติ — ดูแลข้อมูลพื้นฐานเท่านั้น; DIRECTOR สำรองระดับรอง)
+const LATE_ATTENDANCE_APPROVER_ROLES = ['ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'];
 
 const ROLE_LABEL: Record<string, string> = {
   HEAD_OF_DEPARTMENT: 'หัวหน้ากลุ่มสาระการเรียนรู้',
   DEPUTY_HEAD_OF_DEPARTMENT: 'รองหัวหน้ากลุ่มสาระการเรียนรู้',
-  ACADEMIC_HEAD: 'หัวหน้าฝ่ายวิชาการและหลักสูตร',
-  DEPUTY_DIRECTOR_ACADEMIC: 'รองผู้อำนวยการฝ่ายวิชาการ',
+  ACADEMIC_HEAD: 'หัวหน้ากลุ่มงานวิชาการและหลักสูตร',
+  DEPUTY_DIRECTOR_ACADEMIC: 'รองผู้อำนวยการกลุ่มงานวิชาการ',
   DIRECTOR: 'ผู้อำนวยการสถานศึกษา',
 };
 
@@ -80,7 +82,7 @@ export function ApprovalsPortal() {
     if (!canSeeLateAttendance) { setLateRequests([]); return; }
     return subscribeLateAttendanceRequests(setLateRequests);
   }, [canSeeLateAttendance]);
-  const pendingLateCount = lateRequests.filter(r => r.status === 'PENDING').length;
+  const pendingLateCount = lateRequests.filter(r => { const x = resolveLateRequest(r, Date.now()); return x.state === 'AWAITING' || x.deputyReviewOpen; }).length;
 
   // นับงานสอนแทนที่ยังอยู่ในลำดับอนุมัติ (ทุก stage)
   const pendingSubCount = useMemo(

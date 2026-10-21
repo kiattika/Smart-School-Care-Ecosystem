@@ -179,7 +179,7 @@ export function DepartmentManagerModal({
                   {d.backupApproverUid ? (
                     <span className="text-[11px] text-indigo-300 font-semibold">{d.backupApproverName}</span>
                   ) : (
-                    <span className="text-[11px] text-amber-400/80 italic">ยังไม่ได้กำหนด (fallback: หัวหน้าฝ่ายวิชาการฯ)</span>
+                    <span className="text-[11px] text-amber-400/80 italic">ยังไม่ได้กำหนด (fallback: หัวหน้ากลุ่มงานวิชาการฯ)</span>
                   )}
                   <div className="flex-1" />
                   {d.backupApproverUid && (

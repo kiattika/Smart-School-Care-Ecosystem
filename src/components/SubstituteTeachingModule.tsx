@@ -86,8 +86,8 @@ interface SubCandidate {
 
 const STAGE_LABEL_TH: Record<SubstituteApprovalStage, string> = {
   STAGE_1_HEAD_OF_DEPARTMENT: 'ขั้น 1 · หัวหน้ากลุ่มสาระฯ',
-  STAGE_2_ACADEMIC_HEAD: 'ขั้น 2 · หัวหน้าฝ่ายวิชาการและหลักสูตร',
-  STAGE_3_DEPUTY_DIRECTOR_ACADEMIC: 'ขั้น 3 · รองผู้อำนวยการฝ่ายวิชาการ',
+  STAGE_2_ACADEMIC_HEAD: 'ขั้น 2 · หัวหน้ากลุ่มงานวิชาการและหลักสูตร',
+  STAGE_3_DEPUTY_DIRECTOR_ACADEMIC: 'ขั้น 3 · รองผู้อำนวยการกลุ่มงานวิชาการ',
   STAGE_4_DIRECTOR: 'ขั้น 4 · ผู้อำนวยการ',
   COMPLETED: 'อนุมัติครบทุกขั้น',
 };
@@ -100,8 +100,8 @@ const TRIGGER_LABEL_TH: Record<string, string> = {
 
 const SIM_ROLES: { role: UserRole; label: string }[] = [
   { role: 'HEAD_OF_DEPARTMENT', label: 'หัวหน้ากลุ่มสาระฯ — เสนอจัดครู / อนุมัติขั้น 1' },
-  { role: 'ACADEMIC_HEAD', label: 'หัวหน้าฝ่ายวิชาการฯ — อนุมัติขั้น 2' },
-  { role: 'DEPUTY_DIRECTOR_ACADEMIC', label: 'รองผู้อำนวยการฝ่ายวิชาการ — อนุมัติขั้น 3' },
+  { role: 'ACADEMIC_HEAD', label: 'หัวหน้ากลุ่มงานวิชาการฯ — อนุมัติขั้น 2' },
+  { role: 'DEPUTY_DIRECTOR_ACADEMIC', label: 'รองผู้อำนวยการกลุ่มงานวิชาการ — อนุมัติขั้น 3' },
   { role: 'DIRECTOR', label: 'ผู้อำนวยการ — อนุมัติขั้น 4' },
   { role: 'SUBJECT_TEACHER', label: 'ครูผู้สอน — ขอลากิจ/ราชการเอง หรือรับมอบหมายสอนแทน' },
   { role: 'HOMEROOM_TEACHER', label: 'ครูประจำชั้น — ขอลากิจ/ราชการเอง หรือรับมอบหมายสอนแทน' },
@@ -998,7 +998,7 @@ export function SubstituteTeachingModule() {
               ระบบจัดครูสอนแทน <span className="text-indigo-400 font-medium text-lg">| Substitute Teaching</span>
             </h1>
             <p className="text-xs text-slate-400">
-              ลำดับอนุมัติ 4 ขั้น: หัวหน้ากลุ่มสาระฯ → หัวหน้าฝ่ายวิชาการและหลักสูตร → รองผู้อำนวยการฝ่ายวิชาการ → ผู้อำนวยการ
+              ลำดับอนุมัติ 4 ขั้น: หัวหน้ากลุ่มสาระฯ → หัวหน้ากลุ่มงานวิชาการและหลักสูตร → รองผู้อำนวยการกลุ่มงานวิชาการ → ผู้อำนวยการ
               · เชื่อม Firestore <span className="font-mono text-slate-500">substitute_assignments</span> แบบเรียลไทม์
             </p>
           </div>
@@ -1193,7 +1193,7 @@ export function SubstituteTeachingModule() {
                   {backupApproverDeptUsesFallback ? (
                     <span>
                       <strong>กลุ่มสาระฯ "{deptName(effectiveDeptId)}" ยังไม่ได้กำหนดผู้รับผิดชอบสำรองไว้ล่วงหน้า</strong> —
-                      คุณ (หัวหน้าฝ่ายวิชาการฯ) กำลังปฏิบัติหน้าที่แทนเป็นการชั่วคราวตามค่าเริ่มต้นสุดท้าย
+                      คุณ (หัวหน้ากลุ่มงานวิชาการฯ) กำลังปฏิบัติหน้าที่แทนเป็นการชั่วคราวตามค่าเริ่มต้นสุดท้าย
                       แนะนำให้ไปกำหนดผู้รับผิดชอบสำรองของกลุ่มสาระนี้ไว้ล่วงหน้าที่หน้าจัดการกลุ่มสาระฯ
                     </span>
                   ) : (

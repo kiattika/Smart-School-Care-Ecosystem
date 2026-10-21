@@ -5,3 +5,4 @@ export { refreshGuidanceStatus } from './guidanceStatus';
 export { submitNineQ } from './nineQSubmit';
 export { importParentVerification, linkParentLine, signInParentLine, unlinkParentLine } from './parentLine';
 export { scheduledPublicSummary, refreshPublicSummary } from './publicSummary';
+export { lateAttendanceReminder1600, lateAttendanceExpiryNotice } from './lateAttendanceReminders';
