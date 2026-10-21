@@ -50,7 +50,7 @@ export function MyLessonPlansPanel({ courses }: { courses: PlanCourse[] }) {
               onSubmit={(kind, urls, note) => submitLessonPlan({
                 semester: { academicYear: sem.academicYear, term: sem.term },
                 teacher: { staffId, name: user?.displayName || '', departmentId: dept },
-                course: c, kind, urls, note, exists: byKey.has(key),
+                course: c, kind, urls, note, exists: byKey.has(key), staffDirectory: staff,
               })}
               onDelete={() => deleteLessonPlan(planDocId(semesterId, staffId, key))} /></div>
           ))}

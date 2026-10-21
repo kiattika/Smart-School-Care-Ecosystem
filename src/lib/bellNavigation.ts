@@ -94,6 +94,12 @@ export function messageTarget(kind: StaffNotificationKind, myRoles: readonly str
       return teacher ? { role: teacher, tab: 'substitutions' } : null;
     case 'LESSON_PLAN_REVIEW':
       return teacher ? { role: teacher, tab: 'my-lesson-plans' } : null;
+    case 'LESSON_PLAN_SUBMITTED': {
+      // ผู้ตรวจ: หัวหน้างานนิเทศก่อน (เห็นทุกแผน) แล้วค่อยหัวหน้า/รองหัวหน้ากลุ่มสาระฯ (หน้างานนิเทศในพอร์ทัลอนุมัติ)
+      if (myRoles.includes('INSTRUCTIONAL_SUPERVISOR')) return { role: 'INSTRUCTIONAL_SUPERVISOR', tab: 'plans' };
+      const head = firstOwned(myRoles, ['HEAD_OF_DEPARTMENT', 'DEPUTY_HEAD_OF_DEPARTMENT']);
+      return head ? { role: head, tab: 'supervision-plans' } : null;
+    }
     case 'SUPERVISION_RESULT':
       return teacher ? { role: teacher, tab: 'my-supervision' } : null;
     case 'CONDUCT_DECISION':

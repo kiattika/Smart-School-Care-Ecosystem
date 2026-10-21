@@ -4,10 +4,11 @@ import {
 import { db } from '../lib/firebase';
 import {
   DEFAULT_LESSON_PLAN_TEMPLATE, scoresComplete, courseKeyOf, planDocId, validateSubmission,
+  nextReviewerStaffIds,
   type ScoresMap, type LessonPlan, type LessonPlanKind, type PlanQuery,
 } from '../lib/lessonPlans';
 import type { EvalTemplate } from '../lib/evaluationTemplate';
-import { lessonPlanReviewNotice } from '../lib/staffNotifications';
+import { lessonPlanReviewNotice, lessonPlanSubmittedNotice } from '../lib/staffNotifications';
 import { notifyStaffById } from './staffNotify';
 
 const col = () => collection(db, 'lesson_plan_submissions');
@@ -38,7 +39,11 @@ export interface SubmitPlanInput {
   note: string;
   /** มีเอกสารอยู่แล้ว (แก้/ส่งใหม่) */
   exists: boolean;
+  /** ทะเบียนบุคลากร (ใช้หาผู้ตรวจขั้นแรกเพื่อแจ้ง) — ไม่ส่ง = ไม่แจ้ง */
+  staffDirectory?: StaffDirectoryRow[];
 }
+
+type StaffDirectoryRow = { id: string; roles?: readonly string[]; status?: unknown; assignments?: { departmentId?: string } | null };
 
 /** ครูส่งแผน/โครงการ (สร้างใหม่) หรือแก้ลิงก์แล้วส่งใหม่ (เริ่มขั้นแรกอีกครั้ง) */
 export async function submitLessonPlan(input: SubmitPlanInput): Promise<string> {
@@ -63,6 +68,11 @@ export async function submitLessonPlan(input: SubmitPlanInput): Promise<string> 
       createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
     });
   }
+  // แจ้งผู้ตรวจขั้นแรกว่ามีแผนรอตรวจ — หลังบันทึกสำเร็จเท่านั้น, non-fatal
+  const planRef = { id, courseName: input.course.name, courseCode: input.course.code, level: input.course.level, teacherName: input.teacher.name };
+  for (const rid of nextReviewerStaffIds({ teacherStaffId: input.teacher.staffId, departmentId: input.teacher.departmentId }, 'DEPT', input.staffDirectory || [])) {
+    void notifyStaffById(rid, (email) => lessonPlanSubmittedNotice(planRef, 'DEPT', input.exists, email), input.teacher.name);
+  }
   return id;
 }
 
@@ -79,6 +89,8 @@ export interface ReviewInput {
   /** แบบที่ใช้ตรวจ (ต้องเป็นเวอร์ชันปัจจุบัน) — ไม่ส่ง = แบบตั้งต้น v1 */
   tpl?: EvalTemplate;
   reviewer: { staffId: string; name: string };
+  /** ทะเบียนบุคลากร (ใช้หาหัวหน้างานนิเทศเมื่อผ่านขั้นแรก) — ไม่ส่ง = ไม่แจ้งขั้นถัดไป */
+  staffDirectory?: StaffDirectoryRow[];
 }
 
 /** ตรวจแผน: อนุมัติขั้นนี้ หรือขอแก้ไข (ต้องมีความเห็น) — ต้องตอบแบบประเมินครบทุกข้อ */
@@ -104,4 +116,11 @@ export async function reviewLessonPlan(r: ReviewInput): Promise<void> {
   void notifyStaffById(String(p.teacherStaffId || ''), (email) => lessonPlanReviewNotice(
     { id: r.id, courseName: p.courseName, courseCode: p.courseCode, level: p.level }, r.stage, r.decision, r.reviewer.name, r.comment, email,
   ), r.reviewer.name);
+  // ผ่านขั้นหัวหน้ากลุ่มสาระฯ → แจ้งหัวหน้างานนิเทศว่ามีแผนรอตรวจขั้นสุดท้าย (non-fatal; ไม่แจ้งตัวเอง)
+  if (r.stage === 'DEPT' && r.decision === 'APPROVE') {
+    const planRef = { id: r.id, courseName: p.courseName, courseCode: p.courseCode, level: p.level, teacherName: p.teacherName };
+    for (const rid of nextReviewerStaffIds({ teacherStaffId: String(p.teacherStaffId || ''), departmentId: String(p.departmentId || '') }, 'FINAL', r.staffDirectory || [], [r.reviewer.staffId])) {
+      void notifyStaffById(rid, (email) => lessonPlanSubmittedNotice(planRef, 'FINAL', false, email), r.reviewer.name);
+    }
+  }
 }

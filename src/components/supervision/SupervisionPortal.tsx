@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { BookOpen } from 'lucide-react';
 import { PortalSidebarLayout } from '../shared/PortalSidebarLayout';
 import { SupervisionWorkspace, useSupervisionTabs, type Tab } from './SupervisionWorkspace';
+import { useConsumeBellNav } from '../../lib/bellNavigation';
+import { useStore } from '../../store';
 
 /**
  * งานนิเทศการสอน — หน้าของหัวหน้างานนิเทศ (INSTRUCTIONAL_SUPERVISOR) และครูนิเทศ (SUPERVISORY_TEACHER)
@@ -11,6 +13,9 @@ export function SupervisionPortal() {
   const tabs = useSupervisionTabs();
   const [pick, setPick] = useState<Tab | ''>('');
   const tab = (tabs.find(t => t.id === pick)?.id || tabs[0]?.id || '') as Tab | '';
+  // กระดิ่ง "มีแผนรอตรวจ" พาหัวหน้างานนิเทศมาที่แท็บตรวจแผนการสอน
+  const activeRole = useStore(s => s.user?.activeRole) || '';
+  useConsumeBellNav(activeRole, ['plans'], (t) => setPick(t as Tab));
   return (
     <div className="flex-1 min-h-0 bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
       <div className="bg-gradient-to-r from-cyan-950/60 via-slate-900 to-slate-900 border-b border-cyan-500/20 px-6 py-6">

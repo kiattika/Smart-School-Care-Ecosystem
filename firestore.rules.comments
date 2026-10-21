@@ -1099,7 +1099,7 @@ service cloud.firestore {
                     && request.resource.data.id == notifId
                     && request.resource.data.recipientEmail is string && request.resource.data.recipientEmail.matches('^[^@\\s]+@[^@\\s]+$')
                     && request.resource.data.recipientEmail == request.resource.data.recipientEmail.lower()
-                    && request.resource.data.kind in ['LATE_ATTENDANCE_DECISION', 'LATE_ATTENDANCE_REMINDER', 'SUBSTITUTE_UPDATE', 'LESSON_PLAN_REVIEW', 'SUPERVISION_RESULT', 'CONDUCT_DECISION']
+                    && request.resource.data.kind in ['LATE_ATTENDANCE_DECISION', 'LATE_ATTENDANCE_REMINDER', 'SUBSTITUTE_UPDATE', 'LESSON_PLAN_REVIEW', 'LESSON_PLAN_SUBMITTED', 'SUPERVISION_RESULT', 'CONDUCT_DECISION']
                     && request.resource.data.title is string && request.resource.data.title.size() >= 1 && request.resource.data.title.size() <= 120
                     && request.resource.data.message is string && request.resource.data.message.size() >= 1 && request.resource.data.message.size() <= 500
                     && request.resource.data.refId is string && request.resource.data.refId.size() <= 200

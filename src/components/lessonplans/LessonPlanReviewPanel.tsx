@@ -52,7 +52,7 @@ export function LessonPlanReviewPanel() {
   if (open) {
     return (
       <div key={open.id}>
-        <ReviewDetail plan={open} stage={stageOf(open)} onBack={() => setOpenId('')}
+        <ReviewDetail plan={open} stage={stageOf(open)} staff={staff} onBack={() => setOpenId('')}
           reviewer={{ staffId, name: staffFullName(staff.find(s => s.id === staffId)) || user?.displayName || '' }} />
       </div>
     );
@@ -97,8 +97,8 @@ export function LessonPlanReviewPanel() {
   );
 }
 
-function ReviewDetail({ plan, stage, reviewer, onBack }: {
-  plan: LessonPlan; stage: 'DEPT' | 'FINAL' | null; reviewer: { staffId: string; name: string }; onBack: () => void;
+function ReviewDetail({ plan, stage, reviewer, staff, onBack }: {
+  plan: LessonPlan; stage: 'DEPT' | 'FINAL' | null; reviewer: { staffId: string; name: string }; staff: StaffRow[]; onBack: () => void;
 }) {
   const tpls = useEvaluationTemplates('LESSON_PLAN');
   const tpl = tpls.current; // ตรวจใหม่ใช้แบบเวอร์ชันปัจจุบันเสมอ
@@ -116,7 +116,7 @@ function ReviewDetail({ plan, stage, reviewer, onBack }: {
   const decide = async (decision: 'APPROVE' | 'REVISE') => {
     if (!stage) return;
     setBusy(true); setMsg('');
-    try { await reviewLessonPlan({ id: plan.id, stage, decision, comment, scores, tpl: tpl ?? undefined, reviewer }); onBack(); }
+    try { await reviewLessonPlan({ id: plan.id, stage, decision, comment, scores, tpl: tpl ?? undefined, reviewer, staffDirectory: staff }); onBack(); }
     catch (e) { setMsg(errMsg(e)); } finally { setBusy(false); }
   };
   return (

@@ -174,6 +174,29 @@ export function reviewStageFor(
   return null;
 }
 
+/**
+ * ผู้ที่ต้องได้รับแจ้งว่ามีแผนรอตรวจ ณ ขั้น `stage` (staff doc id) — ตรงกับ `reviewStageFor`/rules:
+ *  - DEPT: หัวหน้า/รองหัวหน้ากลุ่มสาระฯ ของแผนกเดียวกับแผน; ถ้าแผนไม่มีแผนก หรือครูเป็นหัวหน้ากลุ่มเอง → หัวหน้างานนิเทศแทน
+ *  - FINAL: หัวหน้างานนิเทศ
+ * ตัดครูเจ้าของแผน/ผู้ลงมือ (`exclude`) และบุคลากรที่ปิดการใช้งานออก; ไม่เจอผู้ตรวจ = [] (ไม่เดา/ไม่ส่งให้คนที่ตรวจไม่ได้)
+ */
+export function nextReviewerStaffIds(
+  plan: { teacherStaffId: string; departmentId: string },
+  stage: 'DEPT' | 'FINAL',
+  staff: ReadonlyArray<{ id: string; roles?: readonly string[]; status?: unknown; assignments?: { departmentId?: string } | null }>,
+  exclude: readonly string[] = [],
+): string[] {
+  const skip = new Set([plan.teacherStaffId, ...exclude]);
+  const live = staff.filter(s => s.status !== 'INACTIVE' && !skip.has(s.id));
+  const supervisors = live.filter(s => s.roles?.includes('INSTRUCTIONAL_SUPERVISOR')).map(s => s.id);
+  if (stage === 'FINAL') return supervisors;
+  const teacherIsHead = !!staff.find(s => s.id === plan.teacherStaffId)?.roles?.includes('HEAD_OF_DEPARTMENT');
+  if (!plan.departmentId || teacherIsHead) return supervisors;
+  return live
+    .filter(s => (s.roles?.includes('HEAD_OF_DEPARTMENT') || s.roles?.includes('DEPUTY_HEAD_OF_DEPARTMENT')) && s.assignments?.departmentId === plan.departmentId)
+    .map(s => s.id);
+}
+
 // ───────────── ความครบถ้วนต่อครู ─────────────
 export type Compliance = 'NONE' | 'PROJECT_ONLY' | 'PLAN_SUBMITTED' | 'PLAN_APPROVED';
 export const COMPLIANCE_LABEL: Record<Compliance, string> = {

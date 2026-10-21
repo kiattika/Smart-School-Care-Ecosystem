@@ -79,9 +79,9 @@ export function SupervisionWorkspace({ tab }: { tab: Tab }) {
 }
 
 /** ใช้ในหน้าที่มีแถบเมนูอยู่แล้ว (ศูนย์อนุมัติ) — สลับเมนูย่อยด้วยปุ่มแถบเล็ก ไม่ซ้อน sidebar */
-export function SupervisionEmbedded() {
+export function SupervisionEmbedded({ startTab }: { startTab?: Tab } = {}) {
   const tabs = useSupervisionTabs();
-  const [pick, setPick] = useState<Tab | ''>('');
+  const [pick, setPick] = useState<Tab | ''>(startTab ?? '');
   const tab = (tabs.find(t => t.id === pick)?.id || tabs[0]?.id || '') as Tab | '';
   if (tabs.length === 0) return <p className="text-sm text-slate-400">บทบาทปัจจุบันไม่มีเมนูในระบบนิเทศ</p>;
   return (
