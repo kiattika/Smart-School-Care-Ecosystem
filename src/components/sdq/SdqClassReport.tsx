@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { subscribeAllSDQAssessments } from '../../services/firestoreService';
-import { Printer, ClipboardList } from 'lucide-react';
+import { Printer, ClipboardList, Save } from 'lucide-react';
+import { useStore } from '../../store';
+import { subscribeClassPlans, saveClassPlan } from '../../services/sdqClassPlanService';
+import { CLASS_PLAN_LIMITS, isClassPlanDirty, normalizeClassPlan, type ClassPlanContent, type ClassPlanDoc, type ClassPlanRound } from '../../lib/sdqClassPlan';
 import { SDQAssessment } from '../../types';
 import { SDQ_TRIAGE_LABEL } from '../../lib/sdq';
 import {
@@ -16,10 +19,13 @@ const cell = (n: number, of: number) => (of ? `${n} คน (${pct(n, of)}%)` : '
 /**
  * แบบสรุปการรายงานผลการคัดกรองนักเรียนในชั้นเรียน (ครูที่ปรึกษา — เมนูสถิติวิชาการ)
  * ส่วนที่ 1 ตาราง 5 ด้าน (จำนวน/ร้อยละ), ส่วนที่ 2 รายชื่อกลุ่มเสี่ยง/มีปัญหา, ส่วนที่ 3 สรุปและข้อเสนอแนะ + ลงนาม
- * ตัวเลขทั้งหมดคำนวณจากผลประเมินจริง; ช่องแนวทางช่วยเหลือ/ข้อเสนอแนะเป็นช่องกรอกเพื่อพิมพ์ (ไม่บันทึกลงระบบ)
+ * ตัวเลขทั้งหมดคำนวณจากผลประเมินจริง; ช่องแนวทางช่วยเหลือ/กิจกรรมโฮมรูมบันทึกลง `sdq_class_plans` (ต่อห้อง/ปี/รอบ) ผ่านปุ่ม "บันทึกแนวทาง" — ไม่ได้ส่งผ่าน prop onSave = กรอกเพื่อพิมพ์อย่างเดียว
  */
-export function SdqClassReport({ room, students, records, academicYear, loading }: {
+export function SdqClassReport({ room, students, records, academicYear, loading, savedPlans, onSavePlan }: {
   room: string; students: ReportStudent[]; records: SDQAssessment[]; academicYear: string; loading?: boolean;
+  /** แนวทางที่บันทึกไว้แล้วของห้อง/ปีนี้ (ทุกรอบ) — ไม่ส่ง = ไม่มีที่เก็บ กรอกเพื่อพิมพ์อย่างเดียว */
+  savedPlans?: ClassPlanDoc[];
+  onSavePlan?: (round: ClassPlanRound, content: ClassPlanContent) => Promise<void>;
 }) {
   const [source, setSource] = useState<ProfileSource>('TEACHER');
   const [round, setRound] = useState<SdqRound>(1);
@@ -30,6 +36,28 @@ export function SdqClassReport({ room, students, records, academicYear, loading 
   const byId = useMemo(() => new Map(students.map(s => [s.studentId, s])), [students]);
   const [plans, setPlans] = useState<Record<string, string>>({});
   const [activityPlan, setActivityPlan] = useState('');
+  const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savedForRound = useMemo(() => savedPlans?.find(p => p.round === round), [savedPlans, round]);
+  const savedKey = savedForRound ? JSON.stringify([savedForRound.studentPlans, savedForRound.activityPlan]) : '';
+  // โหลดค่าที่บันทึกไว้เข้าฟอร์มเมื่อสลับรอบ/ข้อมูลที่บันทึกเปลี่ยน (ไม่มี = ฟอร์มว่างของรอบนั้น)
+  useEffect(() => {
+    setPlans(savedForRound?.studentPlans ?? {});
+    setActivityPlan(savedForRound?.activityPlan ?? '');
+    setSaveMsg(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round, savedKey]);
+  const dirty = isClassPlanDirty({ studentPlans: plans, activityPlan }, savedForRound, ids);
+  const savePlan = async () => {
+    if (!onSavePlan) return;
+    setSaving(true); setSaveMsg(null);
+    try {
+      await onSavePlan(round, normalizeClassPlan({ studentPlans: plans, activityPlan }, ids));
+      setSaveMsg({ ok: true, text: 'บันทึกแนวทางแล้ว' });
+    } catch (e) {
+      setSaveMsg({ ok: false, text: e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ' });
+    } finally { setSaving(false); }
+  };
   const summary = profileSummaryText(profile);
 
   return (
@@ -57,6 +85,10 @@ export function SdqClassReport({ room, students, records, academicYear, loading 
             <select aria-label="ผลที่ใช้สรุป" value={source} onChange={e => setSource(e.target.value as ProfileSource)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200">
               {(Object.keys(PROFILE_SOURCE_LABEL) as ProfileSource[]).map(k => <option key={k} value={k}>{PROFILE_SOURCE_LABEL[k]}</option>)}
             </select>
+          )}
+          {onSavePlan && (
+            <button type="button" onClick={() => void savePlan()} disabled={saving || !dirty} data-testid="sdq-plan-save"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-bold disabled:opacity-40"><Save className="w-3.5 h-3.5" /> {saving ? 'กำลังบันทึก…' : 'บันทึกแนวทาง'}</button>
           )}
           <button type="button" onClick={() => window.print()} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 text-white font-bold"><Printer className="w-3.5 h-3.5" /> พิมพ์ / PDF</button>
         </div>
@@ -124,7 +156,7 @@ export function SdqClassReport({ room, students, records, academicYear, loading 
                           <td className="border border-slate-300 p-1.5 text-center">กลุ่ม{SDQ_TRIAGE_LABEL[c.overall]}</td>
                           <td className="border border-slate-300 p-1.5">{c.prominent.length ? c.prominent.map(k => SUBSCALE_SHORT[k]).join(', ') : '—'}</td>
                           <td className="border border-slate-300 p-1">
-                            <textarea aria-label={`แนวทางช่วยเหลือ ${s?.name ?? c.studentId}`} rows={2} value={plans[c.studentId] ?? ''} onChange={e => setPlans(p => ({ ...p, [c.studentId]: e.target.value }))}
+                            <textarea aria-label={`แนวทางช่วยเหลือ ${s?.name ?? c.studentId}`} rows={2} maxLength={CLASS_PLAN_LIMITS.perStudent} value={plans[c.studentId] ?? ''} onChange={e => setPlans(p => ({ ...p, [c.studentId]: e.target.value }))}
                               className="w-full text-xs bg-transparent border border-dashed border-slate-300 rounded p-1" />
                           </td>
                         </tr>
@@ -140,7 +172,7 @@ export function SdqClassReport({ room, students, records, academicYear, loading 
               <p className="text-xs"><b>1. ภาพรวมปัญหาส่วนใหญ่ของห้องเรียน:</b> {summary}</p>
               <div className="text-xs space-y-1">
                 <b>2. แนวทางการจัดกิจกรรมโฮมรูมหรือพัฒนาห้องเรียนหลังจากนี้:</b>
-                <textarea aria-label="แนวทางการจัดกิจกรรมโฮมรูม" rows={3} value={activityPlan} onChange={e => setActivityPlan(e.target.value)}
+                <textarea aria-label="แนวทางการจัดกิจกรรมโฮมรูม" rows={3} maxLength={CLASS_PLAN_LIMITS.activity} value={activityPlan} onChange={e => setActivityPlan(e.target.value)}
                   className="w-full text-xs bg-transparent border border-dashed border-slate-300 rounded p-1" />
               </div>
               <div className="pt-6 text-xs text-right space-y-1">
@@ -151,7 +183,12 @@ export function SdqClassReport({ room, students, records, academicYear, loading 
           </>
         )}
       </div>
-      <p className="sdq-no-print text-[10px] text-slate-500">ช่อง "แนวทางการช่วยเหลือ" และ "แนวทางการจัดกิจกรรม" ใช้กรอกเพื่อพิมพ์รายงาน ยังไม่บันทึกลงระบบ — ปิดหน้านี้แล้วข้อความจะหาย</p>
+      {saveMsg && <p role={saveMsg.ok ? 'status' : 'alert'} className={`sdq-no-print text-xs ${saveMsg.ok ? 'text-emerald-300' : 'text-rose-400'}`}>{saveMsg.text}</p>}
+      <p className="sdq-no-print text-[10px] text-slate-500">
+        {onSavePlan
+          ? `ช่อง "แนวทางการช่วยเหลือ" และ "แนวทางการจัดกิจกรรม" บันทึกแยกตามรอบการประเมิน (ผู้ที่เห็นได้คือครูที่ปรึกษาของห้องนี้) — ยังไม่กดบันทึก ข้อความจะหายเมื่อปิดหน้านี้${dirty ? ' · มีการแก้ไขที่ยังไม่บันทึก' : ''}`
+          : 'ช่อง "แนวทางการช่วยเหลือ" และ "แนวทางการจัดกิจกรรม" ใช้กรอกเพื่อพิมพ์รายงาน ยังไม่บันทึกลงระบบ — ปิดหน้านี้แล้วข้อความจะหาย'}
+      </p>
     </div>
   );
 }
@@ -161,7 +198,15 @@ export function SdqClassReportLive({ room, students }: { room: string; students:
   const { academicYear, isConfigured, loading: yearLoading } = useCurrentSemester();
   const [records, setRecords] = useState<SDQAssessment[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const user = useStore(s => s.user);
+  const [savedPlans, setSavedPlans] = useState<ClassPlanDoc[]>([]);
+  useEffect(() => {
+    if (!room || !academicYear || !user?.uid) { setSavedPlans([]); return; }
+    return subscribeClassPlans(room, academicYear, setSavedPlans, e => console.warn('[sdq_class_plans]', e.message));
+  }, [room, academicYear, user?.uid]);
   useEffect(() => subscribeAllSDQAssessments(list => { setRecords(list); setLoaded(true); }), []);
   if (!yearLoading && !isConfigured) return <p className="text-xs text-amber-300">ยังไม่ได้ตั้งปีการศึกษาปัจจุบัน — รายงานคัดกรองต้องใช้ปีการศึกษา</p>;
-  return <SdqClassReport room={room} students={students} records={records} academicYear={academicYear} loading={!loaded || yearLoading} />;
+  return <SdqClassReport room={room} students={students} records={records} academicYear={academicYear} loading={!loaded || yearLoading}
+    savedPlans={savedPlans}
+    onSavePlan={(round, content) => saveClassPlan({ room, academicYear, round }, content, { uid: user?.uid || '', staffId: user?.staffId || '' })} />;
 }

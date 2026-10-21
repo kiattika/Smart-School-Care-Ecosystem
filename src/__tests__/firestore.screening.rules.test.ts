@@ -462,3 +462,56 @@ describe.skipIf(!EMULATOR_HOST)('คัดกรองซึมเศร้า 2
     });
   });
 });
+
+describe.skipIf(!EMULATOR_HOST)('แนวทางช่วยเหลือในรายงาน SDQ ชั้นเรียน (sdq_class_plans) — firestore.rules', () => {
+  const plan = (uid: string, staffId: string, over: Record<string, unknown> = {}) => ({
+    room: ROOM, academicYear: '2569', round: 1, studentPlans: { [SID]: 'ติดตามที่บ้านสัปดาห์ละครั้ง' }, activityPlan: 'กิจกรรมโฮมรูมเรื่องอารมณ์',
+    updatedByUid: uid, updatedByStaffId: staffId, updatedAt: new Date(), ...over,
+  });
+  const PATH = 'sdq_class_plans/2569_1_ม.5-8';
+  const fsTs = async () => (await import('firebase/firestore')).serverTimestamp();
+
+  it('ครูที่ปรึกษาของห้องสร้าง/แก้ได้ และ query ด้วย room อ่านได้', async () => {
+    await seed('ACTIVE');
+    const ts = await fsTs();
+    await assertSucceeds(homeroom().doc(PATH).set(plan('hr-uid', HR_STAFF, { updatedAt: ts })));
+    await assertSucceeds(homeroom().collection('sdq_class_plans').where('room', '==', ROOM).where('academicYear', '==', '2569').get());
+    await assertSucceeds(homeroom().doc(PATH).set(plan('hr-uid', HR_STAFF, { activityPlan: 'แก้ไข', updatedAt: ts })));
+  });
+
+  it('ครูที่ปรึกษาห้องอื่น / ครูวิชา / แนะแนว / SUPER_ADMIN / ผู้บริหาร / นักเรียน เขียนและอ่านไม่ได้', async () => {
+    await seed('ACTIVE');
+    await put(PATH, { room: ROOM, academicYear: '2569', round: 1, studentPlans: {}, activityPlan: '', updatedByUid: 'x', updatedByStaffId: HR_STAFF });
+    const ts = await fsTs();
+    for (const [name, db, uid, sid] of [
+      ['other-room', homeroomOtherRoom(), 'hr2-uid', HR_OTHER_STAFF], ['subject', subjectTeacher(), 'sub-uid', 'sub-1'],
+      ['guidance', guidance(), 'guid-uid', 'g-1'], ['admin', superAdmin(), 'adm-uid', 'adm-1'],
+    ] as const) {
+      await assertFails(db.doc('sdq_class_plans/new-' + name).set(plan(uid, sid, { updatedAt: ts })));
+      await assertFails(db.doc(PATH).get());
+    }
+    await assertFails(executive().doc(PATH).get());
+    await assertFails(student().doc(PATH).get());
+  });
+
+  it('เขียนห้องอื่นไม่ได้ / เปลี่ยนห้อง-ปี-รอบหลังสร้างไม่ได้ / ลบไม่ได้ / ปลอมผู้บันทึกไม่ได้', async () => {
+    await seed('ACTIVE');
+    const ts = await fsTs();
+    await assertFails(homeroom().doc('sdq_class_plans/other').set(plan('hr-uid', HR_STAFF, { room: 'ม.6/1', updatedAt: ts })));
+    await assertSucceeds(homeroom().doc(PATH).set(plan('hr-uid', HR_STAFF, { updatedAt: ts })));
+    await assertFails(homeroom().doc(PATH).set(plan('hr-uid', HR_STAFF, { round: 2, updatedAt: ts })));
+    await assertFails(homeroom().doc(PATH).set(plan('hr-uid', HR_STAFF, { academicYear: '2570', updatedAt: ts })));
+    await assertFails(homeroom().doc(PATH).delete());
+    await assertFails(homeroom().doc('sdq_class_plans/forged').set(plan('someone-else', HR_STAFF, { updatedAt: ts })));
+    await assertFails(homeroom().doc('sdq_class_plans/forged2').set(plan('hr-uid', 'other-staff', { updatedAt: ts })));
+  });
+
+  it('ตรวจรูปแบบ: ปีไม่ใช่ 4 หลัก, รอบนอก 1-2, ข้อความกิจกรรมเกิน 1000, เกิน 60 คน, ฟิลด์เกิน', async () => {
+    await seed('ACTIVE');
+    const ts = await fsTs();
+    const many = Object.fromEntries(Array.from({ length: 61 }, (_, i) => [`s${i}`, 'x']));
+    for (const [i, over] of [{ academicYear: '69' }, { round: 3 }, { activityPlan: 'ก'.repeat(1001) }, { studentPlans: many }, { extra: 1 }].entries()) {
+      await assertFails(homeroom().doc(`sdq_class_plans/bad-${i}`).set(plan('hr-uid', HR_STAFF, { ...over, updatedAt: ts })));
+    }
+  });
+});

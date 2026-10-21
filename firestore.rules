@@ -2361,6 +2361,25 @@ service cloud.firestore {
         );
       allow delete: if false;
     }
+    function sdqPlanBodyOk(d) {
+      return d.keys().hasOnly(['room', 'academicYear', 'round', 'studentPlans', 'activityPlan', 'updatedByUid', 'updatedByStaffId', 'updatedAt'])
+        && d.room is string && d.room.size() > 0 && d.room.size() <= 40
+        && d.academicYear is string && d.academicYear.matches('^[0-9]{4}$')
+        && d.round in [1, 2]
+        && d.studentPlans is map && d.studentPlans.size() <= 60
+        && d.activityPlan is string && d.activityPlan.size() <= 1000
+        && d.updatedByUid == request.auth.uid && d.updatedByStaffId == myStaffId()
+        && d.updatedAt == request.time;
+    }
+    match /sdq_class_plans/{planId} {
+      allow read: if resource != null && isHomeroomTeacherOf(resource.data.room);
+      allow create: if isHomeroomTeacherOf(request.resource.data.room) && sdqPlanBodyOk(request.resource.data);
+      allow update: if isHomeroomTeacherOf(resource.data.room) && sdqPlanBodyOk(request.resource.data)
+        && request.resource.data.room == resource.data.room
+        && request.resource.data.academicYear == resource.data.academicYear
+        && request.resource.data.round == resource.data.round;
+      allow delete: if false;
+    }
     match /user_preferences/{uid} {
       allow read: if isSignedIn() && (uid == request.auth.uid
         || (hasAnyRole() && !('STUDENT' in request.auth.token.get('roles', [])) && !('PARENT' in request.auth.token.get('roles', []))));
