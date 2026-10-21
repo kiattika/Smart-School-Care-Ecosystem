@@ -283,6 +283,10 @@ service cloud.firestore {
                        hasRole('INFIRMARY_STAFF') ||
                        hasRole('FINANCE_STAFF') ||
                        hasRole('GUIDANCE_COUNSELOR') ||
+                       // แจ้งผลถึงนักเรียน: ผลทุน/กยศ. (งานกองทุน) และผลแก้ตัว/เรียนซ้ำ (งานทะเบียนวัดผล) — studentUid ถูกตรวจกับทะเบียนด้านบนแล้ว
+                       hasRole('FUND_SCHOLARSHIP') ||
+                       hasRole('REGISTRAR') ||
+                       hasRole('REGISTRAR_ASSISTANT') ||
                        (
                          request.resource.data.parentUid == studentField(request.resource.data.studentId, 'parentUid', '__none__') &&
                          (

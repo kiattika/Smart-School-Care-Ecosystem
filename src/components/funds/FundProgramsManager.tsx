@@ -79,7 +79,7 @@ function InterestsPanel({ program }: { program: FundProgram }) {
   useEffect(() => subscribeInterestsForProgram(program.id, l => setList(l.sort((a, b) => (a.room || '').localeCompare(b.room || '', 'th') || a.studentId.localeCompare(b.studentId))), e => setError(e.message)), [program.id]);
   const decide = async (i: FundInterest, to: InterestStatus) => {
     setBusy(i.id); setError('');
-    try { await decideInterest(i, to, notes[i.id] || '', { staffId: user?.staffId || '', name: user?.displayName || '' }); }
+    try { await decideInterest(i, to, notes[i.id] || '', { staffId: user?.staffId || '', name: user?.displayName || '' }, program.title); }
     catch (e) { setError(errMsg(e)); } finally { setBusy(''); }
   };
   const active = list.filter(i => i.status !== 'WITHDRAWN');

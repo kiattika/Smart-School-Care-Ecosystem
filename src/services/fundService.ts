@@ -4,6 +4,8 @@ import {
   canExpressInterest, canStaffSetInterest, dayEndExclusive, dayStart, fundInterestId, validateFundProgramInput,
   INTEREST_NOTE_MAX, type FundInterest, type FundKind, type FundProgram, type FundProgramInput, type FundStatus, type InterestStatus,
 } from '../lib/fundPrograms';
+import { notifyStudentSide } from './studentNotify';
+import { fundDecisionNotice } from '../lib/studentNotices';
 
 const PROGRAMS = 'fund_programs';
 const INTERESTS = 'fund_interests';
@@ -16,7 +18,7 @@ const programFrom = (id: string, x: Record<string, any>): FundProgram => ({
   registrationOpensAt: x.registrationOpensAt ?? null, registrationClosesAt: x.registrationClosesAt ?? null,
 });
 const interestFrom = (id: string, x: Record<string, any>): FundInterest => ({
-  id, programId: x.programId, studentId: x.studentId, studentName: x.studentName, room: x.room, kind: x.kind,
+  id, programId: x.programId, studentId: x.studentId, studentUid: x.studentUid, studentName: x.studentName, room: x.room, kind: x.kind,
   status: x.status, note: x.note || '', staffNote: x.staffNote,
 });
 
@@ -83,11 +85,14 @@ export async function withdrawInterest(programId: string, studentId: string): Pr
 }
 
 /** งานกองทุนบันทึกผลคัดเลือก (หมายเหตุถึงนักเรียน/ภายใน ≤500) */
-export async function decideInterest(interest: FundInterest, to: InterestStatus, staffNote: string, by: By): Promise<void> {
+export async function decideInterest(interest: FundInterest, to: InterestStatus, staffNote: string, by: By, programTitle = 'โครงการทุน'): Promise<void> {
   if (!by.staffId) throw new Error('บัญชีนี้ไม่ได้เชื่อมกับทะเบียนบุคลากร');
   if (!canStaffSetInterest(interest.status, to)) throw new Error('เปลี่ยนสถานะนี้ไม่ได้จากสถานะปัจจุบัน');
   if (staffNote.length > INTEREST_NOTE_MAX) throw new Error(`หมายเหตุยาวเกิน ${INTEREST_NOTE_MAX} ตัวอักษร`);
   await updateDoc(doc(db, INTERESTS, interest.id), {
     status: to, staffNote: staffNote.trim(), decidedByStaffId: by.staffId, decidedByName: by.name.slice(0, 160), updatedAt: serverTimestamp(),
   });
+  // แจ้งนักเรียนเจ้าของ (studentUid จากเอกสารลงชื่อ) — งานกองทุนอ่านทะเบียนนักเรียนไม่ได้ จึงไม่แจ้งผู้ปกครองทางนี้
+  const notice = fundDecisionNotice(interest.kind, programTitle, to as 'SHORTLISTED' | 'AWARDED' | 'NOT_SELECTED', staffNote);
+  if (notice) await notifyStudentSide({ studentId: interest.studentId, studentName: interest.studentName || '', studentUid: interest.studentUid }, notice);
 }

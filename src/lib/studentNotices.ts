@@ -47,3 +47,34 @@ export function infirmaryVisitNotice(visit: { symptoms: string; visitTime: strin
     type: visit.isUrgentAlert ? 'critical' : 'warning',
   };
 }
+
+/** ผลคำร้องขอฝึกงาน (งานแนะแนวอนุมัติ/ไม่อนุมัติ) — เลขที่หนังสือไม่ใส่ในข้อความ (นักเรียนดูได้ที่หน้าคำร้อง) */
+export function internshipDecisionNotice(r: { periodLabel: string; companyName: string }, to: 'APPROVED' | 'REJECTED', staffNote?: string): StudentNoticeText {
+  const where = `${r.companyName || 'สถานประกอบการ'}${r.periodLabel ? ` (${r.periodLabel})` : ''}`;
+  const note = staffNote && staffNote.trim() ? ` — หมายเหตุ: ${staffNote.trim()}` : '';
+  return to === 'APPROVED'
+    ? { title: '✅ คำร้องขอฝึกงานได้รับการอนุมัติ', message: `งานแนะแนวอนุมัติคำร้องขอฝึกงาน ${where}${note} — ดูรายละเอียดและหนังสือได้ที่เมนูฝึกงาน`, type: 'info' }
+    : { title: '❌ คำร้องขอฝึกงานไม่ได้รับการอนุมัติ', message: `งานแนะแนวไม่อนุมัติคำร้องขอฝึกงาน ${where}${note} — ยื่นคำร้องใหม่ได้ขณะที่ยังเปิดรับ`, type: 'warning' };
+}
+
+const FUND_KIND_TH = { SCHOLARSHIP: 'ทุนการศึกษา', STUDENT_LOAN: 'กองทุนกู้ยืม (กยศ.)' } as const;
+
+/** ผลคัดเลือกทุน/กยศ. — แจ้งเฉพาะสถานะที่เป็นผลต่อนักเรียน (รายชื่อสำรอง/ได้รับ/ไม่ได้รับ) */
+export function fundDecisionNotice(kind: keyof typeof FUND_KIND_TH, programTitle: string, to: 'SHORTLISTED' | 'AWARDED' | 'NOT_SELECTED', staffNote?: string): StudentNoticeText | null {
+  const k = FUND_KIND_TH[kind] || 'ทุน';
+  const note = staffNote && staffNote.trim() ? ` — หมายเหตุ: ${staffNote.trim()}` : '';
+  if (to === 'AWARDED') return { title: `🎉 ได้รับ${k}`, message: `งานกองทุนและทุนการศึกษาบันทึกผล "${programTitle}": ได้รับการคัดเลือก${note}`, type: 'info' };
+  if (to === 'SHORTLISTED') return { title: `📋 ผ่านการคัดเลือกเบื้องต้น (${k})`, message: `"${programTitle}": ท่านอยู่ในรายชื่อผ่านการคัดเลือกเบื้องต้น รอผลขั้นสุดท้าย${note}`, type: 'info' };
+  if (to === 'NOT_SELECTED') return { title: `ℹ️ ผลคัดเลือก${k}`, message: `"${programTitle}": ไม่ได้รับการคัดเลือกในรอบนี้${note}`, type: 'warning' };
+  return null;
+}
+
+/** ผลแก้ตัว/เรียนซ้ำที่งานทะเบียนบันทึก — เกรดใหม่เป็นผลทางวิชาการของนักเรียน (ไม่ใช่ข้อมูลอ่อนไหวด้านสุขภาพ) */
+export function retakeResultNotice(r: { courseCode: string; courseName: string; kind: 'MAKEUP' | 'REPEAT'; originalGrade: string; newGrade: string }, isUpdate: boolean): StudentNoticeText {
+  const kind = r.kind === 'REPEAT' ? 'เรียนซ้ำ' : 'แก้ตัว';
+  return {
+    title: isUpdate ? `📝 แก้ไขผล${kind}` : `📝 บันทึกผล${kind}`,
+    message: `${r.courseCode} ${r.courseName}: เกรดเดิม ${r.originalGrade || '-'} → เกรดใหม่ ${r.newGrade} — ดูในเมนูผลการเรียน (ไม่เป็นทางการ ผลทางการยึดงานทะเบียน/SGS)`,
+    type: 'info',
+  };
+}

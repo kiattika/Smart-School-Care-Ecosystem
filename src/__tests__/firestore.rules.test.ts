@@ -478,6 +478,14 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
         asRole('HOMEROOM_TEACHER').firestore().doc('parent_notifications/notif-new-2').set({ parentUid: 'parent-alice', msg: 'Update 2' })
       );
     });
+
+    it('งานกองทุน/งานทะเบียน/ผู้ช่วยทะเบียน สร้างแจ้งเตือนผลได้ แต่ studentUid ปลอมไม่ได้ และบทบาทอื่นยังสร้างไม่ได้', async () => {
+      for (const [i, role] of ['FUND_SCHOLARSHIP', 'REGISTRAR', 'REGISTRAR_ASSISTANT'].entries()) {
+        await assertSucceeds(asRole(role).firestore().doc(`parent_notifications/notif-result-${i}`).set({ parentUid: null, studentUid: null, studentId: 'std-101', msg: 'ผล' }));
+        await assertFails(asRole(role).firestore().doc(`parent_notifications/notif-forged-${i}`).set({ parentUid: null, studentUid: 'someone-else', studentId: 'std-101', msg: 'ปลอม' }));
+      }
+      await assertFails(asRole('STUDENT_AFFAIRS').firestore().doc('parent_notifications/notif-denied').set({ parentUid: null, studentUid: null, studentId: 'std-101', msg: 'x' }));
+    });
   });
 
   // 5. parent_conferences
