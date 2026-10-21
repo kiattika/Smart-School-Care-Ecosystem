@@ -583,3 +583,32 @@ describe.skipIf(!EMULATOR_HOST)('ขาดเรียนต่อเนื่�
     await assertFails(homeroom().doc('absence_followups/f1').delete());
   });
 });
+
+describe.skipIf(!EMULATOR_HOST)('สรุปการมาเรียน (attendance_summary) + ผู้บริหารเห็นแจ้งเตือนระดับ 3 — firestore.rules', () => {
+  const deputyAcademic = () => ctx('dep-uid', ['DEPUTY_DIRECTOR_ACADEMIC'], { staffId: 'dep-1' });
+  const director = () => ctx('dir-uid', ['DIRECTOR'], { staffId: 'dir-1' });
+  const subjectTeacher2 = () => ctx('st-uid', ['SUBJECT_TEACHER'], { staffId: 'st-1' });
+  const affairs = () => ctx('aff-uid', ['STUDENT_AFFAIRS'], { staffId: 'aff-1' });
+
+  it('attendance_summary: ผู้บริหาร/ผอ./รองวิชาการ/SUPER_ADMIN อ่าน current ได้', async () => {
+    await put('attendance_summary/current', { asOf: '2026-10-21' });
+    for (const who of [executive, director, deputyAcademic, superAdmin]) await assertSucceeds(who().doc('attendance_summary/current').get());
+  });
+  it('attendance_summary: ครู/กิจการ/นักเรียน/ผู้ปกครองอ่านไม่ได้; ทุกคนเขียนและ list ไม่ได้', async () => {
+    await put('attendance_summary/current', { asOf: '2026-10-21' });
+    for (const who of [homeroom, subjectTeacher2, affairs, student, guidance]) await assertFails(who().doc('attendance_summary/current').get());
+    for (const who of [superAdmin, executive, director]) {
+      await assertFails(who().doc('attendance_summary/current').set({ asOf: 'x' }));
+      await assertFails(who().collection('attendance_summary').get());
+    }
+  });
+  it('attendance_summary: เอกสารอื่นนอกจาก current อ่านไม่ได้', async () => {
+    await put('attendance_summary/other', { asOf: '2026-10-21' });
+    await assertFails(executive().doc('attendance_summary/other').get());
+  });
+  it('absence_alerts ระดับ 3: ผู้บริหาร/ผอ./รองวิชาการ อ่านได้ครู วิชาอื่นอ่านไม่ได้', async () => {
+    await put('absence_alerts/' + SID, { studentId: SID, room: ROOM, streakDays: 10, level: 3, sinceDate: '2026-10-07', lastCheckedDate: '2026-10-21' });
+    for (const who of [executive, director, deputyAcademic]) await assertSucceeds(who().doc('absence_alerts/' + SID).get());
+    await assertFails(subjectTeacher2().doc('absence_alerts/' + SID).get());
+  });
+});

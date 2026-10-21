@@ -1,90 +1,55 @@
 import { describe, it, expect } from 'vitest';
-import { computeAttendanceSummary, AttendanceDocLite } from '../lib/attendanceSummary';
-import { isSameRoom } from '../lib/utils';
+import { buildAttendanceSummary, countStudents, weekStartOf } from '../../functions/src/attendanceSummaryLogic';
+import { attendanceRate, levelRows, parseAttendanceSummary, roomsByLowestRate, sumCounts } from '../lib/attendanceSummaryView';
+import { readSource } from './helpers/readSource';
 
-/** helper: expectedRecordIds เหมือนที่ TeacherPortal.tsx คำนวณจาก attRoomCandidates + periodNumber */
-function idsFor(dateStr: string, room: string, periodNumber: number): Set<string> {
-  const ids = new Set<string>();
-  const rr = room.replace('/', '-');
-  ids.add(`${dateStr}_${rr}_p${periodNumber}`);
-  if (periodNumber === 0) ids.add(`${dateStr}_${rr}`);
-  return ids;
-}
+const sem = { academicYear: '2569', term: '1' as const };
+const docs = [
+  { date: '2026-10-19', room: 'ม.1/1', students: { a: 'PRESENT', b: 'LATE', c: 'ABSENT', d: 'LEAVE' } },
+  { date: '2026-10-20', room: 'ม.1/1', students: { a: 'PRESENT', b: 'PRESENT', c: 'PRESENT', d: 'PRESENT' } },
+  { date: '2026-10-20', room: 'ม.4/2', students: { e: 'ABSENT', f: 'PRESENT' } },
+];
 
-describe('computeAttendanceSummary — badge สรุปขาด/ลา/มาสายบนการ์ดตารางสอน', () => {
-  const room = 'ม.5/8';
-  const dateStr = '2569-06-10';
-
-  it('ไม่มี record ใดๆ เลย → undefined (ไม่แสดง badge)', () => {
-    const result = computeAttendanceSummary([], idsFor(dateStr, room, 3), 3, [room], isSameRoom);
-    expect(result).toBeUndefined();
+describe('สรุปการมาเรียน (ฝั่ง functions)', () => {
+  it('นับสถานะ และข้ามค่าที่ไม่รู้จัก', () => {
+    expect(countStudents({ a: 'PRESENT', b: 'X', c: 'ABSENT' })).toEqual({ present: 1, late: 0, absent: 1, leave: 0 });
   });
-
-  it('ครูประจำชั้นเช็คโฮมรูมตอนเช้าแล้ว (มีขาด 1 คน) → คาบอื่นที่ยังไม่เช็คเห็นค่า default ทันที', () => {
-    const docs: AttendanceDocLite[] = [
-      {
-        id: `${dateStr}_${room}`,
-        periodNumber: null,
-        room,
-        students: { std1: 'ABSENT', std2: 'PRESENT', std3: 'PRESENT' },
-        source: 'HOMEROOM_DEFAULT',
-      },
-    ];
-    const result = computeAttendanceSummary(docs, idsFor(dateStr, room, 3), 3, [room], isSameRoom);
-    expect(result).toEqual({ absent: 1, leave: 0, late: 0, present: 2, isDefault: true });
+  it('สัปดาห์เริ่มวันจันทร์', () => {
+    expect(weekStartOf('2026-10-21')).toBe('2026-10-19');
+    expect(weekStartOf('2026-10-25')).toBe('2026-10-19');
   });
-
-  it('REGRESSION: ครูวิชาแก้ไขสถานะเฉพาะคาบตัวเอง (คนที่ขาดตอนเช้ามาสายแทน) → badge ใช้ข้อมูลจริงของคาบนั้น ไม่ใช่ค่า default เดิม', () => {
-    const docs: AttendanceDocLite[] = [
-      {
-        id: `${dateStr}_${room}`,
-        periodNumber: null,
-        room,
-        students: { std1: 'ABSENT', std2: 'PRESENT', std3: 'PRESENT' },
-        source: 'HOMEROOM_DEFAULT',
-      },
-      {
-        id: `${dateStr}_${room}_p3`,
-        periodNumber: 3,
-        room,
-        students: { std1: 'LATE', std2: 'PRESENT', std3: 'PRESENT' }, // แก้เฉพาะคาบ 3
-        source: 'PERIOD_OVERRIDE',
-      },
-    ];
-    const result = computeAttendanceSummary(docs, idsFor(dateStr, room, 3), 3, [room], isSameRoom);
-    expect(result).toEqual({ absent: 0, leave: 0, late: 1, present: 2, isDefault: false });
+  it('ไม่มีข้อมูล = null ไม่แต่งตัวเลข', () => {
+    expect(buildAttendanceSummary([], sem)).toBeNull();
   });
-
-  it('คาบ 0 (โฮมรูมเอง) มี record ของตัวเอง → isDefault: false เสมอ (ไม่ fallback หาตัวเอง)', () => {
-    const docs: AttendanceDocLite[] = [
-      { id: `${dateStr}_${room.replace('/', '-')}`, periodNumber: null, room, students: { std1: 'LEAVE' }, source: 'HOMEROOM_DEFAULT' },
-    ];
-    const result = computeAttendanceSummary(docs, idsFor(dateStr, room, 0), 0, [room], isSameRoom);
-    expect(result).toEqual({ absent: 0, leave: 1, late: 0, present: 0, isDefault: false });
+  it('ไม่มีชื่อ/รหัสนักเรียนในผลลัพธ์', () => {
+    const s = buildAttendanceSummary(docs, sem);
+    expect(s).not.toBeNull();
+    const json = JSON.stringify(s);
+    for (const id of ['"a"', '"b"', '"e"']) expect(json).not.toContain(id);
   });
+});
 
-  it('ห้องอื่นไม่ปนกัน — ไม่ fallback ข้ามห้อง', () => {
-    const docs: AttendanceDocLite[] = [
-      { id: `${dateStr}_ม.5-9`, periodNumber: null, room: 'ม.5/9', students: { std9: 'ABSENT' }, source: 'HOMEROOM_DEFAULT' },
-    ];
-    const result = computeAttendanceSummary(docs, idsFor(dateStr, room, 3), 3, [room], isSameRoom);
-    expect(result).toBeUndefined();
+describe('มุมมองผู้บริหาร', () => {
+  it('ร้อยละ = (มา+สาย)÷ทั้งหมดรวมลา; ไม่มีข้อมูล = null', () => {
+    expect(attendanceRate({ present: 1, late: 1, absent: 1, leave: 1 })).toBe(50);
+    expect(attendanceRate({ present: 0, late: 0, absent: 0, leave: 0 })).toBeNull();
   });
-
-  it('ไม่มีนักเรียนขาด/ลา/สาย เลย (มาครบทุกคน) → นับ present ถูกต้อง, isDefault ตามที่มา', () => {
-    const docs: AttendanceDocLite[] = [
-      { id: `${dateStr}_${room}_p3`, periodNumber: 3, room, students: { a: 'PRESENT', b: 'PRESENT' }, source: 'PERIOD_OVERRIDE' },
-    ];
-    const result = computeAttendanceSummary(docs, idsFor(dateStr, room, 3), 3, [room], isSameRoom);
-    expect(result).toEqual({ absent: 0, leave: 0, late: 0, present: 2, isDefault: false });
+  it('parse เอกสารจริงจาก logic ได้ และเอกสารผิดรูป = null', () => {
+    const v = parseAttendanceSummary(JSON.parse(JSON.stringify(buildAttendanceSummary(docs, sem))));
+    expect(v).not.toBeNull();
+    expect(v!.periods.term.rooms.length).toBe(2);
+    expect(sumCounts(v!.periods.term.rooms).absent).toBe(2);
+    expect(parseAttendanceSummary({ foo: 1 })).toBeNull();
+    expect(parseAttendanceSummary(null)).toBeNull();
   });
-
-  it('students ว่างเปล่า ({}) ไม่นับว่ามี record — ยัง fallback ต่อได้ตามปกติ', () => {
-    const docs: AttendanceDocLite[] = [
-      { id: `${dateStr}_${room}_p3`, periodNumber: 3, room, students: {}, source: 'PERIOD_OVERRIDE' },
-      { id: `${dateStr}_${room}`, periodNumber: null, room, students: { std1: 'ABSENT' }, source: 'HOMEROOM_DEFAULT' },
-    ];
-    const result = computeAttendanceSummary(docs, idsFor(dateStr, room, 3), 3, [room], isSameRoom);
-    expect(result).toEqual({ absent: 1, leave: 0, late: 0, present: 0, isDefault: true });
+  it('เรียงห้องร้อยละต่ำสุดก่อน และรวมรายระดับ', () => {
+    const v = parseAttendanceSummary(JSON.parse(JSON.stringify(buildAttendanceSummary(docs, sem))))!;
+    expect(roomsByLowestRate(v.periods.term.rooms)[0].room).toBe('ม.4/2');
+    expect(levelRows(v.periods.term.rooms).length).toBe(2);
+  });
+  it('แผงไม่ฝังตัวเลขปลอม และต่อกับหน้าภาพรวม', () => {
+    const panel = readSource('src/components/executive/ExecutiveAttendancePanel.tsx');
+    expect(panel).toContain("'attendance_summary'");
+    expect(readSource('src/ExecutivePortal.tsx')).toContain('<ExecutiveAttendancePanel />');
   });
 });

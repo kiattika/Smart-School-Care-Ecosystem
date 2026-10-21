@@ -7,3 +7,4 @@ export { importParentVerification, linkParentLine, signInParentLine, unlinkParen
 export { scheduledPublicSummary, refreshPublicSummary } from './publicSummary';
 export { lateAttendanceReminder1600, lateAttendanceExpiryNotice } from './lateAttendanceReminders';
 export { scheduledAbsenceAlerts, refreshAbsenceAlerts } from './absenceAlerts';
+export { scheduledAttendanceSummary, refreshAttendanceSummary } from './attendanceSummary';

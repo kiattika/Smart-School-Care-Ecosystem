@@ -19,6 +19,10 @@ service cloud.firestore {
              hasRole('DEPUTY_DIRECTOR_PERSONNEL') || hasRole('DEPUTY_DIRECTOR_GENERAL');
     }
 
+    function isSchoolLeader() {
+      return isExec() || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC');
+    }
+
     function isSelf(userId) {
       return isSignedIn() && (request.auth.uid == userId || request.auth.token.email == userId);
     }
@@ -2392,11 +2396,11 @@ service cloud.firestore {
       allow read: if resource != null && (
         isHomeroomTeacherOf(resource.data.room) ||
         ((hasRole('STUDENT_AFFAIRS') || hasRole('GUIDANCE_COUNSELOR')) && resource.data.level >= 2) ||
-        (isExec() && resource.data.level >= 3));
+        (isSchoolLeader() && resource.data.level >= 3));
       allow write: if false;
     }
     match /absence_settings/{docId} {
-      allow read: if docId == 'thresholds' && (hasRole('STUDENT_AFFAIRS') || hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('GUIDANCE_COUNSELOR') || isExec());
+      allow read: if docId == 'thresholds' && (hasRole('STUDENT_AFFAIRS') || hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('GUIDANCE_COUNSELOR') || isSchoolLeader());
       allow create, update: if docId == 'thresholds' && (hasRole('STUDENT_AFFAIRS') || hasRole('SUPER_ADMIN'))
         && request.resource.data.keys().hasOnly(['watchDays', 'weekDays', 'severeDays', 'updatedAt', 'updatedBy'])
         && request.resource.data.watchDays is int && request.resource.data.weekDays is int && request.resource.data.severeDays is int
@@ -2418,6 +2422,10 @@ service cloud.firestore {
         && request.resource.data.byName is string && request.resource.data.byName.size() >= 1
         && request.resource.data.createdAt == request.time;
       allow update, delete: if false;
+    }
+    match /attendance_summary/{docId} {
+      allow get: if docId == 'current' && (isSchoolLeader() || hasRole('SUPER_ADMIN'));
+      allow list, write: if false;
     }
     match /user_preferences/{uid} {
       allow read: if isSignedIn() && (uid == request.auth.uid

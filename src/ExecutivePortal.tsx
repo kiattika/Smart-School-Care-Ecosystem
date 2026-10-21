@@ -52,6 +52,7 @@ import {
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
 import { ExecutiveLearnerAnalytics } from './components/ExecutiveLearnerAnalytics';
 import { ExecutiveEngagementDashboard } from './components/ExecutiveEngagementDashboard';
+import { ExecutiveAttendancePanel } from './components/executive/ExecutiveAttendancePanel';
 import { ExecutiveTeacherInfoPanel } from './components/executive/ExecutiveTeacherInfoPanel';
 import { useStore } from './store';
 import { useRealStudents } from './hooks/useRealStudents';
@@ -283,7 +284,6 @@ export function ExecutivePortal() {
               {activeTab === 'homevisit' && 'สารสนเทศเยี่ยมบ้านระดับโรงเรียน'}
               {activeTab === 'activity' && 'สถิติการปฏิบัติงานสอนทั้งโรงเรียน (ตัวเลขรวม)'}
               {activeTab === 'sub-analytics' && 'วิเคราะห์งานสอนแทน & PA'}
-          {activeTab === 'absence' && <div className="max-w-4xl mx-auto relative z-10"><AbsenceAlertsPanel scope={{ kind: 'MIN_LEVEL', minLevel: 3 }} students={students as any} canFollowUp={false} /></div>}
               {activeTab === 'absence' && 'นักเรียนขาดเรียนต่อเนื่องนาน'}
               {activeTab === 'teacherinfo' && 'ข้อมูลครูรายบุคคล (เฉพาะผู้บริหาร)'}
               {activeTab === 'supervision' && 'ภาพรวมการนิเทศการสอน (ไม่แสดงรายบุคคล)'}
@@ -352,6 +352,8 @@ export function ExecutivePortal() {
                   ส่งออกรายงานสรุปผู้บริหาร (PDF) — เร็วๆ นี้
                 </button>
               </div>
+
+              <ExecutiveAttendancePanel />
 
               {/* 360° Care Score Dashboard
                   TASK 1/2 (audit): เดิมมี "5 KPI Pillars" + "Annual Rewards & Promotions Shortlist"
@@ -690,6 +692,7 @@ export function ExecutivePortal() {
           {activeTab === 'activity' && <div className="max-w-6xl mx-auto relative z-10"><ActivityOverviewPanel level="SCHOOL" /></div>}
           {activeTab === 'sub-analytics' && <div className="max-w-7xl mx-auto relative z-10"><SubstituteTeachingAnalyticsModule views={['EXECUTIVE']} /></div>}
 
+          {activeTab === 'absence' && <div className="max-w-4xl mx-auto relative z-10"><AbsenceAlertsPanel scope={{ kind: 'MIN_LEVEL', minLevel: 3 }} students={students as any} canFollowUp={false} /></div>}
           {activeTab === 'teacherinfo' && <ExecutiveTeacherInfoPanel />}
 
           {activeTab === 'supervision' && <ExecutiveSupervisionOverview />}
