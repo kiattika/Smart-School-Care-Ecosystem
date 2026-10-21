@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Brain, CalendarClock, CalendarHeart, ClipboardCheck, Download, FileText, Home, HeartPulse, LogOut, MapPin, MessageCircle, Monitor, Puzzle, RefreshCw, Satellite, ScanLine, UsersRound, BarChart3, Stethoscope } from 'lucide-react';
+import { ArrowLeft, Brain, FolderGit2, Gauge, ShieldCheck, CalendarClock, CalendarHeart, ClipboardCheck, Download, FileText, Home, HeartPulse, LogOut, MapPin, MessageCircle, Monitor, Puzzle, RefreshCw, Satellite, ScanLine, UsersRound, BarChart3, Stethoscope } from 'lucide-react';
 import { useStore } from '../store';
 import { useRealStudents } from '../hooks/useRealStudents';
 import { useTeacherFirestoreSchedule } from '../hooks/useTeacherFirestoreSchedule';
@@ -13,7 +13,12 @@ import { GateAttendanceTracker } from '../components/student-parent/GateAttendan
 import { ParentEngagementServices } from '../components/student-parent/ParentEngagementServices';
 import { SemesterHealthSelfReportForm } from '../components/student-parent/SemesterHealthSelfReportForm';
 import { useCurrentSemester } from '../hooks/useCurrentSemester';
-import { subscribeSemesterHealthLogs } from '../services/firestoreService';
+import { subscribeSemesterHealthLogs, subscribeLateAttendanceRequests } from '../services/firestoreService';
+import { CourseOverviewCards } from '../components/student-parent/CourseOverviewCards';
+import { ParentPortfolioView } from '../components/portfolio/ParentPortfolioView';
+import { LateAttendanceApprovalList } from '../components/LateAttendanceApprovalList';
+import { actorKindsFor } from '../lib/lateAttendanceFlow';
+import type { LateAttendanceRequestRecord } from '../types';
 import type { SemesterHealthLog } from '../types';
 import { useMobileDue } from './useMobileDue';
 import { useElectiveActivities } from '../hooks/useElectiveActivities';
@@ -43,6 +48,9 @@ const ICONS: Record<MobileMenuId, React.ComponentType<{ className?: string }>> =
   homeVisit: UsersRound,
   appointment: CalendarHeart,
   infirmary: Stethoscope,
+  courses: Gauge,
+  portfolio: FolderGit2,
+  approvals: ShieldCheck,
 };
 const TONES: Record<MobileMenuId, string> = {
   checkin: 'from-emerald-500/25 to-teal-500/10 text-emerald-300 border-emerald-500/30',
@@ -59,6 +67,9 @@ const TONES: Record<MobileMenuId, string> = {
   homeVisit: 'from-amber-500/25 to-orange-500/10 text-amber-300 border-amber-500/30',
   appointment: 'from-lime-500/25 to-green-500/10 text-lime-300 border-lime-500/30',
   infirmary: 'from-rose-500/25 to-pink-500/10 text-rose-300 border-rose-500/30',
+  courses: 'from-blue-500/25 to-indigo-500/10 text-blue-300 border-blue-500/30',
+  portfolio: 'from-fuchsia-500/25 to-pink-500/10 text-fuchsia-300 border-fuchsia-500/30',
+  approvals: 'from-amber-500/25 to-yellow-500/10 text-amber-300 border-amber-500/30',
 };
 
 /** หน้ามือถือ (PWA) /m — แสดงเฉพาะเมนูที่ใช้บ่อยตามบทบาท; งานอื่นเปิดเว็บเต็มได้ */
@@ -105,7 +116,15 @@ export function MobileApp({ onLogout }: Props) {
   const memberThreads = useMemberThreads(isStudent || isParent ? user.uid : undefined);
   const memberUnread = memberThreads.filter(t => t.channel === (isParent ? 'PARENT' : 'STUDENT') && isThreadUnread(t, 'MEMBER')).length;
   const roomUnread = useRoomChatUnread(myRoom || undefined, user.staffId);
-  const badge = (id: MobileMenuId) => (id === 'chat' ? (isStudent || isParent ? memberUnread : roomUnread) : 0);
+  // badge เมนูอนุมัติ: คำขอเช็คชื่อย้อนหลังที่ "ฉันตัดสินได้จริง" ณ ตอนนี้ (สิทธิ์ตามบทบาท/ช่วงเวลาเดียวกับกระดิ่งบนเว็บ)
+  const isApprover = menu.some(m => m.id === 'approvals');
+  const [lateReqs, setLateReqs] = useState<LateAttendanceRequestRecord[]>([]);
+  useEffect(() => {
+    if (!isApprover || !user.uid) { setLateReqs([]); return; }
+    return subscribeLateAttendanceRequests(setLateReqs);
+  }, [isApprover, user.uid]);
+  const approvalCount = isApprover ? lateReqs.filter(r => actorKindsFor(r, { roles: profileRoles as string[], staffId: user.staffId || '' }, clockMs).length > 0).length : 0;
+  const badge = (id: MobileMenuId) => (id === 'chat' ? (isStudent || isParent ? memberUnread : roomUnread) : id === 'approvals' ? approvalCount : 0);
 
   const open = (id: MobileMenuId) => {
     if (id === 'checkin') setGpsOpen(true);
@@ -174,6 +193,9 @@ export function MobileApp({ onLogout }: Props) {
             : <TeacherToday />
         )}
         {view === 'homeroom' && <MobileHomeroomAttendance room={myRoom} />}
+        {view === 'approvals' && isApprover && <LateAttendanceApprovalList />}
+        {view === 'courses' && (child ? <CourseOverviewCards studentId={child.studentId} room={child.room} courseStats={child.courseAttendanceStats} /> : needChild)}
+        {view === 'portfolio' && isParent && (child ? <ParentPortfolioView parentUid={user.uid} studentId={child.studentId} /> : needChild)}
         {view === 'homeLocation' && (
           child ? <StudentHomeLocationForm student={child} studentUid={user.uid} /> : <EmptyNotice loading={own.loading} text="ยังไม่ได้ผูกกับทะเบียนนักเรียน" />
         )}
@@ -183,7 +205,7 @@ export function MobileApp({ onLogout }: Props) {
         {view === 'twoQ' && (child ? <HealthMentalWellbeingModule studentId={child.studentId} student={child} isParentView={false} onlyTab="screening" /> : needChild)}
         {view === 'infirmary' && (child ? <HealthMentalWellbeingModule studentId={child.studentId} student={child} isParentView onlyTab="infirmary" /> : needChild)}
         {view === 'childGate' && (child ? <GateAttendanceTracker studentId={child.studentId} student={child} isParentView onlyTab="gate" /> : needChild)}
-        {view === 'leave' && (child ? <GateAttendanceTracker studentId={child.studentId} student={child} isParentView onlyTab="leave" /> : needChild)}
+        {view === 'leave' && (child ? <GateAttendanceTracker studentId={child.studentId} student={child} isParentView={isParent} onlyTab="leave" /> : needChild)}
         {view === 'appointment' && (child ? <ParentEngagementServices studentId={child.studentId} student={child} isParentView section="appointment" /> : needChild)}
         {view === 'homeVisit' && (child ? <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-4"><FamilyHomeVisitInfoForm student={child} parentUid={user.uid} /></div> : needChild)}
         {view === 'chat' && (

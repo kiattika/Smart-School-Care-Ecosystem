@@ -77,10 +77,10 @@ describe('pwa: ไฟล์ manifest / icons / service worker / hosting', () => 
 describe('mobileMenuFor', () => {
   const ids = (x: ReturnType<typeof mobileMenuFor>) => x.map(i => i.id);
   it('นักเรียน', () => {
-    expect(ids(mobileMenuFor({ appRole: 'student', roles: ['STUDENT'] }))).toEqual(['checkin', 'schedule', 'homeLocation', 'chat']);
+    expect(ids(mobileMenuFor({ appRole: 'student', roles: ['STUDENT'] }))).toEqual(['checkin', 'schedule', 'courses', 'leave', 'homeLocation', 'chat']);
   });
   it('ผู้ปกครอง: ไม่มีเช็คอิน/พิกัดบ้าน; ไม่มีบทบาท PARENT = ไม่มีเมนู', () => {
-    expect(ids(mobileMenuFor({ appRole: 'parent', roles: ['PARENT'] }))).toEqual(['childGate', 'schedule', 'leave', 'appointment', 'infirmary', 'homeVisit', 'chat']);
+    expect(ids(mobileMenuFor({ appRole: 'parent', roles: ['PARENT'] }))).toEqual(['childGate', 'schedule', 'courses', 'portfolio', 'leave', 'appointment', 'infirmary', 'homeVisit', 'chat']);
     expect(mobileMenuFor({ appRole: 'parent', roles: [] })).toEqual([]);
   });
   it('ครูประจำวิชา: เช็คอิน + ตารางสอน ไม่มีเช็คชื่อโฮมรูม', () => {
@@ -88,6 +88,20 @@ describe('mobileMenuFor', () => {
   });
   it('ครูประจำชั้น: มีเช็คชื่อโฮมรูม + ข้อความ', () => {
     expect(ids(mobileMenuFor({ appRole: 'advisor', roles: ['SUBJECT_TEACHER', 'HOMEROOM_TEACHER'] }))).toEqual(['checkin', 'schedule', 'homeroom', 'chat']);
+  });
+  it('ผู้อนุมัติ (หัวหน้าวิชาการ/รองฯ/ผอ.) ได้เมนูอนุมัติรวมกับเมนูครูเดิม; SUPER_ADMIN ไม่ได้', () => {
+    for (const role of ['ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR']) {
+      expect(ids(mobileMenuFor({ appRole: 'teacher', roles: ['SUBJECT_TEACHER', role] }))).toEqual(['checkin', 'schedule', 'approvals']);
+    }
+    expect(ids(mobileMenuFor({ appRole: 'teacher', roles: ['SUBJECT_TEACHER', 'SUPER_ADMIN'] }))).not.toContain('approvals');
+  });
+  it('ครูหลายบทบาท: ที่ปรึกษา + ผู้อนุมัติ ได้เมนูรวมทั้งสอง', () => {
+    expect(ids(mobileMenuFor({ appRole: 'advisor', roles: ['SUBJECT_TEACHER', 'HOMEROOM_TEACHER', 'ACADEMIC_HEAD'] }))).toEqual(['checkin', 'schedule', 'approvals', 'homeroom', 'chat']);
+  });
+  it('นักเรียนไม่เห็นคะแนน/ระดับคัดกรอง: เมนูนักเรียนไม่มีเมนูอนุมัติ/แฟ้มผลงานของผู้ปกครอง', () => {
+    const m = ids(mobileMenuFor({ appRole: 'student', roles: ['STUDENT'] }));
+    expect(m).not.toContain('approvals');
+    expect(m).not.toContain('portfolio');
   });
   it('บทบาทไม่มีตารางสอน (เช่น การเงิน) มีแค่เช็คอิน', () => {
     expect(ids(mobileMenuFor({ appRole: 'teacher', roles: ['FINANCE_STAFF'] }))).toEqual(['checkin']);
@@ -126,11 +140,11 @@ describe('เมนูแบบประเมินบนมือถือ (�
   const student = (due: any) => ids(mobileMenuFor({ appRole: 'student', roles: ['STUDENT'], due }));
   it('นักเรียน: ยังไม่ทำสุขภาพ/SDQ และ 2Q ถึงกำหนด = เห็นครบ', () => {
     expect(student({ clubOpen: true, healthDone: false, sdqDone: false, twoQDue: true }))
-      .toEqual(['checkin', 'schedule', 'club', 'health', 'sdq', 'twoQ', 'homeLocation', 'chat']);
+      .toEqual(['checkin', 'schedule', 'courses', 'leave', 'club', 'health', 'sdq', 'twoQ', 'homeLocation', 'chat']);
   });
   it('นักเรียน: ทำแล้ว = เมนูหาย; ยังไม่รู้สถานะ = ซ่อนไว้ก่อน', () => {
-    expect(student({ healthDone: true, sdqDone: true, twoQDue: false })).toEqual(['checkin', 'schedule', 'homeLocation', 'chat']);
-    expect(student({})).toEqual(['checkin', 'schedule', 'homeLocation', 'chat']);
+    expect(student({ healthDone: true, sdqDone: true, twoQDue: false })).toEqual(['checkin', 'schedule', 'courses', 'leave', 'homeLocation', 'chat']);
+    expect(student({})).toEqual(['checkin', 'schedule', 'courses', 'leave', 'homeLocation', 'chat']);
   });
   it('สมัครชุมนุม: โผล่เฉพาะตอนมีชุมนุมเปิดรับ — ปิดรับหมดหรือยังไม่รู้สถานะ = ซ่อน', () => {
     expect(student({ clubOpen: true })).toContain('club');
