@@ -90,9 +90,9 @@ describe('กระดิ่งงานค้างของบุคลาก�
   });
   it('บทบาทอื่นไม่ได้งานของคนอื่นไปแสดง และไม่ subscribe เกินสิทธิ์', () => {
     expect(buildStaffTasks({ activeRole: 'SUBJECT_TEACHER', roomLeaves: leaves, lateRequests: late })).toEqual([]);
-    expect(staffTaskSources('SUBJECT_TEACHER')).toEqual({ leaves: false, lateRequests: false, screening: false, appointments: false, substitutes: true, chat: false, conduct: false });
-    expect(staffTaskSources('HOMEROOM_TEACHER')).toEqual({ leaves: true, lateRequests: false, screening: true, appointments: true, substitutes: true, chat: true, conduct: false });
-    expect(staffTaskSources('DEPUTY_DIRECTOR_ACADEMIC')).toEqual({ leaves: false, lateRequests: true, screening: false, appointments: false, substitutes: true, chat: false, conduct: false });
+    expect(staffTaskSources('SUBJECT_TEACHER')).toEqual({ leaves: false, lateRequests: false, screening: false, appointments: false, substitutes: true, chat: false, conduct: false, absence: false });
+    expect(staffTaskSources('HOMEROOM_TEACHER')).toEqual({ leaves: true, lateRequests: false, screening: true, appointments: true, substitutes: true, chat: true, conduct: false, absence: true });
+    expect(staffTaskSources('DEPUTY_DIRECTOR_ACADEMIC')).toEqual({ leaves: false, lateRequests: true, screening: false, appointments: false, substitutes: true, chat: false, conduct: false, absence: false });
     expect(staffTaskSources('SUPER_ADMIN').lateRequests).toBe(false);
   });
   it('รวมจำนวนทั้งหมด', () => {

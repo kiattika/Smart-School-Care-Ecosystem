@@ -105,3 +105,19 @@ describe('แจ้งเตือนแชทแบบรวมในกระ�
     expect(taskTarget('CHAT_UNREAD', 'HOMEROOM_TEACHER', [])).toEqual({ role: 'HOMEROOM_TEACHER', tab: 'class-chat' });
   });
 });
+
+describe('ขาดเรียนต่อเนื่อง ในกระดิ่ง', () => {
+  it('ครูที่ปรึกษา/กิจการ/แนะแนวเห็นเป็นจำนวน; บทบาทอื่นไม่เห็น; กดแล้วพาไปแท็บของบทบาทนั้น', async () => {
+    const { buildStaffTasks } = await import('../lib/staffTasks');
+    const base = { roomLeaves: [], lateRequests: [], absence: { count: 3 } };
+    for (const role of ['HOMEROOM_TEACHER', 'STUDENT_AFFAIRS', 'GUIDANCE_COUNSELOR']) {
+      const x = buildStaffTasks({ ...base, activeRole: role }).find((k) => k.kind === 'ABSENCE_STREAK');
+      expect(x?.count).toBe(3);
+    }
+    expect(buildStaffTasks({ ...base, activeRole: 'SUBJECT_TEACHER' }).some((k) => k.kind === 'ABSENCE_STREAK')).toBe(false);
+    expect(buildStaffTasks({ ...base, activeRole: 'HOMEROOM_TEACHER', absence: { count: 0 } }).some((k) => k.kind === 'ABSENCE_STREAK')).toBe(false);
+    expect(taskTarget('ABSENCE_STREAK', 'HOMEROOM_TEACHER', [])).toEqual({ role: 'HOMEROOM_TEACHER', tab: 'absence-streak' });
+    expect(taskTarget('ABSENCE_STREAK', 'STUDENT_AFFAIRS', [])).toEqual({ role: 'STUDENT_AFFAIRS', tab: 'streak' });
+    expect(taskTarget('ABSENCE_STREAK', 'GUIDANCE_COUNSELOR', [])).toEqual({ role: 'GUIDANCE_COUNSELOR', tab: 'absence' });
+  });
+});

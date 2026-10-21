@@ -16,7 +16,7 @@ import { isThreadForTeacher, isThreadUnread, type ChatThreadLike } from './class
  * จัดครูสอนแทน: รออนุมัติในขั้นของบทบาทที่ใช้งานอยู่ · รอฉัน (ครูสอนแทน) ยืนยัน
  * ข้อความแจ้งผล (staff_notifications ที่ยังไม่อ่าน) แสดงแยกเป็นส่วน "ข้อความ" ใน StaffTaskBell และนับรวมที่ป้ายจำนวน
  */
-export type StaffTaskKind = 'LEAVE' | 'LATE_ATTENDANCE' | 'SCREENING_2Q' | 'SCREENING_RED_FLAG' | 'APPOINTMENT' | 'SUBSTITUTE_APPROVAL' | 'SUBSTITUTE_CONFIRM' | 'CHAT_UNREAD' | 'CONDUCT_REVIEW' | 'CONDUCT_CHANGE';
+export type StaffTaskKind = 'LEAVE' | 'LATE_ATTENDANCE' | 'SCREENING_2Q' | 'SCREENING_RED_FLAG' | 'APPOINTMENT' | 'SUBSTITUTE_APPROVAL' | 'SUBSTITUTE_CONFIRM' | 'CHAT_UNREAD' | 'CONDUCT_REVIEW' | 'CONDUCT_CHANGE' | 'ABSENCE_STREAK';
 
 export interface StaffTask {
   kind: StaffTaskKind;
@@ -49,16 +49,19 @@ export interface StaffTaskInput {
   chatThreads?: (ChatThreadLike & { targetStaffId?: string })[];
   /** จำนวนที่รองานกิจการพิจารณา (นับเฉพาะสถานะ PENDING) — ไม่ส่ง = ไม่มี */
   conduct?: { pendingEntries: number; pendingChanges: number };
+  /** จำนวนนักเรียนขาดเรียนต่อเนื่องที่ถึงเกณฑ์ของฉัน (ครูที่ปรึกษา = ห้องฉัน, กิจการ/แนะแนว = ตั้งแต่ระดับทั้งสัปดาห์) — ไม่ส่ง = ไม่มี; แสดงเฉพาะจำนวน ไม่ใส่ชื่อ */
+  absence?: { count: number };
 }
 
 // SUPER_ADMIN ไม่มีสิทธิ์อนุมัติ (ดูแลข้อมูลพื้นฐานเท่านั้น); DIRECTOR สำรองระดับรอง
 export const LATE_REQUEST_APPROVER_ROLES = ['ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'] as const;
 
 /** บทบาทที่ต้องฟังใบลาห้อง / คำขอเข้าสาย — ใช้ตัดสินว่าจะ subscribe อะไร (ไม่ subscribe เกินสิทธิ์) */
-export function staffTaskSources(activeRole: string): { leaves: boolean; lateRequests: boolean; screening: boolean; appointments: boolean; substitutes: boolean; chat: boolean; conduct: boolean } {
+export function staffTaskSources(activeRole: string): { leaves: boolean; lateRequests: boolean; screening: boolean; appointments: boolean; substitutes: boolean; chat: boolean; conduct: boolean; absence: boolean } {
   return {
     chat: activeRole === 'HOMEROOM_TEACHER',
     conduct: activeRole === 'STUDENT_AFFAIRS',
+    absence: activeRole === 'HOMEROOM_TEACHER' || activeRole === 'STUDENT_AFFAIRS' || activeRole === 'GUIDANCE_COUNSELOR',
     // บุคลากรทุกบทบาทอาจถูกมอบหมายสอนแทน / อาจเป็นผู้อนุมัติขั้นใดขั้นหนึ่ง — ข้อมูลมาจาก store ที่ sync อยู่แล้ว (ไม่เพิ่ม listener)
     substitutes: true,
     appointments: activeRole === 'GUIDANCE_COUNSELOR' || activeRole === 'HOMEROOM_TEACHER',
@@ -101,6 +104,10 @@ export function buildStaffTasks(input: StaffTaskInput): StaffTask[] {
   if (src.conduct && input.conduct) {
     if (input.conduct.pendingEntries > 0) tasks.push({ kind: 'CONDUCT_REVIEW', label: 'รายการคะแนนความประพฤติรอพิจารณา', count: input.conduct.pendingEntries, where: 'พอร์ทัลงานกิจการ → เรื่องรอพิจารณา' });
     if (input.conduct.pendingChanges > 0) tasks.push({ kind: 'CONDUCT_CHANGE', label: 'คำร้องแก้/ยกเลิกคะแนนรอพิจารณา', count: input.conduct.pendingChanges, where: 'พอร์ทัลงานกิจการ → คำร้องแก้/ยกเลิกคะแนน' });
+  }
+  if (src.absence && input.absence && input.absence.count > 0) {
+    const where = input.activeRole === 'HOMEROOM_TEACHER' ? 'พอร์ทัลครูที่ปรึกษา → ขาดเรียนต่อเนื่อง' : input.activeRole === 'STUDENT_AFFAIRS' ? 'พอร์ทัลงานกิจการ → ขาดเรียนต่อเนื่อง' : 'พอร์ทัลแนะแนว → ขาดเรียนต่อเนื่อง';
+    tasks.push({ kind: 'ABSENCE_STREAK', label: 'นักเรียนขาดเรียนต่อเนื่อง รอติดตาม', count: input.absence.count, where });
   }
   if (src.screening && input.screening) {
     const where = input.activeRole === 'GUIDANCE_COUNSELOR' ? 'พอร์ทัลแนะแนว → คัดกรองสุขภาพจิต' : 'พอร์ทัลครูที่ปรึกษา → คัดกรองสุขภาพจิต';

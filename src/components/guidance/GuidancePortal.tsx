@@ -1,3 +1,4 @@
+import { AbsenceAlertsPanel } from '../absence/AbsenceAlertsPanel';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../store';
 import { useConsumeBellNav } from '../../lib/bellNavigation';
@@ -45,9 +46,9 @@ export function GuidancePortal() {
   // 9Q/8Q (คัดกรองซึมเศร้า/ฆ่าตัวตาย — แทน PHQ-9 สากลเดิม) สด real-time + สถานะ "มีครูแนะแนวที่ใช้งานอยู่"
   const { records: screeningRecords, loading: depressionLoading, error: depressionError } = useGuidanceScreeningRecords();
   const guidanceStatus = useGuidanceStatus();
-  const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'depression' | 'appointments' | 'internship' | 'tcas'>('cases');
+  const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'depression' | 'appointments' | 'internship' | 'tcas' | 'absence'>('cases');
   // กระดิ่งงานค้างพามาที่แท็บนี้ (นัดพบผู้ปกครอง / คัดกรองซึมเศร้า)
-  useConsumeBellNav('GUIDANCE_COUNSELOR', ['depression', 'appointments'], (t) => setActiveTab(t as typeof activeTab));
+  useConsumeBellNav('GUIDANCE_COUNSELOR', ['depression', 'appointments', 'absence'], (t) => setActiveTab(t as typeof activeTab));
   // คำขอนัดพบจากผู้ปกครองที่ขอพบ "ครูแนะแนว" — real-time (rules: GUIDANCE_COUNSELOR + recipient == GUIDANCE)
   const [guidanceAppointments, setGuidanceAppointments] = useState<import('../../types').ParentAppointment[]>([]);
   useEffect(() => {
@@ -241,6 +242,7 @@ export function GuidancePortal() {
             { id: 'depression', label: 'คัดกรองซึมเศร้า 2Q/9Q/8Q', icon: HeartHandshake },
             { id: 'appointments', label: `นัดพบผู้ปกครอง (${guidanceAppointments.filter(a => a.status === 'REQUESTED').length})`, icon: Calendar },
             { id: 'internship', label: 'คำร้องขอฝึกงานและหนังสือราชการ', icon: FileText },
+            { id: 'absence', label: 'ขาดเรียนต่อเนื่อง (ตั้งแต่ระดับทั้งสัปดาห์)', icon: ShieldAlert },
             { id: 'tcas', label: 'ระบบแนะแนวอาชีพและ TCAS พอร์ตโฟลิโอ', icon: Award },
           ]}
         >
@@ -489,6 +491,7 @@ export function GuidancePortal() {
         )}
 
         {activeTab === 'internship' && <GuidanceInternshipSection />}
+        {activeTab === 'absence' && <AbsenceAlertsPanel scope={{ kind: 'MIN_LEVEL', minLevel: 2 }} students={students} />}
 
         {activeTab === 'tcas' && (
           <div className="space-y-4">

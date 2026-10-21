@@ -60,6 +60,7 @@ import { useSchoolHomeVisitData } from './hooks/useHomeVisitData';
 import { HomeVisitSummaryPanel } from './components/homevisit/HomeVisitSummaryPanel';
 import { ActivityOverviewPanel } from './components/stats/TeacherStatsPanels';
 import { SubstituteTeachingAnalyticsModule } from './components/SubstituteTeachingAnalyticsModule';
+import { AbsenceAlertsPanel } from './components/absence/AbsenceAlertsPanel';
 import { ExecutiveSupervisionOverview } from './components/supervision/ExecutiveSupervisionOverview';
 import { summarizeHomeVisit } from './lib/homeVisitAnalytics';
 import {
@@ -201,7 +202,7 @@ export function ExecutivePortal() {
     ? Math.min(100, Math.round((todayCompletedPostTeachingCount / todayScheduledPeriodCount) * 100))
     : null;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'approvals' | 'analytics' | 'homevisit' | 'supervision' | 'activity' | 'teacherinfo' | 'sub-analytics'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'engagement' | 'gis' | 'health' | 'approvals' | 'analytics' | 'homevisit' | 'supervision' | 'activity' | 'teacherinfo' | 'sub-analytics' | 'absence'>('dashboard');
 
   const pendingApprovalsCount = lateAttendanceRequests.filter(r => { const x = resolveLateRequest(r, Date.now()); return x.state === 'AWAITING' || x.deputyReviewOpen; }).length;
 
@@ -214,6 +215,7 @@ export function ExecutivePortal() {
     { id: 'homevisit', label: 'เยี่ยมบ้าน', fullLabel: 'สารสนเทศเยี่ยมบ้าน (Home Visit)', icon: MapIcon, badge: null, color: 'text-emerald-400' },
     { id: 'activity', label: 'สถิติการสอน', fullLabel: 'สถิติการปฏิบัติงานสอน (ลา/แลกคาบ/สอนแทน)', icon: Clock, badge: null, color: 'text-amber-400' },
     { id: 'sub-analytics', label: 'วิเคราะห์สอนแทน', fullLabel: 'วิเคราะห์งานสอนแทน & PA', icon: BarChart3, badge: null, color: 'text-indigo-400' },
+    { id: 'absence', label: 'ขาดเรียนนาน', fullLabel: 'นักเรียนขาดเรียนต่อเนื่องนาน (ระดับผู้บริหาร)', icon: Users, badge: null, color: 'text-rose-400' },
     { id: 'teacherinfo', label: 'ข้อมูลครูรายบุคคล', fullLabel: 'ข้อมูลครูรายบุคคล (แสดงชื่อ)', icon: Users, badge: null, color: 'text-cyan-400' },
     { id: 'supervision', label: 'นิเทศการสอน', fullLabel: 'ภาพรวมการนิเทศการสอน', icon: Star, badge: null, color: 'text-cyan-400' },
     { id: 'approvals', label: 'กล่องคำขอ', fullLabel: 'กล่องคำขอ (Approvals)', icon: Inbox, badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : null, color: 'text-amber-400' },
@@ -281,6 +283,8 @@ export function ExecutivePortal() {
               {activeTab === 'homevisit' && 'สารสนเทศเยี่ยมบ้านระดับโรงเรียน'}
               {activeTab === 'activity' && 'สถิติการปฏิบัติงานสอนทั้งโรงเรียน (ตัวเลขรวม)'}
               {activeTab === 'sub-analytics' && 'วิเคราะห์งานสอนแทน & PA'}
+          {activeTab === 'absence' && <div className="max-w-4xl mx-auto relative z-10"><AbsenceAlertsPanel scope={{ kind: 'MIN_LEVEL', minLevel: 3 }} students={students as any} canFollowUp={false} /></div>}
+              {activeTab === 'absence' && 'นักเรียนขาดเรียนต่อเนื่องนาน'}
               {activeTab === 'teacherinfo' && 'ข้อมูลครูรายบุคคล (เฉพาะผู้บริหาร)'}
               {activeTab === 'supervision' && 'ภาพรวมการนิเทศการสอน (ไม่แสดงรายบุคคล)'}
               {activeTab === 'approvals' && 'Approval Inbox (กล่องคำขออนุมัติ)'}

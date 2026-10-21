@@ -63,6 +63,8 @@ export function taskTarget(kind: StaffTaskKind, activeRole: string, myRoles: rea
       return { role: 'STUDENT_AFFAIRS', tab: 'changes' };
     case 'CHAT_UNREAD':
       return { role: 'HOMEROOM_TEACHER', tab: 'class-chat' };
+    case 'ABSENCE_STREAK':
+      return activeRole === 'STUDENT_AFFAIRS' ? { role: 'STUDENT_AFFAIRS', tab: 'streak' } : activeRole === 'GUIDANCE_COUNSELOR' ? { role: 'GUIDANCE_COUNSELOR', tab: 'absence' } : { role: 'HOMEROOM_TEACHER', tab: 'absence-streak' };
     case 'APPOINTMENT':
       return activeRole === 'GUIDANCE_COUNSELOR' ? { role: 'GUIDANCE_COUNSELOR', tab: 'appointments' } : { role: 'HOMEROOM_TEACHER', tab: 'dashboard' };
     case 'SCREENING_2Q':
