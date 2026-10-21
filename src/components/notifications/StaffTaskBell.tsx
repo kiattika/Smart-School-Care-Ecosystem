@@ -4,6 +4,7 @@ import { Bell, ClipboardList, MailOpen } from 'lucide-react';
 import { useStore } from '../../store';
 import { subscribeLeaveRequests, subscribeLateAttendanceRequests, subscribeClassChatThreads, type ClassChatThread, subscribeAppointments, subscribeStaffNotifications, markStaffNotificationRead, type StaffNotificationRecord } from '../../services/firestoreService';
 import { subscribePendingConduct, subscribePendingChanges } from '../../services/conductService';
+import { subscribeAbsenceAlerts } from '../../services/absenceService';
 import { useScreeningBellData, type ScreeningBellMode } from '../../hooks/useScreeningBellData';
 import { buildStaffTasks, staffTaskSources, totalStaffTasks } from '../../lib/staffTasks';
 import { useBellNav, taskTarget, messageTarget, type BellNavTarget } from '../../lib/bellNavigation';
@@ -39,6 +40,7 @@ export function StaffTaskBell({ activeRole, onSwitchRole }: { activeRole: string
   const [roomLeaves, setRoomLeaves] = useState<DetailedLeaveRequest[]>([]);
   const [lateRequests, setLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
   const [appointments, setAppointments] = useState<ParentAppointment[]>([]);
+  const [absenceCount, setAbsenceCount] = useState(0);
   const substitutes = useStore(s => s.substituteAssignments);
   const [messages, setMessages] = useState<StaffNotificationRecord[]>([]);
   const [chatThreads, setChatThreads] = useState<ClassChatThread[]>([]);
@@ -78,6 +80,16 @@ export function StaffTaskBell({ activeRole, onSwitchRole }: { activeRole: string
     return () => { u1(); u2(); };
   }, [sources.conduct, user?.uid]);
 
+  // ขาดเรียนต่อเนื่อง: ครูที่ปรึกษา = ห้องของฉัน; กิจการ/แนะแนว = ตั้งแต่ระดับ 2 (ตรงกับ rules) — เก็บเฉพาะจำนวน
+  useEffect(() => {
+    if (!sources.absence || !user?.uid) { setAbsenceCount(0); return; }
+    if (activeRole === 'HOMEROOM_TEACHER') {
+      if (!myRoom) { setAbsenceCount(0); return; }
+      return subscribeAbsenceAlerts({ kind: 'ROOM', room: myRoom }, l => setAbsenceCount(l.length), () => setAbsenceCount(0));
+    }
+    return subscribeAbsenceAlerts({ kind: 'MIN_LEVEL', minLevel: 2 }, l => setAbsenceCount(l.length), () => setAbsenceCount(0));
+  }, [sources.absence, activeRole, myRoom, user?.uid]);
+
   useEffect(() => {
     if (!sources.lateRequests || !user?.uid) { setLateRequests([]); return; }
     return subscribeLateAttendanceRequests(setLateRequests);
@@ -106,7 +118,7 @@ export function StaffTaskBell({ activeRole, onSwitchRole }: { activeRole: string
     return () => document.removeEventListener('mousedown', onDown);
   }, [isOpen]);
 
-  const tasks = buildStaffTasks({ activeRole, roomLeaves, lateRequests, screening, appointments, substitutes, myEmail: user?.email || '', myStaffId: user?.staffId, myRoles: user?.profile?.roles || [], chatThreads, conduct: { pendingEntries, pendingChanges } });
+  const tasks = buildStaffTasks({ absence: { count: absenceCount }, activeRole, roomLeaves, lateRequests, screening, appointments, substitutes, myEmail: user?.email || '', myStaffId: user?.staffId, myRoles: user?.profile?.roles || [], chatThreads, conduct: { pendingEntries, pendingChanges } });
   const unread = messages.filter(m => !m.readAt);
   const total = totalStaffTasks(tasks) + unread.length;
 

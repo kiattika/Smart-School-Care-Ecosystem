@@ -56,7 +56,10 @@ function toRecord(sa: SubstituteAssignment): SubRecord {
   };
 }
 
-export function SubstituteTeachingAnalyticsModule() {
+type AnalyticsView = 'TEACHER' | 'HOD' | 'EXECUTIVE';
+
+// views = มุมมองที่เปิดให้ผู้ใช้หน้านั้นเห็น (หัวหน้ากลุ่มสาระฯ = HOD, ผู้บริหาร = EXECUTIVE) — ไม่ส่ง = ครบ 3
+export function SubstituteTeachingAnalyticsModule({ views = ['TEACHER', 'HOD', 'EXECUTIVE'] }: { views?: AnalyticsView[] }) {
   const user = useStore(s => s.user);
   const substituteAssignments = useStore(s => s.substituteAssignments);
   const staffDirectory = useStore(s => s.staffDirectory);
@@ -69,7 +72,7 @@ export function SubstituteTeachingAnalyticsModule() {
     [substituteAssignments]
   );
 
-  const [activeTab, setActiveTab] = useState<'TEACHER' | 'HOD' | 'EXECUTIVE'>('TEACHER');
+  const [activeTab, setActiveTab] = useState<AnalyticsView>(views[0] || 'TEACHER');
 
   // persona: DEV = simulator select, PROD = ผู้ใช้จริง
   const [simTeacherEmail, setSimTeacherEmail] = useState('');
@@ -218,7 +221,7 @@ export function SubstituteTeachingAnalyticsModule() {
             </h1>
           </div>
           <div className="bg-slate-900/90 border border-slate-800 p-1 rounded-xl flex self-start lg:self-center">
-            {([['TEACHER', 'ครูรายคน', User], ['HOD', 'หัวหน้ากลุ่มสาระฯ', Users], ['EXECUTIVE', 'ผู้บริหาร', Award]] as const).map(([id, label, Icon]) => (
+            {([['TEACHER', 'ครูรายคน', User], ['HOD', 'หัวหน้ากลุ่มสาระฯ', Users], ['EXECUTIVE', 'ผู้บริหาร', Award]] as const).filter(([id]) => views.includes(id)).map(([id, label, Icon]) => (
               <button
                 key={id}
                 onClick={() => setActiveTab(id)}

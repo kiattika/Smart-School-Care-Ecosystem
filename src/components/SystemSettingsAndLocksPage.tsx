@@ -7,6 +7,7 @@ import { CourseRankLevelsSection } from './admin/CourseRankLevelsSection';
 import { BillingPaymentInfoSection } from './admin/BillingPaymentInfoSection';
 import { GuidanceStatusSection } from './admin/GuidanceStatusSection';
 import { PublicSummarySection } from './admin/PublicSummarySection';
+import { ActivityWindowsSection } from './admin/ActivityWindowsSection';
 import { DatePicker } from './shared/DatePicker';
 import { TimePicker } from './shared/TimePicker';
 import { 
@@ -43,19 +44,6 @@ interface GradeLockConfig {
   endTime: string;
 }
 
-interface ExceptionRequest {
-  id: string;
-  teacherId: string;
-  teacherName: string;
-  subjectCode: string;
-  subjectName: string;
-  className: string;
-  reason: string;
-  requestedAt: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  approvedUntil?: string;
-}
-
 export function SystemSettingsAndLocksPage() {
   // 1. Academic Year & Semester Config
   // ว่างจนกว่าจะอ่านจาก school_settings/academic_year ได้ — ไม่เดาปี/ภาคเรียนให้
@@ -72,10 +60,6 @@ export function SystemSettingsAndLocksPage() {
     { id: 'final', title: 'คะแนนสอบปลายภาค (Final Assessment)', description: 'ระบบลงคะแนนสอบรวบยอด และเกรดสรุปปลายภาคเรียน', isOpen: false, startDate: '', startTime: '', endDate: '', endTime: '' },
     { id: 'desirable', title: 'การประเมินคุณลักษณะอันพึงประสงค์ & อ่านคิดวิเคราะห์', description: 'ระบบประเมินคุณลักษณะ 8 ประการ และการอ่าน คิด วิเคราะห์ เขียน', isOpen: false, startDate: '', startTime: '', endDate: '', endTime: '' },
   ]);
-
-  // 3. Exception Request System (คำร้องขอแก้ไขเกรดย้อนหลังรายกรณี)
-  // อ่านจาก school_settings/grade_exceptions เท่านั้น (ไม่มีรายการตัวอย่าง)
-  const [requests, setRequests] = useState<ExceptionRequest[]>([]);
 
   // Toast states
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -109,20 +93,9 @@ export function SystemSettingsAndLocksPage() {
       }
     }, (err) => console.warn('Firestore academic_year subscription notice:', err));
 
-    // 3. Exception Requests
-    const unsubscribeReqs = onSnapshot(doc(db, 'school_settings', 'grade_exceptions'), (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        if (data && Array.isArray(data.requests)) {
-          setRequests(data.requests);
-        }
-      }
-    }, (err) => console.warn('Firestore grade_exceptions subscription notice:', err));
-
     return () => {
       unsubscribeLocks();
       unsubscribeYear();
-      unsubscribeReqs();
     };
   }, []);
 
@@ -166,61 +139,6 @@ export function SystemSettingsAndLocksPage() {
       console.error('[system_locks] save failed:', err);
       triggerToast('⚠️ บันทึกวัน-เวลาไม่สำเร็จ — ตรวจสอบสิทธิ์และการเชื่อมต่อ แล้วลองใหม่');
     });
-  };
-
-  // จัดการอนุมัติขอยื่นแก้ไขเกรดรายตัวครู
-  const handleApproveRequest = async (reqId: string, teacherName: string) => {
-    // คำนวณวันหมดอายุอนุมัติ (24 ชั่วโมงถัดไป)
-    const expirationTime = new Date(Date.now() + 24 * 60 * 60 * 1000);
-    const dateString = expirationTime.toISOString().replace('T', ' ').substring(0, 16);
-
-    const updatedRequests: ExceptionRequest[] = requests.map(req => {
-      if (req.id === reqId) {
-        return {
-          ...req,
-          status: 'APPROVED',
-          approvedUntil: dateString
-        };
-      }
-      return req;
-    });
-
-    try {
-      await setDoc(doc(db, 'school_settings', 'grade_exceptions'), {
-        requests: updatedRequests,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-      setRequests(updatedRequests);
-      triggerToast(`อนุมัติสิทธิ์ให้ครู ${teacherName} แก้ไขเกรดชั่วคราว (หมดอายุ: ${dateString})`);
-    } catch (err) {
-      console.error('[grade_exceptions] approve failed:', err);
-      triggerToast('⚠️ อนุมัติไม่สำเร็จ — ตรวจสอบสิทธิ์และการเชื่อมต่อ แล้วลองใหม่');
-    }
-  };
-
-  // จัดการปฏิเสธคำร้อง
-  const handleRejectRequest = async (reqId: string, teacherName: string) => {
-    const updatedRequests: ExceptionRequest[] = requests.map(req => {
-      if (req.id === reqId) {
-        return {
-          ...req,
-          status: 'REJECTED'
-        };
-      }
-      return req;
-    });
-
-    try {
-      await setDoc(doc(db, 'school_settings', 'grade_exceptions'), {
-        requests: updatedRequests,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-      setRequests(updatedRequests);
-      triggerToast(`ปฏิเสธคำขอของครู ${teacherName} เรียบร้อย`);
-    } catch (err) {
-      console.error('[grade_exceptions] reject failed:', err);
-      triggerToast('⚠️ ปฏิเสธไม่สำเร็จ — ตรวจสอบสิทธิ์และการเชื่อมต่อ แล้วลองใหม่');
-    }
   };
 
   // บันทึกการตั้งค่าปีการศึกษา
@@ -276,10 +194,10 @@ export function SystemSettingsAndLocksPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 gap-6">
         
         {/* คอลัมน์ซ้าย (1): Academic Year Config & Grade Lock Controllers */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="space-y-6">
           
           {/* 1. Academic Year & Semester Config */}
           <div className="bg-slate-900/40 border border-white/5 rounded-2xl p-5 space-y-4">
@@ -333,6 +251,7 @@ export function SystemSettingsAndLocksPage() {
 
           {/* 1.5 ปฏิทินโรงเรียน — วันหยุดพิเศษ + วันเปิด-ปิดภาคเรียน (school_calendar_events —
               collection แยกจาก school_settings/system_locks ด้านบนโดยตั้งใจ ดู SchoolCalendarSection.tsx) */}
+          <ActivityWindowsSection />
           <SchoolCalendarSection />
 
           {/* 1.6 รูปแบบอีเมลนักเรียน — school_settings/studentEmailFormat (client + blocking function อ่านค่าเดียวกัน) */}
@@ -433,105 +352,6 @@ export function SystemSettingsAndLocksPage() {
             </div>
           </div>
 
-        </div>
-
-        {/* คอลัมน์ขวา (2): Exception Request System (ระบบอนุมัติขอยื่นแก้ไขเกรดหลังกำหนดเวลา) */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
-              <Hourglass className="w-4 h-4 text-amber-400" />
-              คำร้องขออนุมัติยื่นแก้ไขคะแนนย้อนหลัง
-            </h3>
-            <span className="text-[10px] font-mono bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/20">
-              {requests.filter(r => r.status === 'PENDING').length} รายการค้าง
-            </span>
-          </div>
-
-          <div className="space-y-3 max-h-[640px] overflow-y-auto pr-1">
-            {requests.map((req) => (
-              <div 
-                key={req.id}
-                className={`p-4 border rounded-2xl flex flex-col space-y-3 transition-colors ${
-                  req.status === 'PENDING'
-                    ? 'bg-amber-500/[0.02] border-amber-500/20'
-                    : req.status === 'APPROVED'
-                    ? 'bg-emerald-500/[0.01] border-emerald-500/10 opacity-75'
-                    : 'bg-slate-900/20 border-white/5 opacity-60'
-                }`}
-              >
-                {/* แถวผู้ขอ และ วันเวลาที่ยื่นคำขอ */}
-                <div className="flex justify-between items-start gap-2 border-b border-white/5 pb-2.5">
-                  <div>
-                    <span className="text-[10px] text-slate-500 font-mono block">Ticket: {req.id} • ยื่นเมื่อ {req.requestedAt}</span>
-                    <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1.5 mt-0.5">
-                      <User className="w-3.5 h-3.5 text-slate-400" />
-                      {req.teacherName}
-                    </h4>
-                  </div>
-                  
-                  {/* Status Badges */}
-                  <div>
-                    {req.status === 'PENDING' && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded">
-                        รอพิจารณา
-                      </span>
-                    )}
-                    {req.status === 'APPROVED' && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded">
-                        อนุมัติแก้ไขแล้ว
-                      </span>
-                    )}
-                    {req.status === 'REJECTED' && (
-                      <span className="text-[9px] font-bold px-1.5 py-0.5 bg-slate-800 text-slate-400 border border-slate-700 rounded">
-                        ปฏิเสธ
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* รายละเอียดวิชา */}
-                <div className="bg-slate-950/40 p-2.5 rounded-lg border border-white/5 space-y-1">
-                  <div className="text-[11px] text-indigo-300">
-                    วิชา: <span className="font-mono font-bold">{req.subjectCode}</span> {req.subjectName} ({req.className})
-                  </div>
-                  <p className="text-[10.5px] text-slate-400 leading-normal font-light">
-                    <strong>เหตุผล:</strong> {req.reason}
-                  </p>
-                </div>
-
-                {/* ปุ่ม Action (อนุมัติ / ปฏิเสธ) */}
-                {req.status === 'PENDING' ? (
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleRejectRequest(req.id, req.teacherName)}
-                      className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-750 border border-white/5 text-slate-300 text-[10.5px] font-bold rounded-xl transition-all"
-                    >
-                      ปฏิเสธคำขอ
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleApproveRequest(req.id, req.teacherName)}
-                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-[10.5px] font-bold rounded-xl transition-all shadow-md"
-                    >
-                      อนุมัติ (24 ชม.)
-                    </button>
-                  </div>
-                ) : (
-                  req.status === 'APPROVED' && req.approvedUntil && (
-                    <div className="text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1.5 rounded-xl flex items-center gap-1.5">
-                      <Unlock className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                      <span>ปลดล็อกระบบชั่วคราวให้แก้ไขได้ถึง: <strong>{req.approvedUntil}</strong></span>
-                    </div>
-                  )
-                )}
-              </div>
-            ))}
-
-            {requests.length === 0 && (
-              <p className="text-xs text-slate-500 italic text-center py-8">ยังไม่มีคำร้องขอปลดล็อกสิทธิ์ย้อนหลัง (ฝั่งครูยังไม่มีหน้ายื่นคำร้องนี้)</p>
-            )}
-          </div>
         </div>
 
       </div>

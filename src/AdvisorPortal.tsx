@@ -5,6 +5,7 @@ import { useConsumeBellNav } from './lib/bellNavigation';
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from './store';
 import { useRealStudents } from "./hooks/useRealStudents";
+import { AbsenceAlertsPanel } from "./components/absence/AbsenceAlertsPanel";
 import { useHomeroomAttendance } from "./hooks/useHomeroomAttendance";
 import { useRoomAttendanceRecords } from "./hooks/useRoomAttendanceRecords";
 import { computeStudentAttendanceStats, defaultAttendanceDateRange } from "./lib/studentAttendanceStats";
@@ -66,9 +67,9 @@ export function AdvisorPortal() {
   // store จะมีข้อมูลก็ต่อเมื่อมีคน import ในเซสชันเดียวกันเท่านั้น — เปิดใหม่/ล็อกอินใหม่แล้วว่าง
   const { students, loading: studentsLoading } = useRealStudents();
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq' | 'screening' | 'class-chat' | 'skip-radar' | 'health' | 'pp6'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'visit-planner' | 'school-checkin' | 'analytics' | 'self-assessment' | 'sdq' | 'screening' | 'class-chat' | 'skip-radar' | 'absence-streak' | 'health' | 'pp6'>('dashboard');
   // กระดิ่งงานค้างพามาที่แท็บนี้ (ใบลา/นัดพบ = แดชบอร์ด, คัดกรอง = screening)
-  useConsumeBellNav('HOMEROOM_TEACHER', ['dashboard', 'screening', 'class-chat'], (t) => setActiveTab(t as typeof activeTab));
+  useConsumeBellNav('HOMEROOM_TEACHER', ['dashboard', 'screening', 'class-chat', 'absence-streak'], (t) => setActiveTab(t as typeof activeTab));
   const [assessmentModalStudent, setAssessmentModalStudent] = useState<Student | null>(null);
   const [assessmentSearch, setAssessmentSearch] = useState('');
   const [assessmentFilter, setAssessmentFilter] = useState<'ALL' | 'COMPLETED' | 'PENDING'>('ALL');
@@ -296,6 +297,7 @@ export function AdvisorPortal() {
             { id: 'visit-planner', label: 'เยี่ยมบ้าน', icon: MapPin },
             { id: 'school-checkin', label: 'เช็คชื่อโฮมรูม', icon: ClipboardList },
             { id: 'skip-radar', label: 'เรดาร์โดดเรียน', icon: Radar },
+            { id: 'absence-streak', label: 'ขาดเรียนต่อเนื่อง', icon: AlertTriangle },
             { id: 'health', label: 'สุขภาพนักเรียน', icon: Heart },
             { id: 'pp6', label: 'ผลการเรียนรายคน (ปพ.6)', icon: ClipboardList },
             { id: 'analytics', label: 'สถิติวิชาการ', icon: Sparkles },
@@ -869,6 +871,9 @@ export function AdvisorPortal() {
                 </div>
               </div>
             </div>
+          )}
+          {activeTab === 'absence-streak' && (
+            <AbsenceAlertsPanel scope={{ kind: 'ROOM', room: myRoom || '' }} students={myStudents as any} />
           )}
           {activeTab === 'skip-radar' && (
             <SkipRadarPanel room={myRoom || ''} students={myStudents} />

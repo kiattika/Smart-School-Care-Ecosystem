@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { ReflectionGuidanceCard } from './TeachingGuidanceCard';
 import { useStore } from '../../store';
 import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { useReflections } from '../../hooks/usePlcAndReflections';
@@ -45,6 +46,7 @@ export function ReflectionPanel() {
         <p className="text-white font-medium">บันทึกสะท้อนคิดการจัดการเรียนรู้ ภาคเรียน {sem.label}</p>
         <p className="text-slate-400 mt-1">เขียนได้ตลอดภาคเรียนและแก้ไขได้ — จะรวมอยู่ในแฟ้มสะสมงาน สถานะ: {isReflectionComplete(d) ? 'กรอกครบหัวข้อที่จำเป็นแล้ว' : 'ยังกรอกไม่ครบ (หัวข้อที่มี * จำเป็น)'}</p>
       </div>
+      <ReflectionGuidanceCard done={!!saved && isReflectionComplete(d)} />
       {error && <p role="alert" className="text-sm text-amber-300">โหลดข้อมูลไม่สำเร็จ: {error}</p>}
       {loading ? <p className="text-sm text-slate-400">กำลังโหลด…</p> : (
         <div className="space-y-3">

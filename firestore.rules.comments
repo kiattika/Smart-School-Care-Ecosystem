@@ -19,6 +19,11 @@ service cloud.firestore {
              hasRole('DEPUTY_DIRECTOR_PERSONNEL') || hasRole('DEPUTY_DIRECTOR_GENERAL');
     }
 
+    // ผู้บริหารที่ดูภาพรวมระดับโรงเรียน: กลุ่ม isExec() + ผู้อำนวยการ + รองผู้อำนวยการกลุ่มงานวิชาการ
+    function isSchoolLeader() {
+      return isExec() || hasRole('DIRECTOR') || hasRole('DEPUTY_DIRECTOR_ACADEMIC');
+    }
+
     function isSelf(userId) {
       return isSignedIn() && (request.auth.uid == userId || request.auth.token.email == userId);
     }
@@ -110,17 +115,27 @@ service cloud.firestore {
         && myStaffId() in get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('responsibleTeacherUids', []);
     }
 
+    // ช่วงเวลากิจกรรมที่แอดมินตั้งรวม (school_settings/activity_windows → windows[kind].opensAt/closesAt)
+    // ไม่มีเอกสาร/ไม่มีช่วงของ kind = ผ่าน (ไม่จำกัด) — ต้องตรง src/lib/activityWindows.ts (ใช้กับชุมนุมที่ rules ตรวจเวลาอยู่แล้ว)
+    function activityWindowOpen(kind) {
+      let w = exists(/databases/$(database)/documents/school_settings/activity_windows)
+        ? get(/databases/$(database)/documents/school_settings/activity_windows).data.get('windows', {}).get(kind, {})
+        : {};
+      return (w.get('opensAt', null) == null || request.time >= w.opensAt) &&
+             (w.get('closesAt', null) == null || request.time < w.closesAt);
+    }
+
     // ชุมนุมเปิดรับสมัครอยู่จริง ณ ตอนนี้ (เวลาเซิร์ฟเวอร์): สถานะ OPEN และอยู่ในช่วงเวลา (ถ้ากำหนด)
     // ต้องตรง src/lib/enrollmentWindow.ts (enrollmentState) — ไม่มี config = ผ่าน (เหมือนเดิม)
     function activityEnrollmentOpen(activityId) {
-      return !exists(/databases/$(database)/documents/elective_activities_config/$(activityId)) ||
+      return activityWindowOpen('CLUB_ENROLLMENT') && (!exists(/databases/$(database)/documents/elective_activities_config/$(activityId)) ||
         (
           get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('enrollmentStatus', 'OPEN') == 'OPEN' &&
           (get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('enrollmentOpensAt', null) == null ||
             request.time >= get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.enrollmentOpensAt) &&
           (get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.get('enrollmentClosesAt', null) == null ||
             request.time < get(/databases/$(database)/documents/elective_activities_config/$(activityId)).data.enrollmentClosesAt)
-        );
+        ));
     }
 
     // 1. Students Collection
@@ -2855,6 +2870,74 @@ service cloud.firestore {
         && request.resource.data.room == resource.data.room
         && request.resource.data.academicYear == resource.data.academicYear
         && request.resource.data.round == resource.data.round;
+      allow delete: if false;
+    }
+    // ===== ขาดเรียนต่อเนื่อง (src/lib/absenceStreak.ts; Cloud Function absenceAlerts.ts คำนวณจากเช็คโฮมรูม) =====
+    // absence_alerts: client เขียนไม่ได้ — อ่าน: ครูที่ปรึกษาของห้อง (ทุกระดับ), งานกิจการ/ครูแนะแนว (level >= 2 — query ต้อง where level >= 2),
+    // ผู้บริหาร isExec (level >= 3 — query ต้อง where level >= 3). SUPER_ADMIN ไม่มีสิทธิ์อ่านรายชื่อ
+    match /absence_alerts/{studentId} {
+      allow read: if resource != null && (
+        isHomeroomTeacherOf(resource.data.room) ||
+        ((hasRole('STUDENT_AFFAIRS') || hasRole('GUIDANCE_COUNSELOR')) && resource.data.level >= 2) ||
+        (isSchoolLeader() && resource.data.level >= 3));
+      allow write: if false;
+    }
+    // เกณฑ์จำนวนวัน (เอกสารเดียว) — งานกิจการนักเรียนปรับได้ (SUPER_ADMIN ด้วย); ผู้เกี่ยวข้องอ่านได้เพื่ออธิบายในหน้าจอ
+    match /absence_settings/{docId} {
+      allow read: if docId == 'thresholds' && (hasRole('STUDENT_AFFAIRS') || hasRole('SUPER_ADMIN') || hasRole('HOMEROOM_TEACHER') || hasRole('GUIDANCE_COUNSELOR') || isSchoolLeader());
+      allow create, update: if docId == 'thresholds' && (hasRole('STUDENT_AFFAIRS') || hasRole('SUPER_ADMIN'))
+        && request.resource.data.keys().hasOnly(['watchDays', 'weekDays', 'severeDays', 'updatedAt', 'updatedBy'])
+        && request.resource.data.watchDays is int && request.resource.data.weekDays is int && request.resource.data.severeDays is int
+        && request.resource.data.watchDays >= 1 && request.resource.data.severeDays <= 60
+        && request.resource.data.watchDays < request.resource.data.weekDays && request.resource.data.weekDays < request.resource.data.severeDays
+        && request.resource.data.updatedBy == request.auth.uid && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+    // บันทึกผลการติดตาม (append-only; ไม่แก้/ลบ) — ครูที่ปรึกษาของห้อง/งานกิจการ/ครูแนะแนว สร้างได้; ห้องต้องตรงทะเบียนนักเรียน
+    match /absence_followups/{followId} {
+      allow read: if resource != null && (isHomeroomTeacherOf(resource.data.room) || hasRole('STUDENT_AFFAIRS') || hasRole('GUIDANCE_COUNSELOR'));
+      allow create: if (isHomeroomTeacherOf(request.resource.data.room) || hasRole('STUDENT_AFFAIRS') || hasRole('GUIDANCE_COUNSELOR'))
+        && request.resource.data.keys().hasOnly(['studentId', 'room', 'action', 'note', 'streakAtTime', 'byUid', 'byStaffId', 'byName', 'createdAt'])
+        && request.resource.data.keys().hasAll(['studentId', 'room', 'action', 'note', 'streakAtTime', 'byUid', 'byStaffId', 'byName', 'createdAt'])
+        && request.resource.data.studentId is string && request.resource.data.room == studentField(request.resource.data.studentId, 'room', '')
+        && request.resource.data.action in ['CALLED_PARENT', 'CALLED_STUDENT', 'HOME_VISIT', 'REFERRED_COUNSELOR', 'REFERRED_AFFAIRS', 'RETURNED', 'OTHER']
+        && request.resource.data.note is string && request.resource.data.note.size() <= 500
+        && request.resource.data.streakAtTime is int && request.resource.data.streakAtTime >= 0
+        && request.resource.data.byUid == request.auth.uid && request.resource.data.byStaffId == myStaffId()
+        && request.resource.data.byName is string && request.resource.data.byName.size() >= 1
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+    // สรุปการมาเรียนรวมของโรงเรียน (Cloud Function attendanceSummary.ts สร้างจากเช็คโฮมรูม — ตัวเลขรวมรายห้อง ไม่มีชื่อนักเรียน)
+    // client เขียนไม่ได้; อ่านเอกสาร current ได้เฉพาะผู้บริหาร (+ SUPER_ADMIN ดูแลระบบ)
+    match /attendance_summary/{docId} {
+      allow get: if docId == 'current' && (isSchoolLeader() || hasRole('SUPER_ADMIN'));
+      allow list, write: if false;
+    }
+    // ===== แผนศึกษาต่อ ม.3/ม.6 + TCAS (src/lib/studyPlan.ts) — student_study_plans/{studentId} =====
+    // นักเรียนเจ้าของกรอกเอง (ต้องเป็นนักเรียนชั้น ม.3 หรือ ม.6 ตามห้องในทะเบียน); ผู้ปกครองตัวจริงอ่านอย่างเดียว;
+    // ครูแนะแนวอ่านทั้งโรงเรียน, ครูที่ปรึกษาอ่านเฉพาะห้องตัวเอง, ผู้บริหาร (isSchoolLeader) อ่านเพื่อสรุปตัวเลข; ลบไม่ได้
+    // รายการสถาบัน/สาขา (choices) ตรวจที่ rules แค่จำนวน ≤3 — เนื้อหารายตัวตรวจที่ client (validateStudyPlan)
+    match /student_study_plans/{studentId} {
+      allow read: if hasRole('GUIDANCE_COUNSELOR') || isSchoolLeader() || isSelfStudent(studentId) || isParentOfStudent(studentId) ||
+                     (resource != null && isHomeroomTeacherOf(resource.data.room));
+      allow create, update: if isSelfStudent(studentId)
+        && request.resource.data.keys().hasOnly(['studentId', 'studentUid', 'room', 'level', 'academicYear', 'planType', 'choices', 'portfolioUrl', 'portfolioSent', 'note', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['studentId', 'studentUid', 'room', 'level', 'academicYear', 'planType', 'choices', 'portfolioUrl', 'portfolioSent', 'note', 'updatedAt'])
+        && request.resource.data.studentId == studentId
+        && request.resource.data.studentUid == request.auth.uid
+        && request.resource.data.room == studentField(studentId, 'room', '__none__')
+        && ((request.resource.data.level == 'M6' && request.resource.data.room.matches('(ม|M)\\.6/.*') &&
+             request.resource.data.planType in ['UNIVERSITY', 'VOCATIONAL', 'WORK', 'OTHER', 'UNDECIDED'])
+            || (request.resource.data.level == 'M3' && request.resource.data.room.matches('(ม|M)\\.3/.*') &&
+             request.resource.data.planType in ['M4_SAME_SCHOOL', 'M4_OTHER_SCHOOL', 'VOCATIONAL', 'OTHER', 'UNDECIDED']))
+        && request.resource.data.academicYear is string && request.resource.data.academicYear.size() == 4
+        && request.resource.data.choices is list && request.resource.data.choices.size() <= 3
+        && request.resource.data.portfolioUrl is string && request.resource.data.portfolioUrl.size() <= 500
+        && (request.resource.data.portfolioUrl == '' || request.resource.data.portfolioUrl.matches('https://.*'))
+        && request.resource.data.portfolioSent is bool
+        && request.resource.data.note is string && request.resource.data.note.size() <= 500
+        && request.resource.data.updatedAt == request.time;
       allow delete: if false;
     }
     // ===== ตั้งค่าส่วนตัว (src/lib/userPreferences.ts) — ธีม/ขนาดตัวอักษร/รูปโปรไฟล์ ผู้ใช้ทุกบทบาทตั้งของตนเอง =====

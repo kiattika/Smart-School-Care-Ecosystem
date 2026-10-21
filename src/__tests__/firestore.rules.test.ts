@@ -1869,6 +1869,24 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(mSetDoc(mDoc(stu(), `activity_enrollments/c-closed_${SID}`), enrollDoc('c-closed')));
     });
 
+    it('ช่วงรับสมัครชุมนุมทั้งโรงเรียน (activity_windows) — นอกช่วงสมัครไม่ได้แม้ชุมนุมนั้นเปิด; ไม่มีเอกสาร/ว่าง = ไม่จำกัด', async () => {
+      const setWin = (windows: Record<string, unknown> | null) => testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const r = ctx.firestore().doc('school_settings/activity_windows');
+        if (windows === null) await r.delete(); else await r.set({ windows });
+      });
+      await seedClub('g-1', {});
+      await setWin({ CLUB_ENROLLMENT: { opensAt: null, closesAt: new Date(Date.now() - HOUR) } });
+      await assertFails(mSetDoc(mDoc(stu(), `activity_enrollments/g-1_${SID}`), enrollDoc('g-1')));
+      await setWin({ CLUB_ENROLLMENT: { opensAt: new Date(Date.now() + HOUR), closesAt: null } });
+      await assertFails(mSetDoc(mDoc(stu(), `activity_enrollments/g-1_${SID}`), enrollDoc('g-1')));
+      await setWin({ SDQ_ROUND1: { opensAt: null, closesAt: new Date(Date.now() - HOUR) } }); // kind อื่นไม่กระทบชุมนุม
+      await assertSucceeds(mSetDoc(mDoc(stu(), `activity_enrollments/g-1_${SID}`), enrollDoc('g-1')));
+      await seedClub('g-2', {});
+      await setWin({ CLUB_ENROLLMENT: { opensAt: new Date(Date.now() - HOUR), closesAt: new Date(Date.now() + HOUR) } });
+      await assertSucceeds(mSetDoc(mDoc(stu(), `activity_enrollments/g-2_${SID}`), enrollDoc('g-2')));
+      await setWin(null);
+    });
+
     it('ครูรับผิดชอบตั้งช่วงเวลา/สถานะของชุมนุมตัวเองได้ แต่แก้ฟิลด์อื่นหรือชุมนุมคนอื่นไม่ได้', async () => {
       await seedClub('c-own', {});
       const ref = (db: any) => mDoc(db, 'elective_activities_config/c-own');

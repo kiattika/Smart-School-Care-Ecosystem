@@ -10,6 +10,7 @@ import {
 import type { EvalTemplate } from '../lib/evaluationTemplate';
 import { lessonPlanReviewNotice, lessonPlanSubmittedNotice } from '../lib/staffNotifications';
 import { notifyStaffById } from './staffNotify';
+import { assertActivityWindowOpen } from './activityWindowService';
 
 const col = () => collection(db, 'lesson_plan_submissions');
 
@@ -49,6 +50,7 @@ type StaffDirectoryRow = { id: string; roles?: readonly string[]; status?: unkno
 export async function submitLessonPlan(input: SubmitPlanInput): Promise<string> {
   const problem = validateSubmission(input);
   if (problem) throw new Error(problem);
+  await assertActivityWindowOpen('LESSON_PLAN'); // ช่วงที่แอดมินตั้ง (ไม่ตั้ง = ไม่จำกัด)
   const key = courseKeyOf(input.course.code);
   if (!key) throw new Error('รายวิชานี้ไม่มีรหัสวิชา ส่งแผนไม่ได้');
   const semesterId = `${input.semester.academicYear}_${input.semester.term}`;

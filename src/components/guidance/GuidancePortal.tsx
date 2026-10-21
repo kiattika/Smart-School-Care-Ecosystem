@@ -1,3 +1,5 @@
+import { GuidanceStudyPlanPanel } from '../studyplan/GuidanceStudyPlanPanel';
+import { AbsenceAlertsPanel } from '../absence/AbsenceAlertsPanel';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../../store';
 import { useConsumeBellNav } from '../../lib/bellNavigation';
@@ -45,9 +47,9 @@ export function GuidancePortal() {
   // 9Q/8Q (คัดกรองซึมเศร้า/ฆ่าตัวตาย — แทน PHQ-9 สากลเดิม) สด real-time + สถานะ "มีครูแนะแนวที่ใช้งานอยู่"
   const { records: screeningRecords, loading: depressionLoading, error: depressionError } = useGuidanceScreeningRecords();
   const guidanceStatus = useGuidanceStatus();
-  const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'depression' | 'appointments' | 'internship' | 'tcas'>('cases');
+  const [activeTab, setActiveTab] = useState<'cases' | 'sdq' | 'depression' | 'appointments' | 'internship' | 'tcas' | 'absence'>('cases');
   // กระดิ่งงานค้างพามาที่แท็บนี้ (นัดพบผู้ปกครอง / คัดกรองซึมเศร้า)
-  useConsumeBellNav('GUIDANCE_COUNSELOR', ['depression', 'appointments'], (t) => setActiveTab(t as typeof activeTab));
+  useConsumeBellNav('GUIDANCE_COUNSELOR', ['depression', 'appointments', 'absence'], (t) => setActiveTab(t as typeof activeTab));
   // คำขอนัดพบจากผู้ปกครองที่ขอพบ "ครูแนะแนว" — real-time (rules: GUIDANCE_COUNSELOR + recipient == GUIDANCE)
   const [guidanceAppointments, setGuidanceAppointments] = useState<import('../../types').ParentAppointment[]>([]);
   useEffect(() => {
@@ -241,6 +243,7 @@ export function GuidancePortal() {
             { id: 'depression', label: 'คัดกรองซึมเศร้า 2Q/9Q/8Q', icon: HeartHandshake },
             { id: 'appointments', label: `นัดพบผู้ปกครอง (${guidanceAppointments.filter(a => a.status === 'REQUESTED').length})`, icon: Calendar },
             { id: 'internship', label: 'คำร้องขอฝึกงานและหนังสือราชการ', icon: FileText },
+            { id: 'absence', label: 'ขาดเรียนต่อเนื่อง (ตั้งแต่ระดับทั้งสัปดาห์)', icon: ShieldAlert },
             { id: 'tcas', label: 'ระบบแนะแนวอาชีพและ TCAS พอร์ตโฟลิโอ', icon: Award },
           ]}
         >
@@ -489,25 +492,10 @@ export function GuidancePortal() {
         )}
 
         {activeTab === 'internship' && <GuidanceInternshipSection />}
+        {activeTab === 'absence' && <AbsenceAlertsPanel scope={{ kind: 'MIN_LEVEL', minLevel: 2 }} students={students} />}
 
         {activeTab === 'tcas' && (
-          <div className="space-y-4">
-            <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl shadow-xl space-y-4">
-              <h3 className="text-base font-bold text-white">ระบบแนะแนวศึกษาต่อและเตรียมพอร์ตโฟลิโอ (TCAS Portfolio)</h3>
-              <p className="text-xs text-slate-400">ติดตามความพร้อมของนักเรียนระดับชั้น ม.6 ในการสมัครเข้ามหาวิทยาลัยผ่านรอบที่ 1 (Portfolio)</p>
-
-              <div className="bg-slate-950 p-5 rounded-xl border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-white">เป้าหมายยอดสมัคร TCAS รอบที่ 1 ปี 2569</span>
-                  <span className="text-xs text-purple-400 font-mono font-bold">ส่งพอร์ตแล้ว 125 คน</span>
-                </div>
-                <div className="w-full bg-slate-800 h-3 rounded-full overflow-hidden">
-                  <div className="bg-purple-500 h-full w-[78%]"></div>
-                </div>
-                <span className="text-xs text-slate-400">นักเรียนผ่านการตรวจรับรองผลงานจากครูแนะแนวแล้ว 78%</span>
-              </div>
-            </div>
-          </div>
+          <GuidanceStudyPlanPanel students={students.map(s => ({ studentId: s.studentId, name: s.name, room: s.room || '' }))} />
         )}
 
       </div>

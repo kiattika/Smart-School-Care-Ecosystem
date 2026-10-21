@@ -31,6 +31,6 @@ describe('กระดิ่งงานกิจการนักเรีย�
     const bell = readSource('src/components/notifications/StaffTaskBell.tsx');
     expect(bell).toContain('subscribePendingConduct');
     expect(bell).toContain('subscribePendingChanges');
-    expect(readSource('src/components/studentaffairs/StudentAffairsPortal.tsx')).toContain("useConsumeBellNav('STUDENT_AFFAIRS', ['review', 'changes']");
+    expect(readSource('src/components/studentaffairs/StudentAffairsPortal.tsx')).toContain("useConsumeBellNav('STUDENT_AFFAIRS', ['review', 'changes', 'streak']");
   });
 });
