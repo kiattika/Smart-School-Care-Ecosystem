@@ -12,10 +12,11 @@ import { isThreadForTeacher, isThreadUnread, type ChatThreadLike } from './class
  * แหล่งที่ต่อแล้ว: ใบลานักเรียนรอครูที่ปรึกษา · คำขอเช็คชื่อย้อนหลัง/เข้าหลังเวลารอรองผอ.วิชาการ ·
  * คัดกรอง 2Q บวก (รอนักเรียนทำ 9Q) และ 9Q ธงแดง (รอแจ้งผู้ปกครอง/พบนักเรียน) ของครูแนะแนว/ครูที่ปรึกษา — นิยามใน screeningTasks.ts
  * คำขอนัดพบครูจากผู้ปกครอง (ครูที่ปรึกษา: ผู้ที่ขอพบครูที่ปรึกษา · ครูแนะแนว: ผู้ที่ขอพบครูแนะแนว) รอตอบรับ
+ * งานกิจการนักเรียน (STUDENT_AFFAIRS): รายการคะแนนความประพฤติ PENDING + คำร้องแก้/ยกเลิก PENDING
  * จัดครูสอนแทน: รออนุมัติในขั้นของบทบาทที่ใช้งานอยู่ · รอฉัน (ครูสอนแทน) ยืนยัน
  * ข้อความแจ้งผล (staff_notifications ที่ยังไม่อ่าน) แสดงแยกเป็นส่วน "ข้อความ" ใน StaffTaskBell และนับรวมที่ป้ายจำนวน
  */
-export type StaffTaskKind = 'LEAVE' | 'LATE_ATTENDANCE' | 'SCREENING_2Q' | 'SCREENING_RED_FLAG' | 'APPOINTMENT' | 'SUBSTITUTE_APPROVAL' | 'SUBSTITUTE_CONFIRM' | 'CHAT_UNREAD';
+export type StaffTaskKind = 'LEAVE' | 'LATE_ATTENDANCE' | 'SCREENING_2Q' | 'SCREENING_RED_FLAG' | 'APPOINTMENT' | 'SUBSTITUTE_APPROVAL' | 'SUBSTITUTE_CONFIRM' | 'CHAT_UNREAD' | 'CONDUCT_REVIEW' | 'CONDUCT_CHANGE';
 
 export interface StaffTask {
   kind: StaffTaskKind;
@@ -46,15 +47,18 @@ export interface StaffTaskInput {
   myStaffId?: string;
   /** ห้องสนทนาของห้องที่ฉันเป็นครูที่ปรึกษา — นับเป็นบรรทัดเดียวแบบรวม (ไม่แยกรายข้อความ) */
   chatThreads?: (ChatThreadLike & { targetStaffId?: string })[];
+  /** จำนวนที่รองานกิจการพิจารณา (นับเฉพาะสถานะ PENDING) — ไม่ส่ง = ไม่มี */
+  conduct?: { pendingEntries: number; pendingChanges: number };
 }
 
 // SUPER_ADMIN ไม่มีสิทธิ์อนุมัติ (ดูแลข้อมูลพื้นฐานเท่านั้น); DIRECTOR สำรองระดับรอง
 export const LATE_REQUEST_APPROVER_ROLES = ['ACADEMIC_HEAD', 'DEPUTY_DIRECTOR_ACADEMIC', 'DIRECTOR'] as const;
 
 /** บทบาทที่ต้องฟังใบลาห้อง / คำขอเข้าสาย — ใช้ตัดสินว่าจะ subscribe อะไร (ไม่ subscribe เกินสิทธิ์) */
-export function staffTaskSources(activeRole: string): { leaves: boolean; lateRequests: boolean; screening: boolean; appointments: boolean; substitutes: boolean; chat: boolean } {
+export function staffTaskSources(activeRole: string): { leaves: boolean; lateRequests: boolean; screening: boolean; appointments: boolean; substitutes: boolean; chat: boolean; conduct: boolean } {
   return {
     chat: activeRole === 'HOMEROOM_TEACHER',
+    conduct: activeRole === 'STUDENT_AFFAIRS',
     // บุคลากรทุกบทบาทอาจถูกมอบหมายสอนแทน / อาจเป็นผู้อนุมัติขั้นใดขั้นหนึ่ง — ข้อมูลมาจาก store ที่ sync อยู่แล้ว (ไม่เพิ่ม listener)
     substitutes: true,
     appointments: activeRole === 'GUIDANCE_COUNSELOR' || activeRole === 'HOMEROOM_TEACHER',
@@ -93,6 +97,10 @@ export function buildStaffTasks(input: StaffTaskInput): StaffTask[] {
     // แชทรวมเป็นบรรทัดเดียว: จำนวนห้องสนทนาที่ยังไม่อ่าน (เฉพาะห้องสนทนาที่ส่งถึงฉันหรือ "ท่านใดก็ได้")
     const n = input.chatThreads.filter(t => isThreadForTeacher(t, input.myStaffId) && isThreadUnread(t, 'TEACHER')).length;
     if (n > 0) tasks.push({ kind: 'CHAT_UNREAD', label: 'ห้องสนทนาที่มีข้อความใหม่จากผู้ปกครอง/นักเรียน', count: n, where: 'พอร์ทัลครูที่ปรึกษา → แชทห้องเรียน' });
+  }
+  if (src.conduct && input.conduct) {
+    if (input.conduct.pendingEntries > 0) tasks.push({ kind: 'CONDUCT_REVIEW', label: 'รายการคะแนนความประพฤติรอพิจารณา', count: input.conduct.pendingEntries, where: 'พอร์ทัลงานกิจการ → เรื่องรอพิจารณา' });
+    if (input.conduct.pendingChanges > 0) tasks.push({ kind: 'CONDUCT_CHANGE', label: 'คำร้องแก้/ยกเลิกคะแนนรอพิจารณา', count: input.conduct.pendingChanges, where: 'พอร์ทัลงานกิจการ → คำร้องแก้/ยกเลิกคะแนน' });
   }
   if (src.screening && input.screening) {
     const where = input.activeRole === 'GUIDANCE_COUNSELOR' ? 'พอร์ทัลแนะแนว → คัดกรองสุขภาพจิต' : 'พอร์ทัลครูที่ปรึกษา → คัดกรองสุขภาพจิต';

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Bell, ClipboardList, MailOpen } from 'lucide-react';
 import { useStore } from '../../store';
 import { subscribeLeaveRequests, subscribeLateAttendanceRequests, subscribeClassChatThreads, type ClassChatThread, subscribeAppointments, subscribeStaffNotifications, markStaffNotificationRead, type StaffNotificationRecord } from '../../services/firestoreService';
+import { subscribePendingConduct, subscribePendingChanges } from '../../services/conductService';
 import { useScreeningBellData, type ScreeningBellMode } from '../../hooks/useScreeningBellData';
 import { buildStaffTasks, staffTaskSources, totalStaffTasks } from '../../lib/staffTasks';
 import { useBellNav, taskTarget, messageTarget, type BellNavTarget } from '../../lib/bellNavigation';
@@ -41,6 +42,8 @@ export function StaffTaskBell({ activeRole, onSwitchRole }: { activeRole: string
   const substitutes = useStore(s => s.substituteAssignments);
   const [messages, setMessages] = useState<StaffNotificationRecord[]>([]);
   const [chatThreads, setChatThreads] = useState<ClassChatThread[]>([]);
+  const [pendingEntries, setPendingEntries] = useState(0);
+  const [pendingChanges, setPendingChanges] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const [openCount, setOpenCount] = useState(0);
   const screeningMode: ScreeningBellMode = !sources.screening ? null : activeRole === 'GUIDANCE_COUNSELOR' ? 'GUIDANCE' : 'HOMEROOM';
@@ -66,6 +69,14 @@ export function StaffTaskBell({ activeRole, onSwitchRole }: { activeRole: string
     if (!myRoom) { setAppointments([]); return; }
     return subscribeAppointments(setAppointments, { homeroomClass: myRoom });
   }, [sources.appointments, activeRole, myRoom, user?.uid]);
+
+  // งานกิจการ: ฟังเฉพาะบทบาท STUDENT_AFFAIRS (rules อนุญาต list รายการ PENDING เฉพาะบทบาทนี้) — ล้มเหลว = นับ 0 ไม่แต่งตัวเลข
+  useEffect(() => {
+    if (!sources.conduct || !user?.uid) { setPendingEntries(0); setPendingChanges(0); return; }
+    const u1 = subscribePendingConduct(l => setPendingEntries(l.length), () => setPendingEntries(0));
+    const u2 = subscribePendingChanges(l => setPendingChanges(l.length), () => setPendingChanges(0));
+    return () => { u1(); u2(); };
+  }, [sources.conduct, user?.uid]);
 
   useEffect(() => {
     if (!sources.lateRequests || !user?.uid) { setLateRequests([]); return; }
@@ -95,7 +106,7 @@ export function StaffTaskBell({ activeRole, onSwitchRole }: { activeRole: string
     return () => document.removeEventListener('mousedown', onDown);
   }, [isOpen]);
 
-  const tasks = buildStaffTasks({ activeRole, roomLeaves, lateRequests, screening, appointments, substitutes, myEmail: user?.email || '', myStaffId: user?.staffId, myRoles: user?.profile?.roles || [], chatThreads });
+  const tasks = buildStaffTasks({ activeRole, roomLeaves, lateRequests, screening, appointments, substitutes, myEmail: user?.email || '', myStaffId: user?.staffId, myRoles: user?.profile?.roles || [], chatThreads, conduct: { pendingEntries, pendingChanges } });
   const unread = messages.filter(m => !m.readAt);
   const total = totalStaffTasks(tasks) + unread.length;
 
