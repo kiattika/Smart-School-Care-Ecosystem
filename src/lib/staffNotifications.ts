@@ -5,9 +5,9 @@ import { normalizeEmail } from './normalizeEmail';
  * ใช้เฉพาะ "ผลลัพธ์ที่ส่งถึงตัวบุคคล" (เช่น คำขอของฉันได้รับอนุมัติ/ถูกส่งกลับ); "งานที่รอให้ฉันทำ" อยู่ในกระดิ่งงานค้าง (staffTasks.ts)
  * ผู้รับระบุด้วยอีเมล (ตรงกับ token.email ที่ rules ใช้) — ไม่มีอีเมลผู้รับ = ไม่ส่ง (ไม่เดา/ไม่แต่งอีเมล)
  */
-export type StaffNotificationKind = 'LATE_ATTENDANCE_DECISION' | 'LATE_ATTENDANCE_REMINDER' | 'SUBSTITUTE_UPDATE' | 'LESSON_PLAN_REVIEW' | 'SUPERVISION_RESULT' | 'CONDUCT_DECISION';
+export type StaffNotificationKind = 'LATE_ATTENDANCE_DECISION' | 'LATE_ATTENDANCE_REMINDER' | 'SUBSTITUTE_UPDATE' | 'LESSON_PLAN_REVIEW' | 'LESSON_PLAN_SUBMITTED' | 'SUPERVISION_RESULT' | 'CONDUCT_DECISION';
 
-export const STAFF_NOTIFICATION_KINDS: readonly StaffNotificationKind[] = ['LATE_ATTENDANCE_DECISION', 'LATE_ATTENDANCE_REMINDER', 'SUBSTITUTE_UPDATE', 'LESSON_PLAN_REVIEW', 'SUPERVISION_RESULT', 'CONDUCT_DECISION'];
+export const STAFF_NOTIFICATION_KINDS: readonly StaffNotificationKind[] = ['LATE_ATTENDANCE_DECISION', 'LATE_ATTENDANCE_REMINDER', 'SUBSTITUTE_UPDATE', 'LESSON_PLAN_REVIEW', 'LESSON_PLAN_SUBMITTED', 'SUPERVISION_RESULT', 'CONDUCT_DECISION'];
 export const STAFF_NOTIFICATION_TITLE_MAX = 120;
 export const STAFF_NOTIFICATION_MESSAGE_MAX = 500;
 
@@ -146,6 +146,26 @@ export function lessonPlanReviewNotice(
     ? `${reviewerName} ตรวจ ${what} (${stageLabel}) ผ่านแล้ว${comment.trim() ? ` — ความเห็น: ${comment.trim()}` : ''}`
     : `${reviewerName} ขอให้แก้ไข ${what} (${stageLabel}) — ${comment.trim() || 'ดูรายละเอียดในแผน'}`;
   return buildStaffNotification({ recipientEmail, kind: 'LESSON_PLAN_REVIEW', refId: plan.id, title, message });
+}
+
+/**
+ * แจ้ง "ผู้ตรวจขั้นถัดไป" ว่ามีแผน/โครงการสอนรอตรวจ — `stage` = ขั้นที่ผู้รับต้องตรวจ
+ * DEPT = ครูส่ง/ส่งใหม่ถึงหัวหน้า/รองหัวหน้ากลุ่มสาระฯ; FINAL = ผ่านขั้นแรกแล้วถึงหัวหน้างานนิเทศ
+ * (ข้อความนี้เป็นแค่การแจ้ง — ผู้ตรวจยังเห็นรายการ "รอฉันตรวจ" ในหน้าตรวจแผนตามเดิม)
+ */
+export function lessonPlanSubmittedNotice(
+  plan: { id: string; courseName?: string; courseCode?: string; level?: string; teacherName?: string },
+  stage: 'DEPT' | 'FINAL', resubmitted: boolean, recipientEmail: string,
+): StaffNotificationDraft | null {
+  const what = `${plan.courseCode ? `${plan.courseCode} ` : ''}${plan.courseName || 'แผนการสอน'}${plan.level ? ` ${plan.level}` : ''}`;
+  const who = plan.teacherName || 'ครู';
+  const title = stage === 'DEPT'
+    ? (resubmitted ? '📄 ครูส่งแผนการสอนฉบับแก้ไข รอท่านตรวจ' : '📄 มีแผนการสอนรอท่านตรวจ')
+    : '📄 แผนการสอนผ่านขั้นกลุ่มสาระฯ แล้ว รอหัวหน้างานนิเทศตรวจ';
+  const message = stage === 'DEPT'
+    ? `${who} ส่ง${resubmitted ? 'ฉบับแก้ไขของ ' : ' '}${what} — ตรวจได้ที่ "ตรวจแผนการสอน" (ขั้นหัวหน้ากลุ่มสาระฯ)`
+    : `${what} ของ ${who} ผ่านการตรวจขั้นหัวหน้ากลุ่มสาระฯ แล้ว — ตรวจได้ที่ "ตรวจแผนการสอน" (ขั้นหัวหน้างานนิเทศ)`;
+  return buildStaffNotification({ recipientEmail, kind: 'LESSON_PLAN_SUBMITTED', refId: plan.id, title, message });
 }
 
 /** ผลนิเทศการสอนส่งแล้ว — ครูเจ้าของผลต้องกดรับทราบ */

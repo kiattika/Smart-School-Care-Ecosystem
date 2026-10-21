@@ -77,7 +77,16 @@ export function ApprovalsPortal() {
 
   const [tab, setTab] = useState<'substitute' | 'late-attendance' | 'elective' | 'house' | 'supervision' | 'activity'>('substitute');
   // กระดิ่งงานค้างพามาที่แท็บนี้ (เฉพาะแท็บที่บทบาทนี้เห็นจริง)
-  useConsumeBellNav(activeRole, [...(canSeeLateAttendance ? ['late-attendance'] : []), 'substitute'], (t) => setTab(t as typeof tab));
+  // แท็บเริ่มต้นของงานนิเทศแบบฝัง (กระดิ่ง "มีแผนรอตรวจ" พาไปแท็บ "ตรวจแผนการสอน")
+  const [supervisionStart, setSupervisionStart] = useState<'plans' | ''>('');
+  useConsumeBellNav(
+    activeRole,
+    [...(canSeeLateAttendance ? ['late-attendance'] : []), 'substitute', ...(SUPERVISION_TAB_ROLES.includes(activeRole) ? ['supervision-plans'] : [])],
+    (t) => {
+      if (t === 'supervision-plans') { setSupervisionStart('plans'); setTab('supervision'); return; }
+      setTab(t as typeof tab);
+    },
+  );
 
   // นับคำขอเช็คชื่อย้อนหลังที่รออนุมัติ (สำหรับ badge)
   const [lateRequests, setLateRequests] = useState<LateAttendanceRequestRecord[]>([]);
@@ -142,7 +151,7 @@ export function ApprovalsPortal() {
           </div>
         )}
         {tab === 'activity' && <ActivityOverviewPanel level={ACTIVITY_SCHOOL_ROLES.includes(activeRole) ? 'SCHOOL' : 'DEPARTMENT'} />}
-        {tab === 'supervision' && <SupervisionEmbedded />}
+        {tab === 'supervision' && <SupervisionEmbedded startTab={supervisionStart || undefined} />}
         {tab === 'elective' && extraTabs.includes('elective') && <ElectiveActivityManagerPage />}
         {tab === 'house' && extraTabs.includes('house') && <HouseManagerPage />}
         {tab === 'late-attendance' && canSeeLateAttendance && (
