@@ -93,7 +93,9 @@ export const HeaderRealTimeClock: React.FC<HeaderRealTimeClockProps> = ({
       )}
 
       {/* Real-Time Live Clock Badge */}
-      <div className="flex items-center gap-2 bg-[#0f172a]/90 hover:bg-[#1e293b] border border-slate-700/80 rounded-xl px-3 py-1.5 shadow-md backdrop-blur-md transition-colors group">
+      {/* อยู่ในแถบบน (data-shell="topbar") — ห้ามใช้ bg-[#hex] เพราะกฎโทเคนของธีมสว่างเปลี่ยนเป็นพื้นอ่อน แต่ตัวหนังสือในแถบคงเป็นสีขาว (อ่านไม่ออก)
+          ใช้ขาวโปร่งแทน: ธีมมืด/แถบเข้ม = พื้นสว่างขึ้นเล็กน้อย, แถบสว่าง = กฎโหมดสว่างกลับเป็นเข้มโปร่งเอง */}
+      <div className="flex items-center gap-2 bg-white/10 hover:bg-white/15 border border-white/15 rounded-xl px-3 py-1.5 shadow-md backdrop-blur-md transition-colors group">
         <Clock className="w-4 h-4 text-amber-400 group-hover:rotate-12 transition-transform duration-300" />
         
         {/* HH:mm:ss Live Clock */}
