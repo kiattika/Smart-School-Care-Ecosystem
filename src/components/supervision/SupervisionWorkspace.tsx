@@ -6,7 +6,7 @@ import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { useDepartments } from '../../hooks/useDepartments';
 import { useRoundAssignments, useRoundObservations, useSupervisionRounds } from '../../hooks/useSupervision';
 import {
-  canEditEvaluationTemplates, canManageSupervision, isSupervisor, supervisionRoundId,
+  canEditEvaluationTemplatesAs, canManageSupervision, isSupervisor, supervisionRoundId,
   type SupervisionObservation, type SupervisionRound,
 } from '../../lib/supervision';
 import {
@@ -32,6 +32,7 @@ export interface SupervisionTabItem { id: Tab; label: string; icon: React.Compon
 /** เมนูย่อยของงานนิเทศตามสิทธิ์จริงของผู้ใช้ (ว่าง = ไม่มีงานในระบบนิเทศ) */
 export function useSupervisionTabs(): SupervisionTabItem[] {
   const roles = (useStore(s => s.user?.profile?.roles) || []) as string[];
+  const activeRole = useStore(s => s.user?.activeRole);
   const staffId = useStore(s => s.user?.staffId) || '';
   const staff = useStore(s => s.staffDirectory) as StaffRow[];
   const myDept = staffDepartmentId(staff.find(s => s.id === staffId));
@@ -41,8 +42,8 @@ export function useSupervisionTabs(): SupervisionTabItem[] {
     ...(overviewQuery(roles) ? [{ id: 'overview' as Tab, label: 'ภาพรวม', icon: BarChart3 }] : []),
     ...(planOverviewQuery(roles, myDept) ? [{ id: 'plans' as Tab, label: 'ตรวจแผนการสอน', icon: FileText }] : []),
     ...(canManageSupervision(roles) ? [{ id: 'manage' as Tab, label: 'จัดการรอบ/จับคู่', icon: Settings2 }] : []),
-    ...(canEditEvaluationTemplates(roles) ? [{ id: 'templates' as Tab, label: 'แบบประเมิน', icon: ListChecks }] : []),
-  ], [roles, staffId, myDept]);
+    ...(canEditEvaluationTemplatesAs(roles, activeRole) ? [{ id: 'templates' as Tab, label: 'แบบประเมิน', icon: ListChecks }] : []),
+  ], [roles, activeRole, staffId, myDept]);
 }
 
 /** เนื้อหาของเมนูที่เลือก (ไม่มีแถบเมนูของตัวเอง — ผู้เรียกใช้ใส่เมนูเอง) */
@@ -61,7 +62,7 @@ export function SupervisionWorkspace({ tab }: { tab: Tab }) {
   const round = rounds.find(r => r.id === roundId) || null;
 
   if (tab === 'plans') return <LessonPlanReviewPanel />;
-  if (tab === 'templates') return canEditEvaluationTemplates(roles) ? <EvaluationTemplateEditor /> : null;
+  if (tab === 'templates') return canEditEvaluationTemplatesAs(roles, user?.activeRole) ? <EvaluationTemplateEditor /> : null;
   if (!user || !staffId) return <p className="text-sm text-slate-400">บัญชีนี้ไม่ได้เชื่อมกับทะเบียนบุคลากร จึงใช้งานระบบนิเทศไม่ได้</p>;
 
   return (

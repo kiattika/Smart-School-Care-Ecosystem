@@ -150,3 +150,15 @@ describe('สิทธิ์แก้แบบประเมิน = หัว�
     expect((block.match(/etEditor\(\)/g) || []).length).toBe(2);
   });
 });
+
+describe('แก้แบบประเมินตามบทบาทที่กำลังใช้อยู่', () => {
+  it('canEditEvaluationTemplatesAs: ต้องมีบทบาทหัวหน้างานนิเทศและกำลังใช้บทบาทนั้นอยู่', async () => {
+    const { canEditEvaluationTemplatesAs } = await import('../lib/supervision');
+    const roles = ['SUBJECT_TEACHER', 'SUPERVISORY_TEACHER', 'INSTRUCTIONAL_SUPERVISOR'];
+    expect(canEditEvaluationTemplatesAs(roles, 'INSTRUCTIONAL_SUPERVISOR')).toBe(true);
+    expect(canEditEvaluationTemplatesAs(roles, 'SUPERVISORY_TEACHER')).toBe(false);
+    expect(canEditEvaluationTemplatesAs(roles, 'SUPER_ADMIN')).toBe(false);
+    expect(canEditEvaluationTemplatesAs(roles, undefined)).toBe(false);
+    expect(canEditEvaluationTemplatesAs(['SUPERVISORY_TEACHER'], 'INSTRUCTIONAL_SUPERVISOR')).toBe(false);
+  });
+});

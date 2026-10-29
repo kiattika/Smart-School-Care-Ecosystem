@@ -49,8 +49,10 @@ describe('lessonPlans lib', () => {
     expect(reviewStageFor(p, { staffId: 'h', roles: ['DEPUTY_HEAD_OF_DEPARTMENT'], departmentId: 'D1' }, false)).toBe('DEPT');
     expect(reviewStageFor(p, { staffId: 'h', roles: ['HEAD_OF_DEPARTMENT'], departmentId: 'D2' }, false)).toBeNull();
     expect(reviewStageFor(p, { staffId: 't1', roles: ['HEAD_OF_DEPARTMENT'], departmentId: 'D1' }, false)).toBeNull();
-    expect(reviewStageFor(p, { staffId: 's', roles: ['INSTRUCTIONAL_SUPERVISOR'], departmentId: 'D3' }, false)).toBeNull();
-    expect(reviewStageFor(p, { staffId: 's', roles: ['INSTRUCTIONAL_SUPERVISOR'], departmentId: 'D3' }, true)).toBe('DEPT'); // ครูเป็นหัวหน้ากลุ่มเอง
+    expect(reviewStageFor(p, { staffId: 's', roles: ['INSTRUCTIONAL_SUPERVISOR'], departmentId: 'D3' }, false)).toBe('FINAL'); // ตรวจข้ามขั้นได้ทุกแผน
+    expect(reviewStageFor(p, { staffId: 's', roles: ['INSTRUCTIONAL_SUPERVISOR'], departmentId: 'D3' }, true)).toBe('FINAL');
+    expect(reviewStageFor(p, { staffId: 's', roles: ['INSTRUCTIONAL_SUPERVISOR'], departmentId: 'D3' }, false)).toBe('FINAL');
+    expect(reviewStageFor({ ...p, teacherStaffId: 's' }, { staffId: 's', roles: ['INSTRUCTIONAL_SUPERVISOR'], departmentId: 'D3' }, false)).toBeNull(); // ห้ามตรวจของตนเอง
     expect(reviewStageFor({ ...p, stage: 'DEPT_APPROVED' }, { staffId: 's', roles: ['INSTRUCTIONAL_SUPERVISOR'], departmentId: 'D3' }, false)).toBe('FINAL');
     expect(reviewStageFor({ ...p, stage: 'DEPT_APPROVED' }, { staffId: 'h', roles: ['HEAD_OF_DEPARTMENT'], departmentId: 'D1' }, false)).toBeNull();
   });

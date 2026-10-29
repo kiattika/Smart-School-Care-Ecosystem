@@ -4877,7 +4877,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertSucceeds(mUpdateDoc(ref(ctxOf('hod1', ['HEAD_OF_DEPARTMENT'])), ok));
     });
 
-    it('ขั้น 2: เฉพาะหัวหน้างานนิเทศ เมื่อผ่านขั้น 1 แล้ว; ขั้น 1 ยังไม่ผ่านห้ามข้าม', async () => {
+    it('ขั้น 2: เฉพาะหัวหน้างานนิเทศ (ต่อจากขั้น 1 หรือตรวจข้ามขั้นได้ทุกแผน); คนอื่นห้ามข้าม', async () => {
       await seed();
       await put(planId('t1'), base('t1', 'D1', { stage: 'DEPT_APPROVED', deptReview: review('hod1', 'APPROVE') }));
       const ref = (c: any) => mDoc(c, `lesson_plan_submissions/${planId('t1')}`);
@@ -4885,7 +4885,11 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(mUpdateDoc(ref(ctxOf('hod1', ['HEAD_OF_DEPARTMENT'])), { ...fin, finalReview: review('hod1', 'APPROVE') }));
       await assertSucceeds(mUpdateDoc(ref(ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR'])), fin));
       await put(planId('t2'), base('t2', 'D2'));
-      await assertFails(mUpdateDoc(mDoc(ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR']), `lesson_plan_submissions/${planId('t2')}`), fin)); // ยังเป็น SUBMITTED
+      // หัวหน้างานนิเทศตรวจข้ามขั้นได้ทุกแผนที่ยังเป็น SUBMITTED (ผลเป็นผลสุดท้าย) — คนอื่นข้ามขั้นไม่ได้
+      const t2ref = (c: any) => mDoc(c, `lesson_plan_submissions/${planId('t2')}`);
+      await assertFails(mUpdateDoc(t2ref(ctxOf('hod2', ['HEAD_OF_DEPARTMENT'])), { ...fin, finalReview: review('hod2', 'APPROVE') }));
+      await assertFails(mUpdateDoc(t2ref(ctxOf('adm', ['SUPER_ADMIN'])), fin));
+      await assertSucceeds(mUpdateDoc(t2ref(ctxOf('sv', ['INSTRUCTIONAL_SUPERVISOR'])), fin));
     });
 
     it('ครูแก้ลิงก์/ส่งใหม่ได้เมื่อ SUBMITTED/REVISION เท่านั้น และแก้ผลตรวจเองไม่ได้; ลบได้เฉพาะก่อนผ่านขั้น 1', async () => {
