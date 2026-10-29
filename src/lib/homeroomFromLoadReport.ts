@@ -22,6 +22,8 @@ export interface HomeroomPlan {
   updates: HomeroomUpdate[];
   /** ครูที่ไฟล์ระบุห้องประจำชั้นขัดกันเอง (ไม่เขียน) */
   conflicts: string[];
+  /** ครูที่ห้องในทะเบียนตรงกับไฟล์อยู่แล้ว (ไม่ต้องเขียน) */
+  unchanged: number;
 }
 
 /**
@@ -51,10 +53,11 @@ export function planHomeroomUpdates(
     wanted.set(id, room);
   }
   const updates: HomeroomUpdate[] = [];
+  let unchanged = 0;
   for (const [staffId, homeroomClass] of wanted) {
     const current = currentByStaffId.get(staffId) || '';
-    if (current && isSameRoom(current, homeroomClass)) continue;
+    if (current && isSameRoom(current, homeroomClass)) { unchanged++; continue; }
     updates.push({ staffId, homeroomClass });
   }
-  return { updates, conflicts: Array.from(conflicted.values()) };
+  return { updates, conflicts: Array.from(conflicted.values()), unchanged };
 }

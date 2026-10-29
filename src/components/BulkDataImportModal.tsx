@@ -37,7 +37,7 @@ import { useStore } from '../store';
 import { Student, Course, GlobalCourse, UserRole } from '../types';
 import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
 import { normalizeEmail } from '../lib/normalizeEmail';
-import { planHomeroomUpdates } from '../lib/homeroomFromLoadReport';
+import { planHomeroomUpdates, normalizeHomeroomLabel } from '../lib/homeroomFromLoadReport';
 import { buildExistingEmailIndex, staffEmailConflict } from '../lib/staffEmailConflict';
 import { buildStaffImportWrite, matchDepartmentId, type ParsedStaffRow } from '../lib/staffImportMerge';
 import { useDepartments } from '../hooks/useDepartments';
@@ -1121,20 +1121,31 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
       // (เขียน staff ได้เฉพาะ SUPER_ADMIN ตาม rules; ไม่แตะ roles — บทบาทเปลี่ยนผ่าน assignUserRole เท่านั้น)
       let homeroomUpdated = 0;
       let homeroomConflicts: string[] = [];
-      if (importType === 'COURSE' && userRoles.includes('SUPER_ADMIN')) {
-        const current = new Map<string, string>(realStaffList.map(x => [x.id, x.homeroomClass || ''] as [string, string]));
-        const plan = planHomeroomUpdates(
-          validRows.map(r => r.parsedData as any).filter(d => d?.isTeacherLoadReport),
-          current,
-        );
-        homeroomConflicts = plan.conflicts;
-        for (let i = 0; i < plan.updates.length; i += BATCH_SIZE) {
-          const hb = writeBatch(db);
-          for (const u of plan.updates.slice(i, i + BATCH_SIZE)) {
-            hb.set(doc(db, 'staff', u.staffId), { assignments: { homeroomClass: u.homeroomClass }, updatedAt: serverTimestamp() }, { merge: true });
+      let homeroomUnchanged = 0;
+      let homeroomNote = '';
+      const loadReportRows = importType === 'COURSE'
+        ? validRows.map(r => r.parsedData as any).filter(d => d?.isTeacherLoadReport)
+        : [];
+      if (loadReportRows.length > 0) {
+        if (!userRoles.includes('SUPER_ADMIN')) {
+          homeroomNote = 'ไม่ได้อัปเดตห้องประจำชั้น: ต้องนำเข้าด้วยบัญชี SUPER_ADMIN';
+        } else {
+          const current = new Map<string, string>(realStaffList.map(x => [x.id, x.homeroomClass || ''] as [string, string]));
+          const plan = planHomeroomUpdates(loadReportRows, current);
+          homeroomConflicts = plan.conflicts;
+          homeroomUnchanged = plan.unchanged;
+          for (let i = 0; i < plan.updates.length; i += BATCH_SIZE) {
+            const hb = writeBatch(db);
+            for (const u of plan.updates.slice(i, i + BATCH_SIZE)) {
+              hb.set(doc(db, 'staff', u.staffId), { assignments: { homeroomClass: u.homeroomClass }, updatedAt: serverTimestamp() }, { merge: true });
+            }
+            await hb.commit();
+            homeroomUpdated += Math.min(BATCH_SIZE, plan.updates.length - i);
           }
-          await hb.commit();
-          homeroomUpdated += Math.min(BATCH_SIZE, plan.updates.length - i);
+          const withRoom = loadReportRows.filter(d => d.matchedTeacherId && normalizeHomeroomLabel(d.homeroom)).length;
+          if (homeroomUpdated === 0 && homeroomUnchanged === 0 && withRoom === 0) {
+            homeroomNote = 'ไม่ได้อัปเดตห้องประจำชั้น: ไม่พบแถวที่จับคู่ครูได้และมีค่า "ประจำชั้น" ในไฟล์';
+          }
         }
       }
 
@@ -1210,9 +1221,11 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         }
       }
 
-      if (importType === 'COURSE' && (homeroomUpdated > 0 || homeroomConflicts.length > 0)) {
-        const lines = [`✅ นำเข้าตารางสอนสำเร็จ`, `• อัปเดตห้องประจำชั้นของครู ${homeroomUpdated} คน (จากคอลัมน์ "ประจำชั้น")`];
-        if (homeroomConflicts.length > 0) lines.push(`• ไม่อัปเดต ${homeroomConflicts.length} คน เพราะไฟล์ระบุห้องประจำชั้นขัดกันเอง: ${homeroomConflicts.slice(0, 5).join(', ')}`);
+      if (loadReportRows.length > 0) {
+        const lines = ['ห้องประจำชั้นของครู (จากคอลัมน์ "ประจำชั้น"):'];
+        if (homeroomNote) lines.push(`• ${homeroomNote}`);
+        else lines.push(`• อัปเดต ${homeroomUpdated} คน • ตรงกับของเดิมอยู่แล้ว ${homeroomUnchanged} คน`);
+        if (homeroomConflicts.length > 0) lines.push(`• ไม่อัปเดต ${homeroomConflicts.length} คน เพราะไฟล์ระบุห้องขัดกันเอง: ${homeroomConflicts.slice(0, 5).join(', ')}`);
         alert(lines.join('\n'));
       }
 
