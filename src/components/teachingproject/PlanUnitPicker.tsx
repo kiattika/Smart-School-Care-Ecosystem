@@ -20,7 +20,7 @@ export function PlanUnitPicker({ courseCode, value, onChange, disabled }: {
 
   if (loading) return null;
   if (!project || project.units.length === 0) {
-    return <p className="text-[11px] text-slate-500">ยังไม่มีโครงการสอนของวิชานี้ในภาคเรียนนี้ — จัดทำได้ที่เมนู "โครงการสอนของฉัน" แล้วจะเลือกหัวข้อที่สอนได้ที่นี่</p>;
+    return <p className="text-[11px] text-slate-500">ยังไม่มีโครงการสอนของวิชานี้ในภาคเรียนนี้ — จัดทำได้ที่เมนู "ผลการนิเทศ" แท็บ "โครงการสอน" แล้วจะเลือกหัวข้อที่สอนได้ที่นี่</p>;
   }
   const toggle = (id: string, title: string) => {
     const has = value.unitIds.includes(id);

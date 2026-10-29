@@ -10,6 +10,7 @@ import { canViewPostTeachingRecord, postTeachingAuthorNote } from './lib/postTea
 import { useDepartments } from './hooks/useDepartments';
 import { useCurrentSemester } from './hooks/useCurrentSemester';
 import { PortalSidebarLayout } from './components/shared/PortalSidebarLayout';
+import { SUPERVISION_GROUP_TABS, isSupervisionGroupTab, sidebarIdForTab } from './lib/supervisionMenu';
 import { MySupervisionPanel } from './components/supervision/MySupervisionPanel';
 import { MyLessonPlansPanel } from './components/lessonplans/MyLessonPlansPanel';
 import { EMPTY_PLAN_PICK, PlanUnitPicker, type PlanPick } from './components/teachingproject/PlanUnitPicker';
@@ -495,10 +496,8 @@ export function TeacherPortal() {
       },
       { id: 'records', label: 'ประวัติบันทึกหลังสอนทั้งหมด', icon: NavRecordsIcon, count: visiblePostTeachingRecords.length },
       { id: 'gradebook', label: 'สมุดบันทึกคะแนน (Gradebook)', icon: NavGradebookIcon, count: 0 },
-      { id: 'my-supervision', label: 'ผลการนิเทศของฉัน', icon: BookOpen, count: 0 },
-      { id: 'my-teaching-projects', label: 'โครงการสอนของฉัน', icon: BookOpen, count: 0 },
-      { id: 'my-lesson-plans', label: 'ส่งแผนการสอน (ลิงก์)', icon: BookOpen, count: 0 },
-      { id: 'my-plc', label: 'PLC และสะท้อนคิด', icon: BookOpen, count: 0 },
+      // โครงการสอน/แผนการสอน/PLC อยู่เป็นแท็บย่อยใต้ "ผลการนิเทศ" (lib/supervisionMenu.ts)
+      { id: 'my-supervision', label: 'ผลการนิเทศ', icon: BookOpen, count: 0 },
       { id: 'my-portfolio', label: 'แฟ้มสะสมงานของฉัน', icon: BookOpen, count: 0 },
       { id: 'my-stats', label: 'สถิติการสอนของฉัน (ลา/แลกคาบ/สอนแทน)', icon: Clock, count: 0 },
       { id: 'conduct', label: 'ให้/หักคะแนนความประพฤติ', icon: BookOpen, count: 0 },
@@ -511,8 +510,8 @@ export function TeacherPortal() {
   // Seamless fallback when role changes and current tab is restricted
   useEffect(() => {
     // แท็บเดิมถูกซ่อน (เช่น สลับบทบาท) → กลับไปแท็บแรกที่มองเห็น ('courses' ไม่เคยถูกซ่อน)
-    const resolved = resolveActiveSidebarId(availableDashboardTabs, dashboardTab);
-    if (resolved && resolved !== dashboardTab) {
+    const resolved = resolveActiveSidebarId(availableDashboardTabs, sidebarIdForTab(dashboardTab));
+    if (resolved && resolved !== sidebarIdForTab(dashboardTab)) {
       setDashboardTab(resolved as typeof dashboardTab);
     }
   }, [availableDashboardTabs, dashboardTab]);
@@ -1118,7 +1117,7 @@ export function TeacherPortal() {
           {/* เมนูย่อย — แถบด้านซ้ายแบบเดียวกันทุก portal (PortalSidebarLayout); ไม่แสดงตอน view เป็น class / active_learning */}
           <PortalSidebarLayout
             title="ภาระงานสอน"
-            activeId={dashboardTab}
+            activeId={sidebarIdForTab(dashboardTab)}
             onSelect={(id) => setDashboardTab(id as typeof dashboardTab)}
             items={availableDashboardTabs.map(tab => ({ id: tab.id, label: tab.label, icon: tab.icon, badge: tab.count > 0 ? tab.count : null }))}
           >
@@ -2047,6 +2046,17 @@ export function TeacherPortal() {
               </div>
             )}
 
+            {isSupervisionGroupTab(dashboardTab) && (
+              <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="ผลการนิเทศ">
+                {SUPERVISION_GROUP_TABS.map(t => (
+                  <button key={t.id} type="button" role="tab" aria-selected={dashboardTab === t.id}
+                    onClick={() => setDashboardTab(t.id)}
+                    className={`px-3.5 py-1.5 rounded-lg text-sm border cursor-pointer ${dashboardTab === t.id ? 'bg-cyan-600 border-cyan-600 text-white' : 'border-slate-600 text-slate-300 hover:bg-slate-800'}`}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {dashboardTab === 'my-supervision' && <MySupervisionPanel />}
             {dashboardTab === 'my-teaching-projects' && <MyTeachingProjectsPanel courses={lessonPlanCourses} />}
             {dashboardTab === 'my-lesson-plans' && <MyLessonPlansPanel courses={lessonPlanCourses} />}
