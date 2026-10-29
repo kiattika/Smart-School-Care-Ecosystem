@@ -1785,6 +1785,9 @@ service cloud.firestore {
     function supManage() {
       return hasRole('INSTRUCTIONAL_SUPERVISOR') || hasRole('SUPER_ADMIN');
     }
+    function etEditor() {
+      return hasRole('INSTRUCTIONAL_SUPERVISOR');
+    }
     function supStaffDept(sid) {
       return exists(/databases/$(database)/documents/staff/$(sid))
         ? get(/databases/$(database)/documents/staff/$(sid)).data.get('assignments', {}).get('departmentId', '')
@@ -1878,7 +1881,7 @@ service cloud.firestore {
     function etKind(k) { return k in ['SUPERVISION', 'LESSON_PLAN']; }
     match /evaluation_template_versions/{vid} {
       allow read: if myStaffId() != '';
-      allow create: if supManage() && myStaffId() != ''
+      allow create: if etEditor() && myStaffId() != ''
                        && request.resource.data.keys().hasOnly(['kind', 'version', 'ids', 'criteria', 'sections', 'createdAt', 'createdByStaffId'])
                        && request.resource.data.keys().hasAll(['kind', 'version', 'ids', 'criteria', 'sections', 'createdAt', 'createdByStaffId'])
                        && etKind(request.resource.data.kind)
@@ -1896,7 +1899,7 @@ service cloud.firestore {
     }
     match /evaluation_templates/{kind} {
       allow read: if myStaffId() != '';
-      allow create, update: if supManage() && etKind(kind)
+      allow create, update: if etEditor() && etKind(kind)
                        && request.resource.data.keys().hasOnly(['kind', 'currentVersion', 'updatedAt', 'updatedByStaffId'])
                        && request.resource.data.kind == kind
                        && request.resource.data.currentVersion is int

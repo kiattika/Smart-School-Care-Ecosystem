@@ -6,7 +6,7 @@ import { useCurrentSemester } from '../../hooks/useCurrentSemester';
 import { useDepartments } from '../../hooks/useDepartments';
 import { useRoundAssignments, useRoundObservations, useSupervisionRounds } from '../../hooks/useSupervision';
 import {
-  canManageSupervision, isSupervisor, supervisionRoundId,
+  canEditEvaluationTemplates, canManageSupervision, isSupervisor, supervisionRoundId,
   type SupervisionObservation, type SupervisionRound,
 } from '../../lib/supervision';
 import {
@@ -41,7 +41,7 @@ export function useSupervisionTabs(): SupervisionTabItem[] {
     ...(overviewQuery(roles) ? [{ id: 'overview' as Tab, label: 'ภาพรวม', icon: BarChart3 }] : []),
     ...(planOverviewQuery(roles, myDept) ? [{ id: 'plans' as Tab, label: 'ตรวจแผนการสอน', icon: FileText }] : []),
     ...(canManageSupervision(roles) ? [{ id: 'manage' as Tab, label: 'จัดการรอบ/จับคู่', icon: Settings2 }] : []),
-    ...(canManageSupervision(roles) ? [{ id: 'templates' as Tab, label: 'แบบประเมิน', icon: ListChecks }] : []),
+    ...(canEditEvaluationTemplates(roles) ? [{ id: 'templates' as Tab, label: 'แบบประเมิน', icon: ListChecks }] : []),
   ], [roles, staffId, myDept]);
 }
 
@@ -61,7 +61,7 @@ export function SupervisionWorkspace({ tab }: { tab: Tab }) {
   const round = rounds.find(r => r.id === roundId) || null;
 
   if (tab === 'plans') return <LessonPlanReviewPanel />;
-  if (tab === 'templates') return canManage ? <EvaluationTemplateEditor /> : null;
+  if (tab === 'templates') return canEditEvaluationTemplates(roles) ? <EvaluationTemplateEditor /> : null;
   if (!user || !staffId) return <p className="text-sm text-slate-400">บัญชีนี้ไม่ได้เชื่อมกับทะเบียนบุคลากร จึงใช้งานระบบนิเทศไม่ได้</p>;
 
   return (

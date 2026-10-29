@@ -189,9 +189,13 @@ export const SUPERVISION_VIEW_ALL_ROLES = [
 /** เปิดรอบ/จับคู่ผู้นิเทศ */
 export const SUPERVISION_MANAGE_ROLES = ['INSTRUCTIONAL_SUPERVISOR', 'SUPER_ADMIN'] as const;
 
+/** เพิ่ม/แก้แบบประเมิน (แบบสังเกตการสอน + แบบประเมินแผนการสอน) — หัวหน้างานนิเทศเท่านั้น (SUPER_ADMIN ไม่ได้; ต้องตรง rules `etEditor()`) */
+export const TEMPLATE_EDIT_ROLES = ['INSTRUCTIONAL_SUPERVISOR'] as const;
+
 const has = (roles: readonly string[] | undefined, list: readonly string[]) => !!roles && roles.some(r => list.includes(r));
 
 export const canManageSupervision = (roles: readonly string[] | undefined) => has(roles, SUPERVISION_MANAGE_ROLES);
+export const canEditEvaluationTemplates = (roles: readonly string[] | undefined) => has(roles, TEMPLATE_EDIT_ROLES);
 export const canViewAllSupervision = (roles: readonly string[] | undefined) => has(roles, SUPERVISION_VIEW_ALL_ROLES);
 export const isExOfficioSupervisor = (roles: readonly string[] | undefined) => has(roles, EX_OFFICIO_SUPERVISOR_ROLES);
 export const isSupervisor = (roles: readonly string[] | undefined) => has(roles, SUPERVISOR_ROLES);

@@ -130,3 +130,23 @@ describe('rules และการต่อสาย', () => {
     }
   });
 });
+
+describe('สิทธิ์แก้แบบประเมิน = หัวหน้างานนิเทศคนเดียว', () => {
+  it('canEditEvaluationTemplates: เฉพาะ INSTRUCTIONAL_SUPERVISOR', async () => {
+    const { canEditEvaluationTemplates } = await import('../lib/supervision');
+    expect(canEditEvaluationTemplates(['INSTRUCTIONAL_SUPERVISOR'])).toBe(true);
+    for (const r of ['SUPER_ADMIN', 'SUPERVISORY_TEACHER', 'HEAD_OF_DEPARTMENT', 'DIRECTOR', 'DEPUTY_DIRECTOR_ACADEMIC', 'SUBJECT_TEACHER']) {
+      expect(canEditEvaluationTemplates([r])).toBe(false);
+    }
+    expect(canEditEvaluationTemplates(undefined)).toBe(false);
+  });
+  it('firestore.rules: เขียน evaluation_template* ใช้ etEditor() (ไม่รวม SUPER_ADMIN)', async () => {
+    const { readSource } = await import('./helpers/readSource');
+    const rules = readSource('firestore.rules.comments');
+    expect(rules).toMatch(/function etEditor\(\) \{\s*return hasRole\('INSTRUCTIONAL_SUPERVISOR'\);\s*\}/);
+    const block = rules.slice(rules.indexOf('match /evaluation_template_versions/'), rules.indexOf('match /supervision_rounds/'));
+    expect(block).not.toContain('supManage()');
+    expect(block).not.toContain('SUPER_ADMIN');
+    expect((block.match(/etEditor\(\)/g) || []).length).toBe(2);
+  });
+});

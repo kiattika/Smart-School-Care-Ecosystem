@@ -5163,13 +5163,14 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       });
     };
 
-    it('เผยแพร่เวอร์ชัน: หัวหน้างานนิเทศ/SUPER_ADMIN ทำได้ ครูทั่วไปทำไม่ได้; ต้องเริ่มที่ 2 และเพิ่มทีละ 1', async () => {
+    it('เผยแพร่เวอร์ชัน: หัวหน้างานนิเทศเท่านั้นทำได้ (SUPER_ADMIN/ครูทั่วไปทำไม่ได้); ต้องเริ่มที่ 2 และเพิ่มทีละ 1', async () => {
       await seed();
       await assertFails(publish(sc('t1', ['SUBJECT_TEACHER']), 'LESSON_PLAN', 2, ['c1', 'c2']));
       await assertFails(publish(sc('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'LESSON_PLAN', 3, ['c1'])); // ข้ามเวอร์ชัน
       await assertSucceeds(publish(sc('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'LESSON_PLAN', 2, ['c1', 'c2']));
       await assertFails(publish(sc('admin', ['SUPER_ADMIN']), 'LESSON_PLAN', 2, ['c1'])); // เวอร์ชันซ้ำ
-      await assertSucceeds(publish(sc('admin', ['SUPER_ADMIN']), 'LESSON_PLAN', 3, ['c1', 'c2', 'c3'], [], 'admin'));
+      await assertFails(publish(sc('admin', ['SUPER_ADMIN']), 'LESSON_PLAN', 3, ['c1', 'c2', 'c3'], [], 'admin')); // SUPER_ADMIN แก้แบบประเมินไม่ได้
+      await assertSucceeds(publish(sc('sup-head', ['INSTRUCTIONAL_SUPERVISOR']), 'LESSON_PLAN', 3, ['c1', 'c2', 'c3']));
       // เวอร์ชันที่เผยแพร่แล้วแก้/ลบไม่ได้
       const db = sc('sup-head', ['INSTRUCTIONAL_SUPERVISOR']);
       await assertFails(mUpdateDoc(mDoc(db, 'evaluation_template_versions/LESSON_PLAN_2'), { ids: ['c1'] }));

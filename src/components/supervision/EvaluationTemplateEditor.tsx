@@ -12,7 +12,7 @@ import {
 const inputCls = 'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-cyan-500';
 const btn = 'p-1.5 rounded-md border border-slate-700 text-slate-300 disabled:opacity-30 cursor-pointer';
 
-/** แอดมิน/หัวหน้างานนิเทศแก้แบบประเมิน — บันทึกเป็นเวอร์ชันใหม่ ผลที่ประเมินไปแล้วยังใช้แบบเวอร์ชันเดิม (ไม่กระทบย้อนหลัง) */
+/** หัวหน้างานนิเทศ (เท่านั้น) แก้แบบประเมิน — บันทึกเป็นเวอร์ชันใหม่ ผลที่ประเมินไปแล้วยังใช้แบบเวอร์ชันเดิม (ไม่กระทบย้อนหลัง) */
 export function EvaluationTemplateEditor() {
   const [kind, setKind] = useState<TemplateKind>('SUPERVISION');
   return (
