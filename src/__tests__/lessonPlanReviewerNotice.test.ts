@@ -26,7 +26,7 @@ describe('nextReviewerStaffIds', () => {
     expect(nextReviewerStaffIds({ teacherStaffId: 't1', departmentId: 'math' }, 'FINAL', STAFF, ['sup1'])).toEqual([]);
   });
   it('ไม่มีผู้ตรวจ/ไม่มีทะเบียน = [] (ไม่เดา)', () => {
-    expect(nextReviewerStaffIds({ teacherStaffId: 't1', departmentId: 'art' }, 'DEPT', STAFF)).toEqual([]);
+    expect(nextReviewerStaffIds({ teacherStaffId: 't1', departmentId: 'art' }, 'DEPT', STAFF)).toEqual(['sup1']); // ไม่มีหัวหน้า/รองกลุ่ม → แจ้งหัวหน้างานนิเทศแทน
     expect(nextReviewerStaffIds({ teacherStaffId: 't1', departmentId: 'math' }, 'DEPT', [])).toEqual([]);
   });
   it('ครูเจ้าของแผนไม่ได้รับแจ้งของตัวเอง', () => {

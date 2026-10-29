@@ -1531,7 +1531,7 @@ service cloud.firestore {
           && request.resource.data.updatedAt == request.time
         ) || (
           myStaffId() != '' && hasRole('INSTRUCTIONAL_SUPERVISOR') && resource.data.teacherStaffId != myStaffId()
-          && resource.data.stage == 'DEPT_APPROVED'
+          && resource.data.stage in ['SUBMITTED', 'DEPT_APPROVED']
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stage', 'finalReview', 'updatedAt'])
           && request.resource.data.stage in ['APPROVED', 'REVISION']
           && lpReviewOk(request.resource.data.finalReview, request.resource.data.stage, 'APPROVED')

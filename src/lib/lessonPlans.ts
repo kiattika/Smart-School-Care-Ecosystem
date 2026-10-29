@@ -161,14 +161,15 @@ export function planOverviewQuery(roles: readonly string[], departmentId: string
 export function reviewStageFor(
   plan: Pick<LessonPlan, 'stage' | 'teacherStaffId' | 'departmentId'>,
   me: { staffId: string; roles: readonly string[]; departmentId: string },
-  teacherIsHead: boolean,
+  _teacherIsHead?: boolean,
 ): 'DEPT' | 'FINAL' | null {
   if (!me.staffId || plan.teacherStaffId === me.staffId) return null;
   if (plan.stage === 'SUBMITTED') {
     const exOfficio = (me.roles.includes('HEAD_OF_DEPARTMENT') || me.roles.includes('DEPUTY_HEAD_OF_DEPARTMENT'))
       && !!plan.departmentId && me.departmentId === plan.departmentId;
-    const fallback = me.roles.includes('INSTRUCTIONAL_SUPERVISOR') && (plan.departmentId === '' || teacherIsHead);
-    return exOfficio || fallback ? 'DEPT' : null;
+    // หัวหน้างานนิเทศตรวจข้ามขั้นได้ทุกแผน (ตัดสินเป็นผลสุดท้ายเลย ไม่ต้องรอหัวหน้ากลุ่มสาระฯ)
+    if (me.roles.includes('INSTRUCTIONAL_SUPERVISOR')) return 'FINAL';
+    return exOfficio ? 'DEPT' : null;
   }
   if (plan.stage === 'DEPT_APPROVED' && me.roles.includes('INSTRUCTIONAL_SUPERVISOR')) return 'FINAL';
   return null;
@@ -192,9 +193,11 @@ export function nextReviewerStaffIds(
   if (stage === 'FINAL') return supervisors;
   const teacherIsHead = !!staff.find(s => s.id === plan.teacherStaffId)?.roles?.includes('HEAD_OF_DEPARTMENT');
   if (!plan.departmentId || teacherIsHead) return supervisors;
-  return live
+  const deptReviewers = live
     .filter(s => (s.roles?.includes('HEAD_OF_DEPARTMENT') || s.roles?.includes('DEPUTY_HEAD_OF_DEPARTMENT')) && s.assignments?.departmentId === plan.departmentId)
     .map(s => s.id);
+  // กลุ่มสาระฯ ที่ไม่มีหัวหน้า/รองที่ใช้งานอยู่ → แจ้งหัวหน้างานนิเทศแทน (ตรวจข้ามขั้นได้) แผนจะไม่ค้างเงียบ
+  return deptReviewers.length > 0 ? deptReviewers : supervisors;
 }
 
 // ───────────── ความครบถ้วนต่อครู ─────────────

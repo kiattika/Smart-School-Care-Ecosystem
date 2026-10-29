@@ -147,7 +147,7 @@ function ReviewDetail({ plan, stage, reviewer, staff, onBack }: {
           ))}
           {!stage ? <p className="text-sm text-slate-400">ท่านดูได้อย่างเดียว (ไม่ใช่ผู้ตรวจในขั้นนี้)</p> : !tpl ? <p className="text-sm text-slate-400">{tpls.loading ? 'กำลังโหลดแบบประเมิน…' : `โหลดแบบประเมินไม่สำเร็จ${tpls.error ? `: ${tpls.error}` : ''}`}</p> : (
             <>
-              <p className="text-sm text-white font-medium">แบบประเมิน — {stage === 'DEPT' ? 'ขั้นที่ 1 หัวหน้ากลุ่มสาระฯ' : 'ขั้นที่ 2 หัวหน้างานนิเทศ'}</p>
+              <p className="text-sm text-white font-medium">แบบประเมิน — {stage === 'DEPT' ? 'ขั้นที่ 1 หัวหน้ากลุ่มสาระฯ' : plan.stage === 'SUBMITTED' ? 'หัวหน้างานนิเทศ (ตรวจข้ามขั้น — ผลนี้เป็นผลสุดท้าย)' : 'ขั้นที่ 2 หัวหน้างานนิเทศ'}</p>
               <ul className="space-y-2">
                 {tpl.criteria.map((c, i) => (
                   <li key={c.id} className="text-sm text-slate-200 space-y-1">

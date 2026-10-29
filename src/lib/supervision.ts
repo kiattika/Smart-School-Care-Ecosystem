@@ -196,6 +196,13 @@ const has = (roles: readonly string[] | undefined, list: readonly string[]) => !
 
 export const canManageSupervision = (roles: readonly string[] | undefined) => has(roles, SUPERVISION_MANAGE_ROLES);
 export const canEditEvaluationTemplates = (roles: readonly string[] | undefined) => has(roles, TEMPLATE_EDIT_ROLES);
+/**
+ * แก้แบบประเมินได้เมื่อ "บทบาทที่กำลังใช้อยู่" (activeRole) เป็นหัวหน้างานนิเทศ และบัญชีมีบทบาทนี้จริง
+ * — บัญชีเดียวถือหลายบทบาทได้ แต่สลับไปใช้บทบาทอื่นแล้วต้องแก้แบบประเมินไม่ได้ (บังคับที่หน้าจอเท่านั้น:
+ * rules เห็นแค่ claims roles ทั้งหมด ไม่รู้ว่าสลับบทบาทไหนอยู่)
+ */
+export const canEditEvaluationTemplatesAs = (roles: readonly string[] | undefined, activeRole: string | undefined | null) =>
+  canEditEvaluationTemplates(roles) && !!activeRole && TEMPLATE_EDIT_ROLES.some(r => r === activeRole);
 export const canViewAllSupervision = (roles: readonly string[] | undefined) => has(roles, SUPERVISION_VIEW_ALL_ROLES);
 export const isExOfficioSupervisor = (roles: readonly string[] | undefined) => has(roles, EX_OFFICIO_SUPERVISOR_ROLES);
 export const isSupervisor = (roles: readonly string[] | undefined) => has(roles, SUPERVISOR_ROLES);

@@ -1931,9 +1931,9 @@ service cloud.firestore {
           && lpReviewOk(request.resource.data.deptReview, request.resource.data.stage, 'DEPT_APPROVED')
           && request.resource.data.updatedAt == request.time
         ) || (
-          // ขั้นที่ 2: หัวหน้างานนิเทศ
+          // ขั้นที่ 2: หัวหน้างานนิเทศ — ตรวจต่อจากหัวหน้ากลุ่มสาระฯ (DEPT_APPROVED) หรือตรวจข้ามขั้นได้ทุกแผนที่ยังรอตรวจ (SUBMITTED)
           myStaffId() != '' && hasRole('INSTRUCTIONAL_SUPERVISOR') && resource.data.teacherStaffId != myStaffId()
-          && resource.data.stage == 'DEPT_APPROVED'
+          && resource.data.stage in ['SUBMITTED', 'DEPT_APPROVED']
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stage', 'finalReview', 'updatedAt'])
           && request.resource.data.stage in ['APPROVED', 'REVISION']
           && lpReviewOk(request.resource.data.finalReview, request.resource.data.stage, 'APPROVED')
