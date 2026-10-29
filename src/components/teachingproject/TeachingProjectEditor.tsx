@@ -4,6 +4,8 @@ import {
   type AssessmentItem, type ProjectUnit, type TeachingProject,
 } from '../../lib/teachingProject';
 import type { ProjectContent } from '../../services/teachingProjectService';
+import { TeachingProjectExcelBar } from './TeachingProjectExcelBar';
+import type { ExcelContent } from '../../lib/teachingProjectExcel';
 
 const inp = 'w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-white';
 const lbl = 'text-xs text-slate-400 block mb-1';
@@ -11,8 +13,9 @@ const lbl = 'text-xs text-slate-400 block mb-1';
 export interface EditorInit extends ProjectContent { }
 
 /** ฟอร์มโครงการสอนรายสัปดาห์ — ใช้กับทุกห้องที่สอนรหัสวิชาเดียวกัน */
-export function TeachingProjectEditor({ init, onSave, onCancel, levelsNote }: {
+export function TeachingProjectEditor({ init, onSave, onCancel, levelsNote, courseCode, courseName, semesterLabel }: {
   init: EditorInit; onSave: (c: ProjectContent) => Promise<unknown>; onCancel: () => void; levelsNote: string;
+  courseCode?: string; courseName?: string; semesterLabel?: string;
 }) {
   const [d, setD] = useState<EditorInit>(init);
   const [busy, setBusy] = useState(false);
@@ -26,6 +29,7 @@ export function TeachingProjectEditor({ init, onSave, onCancel, levelsNote }: {
   };
   const setAssess = (i: number, patch: Partial<AssessmentItem>) => set('assessment', d.assessment.map((a, k) => (k === i ? { ...a, ...patch } : a)));
   const total = assessmentTotal(d.assessment);
+  const applyImport = (c: ExcelContent) => setD(s => ({ ...s, ...c }));
 
   const save = async () => {
     setBusy(true); setMsg('');
@@ -34,6 +38,9 @@ export function TeachingProjectEditor({ init, onSave, onCancel, levelsNote }: {
   return (
     <div className="space-y-4 rounded-xl border border-slate-700 bg-slate-900/60 p-4">
       <p className="text-xs text-cyan-300">โครงการสอนฉบับนี้ใช้กับทุกห้องที่ท่านสอนรหัสวิชานี้: {levelsNote || '-'}</p>
+      <TeachingProjectExcelBar
+        courseCode={courseCode || ''} courseName={courseName || ''} semesterLabel={semesterLabel || ''}
+        draft={d} defaults={init} onImport={applyImport} />
       <div className="grid gap-3 sm:grid-cols-4">
         <div className="sm:col-span-2"><label className={lbl}>ประเภทวิชา</label><input className={inp} list="tp-course-types" value={d.courseType} onChange={e => set('courseType', e.target.value)} maxLength={80} placeholder="เช่น สาระการเรียนรู้พื้นฐาน" />
           <datalist id="tp-course-types"><option value="สาระการเรียนรู้พื้นฐาน" /><option value="สาระการเรียนรู้เพิ่มเติม" /><option value="กิจกรรมพัฒนาผู้เรียน" /></datalist></div>

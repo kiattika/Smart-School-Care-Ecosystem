@@ -142,7 +142,7 @@ describe('guard: staff portals use the shared PortalSidebarLayout', () => {
     const s = src('src/TeacherPortal.tsx');
     expect(s).toContain("return visibleSidebarItems(rawTabs, user?.activeRole || 'SUBJECT_TEACHER');");
     expect(s).toContain("{ id: 'teaching-load', label: 'ตารางภาระงานสอน (Teaching Load)', icon: NavLoadIcon, count: 6, hideForRoles: ['SUBJECT_TEACHER'] },");
-    expect(s).toContain('const resolved = resolveActiveSidebarId(availableDashboardTabs, dashboardTab);');
+    expect(s).toContain('const resolved = resolveActiveSidebarId(availableDashboardTabs, sidebarIdForTab(dashboardTab));');
     const dashboardBranch = s.indexOf("{view === 'dashboard' ? (");
     const layout = s.indexOf('<PortalSidebarLayout');
     const layoutEnd = s.indexOf('</PortalSidebarLayout>');

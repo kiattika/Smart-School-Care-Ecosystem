@@ -70,7 +70,7 @@ export function MyTeachingProjectsPanel({ courses }: { courses: CourseLike[] }) 
                 <div key={g.key} className="rounded-xl border border-slate-700 bg-slate-900/40 p-4 space-y-2">
                   {head()}
                   {g.kind !== 'EXEMPT' && !isOpen && <button className="px-3 py-1.5 rounded-lg text-xs bg-cyan-600 text-white cursor-pointer" onClick={() => { setOpenKey(g.key); setViewKey(''); }}>สร้างโครงการสอน</button>}
-                  {isOpen && <TeachingProjectEditor levelsNote={g.levels.join(', ')} init={initOf(g)} onSave={(c) => save(g, c)} onCancel={() => setOpenKey('')} />}
+                  {isOpen && <TeachingProjectEditor levelsNote={g.levels.join(', ')} courseCode={g.code} courseName={g.name} semesterLabel={sem.label} init={initOf(g)} onSave={(c) => save(g, c)} onCancel={() => setOpenKey('')} />}
                 </div>
               );
             }
@@ -94,7 +94,7 @@ export function MyTeachingProjectsPanel({ courses }: { courses: CourseLike[] }) 
                       )}
                       {coOpen && owner && <div key={p.id}><CoTeacherEditor p={p} staff={staff} meId={staffId} dept={dept} deptNameOf={deptNameOf} onClose={() => setCoKey('')} /></div>}
                       {viewKey === p.id && <TeachingProjectView p={p} />}
-                      {isOpen && <TeachingProjectEditor levelsNote={g.levels.join(', ')} init={initOf(g, p)} onSave={(c) => save(g, c, p)} onCancel={() => setOpenKey('')} />}
+                      {isOpen && <TeachingProjectEditor levelsNote={g.levels.join(', ')} courseCode={g.code} courseName={g.name} semesterLabel={sem.label} init={initOf(g, p)} onSave={(c) => save(g, c, p)} onCancel={() => setOpenKey('')} />}
                     </div>
                   );
                 })}
