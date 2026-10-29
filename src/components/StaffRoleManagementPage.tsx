@@ -767,6 +767,11 @@ export function StaffRoleManagementPage({ onGoToImport }: { onGoToImport?: () =>
                               ⚠️ ห้องไม่ตรงข้อมูลที่นำเข้า
                             </div>
                           )}
+                          {!staff.roles.includes('HOMEROOM_TEACHER') && staff.assignments?.homeroomClass && (
+                            <div className="text-[10px] text-slate-400" title="ห้องจากไฟล์นำเข้า — ต้องมอบบทบาทครูประจำชั้นจึงจะมีสิทธิ์ของครูที่ปรึกษา">
+                              ห้องตามไฟล์: {staff.assignments.homeroomClass} (ยังไม่มีบทบาทครูประจำชั้น)
+                            </div>
+                          )}
                           {!staff.assignments?.homeroomClass && (
                             <span className="text-[10px] text-slate-500 italic block text-center w-full">ไม่มีข้อมูลการเชื่อมสิทธิ์</span>
                           )}
