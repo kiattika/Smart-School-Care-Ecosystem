@@ -446,7 +446,7 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 
 
 ## แบบประเมินที่แอดมินแก้ได้ (`src/lib/evaluationTemplate.ts`)
-- ครอบคลุม **แบบสังเกตการสอน** (`SUPERVISION`) และ **แบบประเมินแผนการสอน** (`LESSON_PLAN`); แท็บ "แบบประเมิน" ในงานนิเทศ (หัวหน้างานนิเทศ/SUPER_ADMIN) → `EvaluationTemplateEditor`
+- ครอบคลุม **แบบสังเกตการสอน** (`SUPERVISION`) และ **แบบประเมินแผนการสอน** (`LESSON_PLAN`); แท็บ "แบบประเมิน" ในงานนิเทศ → `EvaluationTemplateEditor` — **เพิ่ม/แก้ได้เฉพาะหัวหน้างานนิเทศ (`INSTRUCTIONAL_SUPERVISOR`) คนเดียว; SUPER_ADMIN แก้ไม่ได้** (`canEditEvaluationTemplates` ใน `src/lib/supervision.ts` ต้องตรง `etEditor()` ใน rules; ต่างจาก `supManage()` ที่ SUPER_ADMIN ยังเปิดรอบ/จับคู่ได้ — ถ้ายังไม่มีผู้ถือบทบาทนี้ ให้ SUPER_ADMIN มอบบทบาทผ่าน "จัดการสิทธิ์บุคลากร")
 - แบบเป็น **เวอร์ชันที่แก้ย้อนหลังไม่ได้**: `evaluation_template_versions/{KIND}_{n}` (สร้างครั้งเดียว) + ตัวชี้ `evaluation_templates/{KIND}.currentVersion` (+1 ต่อครั้ง, สร้างคู่กันใน transaction เดียว — rules ใช้ `existsAfter`). **เวอร์ชัน 1 = แบบตั้งต้นในโค้ด ไม่มีเอกสาร** (`DEFAULT_SUPERVISION_TEMPLATE` 20 ข้อ/5 หมวด, `DEFAULT_LESSON_PLAN_TEMPLATE` 15 ข้อ) — ผลเก่าทั้งหมดเป็น v1 ต้องแสดง/คิดเท่าเดิม
 - ผลที่บันทึกเก็บ `templateVersion` (นิเทศ: ฟิลด์บนเอกสาร; รีวิวแผน: ใน deptReview/finalReview เฉพาะ >1 — ไม่มี = v1). **ฉบับใหม่ต้องใช้เวอร์ชันปัจจุบัน** (rules บังคับ), ฉบับร่างนิเทศที่ค้างแก้ต่อด้วยเวอร์ชันเดิมจนส่ง; การแสดงผลใช้ `useEvaluationTemplates(kind).byVersion(v)` เสมอ ห้ามอ้างค่าคงที่ `SUPERVISION_ITEMS`/`PLAN_CRITERIA` ในหน้าจอ (มีเทสต์จับ)
 - มาตราคะแนนยังเป็น 1–5; ระดับ/เกณฑ์ผลสรุปเดิมคงที่ (นิเทศ: เปอร์เซ็นต์ = total×100÷(จำนวนข้อ×5)). แก้ได้: ข้อความ/เพิ่ม/ลบ/เรียงข้อ, หมวด (เฉพาะแบบนิเทศ), ข้อที่มีช่องวิธีประเมินผล (ข้อเดียว)
