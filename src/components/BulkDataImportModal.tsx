@@ -37,6 +37,7 @@ import { useStore } from '../store';
 import { Student, Course, GlobalCourse, UserRole } from '../types';
 import { ROLE_NAMES_TH } from './StaffRoleManagementPage';
 import { normalizeEmail } from '../lib/normalizeEmail';
+import { planHomeroomUpdates } from '../lib/homeroomFromLoadReport';
 import { buildExistingEmailIndex, staffEmailConflict } from '../lib/staffEmailConflict';
 import { buildStaffImportWrite, matchDepartmentId, type ParsedStaffRow } from '../lib/staffImportMerge';
 import { useDepartments } from '../hooks/useDepartments';
@@ -129,7 +130,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importError, setImportError] = useState<string | null>(null);
-  const [realStaffList, setRealStaffList] = useState<Array<{ id: string; fullName?: string; firstName?: string; lastName?: string; displayName?: string; email?: string; prefix?: string; status?: string; roles?: string[] }>>([]);
+  const [realStaffList, setRealStaffList] = useState<Array<{ id: string; fullName?: string; firstName?: string; lastName?: string; displayName?: string; email?: string; prefix?: string; status?: string; roles?: string[]; homeroomClass?: string }>>([]);
   // กลุ่มสาระฯ จาก department_config (สด) — ใช้แปลงชื่อกลุ่มในไฟล์นำเข้าบุคลากรเป็นรหัส
   const { departments: importDepartments } = useDepartments();
   const [isStaffLoading, setIsStaffLoading] = useState(false);
@@ -178,6 +179,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             status: typeof data.status === 'string' ? data.status : '',
             // บทบาทเดิมของคนที่มี staff doc อยู่แล้ว — นำเข้าซ้ำต้องไม่เขียนทับ (ดู lib/staffImportMerge.ts)
             roles: Array.isArray(data.roles) ? (data.roles as string[]) : [],
+            homeroomClass: typeof data.assignments?.homeroomClass === 'string' ? data.assignments.homeroomClass : '',
           };
         });
         setIsStaffLoading(false);
@@ -324,6 +326,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           teacherName: row.teacherName,
           teacherEmail: row.teacherEmail,
           department: row.department,
+          homeroom: row.homeroom,
           matchedTeacherId: row.matchedTeacherId,
           matchedTeacherEmail: row.matchedTeacherEmail,
           unlinkedTeacherName: row.unlinkedTeacherName,
@@ -1114,6 +1117,27 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         setImportProgress(Math.min(95, Math.round((processedCount / totalValid) * 90) + 10));
       }
 
+      // ── ห้องประจำชั้นของครู: อัปเดต staff.assignments.homeroomClass จากคอลัมน์ "ประจำชั้น" ของรายงาน ──
+      // (เขียน staff ได้เฉพาะ SUPER_ADMIN ตาม rules; ไม่แตะ roles — บทบาทเปลี่ยนผ่าน assignUserRole เท่านั้น)
+      let homeroomUpdated = 0;
+      let homeroomConflicts: string[] = [];
+      if (importType === 'COURSE' && userRoles.includes('SUPER_ADMIN')) {
+        const current = new Map<string, string>(realStaffList.map(x => [x.id, x.homeroomClass || ''] as [string, string]));
+        const plan = planHomeroomUpdates(
+          validRows.map(r => r.parsedData as any).filter(d => d?.isTeacherLoadReport),
+          current,
+        );
+        homeroomConflicts = plan.conflicts;
+        for (let i = 0; i < plan.updates.length; i += BATCH_SIZE) {
+          const hb = writeBatch(db);
+          for (const u of plan.updates.slice(i, i + BATCH_SIZE)) {
+            hb.set(doc(db, 'staff', u.staffId), { assignments: { homeroomClass: u.homeroomClass }, updatedAt: serverTimestamp() }, { merge: true });
+          }
+          await hb.commit();
+          homeroomUpdated += Math.min(BATCH_SIZE, plan.updates.length - i);
+        }
+      }
+
       if (importType === 'PARENT' && parentImportRecords.length > 0) {
         const result = await importParentRecords(parentImportRecords);
         if (result.errors.length > 0) {
@@ -1184,6 +1208,12 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         } else if (importImpact.teacherChanges.length > 0 || aftercare.cleaned.length > 0) {
           alert(`✅ นำเข้าสำเร็จ\n• โอนประวัติ: เปลี่ยนครู ${importImpact.teacherChanges.length} คาบ (ประทับชื่อครูคนเดิมในบันทึกหลังสอน ${stampedTotal} รายการ)\n• เก็บกวาดตารางครูที่ปิดการใช้งาน ${aftercare.cleaned.length} รายการ\n• บันทึก log การนำเข้าแล้ว`);
         }
+      }
+
+      if (importType === 'COURSE' && (homeroomUpdated > 0 || homeroomConflicts.length > 0)) {
+        const lines = [`✅ นำเข้าตารางสอนสำเร็จ`, `• อัปเดตห้องประจำชั้นของครู ${homeroomUpdated} คน (จากคอลัมน์ "ประจำชั้น")`];
+        if (homeroomConflicts.length > 0) lines.push(`• ไม่อัปเดต ${homeroomConflicts.length} คน เพราะไฟล์ระบุห้องประจำชั้นขัดกันเอง: ${homeroomConflicts.slice(0, 5).join(', ')}`);
+        alert(lines.join('\n'));
       }
 
       // นำเข้าบุคลากรอาจเพิ่ม/เปลี่ยนครูแนะแนว (GUIDANCE_COUNSELOR) — สิทธิ์อ่าน 9Q/8Q ของครูที่ปรึกษาขึ้นกับ "มีครูแนะแนวที่ใช้งานอยู่ไหม"

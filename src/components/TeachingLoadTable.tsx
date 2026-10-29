@@ -140,7 +140,8 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
     staffData.forEach((st) => {
       const name = st.fullName || `${st.prefix || ''}${st.firstName || ''} ${st.lastName || ''}`.trim() || st.displayName || st.email || st.id;
       const dept = st.department || st.departmentId || 'กลุ่มสาระการเรียนรู้ทั่วไป';
-      const homeroom = st.homeroom || st.homeroomClass || st.room || '-';
+      // ห้องประจำชั้นจริงเก็บที่ staff.assignments.homeroomClass (ฟิลด์ระดับบนไม่มีใครเขียน)
+      const homeroom = st.assignments?.homeroomClass || st.homeroomClass || st.homeroom || '-';
 
       staffLoadsMap.set(st.id, {
         staffDocId: st.id,
