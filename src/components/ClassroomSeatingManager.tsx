@@ -1087,8 +1087,8 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
                       <div className="min-w-0">
                         <div className="text-xs font-bold truncate">{student.name}</div>
                         <div className="text-[10px] text-slate-400 flex items-center gap-1.5 font-mono">
-                          <span>เลขที่ {student.studentNumber || '-'}</span>
-                          {student.nickname && <span>({student.nickname})</span>}
+                          <span>เลขที่ {student.studentNo || '-'}</span>
+                          <span>ชื่อเล่น {student.nickname || '-'}</span>
                         </div>
                       </div>
                     </div>
@@ -1321,8 +1321,8 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
                                   <div className="text-xs font-bold truncate text-white leading-tight">
                                     {student.name}
                                   </div>
-                                  <div className="text-[10px] text-slate-400 font-mono">
-                                    #{student.studentNumber} {student.nickname && `(${student.nickname})`}
+                                  <div className="text-[10px] text-slate-400 font-mono truncate">
+                                    เลขที่ {student.studentNo || '-'} · ชื่อเล่น {student.nickname || '-'}
                                   </div>
                                 </div>
                               </div>
