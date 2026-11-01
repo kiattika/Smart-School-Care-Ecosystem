@@ -26,6 +26,8 @@ import {
 } from 'recharts';
 import { ActiveLearningRecord } from '../types';
 import { useRealStudents } from '../hooks/useRealStudents';
+import { useAllSchedules } from '../hooks/useAllSchedules';
+import { taughtCoursesFromSchedules, leaderboardStudents } from '../lib/leaderboardScope';
 import { subscribeActiveLearningLogsForTeacher } from '../services/firestoreService';
 import { useStore } from '../store';
 import { useCurrentSemester } from '../hooks/useCurrentSemester';
@@ -47,10 +49,12 @@ const PODIUM_COLORS = [
 
 export const ClassroomLeaderboard: React.FC = () => {
   // ข้อมูลจริงจาก Firestore สด — ไม่พึ่ง Zustand store ที่ว่างเมื่อเปิดหน้าใหม่/ล็อกอินใหม่
-  const { students } = useRealStudents();
+  const { students: allStudents } = useRealStudents();
+  const { data: allSchedules } = useAllSchedules();
   const [alLogs, setAlLogs] = useState<ActiveLearningRecord[]>([]);
   // อ่านเฉพาะคะแนนที่ครูคนนี้ให้เอง (rules ไม่เปิดให้ครูอ่านคะแนนของวิชา/ครูท่านอื่นแล้ว)
-  const myStaffId = useStore(s => s.user?.staffId) ?? '';
+  const user = useStore(s => s.user);
+  const myStaffId = user?.staffId ?? '';
   useEffect(() => subscribeActiveLearningLogsForTeacher(myStaffId, setAlLogs), [myStaffId]);
 
   // คะแนนเป็นรายวิชา ไม่รวมข้ามวิชา: เลือกวิชาที่ต้องการดู (วิชาที่ครูเคยให้คะแนนในภาคเรียนปัจจุบัน)
@@ -63,6 +67,13 @@ export const ClassroomLeaderboard: React.FC = () => {
   const activeLearningPoints = useMemo(
     () => (effectiveCourseKey ? pointsByStudentForCourse(alLogs, effectiveCourseKey, { academicYear, term }) : {}),
     [alLogs, effectiveCourseKey, academicYear, term],
+  );
+
+  // แสดงเฉพาะนักเรียนที่ครูคนนี้สอน (ตามตารางสอน) และตามวิชาที่เลือก — ไม่แสดงทั้งโรงเรียน
+  const taught = useMemo(() => taughtCoursesFromSchedules(allSchedules, user), [allSchedules, user]);
+  const students = useMemo(
+    () => leaderboardStudents(allStudents, taught, effectiveCourseKey, activeLearningPoints),
+    [allStudents, taught, effectiveCourseKey, activeLearningPoints],
   );
 
   const [selectedRoom, setSelectedRoom] = useState<string>('ALL');
@@ -78,13 +89,16 @@ export const ClassroomLeaderboard: React.FC = () => {
     return Array.from(set).sort();
   }, [students]);
 
+  // เปลี่ยนวิชาแล้วห้องที่เลือกไว้ไม่อยู่ในรายการ → กลับเป็นทุกห้อง
+  const roomFilter = selectedRoom === 'ALL' || roomOptions.includes(selectedRoom) ? selectedRoom : 'ALL';
+
   // Filtered and sorted students by cumulative points
   const rankedStudents = useMemo(() => {
     return students
       .filter(s => {
-        if (selectedRoom !== 'ALL') {
+        if (roomFilter !== 'ALL') {
           const sRoom = (s.room || '').replace(/^M\./i, 'ม.');
-          if (sRoom !== selectedRoom) return false;
+          if (sRoom !== roomFilter) return false;
         }
         if (searchTerm.trim()) {
           const q = searchTerm.toLowerCase();
@@ -102,7 +116,7 @@ export const ClassroomLeaderboard: React.FC = () => {
         points: activeLearningPoints[s.studentId] || 0
       }))
       .sort((a, b) => b.points - a.points || (a.studentNo || 999) - (b.studentNo || 999));
-  }, [students, activeLearningPoints, selectedRoom, searchTerm, pointFilter]);
+  }, [students, activeLearningPoints, roomFilter, searchTerm, pointFilter]);
 
   // Chart data: Top 10 students
   const chartData = useMemo(() => {
@@ -222,11 +236,11 @@ export const ClassroomLeaderboard: React.FC = () => {
               </select>
               <select
                 id="select-leaderboard-room"
-                value={selectedRoom}
+                value={roomFilter}
                 onChange={(e) => setSelectedRoom(e.target.value)}
                 className="bg-transparent text-slate-200 font-medium focus:outline-none cursor-pointer"
               >
-                <option value="ALL" className="bg-slate-900 text-white">ทุกห้องเรียน (All Rooms)</option>
+                <option value="ALL" className="bg-slate-900 text-white">ทุกห้องที่สอน</option>
                 {roomOptions.map(r => (
                   <option key={r} value={r} className="bg-slate-900 text-white">ห้อง {r}</option>
                 ))}
