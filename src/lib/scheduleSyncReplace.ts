@@ -27,6 +27,9 @@ function semesterIdSegment(sem: ScheduleSemester): string {
  */
 export function isScheduleInTerm(data: Record<string, any> | null | undefined, sem: ScheduleSemester): boolean {
   if (!data) return false;
+  // คาบที่ถูก "แทนที่" โดยการนำเข้าตารางใหม่ (sync/replace) แต่ลบจริงไม่ได้เพราะมีบันทึกผูกอยู่ → ไม่ใช่ตารางปัจจุบันอีกต่อไป
+  // (ทุกหน้าจอที่อ่าน schedules ผ่านฟังก์ชันนี้จึงไม่เห็น; เอกสารยังอยู่ให้ประวัติเช็คชื่อ/บันทึกหลังสอนอ้างถึง)
+  if (data.supersededAt) return false;
   const y = data.academicYear, t = data.term;
   if (y !== undefined && y !== null && y !== '' && String(y) !== String(sem.academicYear)) return false;
   if (t !== undefined && t !== null && t !== '' && String(t) !== String(sem.term)) return false;
