@@ -19,6 +19,8 @@ import { db } from '../lib/firebase';
 import { useCurrentSemester } from '../hooks/useCurrentSemester';
 import { isScheduleInTerm } from '../lib/scheduleSyncReplace';
 import { cn } from '../lib/utils';
+import { useStore } from '../store';
+import { clearTeacherSchedules } from '../services/clearTeacherSchedulesService';
 import { matchTeacherByName } from '../utils/teacherLoadReportParser';
 import { isStaffActive } from '../lib/staffStatus';
 import { shouldShowInTeachingLoad } from '../lib/teachingLoadVisibility';
@@ -49,6 +51,8 @@ export interface TeacherTeachingLoad {
   isUnlinked?: boolean;
   /** บุคลากรถูกปิดการใช้งาน (แสดงเฉพาะเมื่อยังมีคาบค้าง) */
   isInactive?: boolean;
+  /** schedule doc id ของคาบทั้งหมดของครูคนนี้ในภาคเรียนปัจจุบัน */
+  scheduleDocIds?: string[];
 }
 
 const DAY_ORDER: Record<string, number> = {
@@ -75,10 +79,12 @@ interface TeachingLoadTableProps {
   initialTeacherName?: string;
   onSelectTeacher?: (teacher: TeacherTeachingLoad) => void;
   onOpenImport?: () => void;
+  /** แอดมิน: แสดงปุ่ม "ยกเลิกตารางสอนของครูคนนี้" */
+  canClearSchedules?: boolean;
   className?: string;
 }
 
-export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenImport, className }: TeachingLoadTableProps) {
+export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenImport, canClearSchedules, className }: TeachingLoadTableProps) {
   const semester = useCurrentSemester();
   const [searchTerm, setSearchTerm] = useState(initialTeacherName || '');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('ALL');
@@ -87,6 +93,24 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
   const [staffData, setStaffData] = useState<any[]>([]);
   const [schedulesData, setSchedulesData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const authUser = useStore((st: any) => st.user);
+  const [clearingId, setClearingId] = useState<string | null>(null);
+  const handleClear = async (t: TeacherTeachingLoad) => {
+    const ids = new Set(t.scheduleDocIds || []);
+    const items = schedulesData.filter(x => ids.has(x.id));
+    if (items.length === 0) return;
+    if (!window.confirm(`ยกเลิกตารางสอนของ ${t.teacherName} ทั้ง ${items.length} คาบในภาคเรียนนี้?\n\n• คาบที่ไม่มีบันทึกผูกอยู่ → ลบถาวร\n• คาบที่มีเช็คชื่อ/บันทึกหลังสอน/สอนแทน → ซ่อนจากตาราง เก็บประวัติไว้\n• คาบที่สอนร่วมกับครูอื่น → ถอดเฉพาะครูคนนี้ออก\n\nข้อมูลของภาคเรียนอื่นไม่ถูกแตะ`)) return;
+    setClearingId(String(t.id));
+    try {
+      const r = await clearTeacherSchedules(t.staffDocId, items as any, authUser?.uid ?? null);
+      alert(`เรียบร้อย: ลบ ${r.deleted} คาบ • ซ่อน ${r.hidden} คาบ (มีประวัติผูกอยู่) • ถอดครูออกจากคาบร่วม ${r.detached} คาบ`);
+    } catch (e: any) {
+      console.error(e);
+      alert(`ไม่สำเร็จ (ยังไม่มีการเปลี่ยนแปลง): ${e?.message || e}`);
+    } finally {
+      setClearingId(null);
+    }
+  };
 
   // Subscribe to real Firestore collections
   useEffect(() => {
@@ -217,7 +241,8 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
         totalMainPeriods,
         totalActivityPeriods,
         totalPeriods,
-        isInactive: entry.isInactive
+        isInactive: entry.isInactive,
+        scheduleDocIds: entry.scheduleItems.map((x: any) => x.id)
       });
     });
 
@@ -672,6 +697,17 @@ export function TeachingLoadTable({ initialTeacherName, onSelectTeacher, onOpenI
                       <span className="font-bold text-purple-400">{teacher.totalActivityPeriods}</span>
                     </div>
 
+                    {canClearSchedules && !teacher.isUnlinked && (teacher.scheduleDocIds?.length ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        disabled={clearingId === String(teacher.id)}
+                        onClick={(e) => { e.stopPropagation(); void handleClear(teacher); }}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-red-500/10 text-red-300 border border-red-500/30 hover:bg-red-500/20 disabled:opacity-50"
+                        title="ใช้เมื่อครูเลิกสอนทั้งหมดและไม่มีแถวในไฟล์นำเข้า"
+                      >
+                        {clearingId === String(teacher.id) ? 'กำลังดำเนินการ…' : 'ยกเลิกตารางสอนครูคนนี้'}
+                      </button>
+                    )}
                     <div className={cn(
                       "px-3.5 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm",
                       teacher.totalPeriods >= 18 ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" :
