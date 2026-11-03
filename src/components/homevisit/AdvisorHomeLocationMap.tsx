@@ -46,6 +46,10 @@ export function AdvisorHomeLocationMap({ homeroomClass, students }: { homeroomCl
     return [lat, lng];
   }, [locs]);
 
+  const locByStudent = useMemo(() => new Map(locs.map(l => [l.studentId, l])), [locs]);
+  const sortedStudents = useMemo(() => [...students].sort((a, b) => (Number(a.studentNo) || 0) - (Number(b.studentNo) || 0)), [students]);
+  const recorded = useMemo(() => sortedStudents.filter(st => locByStudent.has(st.studentId)).map(st => ({ st, loc: locByStudent.get(st.studentId)! })), [sortedStudents, locByStudent]);
+  const notRecorded = useMemo(() => sortedStudents.filter(st => !locByStudent.has(st.studentId)), [sortedStudents, locByStudent]);
   const withLoc = locs.length;
   const total = students.length;
 
@@ -96,6 +100,7 @@ export function AdvisorHomeLocationMap({ homeroomClass, students }: { homeroomCl
                         <div>เลขที่: {st?.studentNo || '-'}</div>
                         <div>ชื่อเล่น: {st?.nickname || '-'}</div>
                         <div>เบอร์โทร (ผู้ปกครอง): {st?.parentMobile || '-'}</div>
+                        <div>พิกัด: {l.latitude.toFixed(6)}, {l.longitude.toFixed(6)}</div>
                       </div>
                     );
                   })()}
@@ -125,6 +130,38 @@ export function AdvisorHomeLocationMap({ homeroomClass, students }: { homeroomCl
               </Marker>
             ))}
           </MapContainer>
+        </div>
+      )}
+
+      {!loading && total > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3" id="home-location-lists">
+          <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3">
+            <div className="text-xs font-bold text-slate-200 mb-2">บันทึกพิกัดแล้ว ({recorded.length} คน) — ข้อมูลที่นักเรียนกรอกเอง</div>
+            {recorded.length === 0 ? <div className="text-xs text-slate-500">ยังไม่มี</div> : (
+              <ul className="space-y-1.5 max-h-60 overflow-y-auto">
+                {recorded.map(({ st, loc }) => (
+                  <li key={st.studentId} className="text-xs text-slate-200 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="font-bold">เลขที่ {st.studentNo || '-'}</span>
+                    <span>{st.fullName || st.name}{st.nickname ? ` (${st.nickname})` : ''}</span>
+                    <span className="font-mono text-indigo-300">{loc.latitude.toFixed(6)}, {loc.longitude.toFixed(6)}</span>
+                    <a href={`https://www.google.com/maps/dir/?api=1&destination=${loc.latitude},${loc.longitude}`} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">นำทาง</a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3">
+            <div className="text-xs font-bold text-slate-200 mb-2">ยังไม่บันทึกพิกัดบ้าน ({notRecorded.length} คน)</div>
+            {notRecorded.length === 0 ? <div className="text-xs text-slate-500">บันทึกครบทุกคนแล้ว</div> : (
+              <ul className="space-y-1 max-h-60 overflow-y-auto">
+                {notRecorded.map(st => (
+                  <li key={st.studentId} className="text-xs text-slate-300">
+                    <span className="font-bold">เลขที่ {st.studentNo || '-'}</span> {st.fullName || st.name}{st.nickname ? ` (${st.nickname})` : ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       )}
     </div>

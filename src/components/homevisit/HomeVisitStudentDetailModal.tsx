@@ -53,7 +53,7 @@ export function HomeVisitStudentDetailModal({ student, location, distanceFromSch
             </div>
           </div>
 
-          <div className="bg-black/20 border border-white/5 rounded-xl px-4">
+          <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl px-4">
             <Row icon={<MapPin className="w-4 h-4" />} label="ที่อยู่ (จากทะเบียนนักเรียน)">{address || <None />}</Row>
             <Row icon={<Phone className="w-4 h-4" />} label="เบอร์โทรผู้ปกครอง">
               {student.parentMobile ? <a href={`tel:${student.parentMobile}`} className="text-emerald-300 font-mono hover:underline">{student.parentMobile}</a> : <None />}
@@ -84,7 +84,7 @@ export function HomeVisitStudentDetailModal({ student, location, distanceFromSch
 
           <HomeVisitInfoPanel student={student} studentInfo={studentInfo} familyInfo={familyInfo} todayYmd={todayYmd} />
 
-          <div className="bg-black/20 border border-white/5 rounded-xl p-4">
+          <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-4">
             <div className="text-xs font-bold text-slate-300 mb-1.5">การเยี่ยมบ้านปีการศึกษานี้</div>
             {record ? (
               <div className="text-sm text-slate-200 space-y-1">

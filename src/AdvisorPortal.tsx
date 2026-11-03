@@ -494,7 +494,7 @@ export function AdvisorPortal() {
                     const isCompleted = visitRecordsByStudent.has(student.studentId);
                     const distM = distanceFromSchool(student.studentId);
                     return (
-                      <div key={student.studentId} className="bg-black/20 border border-white/5 rounded-xl p-4 hover:border-emerald-500/30 transition-all cursor-pointer" onClick={() => setVisitDetailStudentId(student.studentId)}>
+                      <div key={student.studentId} className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-4 hover:border-emerald-500/30 transition-all cursor-pointer" onClick={() => setVisitDetailStudentId(student.studentId)}>
                         <div className="flex gap-3 mb-3">
                           <img src={student.photoUrl || student.avatar} alt="" className="w-10 h-10 rounded-full object-cover" />
                           <div className="min-w-0">

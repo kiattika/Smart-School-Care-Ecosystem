@@ -21,7 +21,7 @@ export function SchoolPicker({ provinces, current, onPick }: { provinces: Provin
   const pick = (s: SchoolRecord) => { onPick(schoolToInfoPatch(s, provinceName)); setQ(''); };
 
   return (
-    <div className="bg-black/20 border border-white/5 rounded-xl p-3 space-y-2" data-testid="school-picker">
+    <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3 space-y-2" data-testid="school-picker">
       <Label>ค้นหาโรงเรียนจากรายชื่อ (ไม่บังคับ — ไม่พบให้กรอกเองด้านล่าง)</Label>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <select className={inputCls} value={provinceCode} onChange={e => { setProvinceCode(e.target.value); setQ(''); }} aria-label="จังหวัดของโรงเรียน">
