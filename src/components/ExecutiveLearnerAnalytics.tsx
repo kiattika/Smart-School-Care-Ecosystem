@@ -34,6 +34,8 @@ interface Props {
   assessments: Record<string, StudentSelfAssessment>;
 }
 
+const TOOLTIP_STYLE = { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#fff', fontSize: '12px' } as const;
+
 export const ExecutiveLearnerAnalytics: React.FC<Props> = ({
   students,
   assessments
@@ -305,10 +307,10 @@ export const ExecutiveLearnerAnalytics: React.FC<Props> = ({
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={learningStyleData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
-                <XAxis type="number" allowDecimals={false} stroke="#94a3b8" fontSize={11} />
+                <XAxis type="number" allowDecimals={false} stroke="#64748b" fontSize={11} />
                 <YAxis dataKey="name" type="category" stroke="#475569" fontSize={11} width={80} />
                 <Tooltip 
-                  contentStyle={{ backgroundColor: '#1e293b', borderRadius: '8px', color: '#fff', fontSize: '12px' }} 
+                  contentStyle={TOOLTIP_STYLE} labelStyle={{ color: '#fff' }} itemStyle={{ color: '#e2e8f0' }} 
                   formatter={(val: any) => [`${val} คน`, 'จำนวน']}
                 />
                 <Bar dataKey="count" radius={[0, 6, 6, 0]}>
@@ -350,7 +352,7 @@ export const ExecutiveLearnerAnalytics: React.FC<Props> = ({
                   ))}
                 </Pie>
                 <Tooltip 
-                  contentStyle={{ backgroundColor: '#1e293b', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
+                  contentStyle={TOOLTIP_STYLE} labelStyle={{ color: '#fff' }} itemStyle={{ color: '#e2e8f0' }}
                 />
                 <Legend iconSize={10} wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
               </PieChart>
@@ -373,9 +375,9 @@ export const ExecutiveLearnerAnalytics: React.FC<Props> = ({
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={deviceData} margin={{ top: 10, right: 20, left: 0, bottom: 20 }}>
                 <XAxis dataKey="name" stroke="#64748b" fontSize={11} />
-                <YAxis allowDecimals={false} stroke="#94a3b8" fontSize={11} />
+                <YAxis allowDecimals={false} stroke="#64748b" fontSize={11} />
                 <Tooltip 
-                  contentStyle={{ backgroundColor: '#1e293b', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
+                  contentStyle={TOOLTIP_STYLE} labelStyle={{ color: '#fff' }} itemStyle={{ color: '#e2e8f0' }}
                 />
                 <Bar dataKey="count" fill="#3b82f6" radius={[6, 6, 0, 0]}>
                   {deviceData.map((entry, index) => (
@@ -401,10 +403,10 @@ export const ExecutiveLearnerAnalytics: React.FC<Props> = ({
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={groupRoleData} layout="vertical" margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
-                <XAxis type="number" allowDecimals={false} stroke="#94a3b8" fontSize={11} />
+                <XAxis type="number" allowDecimals={false} stroke="#64748b" fontSize={11} />
                 <YAxis dataKey="name" type="category" stroke="#475569" fontSize={11} width={100} />
                 <Tooltip 
-                  contentStyle={{ backgroundColor: '#1e293b', borderRadius: '8px', color: '#fff', fontSize: '12px' }}
+                  contentStyle={TOOLTIP_STYLE} labelStyle={{ color: '#fff' }} itemStyle={{ color: '#e2e8f0' }}
                 />
                 <Bar dataKey="count" radius={[0, 6, 6, 0]}>
                   {groupRoleData.map((entry, index) => (
@@ -418,40 +420,40 @@ export const ExecutiveLearnerAnalytics: React.FC<Props> = ({
       </div>
 
       {/* Strategic Policy & Curriculum Recommendations */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-6 shadow-md border border-slate-800">
+      <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
         <div className="flex items-center gap-2 mb-3">
-          <GraduationCap className="w-5 h-5 text-amber-400" />
-          <h3 className="text-base font-bold text-white">
+          <GraduationCap className="w-5 h-5 text-amber-600" />
+          <h3 className="text-base font-bold text-slate-900">
             ข้อเสนอแนะเชิงนโยบายและการบริหารจัดการเรียนรู้ (Executive Recommendations)
           </h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-300">
-          <div className="bg-white/10 p-4 rounded-xl border border-white/10 space-y-1.5">
-            <div className="font-bold text-white flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-blue-400" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-600">
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1.5">
+            <div className="font-bold text-slate-900 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-blue-500" />
               1. พัฒนาการสอนแบบ Hands-on & Digital
             </div>
-            <p className="text-slate-300 leading-relaxed">
+            <p className="text-slate-600 leading-relaxed">
               ผู้เรียนกว่า 65% ชอบการลงมือปฏิบัติและสื่อมัลติมีเดีย แนะนำให้กลุ่มสาระฯ เพิ่มสัดส่วนสื่อคลิปสั้นและการทดลองจริงแทนการบรรยายแบบทางเดียว
             </p>
           </div>
 
-          <div className="bg-white/10 p-4 rounded-xl border border-white/10 space-y-1.5">
-            <div className="font-bold text-white flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-indigo-400" />
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1.5">
+            <div className="font-bold text-slate-900 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-indigo-500" />
               2. ส่งเสริม AI Literacy & จริยธรรม
             </div>
-            <p className="text-slate-300 leading-relaxed">
+            <p className="text-slate-600 leading-relaxed">
               นักเรียนมีการใช้ AI อย่างแพร่หลาย โรงเรียนควรจัดอบรมแนวทาง Prompt Engineering ที่มีประสิทธิภาพและการอ้างอิงแหล่งที่มาอย่างถูกต้อง
             </p>
           </div>
 
-          <div className="bg-white/10 p-4 rounded-xl border border-white/10 space-y-1.5">
-            <div className="font-bold text-white flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-1.5">
+            <div className="font-bold text-slate-900 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
               3. แนะแนวเชิงรุกรายสาขาอาชีพ
             </div>
-            <p className="text-slate-300 leading-relaxed">
+            <p className="text-slate-600 leading-relaxed">
               นักเรียนมีความสนใจในสาขาวิศวกรรม AI วิทยาศาสตร์สุขภาพ และดิจิทัลอาร์ตสูง ควรจัดสัมมนาเส้นทาง Portfolio และการเตรียมสอบร่วมกับศิษย์เก่า
             </p>
           </div>
