@@ -180,7 +180,10 @@ service cloud.firestore {
                        ) ||
                        (
                          isSelfStudent(studentId) &&
-                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['photoUrl', 'photoUpdatedAt'])
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['photoUrl', 'photoUpdatedAt', 'nickname']) &&
+                         // ชื่อเล่น: สำเนาจากแบบประเมินตนเองข้อ 2 ให้ครูผู้สอนเห็น (ตัวเลือก ≤ 30 ตัวอักษร)
+                         (!('nickname' in request.resource.data) ||
+                          (request.resource.data.nickname is string && request.resource.data.nickname.size() <= 30))
                        ) ||
                        // งานทะเบียนวัดผล (ตัวจริง): ซ่อนนักเรียนที่จบ — แตะได้เฉพาะฟิลด์สถานะ และต้องมี graduation_approvals ของนักเรียนคนนี้ในชุดเขียนเดียวกัน
                        (

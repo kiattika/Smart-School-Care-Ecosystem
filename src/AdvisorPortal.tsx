@@ -48,6 +48,7 @@ import { summarizeHomeVisit } from './lib/homeVisitAnalytics';
 import { HomeVisitDocumentModal } from './components/homevisit/HomeVisitDocumentModal';
 import { useRoomStudentHomeVisitInfo, useRoomFamilyHomeVisitInfo } from './hooks/useHomeVisitData';
 import { AdvisorHomeLocationMap } from './components/homevisit/AdvisorHomeLocationMap';
+import { useLeaveStudentIds } from './hooks/useApprovedLeaveDays';
 import { gateMorningByStudent, resolveMorningStatus } from './lib/gateMorningStatus';
 import { AdvisorGpsCheckInPanel } from './components/homevisit/AdvisorGpsCheckInPanel';
 import { AdvisorGateCheckInPanel } from './components/student-parent/AdvisorGateCheckInPanel';
@@ -116,6 +117,7 @@ export function AdvisorPortal() {
   const [gateLogsToday, setGateLogsToday] = useState<import('./types').GateAttendanceRecord[]>([]);
   useEffect(() => subscribeGateAttendanceLogs(setGateLogsToday, { date: todayStr }), [todayStr]);
   const gateMorning = useMemo(() => gateMorningByStudent(gateLogsToday, todayStr), [gateLogsToday, todayStr]);
+  const leaveToday = useLeaveStudentIds(todayStr);
 
   const myStudents = useMemo(() => {
     if (!myRoom) return [];
@@ -129,7 +131,7 @@ export function AdvisorPortal() {
           hrStatus: hrRecord?.students?.[s.studentId],
           hrLocked: !!hrRecord?.isLocked,
           gate,
-          docStatus: s.attendance.morningStatus,
+          onApprovedLeave: leaveToday.has(s.studentId),
         });
         // เวลา/วิธีเช็คอินแสดงตามผลประตูเมื่อสถานะมาจากประตู
         const fromGate = !!gate && !attendanceOverrides[s.studentId] && merged === gate.status;
@@ -141,7 +143,7 @@ export function AdvisorPortal() {
           && attendance.checkInTime === s.attendance.checkInTime) return s;
         return { ...s, attendance };
       });
-  }, [myRoom, students, attendanceOverrides, hrRecord, gateMorning]);
+  }, [myRoom, students, attendanceOverrides, hrRecord, gateMorning, leaveToday]);
 
   // สถิติการเข้าเรียนทั้งห้อง (ขาด/ลา/มาสาย + % อัตราเข้าเรียน) — real-time จาก attendance_records
   // จริง ย้อนหลัง 30 วัน (ค่าเริ่มต้น ยังไม่ยืนยันจากโรงเรียน) ครูที่ปรึกษามีสิทธิ์อ่านตรงอยู่แล้ว
@@ -174,7 +176,7 @@ export function AdvisorPortal() {
     try {
       const studentStatuses: Record<string, 'PRESENT' | 'LATE' | 'ABSENT' | 'LEAVE'> = {};
       myStudents.forEach(student => {
-        studentStatuses[student.studentId] = (student.attendance.morningStatus || 'PRESENT') as any;
+        studentStatuses[student.studentId] = (student.attendance.morningStatus || 'ABSENT') as any;
       });
       // โฮมรูม = คาบ 0 ของห้องในตารางสอนจริง — ผูกรหัสวิชา/กิจกรรมเพื่อนับสถิติรายวิชา (ไม่พบในตาราง = ไม่ผูก)
       const hrSched = (fsSchedules as any[]).find(sc => Number(sc.periodNumber) === 0 && isScheduleForRoom(sc, myRoom));

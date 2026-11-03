@@ -43,6 +43,7 @@ import { DEFAULT_SCHOOL_GEOFENCE } from './utils/geoUtils';
 import { assertActivityWindowOpen } from './services/activityWindowService';
 import { 
   saveSelfAssessmentRecord, 
+  mirrorNicknameToStudent,
   saveGateAttendanceRecordFirestore,
   getStudentLinkIds,
   saveGPSCheckInLogFirestore,
@@ -858,6 +859,11 @@ export const useStore = create<StoreState>((set, get) => ({
     // เขียน Firestore จริงก่อน — ล้มเหลวต้อง throw ให้ฟอร์มแจ้งผู้ใช้ (เดิมกลืน error แล้วแจ้งสำเร็จทั้งที่ไม่ได้บันทึก
     // ทำให้ข้อมูลหายตอนกลับมาเปิด และครูที่ปรึกษาไม่เห็น)
     await saveSelfAssessmentRecord(updated);
+
+    // สำเนาชื่อเล่น (ข้อ 2) ไปที่ทะเบียนนักเรียน เพื่อให้ครูผู้สอนเห็น (ครูผู้สอนอ่านแบบประเมินไม่ได้) —
+    // เป็นของเสริม ไม่ทำให้การส่งแบบประเมินล้ม
+    try { await mirrorNicknameToStudent(assessment.studentId, assessment.basicInfo?.nickname); }
+    catch (e) { console.warn('[saveSelfAssessment] สำเนาชื่อเล่นไปทะเบียนนักเรียนไม่สำเร็จ:', e); }
 
     set((state) => ({
       selfAssessments: {

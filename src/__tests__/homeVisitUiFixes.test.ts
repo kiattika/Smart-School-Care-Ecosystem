@@ -6,7 +6,8 @@ describe('guard: แบบประเมินตนเองต้องบั
     const st = readSource('src/store.ts');
     const blk = st.match(/saveSelfAssessment: async[\s\S]*?\n {2}\},\n/)?.[0] || '';
     expect(blk).toMatch(/await saveSelfAssessmentRecord\(updated\)/);
-    expect(blk).not.toMatch(/catch/);
+    // catch ได้เฉพาะสำเนาชื่อเล่น (ของเสริม) — การเขียนแบบประเมินหลักห้ามกลืน error
+    expect(blk.replace(/try \{ await mirrorNicknameToStudent[\s\S]*?\n\s*catch \(e\) \{[^\n]*\}\n/, '')).not.toMatch(/catch/);
     expect(blk.indexOf('await saveSelfAssessmentRecord')).toBeLessThan(blk.indexOf('set((state)'));
   });
   it('rules: นักเรียนเจ้าของเทียบผ่าน students.studentUid, ครูที่ปรึกษาอ่านตามห้อง, เขียนต้อง homeroomClass ตรง students.room', () => {

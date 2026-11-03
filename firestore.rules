@@ -140,7 +140,9 @@ service cloud.firestore {
                        ) ||
                        (
                          isSelfStudent(studentId) &&
-                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['photoUrl', 'photoUpdatedAt'])
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['photoUrl', 'photoUpdatedAt', 'nickname']) &&
+                         (!('nickname' in request.resource.data) ||
+                          (request.resource.data.nickname is string && request.resource.data.nickname.size() <= 30))
                        ) ||
                        (
                          hasRole('REGISTRAR') &&

@@ -108,7 +108,10 @@ describe('guard: ครูที่ปรึกษาไม่มีช่อง
     const i = r.indexOf('match /students/{studentId}');
     const upd = r.slice(r.indexOf('allow update:', i), r.indexOf('// ทะเบียนเลขประจำตัวนักเรียน', i));
     expect(upd).not.toMatch(/hasRole\('SUPER_ADMIN'\) \|\| hasRole\('HOMEROOM_TEACHER'\)/);
-    expect(upd).not.toMatch(/'nickname'|'parentEmail'|parentUid|behaviorScore/);
+    // นักเรียนเจ้าของตั้งชื่อเล่นตัวเองได้ (สาขา isSelfStudent) — ตัดสาขานั้นออกก่อนตรวจสิทธิ์ของครูที่ปรึกษา
+    const nonSelf = upd.replace(/isSelfStudent\(studentId\) &&[\s\S]*?size\(\) <= 30\)\)/, '');
+    expect(nonSelf).not.toMatch(/'nickname'|'parentEmail'|parentUid|behaviorScore/);
+    expect(upd).toMatch(/isSelfStudent\(studentId\)[\s\S]*hasOnly\(\['photoUrl', 'photoUpdatedAt', 'nickname'\]\)/);
     expect(upd).toMatch(/hasRole\('HOMEROOM_TEACHER'\) &&\s+request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\s+\.hasOnly\(\['attendanceStats'/);
   });
   it('UI: AdvisorPortal ไม่มีปุ่ม/หน้าต่างแก้โปรไฟล์นักเรียน และไม่มี updateStudentProfile เหลือ', () => {

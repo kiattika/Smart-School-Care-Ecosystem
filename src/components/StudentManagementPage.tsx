@@ -46,6 +46,7 @@ import {
   type StudentStatusReason,
 } from '../lib/studentStatus';
 import type { IdConflict } from '../lib/studentIdRegistry';
+import { backfillNicknamesFromAssessments } from '../services/firestoreService';
 import { changeStudentStatus, checkStudentIdConflict, createStudentWithRegistry } from '../services/studentLifecycle';
 
 export interface StudentRecord {
@@ -104,6 +105,7 @@ export function StudentManagementPage({ onGoToImport, onOpenIdRegistry }: { onGo
     [rawStudentsList, studentEmailFormat]
   );
   const [isLoading, setIsLoading] = useState(true);
+  const [nickBusy, setNickBusy] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -577,6 +579,23 @@ export function StudentManagementPage({ onGoToImport, onOpenIdRegistry }: { onGo
           >
             <UserPlus className="w-4 h-4" />
             <span>เพิ่มนักเรียนใหม่</span>
+          </button>
+
+          <button
+            onClick={async () => {
+              setNickBusy(true);
+              try {
+                const n = await backfillNicknamesFromAssessments();
+                window.alert(n > 0 ? `เติมชื่อเล่นจากแบบประเมินตนเอง 30 ข้อ ให้นักเรียน ${n} คนแล้ว` : 'ไม่มีนักเรียนที่ต้องเติมชื่อเล่น (ทุกคนที่ตอบข้อ 2 มีชื่อเล่นในทะเบียนแล้ว)');
+              } catch (e) {
+                window.alert(`เติมชื่อเล่นไม่สำเร็จ: ${e instanceof Error ? e.message : String(e)}`);
+              } finally { setNickBusy(false); }
+            }}
+            disabled={nickBusy}
+            title="ดึงชื่อเล่น (ข้อ 2) จากแบบประเมินตนเอง 30 ข้อ มาใส่ทะเบียนนักเรียน — ไม่ทับชื่อเล่นที่มีอยู่"
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-bold text-xs rounded-xl border border-white/10 transition-all cursor-pointer"
+          >
+            <span>{nickBusy ? 'กำลังเติม…' : 'เติมชื่อเล่นจากแบบประเมิน'}</span>
           </button>
 
           {onOpenIdRegistry && (

@@ -28,17 +28,22 @@ describe('gateMorningByStudent', () => {
 describe('resolveMorningStatus', () => {
   const gate = { status: 'LATE' as const, time: '12:35 น.', method: 'GEOFENCE' as const };
   it('ผลเช็คอินสายชนะค่า PRESENT ที่บันทึกไว้แต่ยังไม่ล็อก (กรณีในภาพ)', () => {
-    expect(resolveMorningStatus({ hrStatus: 'PRESENT', hrLocked: false, gate, docStatus: 'PRESENT' })).toBe('LATE');
+    expect(resolveMorningStatus({ hrStatus: 'PRESENT', hrLocked: false, gate, })).toBe('LATE');
   });
   it('ครูบันทึกและล็อกแล้ว = ครูยืนยันเอง ชนะประตู', () => {
-    expect(resolveMorningStatus({ hrStatus: 'PRESENT', hrLocked: true, gate, docStatus: 'PRESENT' })).toBe('PRESENT');
+    expect(resolveMorningStatus({ hrStatus: 'PRESENT', hrLocked: true, gate, })).toBe('PRESENT');
   });
   it('override บนหน้าจอชนะทุกอย่าง', () => {
-    expect(resolveMorningStatus({ override: 'ABSENT', hrLocked: true, hrStatus: 'PRESENT', gate, docStatus: 'PRESENT' })).toBe('ABSENT');
+    expect(resolveMorningStatus({ override: 'ABSENT', hrLocked: true, hrStatus: 'PRESENT', gate, })).toBe('ABSENT');
   });
-  it('ไม่มีผลประตู → ใช้ที่บันทึก/ค่าใน doc', () => {
-    expect(resolveMorningStatus({ hrStatus: 'LEAVE', hrLocked: false, docStatus: 'PRESENT' })).toBe('LEAVE');
-    expect(resolveMorningStatus({ hrLocked: false, docStatus: 'ABSENT' })).toBe('ABSENT');
+  it('ยังไม่เช็คอินและไม่มีบันทึก → ขาด (ไม่ใช้ค่า PRESENT เริ่มต้นใน doc); มีใบลาอนุมัติ → ลา', () => {
+    expect(resolveMorningStatus({ hrLocked: false })).toBe('ABSENT');
+    expect(resolveMorningStatus({ hrLocked: false, onApprovedLeave: true })).toBe('LEAVE');
+    expect(resolveMorningStatus({ hrLocked: false, gate, onApprovedLeave: true })).toBe('LATE');
+  });
+  it('ไม่มีผลประตู → ใช้ที่บันทึก', () => {
+    expect(resolveMorningStatus({ hrStatus: 'LEAVE', hrLocked: false, })).toBe('LEAVE');
+    expect(resolveMorningStatus({ hrLocked: false })).toBe('ABSENT');
   });
 });
 
