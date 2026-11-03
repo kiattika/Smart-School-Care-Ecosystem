@@ -330,7 +330,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
       <div className="bg-[#0f1422] border border-indigo-500/30 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         
         {/* Header */}
-        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-indigo-950/60 via-[#131a2e] to-[#0f1422]">
+        <div className="px-6 py-4 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-indigo-950/60 via-slate-900 to-slate-900">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-indigo-500 p-0.5 shadow-lg flex items-center justify-center">
               <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center">
@@ -541,7 +541,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                   <motion.div
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
-                    className="max-w-md mx-auto bg-gradient-to-b from-[#1a233a] to-[#111728] border-2 border-amber-500/60 rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col items-center text-center group"
+                    className="max-w-md mx-auto bg-gradient-to-b from-slate-800 to-slate-900 border-2 border-amber-500/60 rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col items-center text-center group"
                   >
                     <div className="absolute -top-12 -right-12 w-32 h-32 bg-amber-500/20 rounded-full blur-2xl pointer-events-none"></div>
 
@@ -643,7 +643,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
               </div>
 
               {/* Group Winner Banner Card */}
-              <div className="bg-gradient-to-r from-[#172138] via-[#1f2c4a] to-[#172138] border-2 border-amber-500/60 rounded-3xl p-5 shadow-2xl relative overflow-hidden">
+              <div className="bg-gradient-to-r from-slate-800 via-slate-700 to-slate-800 border-2 border-amber-500/60 rounded-3xl p-5 shadow-2xl relative overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-2xl shadow-md">

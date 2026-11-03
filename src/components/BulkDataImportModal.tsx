@@ -358,6 +358,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         const room = getFieldValue(normalized, ['room', 'classname', 'class', 'grade', 'graderoom', 'ห้อง', 'ห้องเรียน', 'ระดับชั้น']);
         const studentNoStr = getFieldValue(normalized, ['studentno', 'number', 'no', 'studentnumber', 'เลขที่']);
         const parentMobile = getFieldValue(normalized, ['parentmobile', 'parentphone', 'mobile', 'phone', 'เบอร์โทรผู้ปกครอง', 'เบอร์ผู้ปกครอง', 'เบอร์โทร']);
+        const nickname = getFieldValue(normalized, ['nickname', 'nick', 'ชื่อเล่น']);
 
         // Handle single fullName column if separate fields are not given
         if (!firstName && rawFullName) {
@@ -425,6 +426,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             room,
             studentNo: isNaN(studentNo) || studentNo <= 0 ? (idx + 1) : studentNo,
             parentMobile: parentMobile ? parentMobile.replace(/[-\s]/g, '') : '',
+            nickname,
           }
         };
       } else if (type === 'TEACHER') {
@@ -899,7 +901,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               lastName: parsedData.lastName,
               name: parsedData.fullName,
               fullName: parsedData.fullName,
-              nickname: '',
+              // ชื่อเล่นเขียนเฉพาะเมื่อไฟล์มีคอลัมน์ "ชื่อเล่น" — ห้ามเขียนค่าว่างทับชื่อเล่นที่เคยกรอกไว้เมื่อนำเข้าซ้ำ
+              ...(parsedData.nickname ? { nickname: parsedData.nickname } : {}),
               room: parsedData.room,
               className: parsedData.room,
               grade: parsedData.room.includes('/') ? parsedData.room.split('/')[0] : parsedData.room,

@@ -51,6 +51,7 @@ import { format } from 'date-fns';
 import { useLeaveStudentIds } from '../hooks/useApprovedLeaveDays';
 import { useCourseActivityPoints } from '../hooks/useCourseActivityPoints';
 import { courseActivityKey } from '../lib/courseRank';
+import { dedupeActiveAssignments } from '../lib/seatingAssignments';
 import { withLeavePrefill } from '../lib/leaveAttendance';
 import { 
   getSeatingLayoutFromFirestore, 
@@ -160,6 +161,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
 
   // UI States
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const needsInitialAssignRef = useRef<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
   const [quickAwardStudent, setQuickAwardStudent] = useState<(typeof students)[number] | null>(null);
@@ -315,13 +317,8 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
           setIsLayoutLocked(remoteData.layout.isLocked ?? false);
 
           // Convert active assignments array to record
-          const assignMap: Record<string, SeatingAssignment> = {};
-          remoteData.assignments.forEach(a => {
-            if (!a.effectiveTo) {
-              assignMap[a.seatId] = a;
-            }
-          });
-          setAssignments(assignMap);
+          // 1 คน = 1 ที่นั่ง (เอกสารเก่าที่ย้ายที่นั่งแล้วไม่ถูกปิดจะทำให้ชื่อซ้ำหลายที่)
+          setAssignments(dedupeActiveAssignments(remoteData.assignments));
           setAllAssignmentsHistory(remoteData.assignments);
         } else {
           // Check local fallback
@@ -331,43 +328,17 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
             const parsed = JSON.parse(localRaw);
             if (parsed.groups && parsed.groups.length > 0) {
               setGroups(parsed.groups);
-              setAssignments(parsed.assignments || {});
+              setAssignments(dedupeActiveAssignments(Object.values(parsed.assignments || {}) as SeatingAssignment[]));
               setZoomScale(parsed.zoomScale || 100);
               setIsLayoutLocked(parsed.isLocked ?? false);
               return;
             }
           }
 
-          // Generate default standard layout
-          const defGroups = generateDefaultStandardGroups();
-          setGroups(defGroups);
-
-          // Auto-assign existing course students to default seats initially
-          const initialAssign: Record<string, SeatingAssignment> = {};
-          let studentIdx = 0;
-          // ไม่มี user = ไม่จัดที่นั่งให้อัตโนมัติ (ไม่มีตัวตนผู้จัดจริงสำหรับ assignedBy)
-          if (user?.uid) defGroups.forEach(g => {
-            g.seats.forEach(s => {
-              if (studentIdx < courseStudents.length) {
-                const student = courseStudents[studentIdx];
-                const assignment: SeatingAssignment = {
-                  id: `assign_${s.id}_${student.studentId}`,
-                  layoutId,
-                  groupId: g.id,
-                  seatId: s.id,
-                  studentId: student.studentId,
-                  studentName: student.name,
-                  studentNo: student.studentNo,
-                  effectiveFrom: new Date().toISOString(),
-                  effectiveTo: null,
-                  assignedBy: user!.uid
-                };
-                initialAssign[s.id] = assignment;
-                studentIdx++;
-              }
-            });
-          });
-          setAssignments(initialAssign);
+          // Generate default standard layout — จัดที่นั่งเริ่มต้นให้ทีหลังเมื่อรายชื่อนักเรียนโหลดครบ (effect ด้านล่าง)
+          setGroups(generateDefaultStandardGroups());
+          setAssignments({});
+          needsInitialAssignRef.current = true;
         }
       } catch (err) {
         console.warn('Could not load remote seating layout, using default:', err);
@@ -380,10 +351,38 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
 
     fetchLayout();
     return () => { isMounted = false; };
-  }, [layoutId, courseStudents]);
+  // โหลดผังใหม่เฉพาะเมื่อเปลี่ยนผัง (layoutId) — เดิมผูกกับ courseStudents ทำให้ทุกครั้งที่รายชื่อนักเรียน
+  // (live listener) อัปเดต ผังที่ยังไม่บันทึกถูกโหลดทับจนหาย
+  }, [layoutId]);
+
+  // จัดที่นั่งเริ่มต้นครั้งเดียวสำหรับผังที่สร้างใหม่ เมื่อรายชื่อนักเรียนพร้อม
+  useEffect(() => {
+    if (!needsInitialAssignRef.current || isLoading || courseStudents.length === 0 || groups.length === 0) return;
+    needsInitialAssignRef.current = false;
+    if (!user?.uid) return; // ไม่มีตัวตนผู้จัดจริง = ไม่จัดอัตโนมัติ
+    const initialAssign: Record<string, SeatingAssignment> = {};
+    const seats = groups.flatMap(g => g.seats.map(st => ({ g, st })));
+    courseStudents.slice(0, seats.length).forEach((student, i) => {
+      const { g, st } = seats[i];
+      initialAssign[st.id] = {
+        id: `assign_${st.id}_${student.studentId}`,
+        layoutId,
+        groupId: g.id,
+        seatId: st.id,
+        studentId: student.studentId,
+        studentName: student.name,
+        studentNo: student.studentNo,
+        effectiveFrom: new Date().toISOString(),
+        effectiveTo: null,
+        assignedBy: user.uid,
+      };
+    });
+    setAssignments(initialAssign);
+  }, [courseStudents, groups, isLoading, layoutId, user?.uid]);
 
   // 4. Save Layout Function
-  const handleSaveLayout = async (showNotice: boolean = true) => {
+  const handleSaveLayout = async (showNotice: boolean = true, lockedOverride?: boolean) => {
+    const lockedNow = lockedOverride ?? isLayoutLocked;
     const actorUid = requireActorUid();
     if (!actorUid) return;
     setIsSaving(true);
@@ -394,11 +393,11 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
         teacherEmail: user?.email ?? '',
         totalCapacity,
         zoomScale,
-        isLocked: isLayoutLocked,
+        isLocked: lockedNow,
         updatedAt: new Date().toISOString()
       };
 
-      const currentAssignmentsArray: SeatingAssignment[] = Object.values(assignments);
+      const currentAssignmentsArray: SeatingAssignment[] = Object.values(dedupeActiveAssignments(Object.values(assignments) as SeatingAssignment[]));
       await saveSeatingLayoutToFirestore(updatedMeta, groups, currentAssignmentsArray);
 
       // Save locally as backup
@@ -407,7 +406,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
         groups,
         assignments,
         zoomScale,
-        isLocked: isLayoutLocked
+        isLocked: lockedNow
       }));
 
       if (showNotice) {
@@ -416,18 +415,17 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
       }
     } catch (err) {
       console.error('Error saving layout to Firestore:', err);
-      // Fallback local persistence
+      // เก็บสำเนาในเครื่องไว้กู้คืน แต่ต้องแจ้งตามจริงว่าบันทึกขึ้นระบบไม่สำเร็จ (ห้ามแจ้งว่าสำเร็จ)
       localStorage.setItem(`seating_layout_${layoutId}`, JSON.stringify({
         layout: layoutMeta,
         groups,
         assignments,
         zoomScale,
-        isLocked: isLayoutLocked
+        isLocked: lockedNow
       }));
-      if (showNotice) {
-        setSaveToast('บันทึกข้อมูลในเครื่องเรียบร้อยแล้ว (ออฟไลน์)');
-        setTimeout(() => setSaveToast(null), 3000);
-      }
+      const code = (err as { code?: string })?.code;
+      setSaveToast(`❌ บันทึกผังขึ้นระบบไม่สำเร็จ${code ? ` (${code})` : ''} — ผังยังไม่ถูกบันทึกให้ผู้อื่น/เครื่องอื่นเห็น กรุณากดบันทึกอีกครั้ง`);
+      setTimeout(() => setSaveToast(null), 6000);
     } finally {
       setIsSaving(false);
     }
@@ -601,6 +599,8 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
       await assignStudentToSeatInFirestore(newAssignment);
     } catch (e) {
       console.warn('Background sync assign error:', e);
+      setSaveToast('⚠️ ซิงค์การจัดที่นั่งขึ้นระบบไม่สำเร็จ — กรุณากด "บันทึกผัง"');
+      setTimeout(() => setSaveToast(null), 4000);
     }
   };
 
@@ -964,6 +964,8 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
               setLayoutMeta(m => ({ ...m, isLocked: nextState }));
               setSaveToast(nextState ? '🔒 ล็อกผังที่นั่งแล้ว' : '🔓 ปลดล็อกผังเพื่อแก้ไข');
               setTimeout(() => setSaveToast(null), 2500);
+              // ล็อก/ปลดล็อกต้องบันทึกขึ้นระบบด้วย ไม่งั้นรีโหลดแล้วผังกลับเป็นสถานะเดิม
+              void handleSaveLayout(false, nextState);
             }}
             className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
               isLayoutLocked
@@ -1345,7 +1347,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
                                 )}
 
                                 {/* Quick Point Increment */}
-                                {!isLayoutLocked && !isAbsent && !attendanceOnly && (
+                                {!isAbsent && !attendanceOnly && (
                                   <button
                                     onClick={e => {
                                       e.stopPropagation();

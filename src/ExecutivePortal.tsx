@@ -56,6 +56,7 @@ import { ExecutiveAttendancePanel } from './components/executive/ExecutiveAttend
 import { ExecutiveStudyPlanPanel } from './components/studyplan/ExecutiveStudyPlanPanel';
 import { ExecutiveTeacherInfoPanel } from './components/executive/ExecutiveTeacherInfoPanel';
 import { useStore } from './store';
+import { levelEngagement } from './lib/levelEngagement';
 import { useRealStudents } from './hooks/useRealStudents';
 import { SdqSchoolOverviewLive } from './components/sdq/SdqSchoolOverview';
 import { useSchoolHomeVisitData } from './hooks/useHomeVisitData';
@@ -115,6 +116,16 @@ export function ExecutivePortal() {
   // (active_learning_logs, student_self_assessments) จึงแค่ต้องเพิ่ม listener อ่านกลับ
   const [activeLearningLogs, setActiveLearningLogs] = useState<ActiveLearningRecord[]>([]);
   useEffect(() => subscribeActiveLearningLogs(setActiveLearningLogs), []);
+  const semesterNow = useCurrentSemester();
+  const levelStats = useMemo(
+    () => levelEngagement(activeLearningLogs, students, { academicYear: semesterNow.academicYear, term: semesterNow.term as '1' | '2' }),
+    [activeLearningLogs, students, semesterNow.academicYear, semesterNow.term],
+  );
+  const topLevel = levelStats.length ? [...levelStats].sort((a, b) => b.avgPts - a.avgPts)[0] : null;
+  const schoolParticipation = (() => {
+    const n = levelStats.reduce((a, l) => a + l.students, 0);
+    return n ? Math.round(levelStats.reduce((a, l) => a + l.participation * l.students, 0) / n) : null;
+  })();
   const activeLearningPoints = useMemo(() => {
     const totals: Record<string, number> = {};
     activeLearningLogs.forEach(log => {
@@ -415,7 +426,7 @@ export function ExecutivePortal() {
                       </div>
                       <h3 className="text-lg font-bold text-white flex items-center gap-2 mt-1">
                         <BarChart3 className="w-5 h-5 text-emerald-400" />
-                        ภาพรวมการมีส่วนร่วมและคะแนน Active Learning รายระดับชั้น (ม.1 - ม.6)
+                        ภาพรวมการมีส่วนร่วมและคะแนน Active Learning รายระดับชั้น
                       </h3>
                       <p className="text-xs text-slate-400 mt-0.5">
                         เปรียบเทียบแนวโน้มการมีส่วนร่วมในห้องเรียน อัตราการปฏิสัมพันธ์ และสมรรถนะผู้เรียนตามระดับชั้น
@@ -431,16 +442,12 @@ export function ExecutivePortal() {
 
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
                     <div className="lg:col-span-8 h-[220px] w-full">
+                      {levelStats.length === 0 ? (
+                        <div className="h-full flex items-center justify-center text-xs text-slate-400">ยังไม่มีข้อมูลนักเรียน/คะแนน Active Learning ของภาคเรียนนี้</div>
+                      ) : (
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart 
-                          data={[
-                            { grade: 'ม.1', avgPts: 32.2, participation: 86 },
-                            { grade: 'ม.2', avgPts: 29.4, participation: 79 },
-                            { grade: 'ม.3', avgPts: 30.8, participation: 83 },
-                            { grade: 'ม.4', avgPts: 34.1, participation: 89 },
-                            { grade: 'ม.5', avgPts: 35.8, participation: 92 },
-                            { grade: 'ม.6', avgPts: 30.2, participation: 84 },
-                          ]} 
+                          data={levelStats}
                           margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
                         >
                           <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
@@ -451,12 +458,13 @@ export function ExecutivePortal() {
                             formatter={(val: any) => [`${val} คะแนน/คน`, 'คะแนนเฉลี่ย']}
                           />
                           <Bar dataKey="avgPts" radius={[6, 6, 0, 0]} fill="#10b981">
-                            {['ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'].map((g, i) => (
-                              <Cell key={i} fill={g === 'ม.5' ? '#10b981' : g === 'ม.4' ? '#3b82f6' : '#8b5cf6'} />
+                            {levelStats.map((l, i) => (
+                              <Cell key={i} fill={topLevel && l.grade === topLevel.grade ? '#10b981' : '#8b5cf6'} />
                             ))}
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
+                      )}
                     </div>
 
                     <div className="lg:col-span-4 space-y-3 bg-black/30 p-4 rounded-xl border border-white/5">
@@ -464,15 +472,11 @@ export function ExecutivePortal() {
                       <div className="space-y-2 text-xs">
                         <div className="flex items-center justify-between">
                           <span className="text-slate-400">ระดับชั้นอันดับ 1:</span>
-                          <span className="text-emerald-400 font-bold">ม.5 (35.8 pts / 92%)</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-400">การเติบโตเร็วสุด:</span>
-                          <span className="text-blue-400 font-bold">ม.4 (+14.2% MoM)</span>
+                          <span className="text-emerald-400 font-bold">{topLevel && topLevel.avgPts > 0 ? `${topLevel.grade} (${topLevel.avgPts} pts / ${topLevel.participation}%)` : '-'}</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-slate-400">อัตราเฉลี่ยรวม รร.:</span>
-                          <span className="text-white font-bold">85.5% ร่วมกิจกรรม</span>
+                          <span className="text-white font-bold">{schoolParticipation === null ? '-' : `${schoolParticipation}% ร่วมกิจกรรม`}</span>
                         </div>
                       </div>
                       <div className="pt-2 border-t border-white/5">

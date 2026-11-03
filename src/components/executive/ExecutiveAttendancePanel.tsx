@@ -94,7 +94,7 @@ export function ExecutiveAttendancePanel() {
 
           {lowest.length > 0 && (
             <div className="space-y-1.5">
-              <h4 className="text-xs font-bold text-slate-300">ห้องที่ร้อยละการมาเรียนต่ำสุด (8 ห้อง)</h4>
+              <h4 className="text-xs font-bold text-slate-300">ห้องที่ร้อยละการมาเรียนต่ำสุด ({lowest.length} ห้อง)</h4>
               <table className="w-full text-xs">
                 <thead><tr className="text-slate-500 text-left"><th className="py-1">ห้อง</th><th>ร้อยละ</th><th>ขาด</th><th>สาย</th><th>ลา</th></tr></thead>
                 <tbody>
