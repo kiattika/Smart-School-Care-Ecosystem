@@ -154,7 +154,7 @@ export function HomeVisitFormModal({ student, location, distanceFromSchoolM, exi
 
         <div className="p-5 space-y-6">
           <Section title="ข้อมูลที่ระบบและผู้ปกครอง/นักเรียนกรอกไว้แล้ว" hint="ตรวจทานก่อนลงบันทึก หากไม่ตรงความจริงให้จดไว้ในช่อง “แก้ไขข้อมูล” ด้านล่าง">
-            <div className="bg-black/20 border border-white/5 rounded-xl p-3 text-xs text-slate-300 space-y-1">
+            <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3 text-xs text-slate-300 space-y-1">
               <div className="flex items-center gap-2"><SourceTag source="SYSTEM" /> {student.name} · เลขประจำตัว {student.studentId} · ห้อง {student.room || '-'} · เลขที่ {student.studentNo || '-'}</div>
               <div><span className="text-slate-500">ที่อยู่ปัจจุบัน:</span> {address || 'ยังไม่มีในทะเบียน'}</div>
               <div><span className="text-slate-500">เบอร์ผู้ปกครอง:</span> {student.parentMobile || 'ยังไม่มีในทะเบียน'}</div>
@@ -233,7 +233,7 @@ export function HomeVisitFormModal({ student, location, distanceFromSchoolM, exi
             <label className="flex items-start gap-2 text-xs text-slate-200"><input type="checkbox" className="mt-0.5" checked={form.reviewedFamilyData} onChange={e => set('reviewedFamilyData', e.target.checked)} /> ข้าพเจ้าตรวจข้อมูลที่นักเรียน/ผู้ปกครองกรอกแล้ว และสอบถามยืนยันระหว่างเยี่ยมบ้าน</label>
             <div><Label>แก้ไขข้อมูล (กรณีข้อมูลที่กรอกไว้ไม่ตรงความจริง)</Label><textarea className={cn(inputCls, 'h-16 resize-none')} placeholder="เว้นว่างถ้าถูกต้องทั้งหมด" value={form.correctionNotes} onChange={e => set('correctionNotes', e.target.value)} /></div>
             <label className="flex items-start gap-2 text-xs text-slate-200"><input type="checkbox" className="mt-0.5" checked={form.purposeExplained} onChange={e => set('purposeExplained', e.target.checked)} /> <span>{SIGNING_PURPOSE_TEXT}</span></label>
-            <div className="bg-black/20 border border-white/5 rounded-xl p-3 space-y-2">
+            <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3 space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-xs font-bold text-slate-200">ยืนยันตำแหน่งขณะเยี่ยม (ไม่บังคับ)</div>

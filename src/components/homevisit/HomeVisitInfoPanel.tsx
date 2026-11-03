@@ -5,7 +5,7 @@ import { ageFromBirthDate, bodyShapeFromBmi } from '../../lib/homeVisitData';
 
 /** แผงอ่านอย่างเดียว: ข้อมูลที่นักเรียน/ผู้ปกครองกรอก ให้ครูตรวจก่อนลงบันทึกเยี่ยมบ้าน */
 const Line = ({ k, v }: { k: string; v?: React.ReactNode }) => (
-  <div className="text-xs"><span className="text-slate-500">{k}:</span> <span className="text-slate-200">{v === undefined || v === '' || v === null ? <span className="text-slate-600">-</span> : v}</span></div>
+  <div className="text-xs"><span className="text-slate-500">{k}:</span> <span className="text-slate-200">{v === undefined || v === '' || v === null ? <span className="text-slate-500">-</span> : v}</span></div>
 );
 const Empty = ({ who }: { who: string }) => <div className="text-xs text-amber-300/90">{who}ยังไม่ได้กรอกข้อมูล — ขอให้กรอกในพอร์ทัลก่อน หรือสอบถามระหว่างเยี่ยมบ้านแล้วจดในช่องแก้ไขข้อมูล</div>;
 
@@ -21,7 +21,7 @@ export function HomeVisitInfoPanel({ student, studentInfo, familyInfo, todayYmd 
   const g = familyInfo?.guardian;
   return (
     <div className="space-y-3">
-      <div className="bg-black/20 border border-white/5 rounded-xl p-3 space-y-1.5">
+      <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3 space-y-1.5">
         <div className="flex items-center gap-2 text-xs font-bold text-slate-200">ข้อมูลที่นักเรียนกรอก <SourceTag source="STUDENT" /></div>
         {!studentInfo ? <Empty who="นักเรียน" /> : (<>
           <Line k="เพศ/อายุ" v={`${studentInfo.gender === 'M' ? 'ชาย' : studentInfo.gender === 'F' ? 'หญิง' : '-'} · ${age ? `${age.years} ปี ${age.months} เดือน` : '-'}`} />
@@ -35,7 +35,7 @@ export function HomeVisitInfoPanel({ student, studentInfo, familyInfo, todayYmd 
           <Line k="บุตรคนที่" v={studentInfo.siblings.onlyChild ? 'บุตรคนเดียว' : `${studentInfo.siblings.birthOrder ?? '-'} จาก ${studentInfo.siblings.totalSiblings ?? '-'} คน`} />
         </>)}
       </div>
-      <div className="bg-black/20 border border-white/5 rounded-xl p-3 space-y-1.5">
+      <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3 space-y-1.5">
         <div className="flex items-center gap-2 text-xs font-bold text-slate-200">ข้อมูลที่ผู้ปกครองกรอก <SourceTag source="PARENT" /></div>
         {!familyInfo || !g ? <Empty who="ผู้ปกครอง" /> : (<>
           <Line k="บิดา" v={personLine(familyInfo.father)} />

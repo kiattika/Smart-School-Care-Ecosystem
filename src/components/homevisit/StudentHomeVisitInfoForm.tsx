@@ -30,7 +30,7 @@ const Num = ({ v, on, label }: { v: number | null; on: (n: number | null) => voi
 
 function FriendFields({ title, f, onChange, inSchool }: { title: string; f: FriendInfo; onChange: (f: FriendInfo) => void; inSchool: boolean }) {
   return (
-    <div className="bg-black/20 border border-white/5 rounded-xl p-3 space-y-2">
+    <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3 space-y-2">
       <div className="text-xs font-bold text-slate-200">{title}</div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <input className={inputCls} placeholder="คำนำหน้า" value={f.title} onChange={e => onChange({ ...f, title: e.target.value })} />
@@ -135,7 +135,7 @@ export function StudentHomeVisitInfoForm({ student, studentUid }: { student: Stu
       </div>
 
       <Section title="ข้อมูลที่ระบบมีอยู่แล้ว" hint="แก้ไขได้ที่ครูที่ปรึกษา/ผู้ดูแลระบบ">
-        <div className="bg-black/20 border border-white/5 rounded-xl p-3 text-xs text-slate-300 space-y-1">
+        <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3 text-xs text-slate-300 space-y-1">
           <div className="flex items-center gap-2"><SourceTag source="SYSTEM" /> {student.name} · เลขประจำตัว {student.studentId} · ห้อง {student.room || '-'} · เลขที่ {student.studentNo || '-'}</div>
           <div><span className="text-slate-500">ที่อยู่ปัจจุบัน:</span> {address || 'ยังไม่มีในทะเบียน'}</div>
         </div>

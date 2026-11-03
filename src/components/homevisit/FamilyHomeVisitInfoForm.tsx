@@ -23,7 +23,7 @@ const PRESENCE: { v: ParentInfo['presence']; l: string }[] = [
 function PersonFields({ label, p, onChange }: { label: string; p: ParentInfo; onChange: (p: ParentInfo) => void }) {
   const present = p.presence === 'PRESENT';
   return (
-    <div className="bg-black/20 border border-white/5 rounded-xl p-3 space-y-2">
+    <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3 space-y-2">
       <div className="text-xs font-bold text-slate-200">{label}</div>
       <Single options={PRESENCE.map(x => x.l)} value={PRESENCE.find(x => x.v === p.presence)?.l || ''} onPick={o => onChange({ ...p, presence: PRESENCE.find(x => x.l === o)!.v })} />
       {present && (
@@ -142,7 +142,7 @@ export function FamilyHomeVisitInfoForm({ student, parentUid }: { student: Stude
           <Single options={['บิดา', 'มารดา', 'อื่น ๆ']} value={choice ? choiceLabel[choice] : ''} onPick={o => pickChoice(o === 'บิดา' ? 'FATHER' : o === 'มารดา' ? 'MOTHER' : 'OTHER')} />
         </div>
         {(choice === 'FATHER' || choice === 'MOTHER') && (
-          <div className="bg-black/20 border border-white/5 rounded-xl p-3 text-xs text-slate-300 space-y-1">
+          <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3 text-xs text-slate-300 space-y-1">
             <div className="font-bold text-slate-200">ใช้ข้อมูล{choiceLabel[choice]}จากด้านบน</div>
             {(choice === 'FATHER' ? form.father : form.mother).presence === 'PRESENT'
               ? <div>{g.title}{g.firstName} {g.lastName} · อายุ {g.age ?? '-'} ปี · {g.occupation || '-'} · โทร {g.phone || '-'}</div>

@@ -7,7 +7,7 @@ const pct = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` :
 
 function Stat({ label, n, of, tone }: { label: string; n: number; of: number; tone?: string }) {
   return (
-    <div className="bg-black/20 border border-white/5 rounded-xl p-3">
+    <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3">
       <div className="text-[11px] text-slate-400">{label}</div>
       <div className={`text-2xl font-bold ${tone || 'text-white'}`}>{n}<span className="text-xs text-slate-500 font-normal"> / {of} ({pct(n, of)})</span></div>
     </div>
@@ -16,7 +16,7 @@ function Stat({ label, n, of, tone }: { label: string; n: number; of: number; to
 function Bars({ title, rows, base }: { title: string; rows: Dist[]; base: number }) {
   const shown = rows.filter(r => r.count > 0);
   return (
-    <div className="bg-black/20 border border-white/5 rounded-xl p-3">
+    <div className="bg-slate-900/50 border border-slate-700/40 rounded-xl p-3">
       <div className="text-xs font-bold text-slate-200 mb-2">{title}</div>
       {shown.length === 0 ? <div className="text-[11px] text-slate-500">ยังไม่มีข้อมูล</div> : (
         <div className="space-y-1.5">
