@@ -88,11 +88,17 @@ export async function saveSeatingLayoutToFirestore(
       }
     }
 
-    // 3. If active assignments provided, write them
-    if (assignments && assignments.length > 0) {
+    // 3. เขียนที่นั่งปัจจุบัน และ "ปิด" รายการ active เดิมที่ไม่อยู่ในผังปัจจุบันแล้ว
+    //    (เดิมไม่เคยปิด → ย้าย/สลับที่นั่งแล้วนักเรียนคนเดียวโผล่หลายที่นั่งตอนโหลดใหม่)
+    if (assignments) {
+      const nowIso = new Date().toISOString();
+      const keepIds = new Set(assignments.map(a => a.id));
+      const prevActive = await getActiveAssignmentsFromFirestore(layout.id);
+      for (const old of prevActive) {
+        if (!keepIds.has(old.id)) batch.update(doc(db, ASSIGNMENTS_COL, old.id), { effectiveTo: nowIso });
+      }
       for (const a of assignments) {
-        const aRef = doc(db, ASSIGNMENTS_COL, a.id);
-        batch.set(aRef, a, { merge: true });
+        batch.set(doc(db, ASSIGNMENTS_COL, a.id), { ...a, layoutId: layout.id, effectiveTo: a.effectiveTo ?? null }, { merge: true });
       }
     }
 
@@ -282,10 +288,10 @@ export async function assignStudentToSeatInFirestore(assignment: SeatingAssignme
   try {
     // 1. Close active assignment on that seat
     const active = await getActiveAssignmentsFromFirestore(assignment.layoutId);
-    const existing = active.find(a => a.seatId === assignment.seatId || a.studentId === assignment.studentId);
-    if (existing) {
-      const prevRef = doc(db, ASSIGNMENTS_COL, existing.id);
-      batch.update(prevRef, { effectiveTo: now });
+    // ปิดทั้งผู้ที่นั่งเดิมของที่นั่งนี้ และที่นั่งเก่าของนักเรียนคนนี้ (เดิมปิดแค่รายการแรกที่เจอ)
+    for (const existing of active.filter(a => a.seatId === assignment.seatId || a.studentId === assignment.studentId)) {
+      if (existing.id === assignment.id) continue;
+      batch.update(doc(db, ASSIGNMENTS_COL, existing.id), { effectiveTo: now });
     }
 
     // 2. Set new assignment
