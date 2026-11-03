@@ -1,3 +1,4 @@
+import { planNicknameBackfill } from '../lib/nicknameBackfill';
 import { omitUndefined } from '../lib/firestorePayload';
 import { deriveParentNames } from '../lib/parentNames';
 import { infirmaryVisitNotice } from '../lib/studentNotices';
@@ -818,6 +819,28 @@ export async function saveSelfAssessmentRecord(assessment: StudentSelfAssessment
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${collectionPath}/${docId}`);
   }
+}
+
+/** นักเรียนเจ้าของ: สำเนาชื่อเล่นจากแบบประเมินข้อ 2 ลง students/{id}.nickname (rules: เฉพาะเจ้าของ ≤30 ตัวอักษร) */
+export async function mirrorNicknameToStudent(studentId: string, nickname: unknown): Promise<void> {
+  const nick = typeof nickname === 'string' ? nickname.trim().slice(0, 30) : '';
+  if (!studentId || !nick) return;
+  await updateDoc(doc(db, 'students', studentId), { nickname: nick });
+}
+
+/** SUPER_ADMIN: เติมชื่อเล่นให้นักเรียนที่ส่งแบบประเมินไปก่อนมีระบบสำเนา (ไม่ทับชื่อเล่นเดิม) — คืนจำนวนที่เติม */
+export async function backfillNicknamesFromAssessments(): Promise<number> {
+  const [assessments, studentSnap] = await Promise.all([getAllSelfAssessmentRecords(), getDocs(collection(db, 'students'))]);
+  const plan = planNicknameBackfill(
+    assessments,
+    studentSnap.docs.map(d => ({ studentId: d.id, nickname: (d.data() as { nickname?: string }).nickname })),
+  );
+  for (let i = 0; i < plan.length; i += 400) {
+    const batch = writeBatch(db);
+    for (const p of plan.slice(i, i + 400)) batch.update(doc(db, 'students', p.studentId), { nickname: p.nickname });
+    await batch.commit();
+  }
+  return plan.length;
 }
 
 /**

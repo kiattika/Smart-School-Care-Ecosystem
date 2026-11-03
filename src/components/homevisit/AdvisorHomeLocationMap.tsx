@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { MapPin, ExternalLink, Loader2, Users } from 'lucide-react';
@@ -37,6 +37,7 @@ export function AdvisorHomeLocationMap({ homeroomClass, students }: { homeroomCl
     const m = new Map(students.map(s => [s.studentId, s.fullName || s.name]));
     return (sid: string) => m.get(sid) || `เลขประจำตัว ${sid}`;
   }, [students]);
+  const studentOf = useMemo(() => new Map(students.map(s => [s.studentId, s])), [students]);
 
   const center = useMemo<[number, number]>(() => {
     if (locs.length === 0) return [17.6251, 100.0932]; // อุตรดิตถ์ (ใช้เฉพาะตอนไม่มีหมุดให้แสดง — แผนที่ไม่ถูก render)
@@ -85,6 +86,20 @@ export function AdvisorHomeLocationMap({ homeroomClass, students }: { homeroomCl
             />
             {locs.map(l => (
               <Marker key={l.studentId} position={[l.latitude, l.longitude]} icon={pinIcon}>
+                {/* เลื่อนเมาส์ไปที่หมุดแล้วเห็นข้อมูลนักเรียนทันที (ไม่ต้องคลิก) — ไม่มีข้อมูล = แสดง "-" */}
+                <Tooltip direction="top" offset={[0, -10]} opacity={1}>
+                  {(() => {
+                    const st = studentOf.get(l.studentId);
+                    return (
+                      <div className="text-xs font-sans leading-5 min-w-[170px]">
+                        <div className="font-bold text-sm">{nameOf(l.studentId)}</div>
+                        <div>เลขที่: {st?.studentNo || '-'}</div>
+                        <div>ชื่อเล่น: {st?.nickname || '-'}</div>
+                        <div>เบอร์โทร (ผู้ปกครอง): {st?.parentMobile || '-'}</div>
+                      </div>
+                    );
+                  })()}
+                </Tooltip>
                 <Popup>
                   <div className="p-1 font-sans min-w-[180px]">
                     <h4 className="font-bold text-slate-800 text-sm mb-1">{nameOf(l.studentId)}</h4>

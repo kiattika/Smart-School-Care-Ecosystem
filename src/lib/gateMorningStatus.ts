@@ -36,19 +36,22 @@ export function gateMorningByStudent(logs: GateAttendanceRecord[], today: string
  * 1) ที่ครูเพิ่งเลือกบนหน้าจอ (override)
  * 2) ที่ครูบันทึกและล็อกแล้ว (ครูยืนยันเอง)
  * 3) ผลเช็คอินผ่านประตูวันนี้ (สาย = สาย)
- * 4) ที่บันทึกไว้แต่ยังไม่ล็อก  5) ค่าใน student doc
+ * 4) ที่บันทึกไว้แต่ยังไม่ล็อก
+ * 5) ยังไม่มีข้อมูลใดเลย: มีใบลาอนุมัติวันนี้ = ลา, ไม่งั้น = ขาด (ยังไม่เช็คอิน — พอเช็คอินจะเปลี่ยนเป็นมา/สายเอง)
+ *    ห้ามใช้ค่า morningStatus ใน student doc (ค่าเริ่มต้นนำเข้าเป็น PRESENT ทำให้คนยังไม่มาขึ้น "มา")
  */
 export function resolveMorningStatus(p: {
   override?: MorningStatus;
   hrStatus?: MorningStatus;
   hrLocked: boolean;
   gate?: GateMorning;
-  docStatus: MorningStatus;
+  /** มีใบลาที่อนุมัติครอบคลุมวันนี้ (student_leave_days) */
+  onApprovedLeave?: boolean;
 }): MorningStatus {
   if (p.override) return p.override;
   if (p.hrLocked && p.hrStatus) return p.hrStatus;
   if (p.gate) return p.gate.status;
-  return p.hrStatus ?? p.docStatus;
+  return p.hrStatus ?? (p.onApprovedLeave ? 'LEAVE' : 'ABSENT');
 }
 
 /** เวลาที่แสดงในแผงพิกัด GPS — timestamp เก็บเป็น "HH:MM น." (ไม่ใช่ ISO) จึงห้าม new Date() ตรง ๆ */

@@ -252,6 +252,18 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(studentDb.doc('students/69501').update({ behaviorScore: 0 }));
     });
 
+    it('allows a STUDENT to set own nickname (<=30 chars) but not others or other fields', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('students/69511').set({ studentId: '69511', studentUid: 'stu-uid-n', name: 'Me', nickname: '' });
+        await ctx.firestore().doc('students/69512').set({ studentId: '69512', studentUid: 'stu-uid-o', name: 'Other', nickname: '' });
+      });
+      const studentDb = asUser('stu-uid-n', ['STUDENT']).firestore();
+      await assertSucceeds(studentDb.doc('students/69511').update({ nickname: 'ฟ้า' }));
+      await assertFails(studentDb.doc('students/69511').update({ nickname: 'ก'.repeat(31) }));
+      await assertFails(studentDb.doc('students/69511').update({ nickname: 'ฟ้า', behaviorScore: 0 }));
+      await assertFails(studentDb.doc('students/69512').update({ nickname: 'x' }));
+    });
+
     it('denies a STUDENT updating another student photoUrl, and denies create/delete', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await ctx.firestore().doc('students/69502').set({ studentId: '69502', studentUid: 'stu-uid-2', name: 'Other', photoUrl: 'o.jpg' });

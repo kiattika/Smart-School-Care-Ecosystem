@@ -5,6 +5,7 @@ import { useRealStudents } from '../hooks/useRealStudents';
 import { useHomeroomAttendance } from '../hooks/useHomeroomAttendance';
 import { useTeacherFirestoreSchedule } from '../hooks/useTeacherFirestoreSchedule';
 import { subscribeGateAttendanceLogs } from '../services/firestoreService';
+import { useLeaveStudentIds } from '../hooks/useApprovedLeaveDays';
 import { gateMorningByStudent, resolveMorningStatus } from '../lib/gateMorningStatus';
 import { isSameRoom } from '../lib/utils';
 import { isScheduleForRoom } from '../lib/studentDaySchedule';
@@ -27,6 +28,7 @@ export function MobileHomeroomAttendance({ room }: { room: string }) {
   const [gateLogs, setGateLogs] = useState<GateAttendanceRecord[]>([]);
   useEffect(() => subscribeGateAttendanceLogs(setGateLogs, { date: todayStr }), [todayStr]);
   const gateMorning = useMemo(() => gateMorningByStudent(gateLogs, todayStr), [gateLogs, todayStr]);
+  const leaveToday = useLeaveStudentIds(todayStr);
   const [overrides, setOverrides] = useState<Record<string, Status>>({});
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -40,20 +42,20 @@ export function MobileHomeroomAttendance({ room }: { room: string }) {
         hrStatus: hrRecord?.students?.[s.studentId],
         hrLocked: !!hrRecord?.isLocked,
         gate: gateMorning.get(s.studentId),
-        docStatus: s.attendance.morningStatus,
+        onApprovedLeave: leaveToday.has(s.studentId),
       }) as Status | undefined,
     }))
-    .sort((a, b) => (Number(a.s.studentNo) || 0) - (Number(b.s.studentNo) || 0)), [all, room, overrides, hrRecord, gateMorning]);
+    .sort((a, b) => (Number(a.s.studentNo) || 0) - (Number(b.s.studentNo) || 0)), [all, room, overrides, hrRecord, gateMorning, leaveToday]);
 
   const locked = !!hrRecord?.isLocked;
-  const counts = OPTIONS.map(o => ({ ...o, n: students.filter(x => (x.status || 'PRESENT') === o.v).length }));
+  const counts = OPTIONS.map(o => ({ ...o, n: students.filter(x => (x.status || 'ABSENT') === o.v).length }));
 
   const save = async () => {
     setSaving(true);
     setMsg(null);
     try {
       const statuses: Record<string, Status> = {};
-      students.forEach(({ s, status }) => { statuses[s.studentId] = (status || 'PRESENT') as Status; });
+      students.forEach(({ s, status }) => { statuses[s.studentId] = (status || 'ABSENT') as Status; });
       const hrSched = (schedules as any[]).find(sc => Number(sc.periodNumber) === 0 && isScheduleForRoom(sc, room));
       const code = hrSched ? String(hrSched.subjectCode || hrSched.courseCode || '') : '';
       await saveHomeroomAttendance(statuses, code ? { code, name: String(hrSched.subjectName || hrSched.courseName || code) } : null);
@@ -105,8 +107,8 @@ export function MobileHomeroomAttendance({ room }: { room: string }) {
                   key={o.v}
                   disabled={locked}
                   onClick={() => setOverrides(prev => ({ ...prev, [s.studentId]: o.v }))}
-                  aria-pressed={(status || 'PRESENT') === o.v}
-                  className={`py-2.5 rounded-xl text-xs font-bold border disabled:opacity-50 ${(status || 'PRESENT') === o.v ? o.on : 'bg-slate-800/60 text-slate-400 border-slate-700'}`}
+                  aria-pressed={(status || 'ABSENT') === o.v}
+                  className={`py-2.5 rounded-xl text-xs font-bold border disabled:opacity-50 ${(status || 'ABSENT') === o.v ? o.on : 'bg-slate-800/60 text-slate-400 border-slate-700'}`}
                 >
                   {o.label}
                 </button>

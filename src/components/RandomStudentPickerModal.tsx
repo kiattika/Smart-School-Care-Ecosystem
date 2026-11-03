@@ -541,7 +541,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
                   <motion.div
                     initial={{ y: 20, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
-                    className="max-w-md mx-auto bg-gradient-to-b from-slate-800 to-slate-900 border-2 border-amber-500/60 rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col items-center text-center group"
+                    className="max-w-md mx-auto bg-slate-900 border-2 border-amber-500/60 rounded-3xl p-6 shadow-2xl relative overflow-hidden flex flex-col items-center text-center group"
                   >
                     <div className="absolute -top-12 -right-12 w-32 h-32 bg-amber-500/20 rounded-full blur-2xl pointer-events-none"></div>
 
@@ -643,7 +643,7 @@ export const RandomStudentPickerModal: React.FC<RandomStudentPickerModalProps> =
               </div>
 
               {/* Group Winner Banner Card */}
-              <div className="bg-gradient-to-r from-slate-800 via-slate-700 to-slate-800 border-2 border-amber-500/60 rounded-3xl p-5 shadow-2xl relative overflow-hidden">
+              <div className="bg-slate-900 border-2 border-amber-500/60 rounded-3xl p-5 shadow-2xl relative overflow-hidden">
                 <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-2xl shadow-md">
