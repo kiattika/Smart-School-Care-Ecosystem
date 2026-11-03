@@ -286,3 +286,11 @@ describe('กันลบ schedule ที่ยังมีข้อมูลท
     expect(src).not.toContain("collection(db, 'attendance_records')");
   });
 });
+
+describe('คาบที่ถูกแทนที่ (supersededAt)', () => {
+  it('isScheduleInTerm = false เมื่อมี supersededAt แม้ภาคเรียนตรง', () => {
+    const sem = { academicYear: '2569', term: '1' };
+    expect(isScheduleInTerm({ academicYear: '2569', term: '1' }, sem)).toBe(true);
+    expect(isScheduleInTerm({ academicYear: '2569', term: '1', supersededAt: { seconds: 1 } }, sem)).toBe(false);
+  });
+});

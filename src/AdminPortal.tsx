@@ -188,7 +188,7 @@ export function AdminPortal() {
                       <p className="text-slate-400 mt-1 text-sm">ข้อมูลภาระงานสอนอย่างเป็นทางการจากฐานข้อมูล Firestore ของโรงเรียน</p>
                     </div>
                   </div>
-                  <TeachingLoadTable onOpenImport={() => goToImport('COURSE')} />
+                  <TeachingLoadTable onOpenImport={() => goToImport('COURSE')} canClearSchedules />
                 </div>
               )}
 

@@ -20,7 +20,7 @@ import {
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { importParentRecords, ParentImportRecord } from '../lib/lineParent';
-import { writeBatch, doc, serverTimestamp, collection, getDocs, onSnapshot } from 'firebase/firestore';
+import { writeBatch, doc, serverTimestamp, deleteField, collection, getDocs, onSnapshot } from 'firebase/firestore';
 import {
   computeSyncReplacePlan, scheduleDocIdFor, primaryTeacherKey,
   SCHEDULE_REFERENCING_COLLECTIONS, collectReferenceValues, partitionStaleByReferences,
@@ -1007,6 +1007,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                 const primaryTeacherName = merged?.primaryTeacherName || parsedData.teacherName || '';
 
                 const schedulePayload = {
+                  supersededAt: deleteField(), // นำเข้าซ้ำที่คาบนี้อีกครั้ง = กลับมาใช้งาน
                   id: scheduleDocId,
                   academicYear: sem.academicYear,
                   term: sem.term,
@@ -1067,6 +1068,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               const scheduleRef = doc(db, 'schedules', scheduleDocId);
 
               const schedulePayload = {
+                supersededAt: deleteField(),
                 id: scheduleDocId,
                 academicYear: sem.academicYear,
                 term: sem.term,
@@ -1195,7 +1197,17 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
           }
           console.log(`[BulkDataImportModal] sync/replace: ลบ schedule เก่า ${deletable.length} รายการ (เก็บไว้ ${protectedDocs.length} รายการที่ยังมีข้อมูลบันทึกผูกอยู่)`);
           if (protectedDocs.length > 0) {
-            alert(`ℹ️ ตารางสอนเก่า ${protectedDocs.length} รายการไม่ถูกลบ เพราะยังมีบันทึก (เช่น บันทึกหลังสอน/เช็คชื่อย้อนหลัง/สอนแทน) ผูกอยู่ — ตรวจสอบและจัดการเองได้ภายหลัง`);
+            // ลบจริงไม่ได้ (มีเช็คชื่อ/บันทึกหลังสอน/สอนแทนผูกอยู่) → ซ่อนออกจากตารางปัจจุบันแทน เอกสารและประวัติยังอยู่ครบ
+            for (let i = 0; i < protectedDocs.length; i += 450) {
+              const supBatch = writeBatch(db);
+              protectedDocs.slice(i, i + 450).forEach(s => supBatch.update(doc(db, 'schedules', s.id), {
+                supersededAt: serverTimestamp(),
+                supersededBy: user?.uid ?? null,
+                supersededReason: 'IMPORT_SYNC_REPLACE',
+              }));
+              await supBatch.commit();
+            }
+            alert(`ℹ️ คาบเก่า ${protectedDocs.length} รายการมีบันทึกผูกอยู่ (เช็คชื่อ/บันทึกหลังสอน/สอนแทน) จึงไม่ลบถาวร แต่ถูกซ่อนจากตารางสอนแล้ว — ประวัติเดิมยังอยู่ครบ และคาบใหม่ตามไฟล์ใช้แทนที่`);
           }
         }
       }
@@ -1861,7 +1873,7 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                         />
                         <span className="text-[11px] text-amber-200">
                           <strong>โหมด Sync/Replace:</strong> พบตารางสอนเก่าของครูในไฟล์นี้ <strong>{staleSchedules.length} รายการ</strong> ที่ไม่มีอยู่ในไฟล์ที่กำลังนำเข้า
-                          — ติ๊กเพื่อ <strong className="text-red-300">ลบถาวร</strong> (เฉพาะครูที่ปรากฏในไฟล์นี้ ไม่แตะครูคนอื่น; ข้ามรายการที่ยังมีบันทึกหลังสอน/คำขอเช็คชื่อย้อนหลัง/รายการสอนแทนผูกอยู่)
+                          — ติ๊กเพื่อ <strong className="text-red-300">ลบถาวร</strong> (เฉพาะครูที่ปรากฏในไฟล์นี้ ไม่แตะครูคนอื่น; รายการที่ยังมีเช็คชื่อ/บันทึกหลังสอน/คำขอเช็คชื่อย้อนหลัง/สอนแทนผูกอยู่ จะไม่ลบถาวร แต่ซ่อนออกจากตารางสอน เก็บประวัติไว้)
                         </span>
                       </label>
                       <details className="text-[10px] text-amber-300/80">
