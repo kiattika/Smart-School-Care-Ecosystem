@@ -124,6 +124,17 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
     return normalizeClassName(p.className) === selectedClass;
   });
 
+  // กิจกรรม/ภาระงานที่ไม่มีนักเรียน (CZ, PLC ฯลฯ) — แสดงเป็นแถวข้อมูลล้วน ไม่มีปุ่มเช็คชื่อ/บันทึกหลังสอน
+  // ยกเว้น "ชุมนุม": คาบชุมนุมจากไฟล์นำเข้าไม่แสดงซ้ำ เพราะชุมนุมจริงถูกดึงจาก elective config
+  // (รายชื่อมาจากที่นักเรียนเลือกลงชุมนุม) และแสดงเป็นคาบเช็คชื่อปกติอยู่แล้ว
+  const infoPeriods = useMemo(() => {
+    if (selectedClass !== 'ALL') return [];
+    return sortedPeriods.filter(p =>
+      isNonStudentSession(p.subjectName, p.subjectCode, p.level || p.className) &&
+      !/ชุมนุม/.test(p.subjectName || '') && !/ชุมนุม/.test(p.subjectCode || '')
+    );
+  }, [sortedPeriods, selectedClass]);
+
   // รวมคาบติดกัน (เช่น คาบ 3-4 วิชา+ห้องเดียวกัน) ให้เป็นแถวเดียว
   const displayPeriods = useMemo(() => mergeConsecutivePeriods(filteredPeriods), [filteredPeriods]);
 
@@ -299,7 +310,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
 
       {/* List ของคาบเรียน */}
       <div className="space-y-4" id="periods-list-container">
-        {displayPeriods.length === 0 ? (
+        {displayPeriods.length === 0 && infoPeriods.length === 0 ? (
           <div className="text-center py-12 bg-[#161f30] rounded-xl border border-slate-800/80 text-slate-300 text-sm" id="empty-schedule-state">
             ไม่มีวิชา/คาบเรียนในตารางสอนสำหรับวันหรือตัวเลือกนี้
           </div>
@@ -563,6 +574,21 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
           })
         )}
       </div>
+
+      {infoPeriods.length > 0 && (
+        <div className="bg-[#161f30] border border-slate-800/80 rounded-xl px-4 py-3" id="non-student-activities">
+          <div className="text-xs font-bold text-slate-300 mb-2">กิจกรรม/ภาระงานอื่นของวันนี้ (ไม่ต้องเช็คชื่อ)</div>
+          <ul className="space-y-1.5">
+            {infoPeriods.map(p => (
+              <li key={p.id} className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-md border bg-slate-800/60 border-slate-700/60">คาบ {p.periodNumber}</span>
+                <span className="font-semibold text-white">{p.subjectName}</span>
+                {p.startTime && p.endTime && <span className="text-xs text-slate-400">{p.startTime} - {p.endTime} น.</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 };
