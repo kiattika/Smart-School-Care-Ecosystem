@@ -88,20 +88,27 @@ describe('buildTeacherWeekGrid', () => {
 });
 
 describe('subjectColor / staffDisplayName', () => {
-  it('สีคงที่ต่อตัวอักษรแรกของรหัสวิชา และเฉพาะ HR/CZ/PLC', () => {
+  it('สีตามตัวอักษรแรกของรหัสวิชา: วิชาเดียวกลุ่มเดียวกันสีเดียวกัน', () => {
     expect(subjectColor('ค32102')).toBe(subjectColor('ค32202'));
-    expect(subjectColor('HR')).toBe(subjectColor('CZ'));
-    expect(subjectColor('PLC')).not.toBe(subjectColor('HR'));
+    expect(subjectColor('hr')).toBe(subjectColor('HR'));
     expect(subjectColor('')).toBe('#64748b');
   });
-  it('กลุ่มสาระหลัก + กิจกรรม + HR/PLC ทุกตัวอักษรได้สีไม่ซ้ำกัน', () => {
-    const codes = ['ท1', 'ส1', 'ง1', 'ก1', 'ว1', 'พ1', 'ค1', 'อ1', 'ศ1', 'HR', 'PLC'];
+  it('H (HR) = ม่วง, C (CZ) = ชมพู, ก = ฟ้า, ง = เหลือง, ส = ส้ม, ท = แดง', () => {
+    expect(subjectColor('HR')).toBe('#7c3aed');
+    expect(subjectColor('CZ')).toBe('#ec4899');
+    expect(subjectColor('ก31908')).toBe('#0ea5e9');
+    expect(subjectColor('ง30101')).toBe('#ca8a04');
+    expect(subjectColor('ส30222')).toBe('#ea580c');
+    expect(subjectColor('ท31101')).toBe('#dc2626');
+  });
+  it('ทุกตัวอักษรหลัก (รวม H/C/P) ได้สีไม่ซ้ำกัน', () => {
+    const codes = ['HR', 'CZ', 'PLC', 'ก1', 'ท1', 'ส1', 'ง1', 'ว1', 'พ1', 'ค1', 'อ1', 'ศ1'];
     const colors = codes.map(subjectColor);
     expect(new Set(colors).size).toBe(codes.length);
     for (const c of colors) expect(c).toMatch(/^#[0-9a-f]{6}$/);
   });
-  it('ตัวอักษรอื่นที่ไม่อยู่ในกลุ่มสาระหลักได้สีสำรอง ไม่ซ้ำกับสีหลัก', () => {
-    const main = new Set(['ท', 'ส', 'ง', 'ก', 'ว', 'พ', 'ค', 'อ', 'ศ'].map(l => subjectColor(`${l}1`)));
+  it('ตัวอักษรอื่นที่ไม่อยู่ในกลุ่มหลักได้สีสำรอง ไม่ซ้ำกับสีหลัก', () => {
+    const main = new Set(['H', 'C', 'P', 'ก', 'ท', 'ส', 'ง', 'ว', 'พ', 'ค', 'อ', 'ศ'].map(l => subjectColor(`${l}1`)));
     for (const l of ['จ', 'ญ', 'ฝ', 'ย', 'ป', 'ร', 'ล', 'ฮ', 'ข', 'ซ', 'ต', 'น', 'บ', 'ม']) {
       expect(main.has(subjectColor(`${l}30101`))).toBe(false);
     }
