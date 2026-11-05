@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildTeacherWeekGrid, subjectColor, staffDisplayName } from '../lib/teacherWeekTimetable';
+import { buildTeacherWeekGrid, subjectColor, staffDisplayName, compareStaffId, matchesStaffQuery } from '../lib/teacherWeekTimetable';
 
 const doc = (o: Record<string, any>) => ({ academicYear: '2569', term: '1', subjectType: 'MAIN', ...o });
 
@@ -88,16 +88,46 @@ describe('buildTeacherWeekGrid', () => {
 });
 
 describe('subjectColor / staffDisplayName', () => {
-  it('สีคงที่ต่อกลุ่มวิชา (ตัวอักษรแรก) และเฉพาะ HR/CZ/PLC', () => {
+  it('สีคงที่ต่อตัวอักษรแรกของรหัสวิชา และเฉพาะ HR/CZ/PLC', () => {
     expect(subjectColor('ค32102')).toBe(subjectColor('ค32202'));
     expect(subjectColor('HR')).toBe(subjectColor('CZ'));
     expect(subjectColor('PLC')).not.toBe(subjectColor('HR'));
     expect(subjectColor('')).toBe('#64748b');
+  });
+  it('กลุ่มสาระหลัก + กิจกรรม + HR/PLC ทุกตัวอักษรได้สีไม่ซ้ำกัน', () => {
+    const codes = ['ท1', 'ส1', 'ง1', 'ก1', 'ว1', 'พ1', 'ค1', 'อ1', 'ศ1', 'HR', 'PLC'];
+    const colors = codes.map(subjectColor);
+    expect(new Set(colors).size).toBe(codes.length);
+    for (const c of colors) expect(c).toMatch(/^#[0-9a-f]{6}$/);
+  });
+  it('ตัวอักษรอื่นที่ไม่อยู่ในกลุ่มสาระหลักได้สีสำรอง ไม่ซ้ำกับสีหลัก', () => {
+    const main = new Set(['ท', 'ส', 'ง', 'ก', 'ว', 'พ', 'ค', 'อ', 'ศ'].map(l => subjectColor(`${l}1`)));
+    for (const l of ['จ', 'ญ', 'ฝ', 'ย', 'ป', 'ร', 'ล', 'ฮ', 'ข', 'ซ', 'ต', 'น', 'บ', 'ม']) {
+      expect(main.has(subjectColor(`${l}30101`))).toBe(false);
+    }
   });
   it('ชื่อบุคลากร: fullName ก่อน แล้ว prefix+ชื่อ, displayName, อีเมล, id', () => {
     expect(staffDisplayName({ id: 'a', fullName: 'นายเกียรติศักดิ์ แก้วหล้า', email: 'x' })).toBe('นายเกียรติศักดิ์ แก้วหล้า');
     expect(staffDisplayName({ id: 'a', prefix: 'นาย', firstName: 'ก', lastName: 'ข' })).toBe('นายก ข');
     expect(staffDisplayName({ id: 'a', email: 'e@x' })).toBe('e@x');
     expect(staffDisplayName({ id: 'a' })).toBe('a');
+  });
+});
+
+describe('compareStaffId / matchesStaffQuery', () => {
+  it('เรียงตามรหัสครูแบบตัวเลขตามธรรมชาติ', () => {
+    const ids = ['sci-20', 'mat-018', 'sci-3', 'mat-002', 'tha-01', 'sci-100'];
+    expect([...ids].sort(compareStaffId)).toEqual(['mat-002', 'mat-018', 'sci-3', 'sci-20', 'sci-100', 'tha-01']);
+  });
+  it('ค้นหาจากรหัสหรือชื่อ ไม่สนตัวพิมพ์/ช่องว่างซ้ำ และทุกคำต้องตรง', () => {
+    const t = { id: 'sci-20', name: 'นางสาวสุกานดา แย้มเยื้อน' };
+    expect(matchesStaffQuery(t, '')).toBe(true);
+    expect(matchesStaffQuery(t, '  ')).toBe(true);
+    expect(matchesStaffQuery(t, 'SCI-20')).toBe(true);
+    expect(matchesStaffQuery(t, 'สุกานดา')).toBe(true);
+    expect(matchesStaffQuery(t, 'สุกานดา   แย้ม')).toBe(true);
+    expect(matchesStaffQuery(t, 'sci สุกานดา')).toBe(true);
+    expect(matchesStaffQuery(t, 'mat-018')).toBe(false);
+    expect(matchesStaffQuery(t, 'สุกานดา เกียรติ')).toBe(false);
   });
 });
