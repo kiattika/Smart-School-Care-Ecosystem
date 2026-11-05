@@ -43,6 +43,7 @@ import { buildStaffImportWrite, matchDepartmentId, type ParsedStaffRow } from '.
 import { useDepartments } from '../hooks/useDepartments';
 import { IMPORT_TEMPLATES, templateFilename } from '../lib/importTemplates';
 import { summarizeUnlinkedTeachers } from '../lib/importUnlinkedSummary';
+import { splitLevels } from '../lib/apCourses';
 import {
   isTeacherLoadReportFormat, 
   parseTeacherLoadReport, 
@@ -860,8 +861,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
               unlinkedTeacherName: null, unlinkedTeacherEmail: null, levels: [],
             };
             {
-              const lv = String(parsedData.level || '').trim();
-              if (lv && !entry.levels.includes(lv)) entry.levels.push(lv);
+              // ช่องระดับชั้นอาจมีหลายห้องในข้อความเดียว ("M.6/1, M.6/2") — แยกเก็บเป็นรายห้อง
+              for (const lv of splitLevels(parsedData.level)) if (!entry.levels.includes(lv)) entry.levels.push(lv);
             }
             if (parsedData.matchedTeacherId) {
               if (!entry.teacherIds.includes(parsedData.matchedTeacherId)) entry.teacherIds.push(parsedData.matchedTeacherId);
@@ -1020,9 +1021,9 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                   subjectCode: parsedData.subjectCode,
                   subjectName: parsedData.subjectName,
                   room: parsedData.room || '',
-                  level: (merged?.levels?.length ?? 0) > 1 ? merged!.levels[0] : (parsedData.level || ''),
+                  level: parsedData.level || '',
                   // ทุกชั้นที่รวมกันในคาบนี้ (วิชา AP) — มีชั้นเดียว = เก็บเหมือนเดิมเพื่อให้อ่านย้อนหลังได้
-                  levels: merged?.levels?.length ? merged.levels : (parsedData.level ? [parsedData.level] : []),
+                  levels: merged?.levels?.length ? merged.levels : splitLevels(parsedData.level),
                   credits: parsedData.credits ?? 0,
                   teacherIds,
                   teacherId: primaryTeacherId,

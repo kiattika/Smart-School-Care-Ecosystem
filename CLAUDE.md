@@ -445,6 +445,9 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - โครงการสอนใหม่เติม "หน่วยกิต/ชั่วโมงต่อสัปดาห์" ให้อัตโนมัติจากจำนวนคาบ (`CourseGroup.periodsPerWeek` = ห้องที่คาบมากสุด, `prefillCreditsHours`) — ครูแก้เองได้; ฉบับที่บันทึกแล้วไม่ถูกเขียนทับ
 
 
+## ประวัติบันทึกหลังสอน (TeacherPortal)
+- เรียงใหม่→เก่า (`sortPostTeachingRecords`: วันที่ → คาบมาก→น้อย → เวลาส่ง) แสดงคาบ/รหัสวิชา/ชื่อวิชา; บันทึกใหม่เก็บ `periodNumber`/`subjectName`, บันทึกเก่าถอดคาบจากท้าย scheduleId (`periodOfRecord`) ไม่รู้ = ไม่แสดง ห้ามเดา (`src/lib/postTeachingDisplay.ts`)
+
 ## แบบประเมินที่แอดมินแก้ได้ (`src/lib/evaluationTemplate.ts`)
 - ครอบคลุม **แบบสังเกตการสอน** (`SUPERVISION`) และ **แบบประเมินแผนการสอน** (`LESSON_PLAN`); แท็บ "แบบประเมิน" ในงานนิเทศ → `EvaluationTemplateEditor` — **เพิ่ม/แก้ได้เฉพาะหัวหน้างานนิเทศ (`INSTRUCTIONAL_SUPERVISOR`) คนเดียว; SUPER_ADMIN แก้ไม่ได้** และ**เฉพาะตอนใช้บทบาทหัวหน้างานนิเทศอยู่** (`canEditEvaluationTemplatesAs(roles, activeRole)` — บังคับที่หน้าจอ; rules เห็นแค่ claims ทั้งหมด จึงบังคับ activeRole ไม่ได้) (`canEditEvaluationTemplates` ใน `src/lib/supervision.ts` ต้องตรง `etEditor()` ใน rules; ต่างจาก `supManage()` ที่ SUPER_ADMIN ยังเปิดรอบ/จับคู่ได้ — ถ้ายังไม่มีผู้ถือบทบาทนี้ ให้ SUPER_ADMIN มอบบทบาทผ่าน "จัดการสิทธิ์บุคลากร")
 - แบบเป็น **เวอร์ชันที่แก้ย้อนหลังไม่ได้**: `evaluation_template_versions/{KIND}_{n}` (สร้างครั้งเดียว) + ตัวชี้ `evaluation_templates/{KIND}.currentVersion` (+1 ต่อครั้ง, สร้างคู่กันใน transaction เดียว — rules ใช้ `existsAfter`). **เวอร์ชัน 1 = แบบตั้งต้นในโค้ด ไม่มีเอกสาร** (`DEFAULT_SUPERVISION_TEMPLATE` 20 ข้อ/5 หมวด, `DEFAULT_LESSON_PLAN_TEMPLATE` 15 ข้อ) — ผลเก่าทั้งหมดเป็น v1 ต้องแสดง/คิดเท่าเดิม
@@ -490,4 +493,5 @@ Zustand store (`students`, `globalCourses`, `courses`) จะมีข้อม�
 - **ครูผู้สอนคัดรายชื่อเอง** ที่ `ap_rosters/{semesterId}_{courseKey}_{staffId}` (`courseKey` = รหัสวิชา; rules บล็อก 39.5: เจ้าของเขียน, บุคลากรทุกคนอ่าน, ลบไม่ได้): ปุ่ม "จัดรายชื่อ AP" ในหน้าห้องเรียน (`ApRosterEditor`) — **ยังไม่ยืนยัน = แสดงนักเรียนทุกห้องที่รวมกัน** (ไม่เดาแทนครู); ยืนยันแล้ว = เฉพาะที่เลือก ใช้กับเช็คชื่อ/ผังที่นั่ง/สมุดคะแนนของ AP (คะแนนยังเก็บใต้ `className` ของวิชาเหมือนเดิม)
 - **รายงานนักเรียนตกหล่น** (`ApFallThroughReport`): ครู AP เห็นเฉพาะคาบที่ตนสอน (ปุ่ม "ตรวจนักเรียนตกหล่น"), ACADEMIC_HEAD เห็นทั้งโรงเรียน (แท็บ "นักเรียนตกหล่นวิชา AP" ใน ApprovalsPortal); นับเมื่อมีครูยืนยันอย่างน้อย 1 วิชาในคาบนั้น; ⚠️ นักเรียนที่เรียนวิชาอื่นที่ไม่ใช่ AP ในคาบเดียวกันจะขึ้นเป็นตกหล่นด้วย (ระบบไม่มีข้อมูลว่าเลือกวิชาอะไร) — ผู้ใช้ต้องตรวจเอง
 - `ApRosterEditor` ตั้งใจไม่ใช้ `StudentPicker` multi-room: ต้องเห็นหลายห้องพร้อมกันและเอาออกทีละคน/ทั้งห้อง
+- **ช่องระดับชั้นเป็นข้อความเดียวหลายห้อง** (เช่น "M.6/1, M.6/2" ในไฟล์ import): แยกด้วย `splitLevels()` (`,` `;` `&` `+` "และ") ทั้งตอน import และตอนอ่าน (`levelsOfSchedule`) — แยกตอนอ่านด้วยจึงไม่ต้อง import ใหม่เพื่อให้จับคู่ได้
 - ข้อจำกัด: schedule ที่ import ก่อนมี `levels` ต้อง import ใหม่เพื่อให้ได้ครบทุกชั้น (ถ้าแยก doc ตามชั้นอยู่แล้วระบบรวมให้)

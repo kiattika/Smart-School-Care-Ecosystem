@@ -317,6 +317,9 @@ export interface PostTeachingRecord {
   // ตัวช่วยจับคู่ให้แม่นขึ้น เมื่อ courseId ระหว่างเซสชันไม่ตรงกัน (schedule doc id เปลี่ยนรูป ฯลฯ)
   scheduleId?: string;
   subjectCode?: string;
+  subjectName?: string;
+  /** คาบที่สอน (เลขคาบ; 0 = โฮมรูม) — บันทึกเก่าไม่มี ให้ถอดจากท้าย scheduleId */
+  periodNumber?: number;
   level?: string;
   room?: string;
   // ผู้บันทึก — staff doc id (user.staffId) ของครูที่ส่งบันทึก; ใช้ให้ประวัติอยู่กับครูคนเดิมแม้ภายหลังเปลี่ยนครูผู้สอนของคาบ

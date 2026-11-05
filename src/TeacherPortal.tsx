@@ -1,3 +1,4 @@
+import { periodOfRecord, sortPostTeachingRecords } from './lib/postTeachingDisplay';
 import { ConductEntryForm } from './components/studentaffairs/ConductEntryForm';
 import { TeacherConductPanel } from './components/studentaffairs/TeacherConductPanel';
 import { MyConductEntriesPanel } from './components/studentaffairs/MyConductEntriesPanel';
@@ -494,7 +495,7 @@ export function TeacherPortal() {
   const lessonPlanCourses = useMemo(() => myCourses.filter(c => !(c as any).roleLabel && courseKindOf({ code: c.code || '', name: c.name || '' }) !== 'EXEMPT').map(c => ({ code: c.code || '', name: c.name || '', level: c.level || '', room: c.room, subjectType: c.subjectType, schedule: c.schedule })), [myCourses]);
   const myCourseIdSet = useMemo(() => new Set(myCourses.map(c => c.id)), [myCourses]);
   const visiblePostTeachingRecords = useMemo(
-    () => postTeachingRecords.filter(r => canViewPostTeachingRecord(user, r, myCourseIdSet)),
+    () => sortPostTeachingRecords(postTeachingRecords.filter(r => canViewPostTeachingRecord(user, r, myCourseIdSet))),
     [postTeachingRecords, user, myCourseIdSet],
   );
 
@@ -919,6 +920,9 @@ export function TeacherPortal() {
         isLate: isLate,
         scheduleId: postTeachingPeriod?.scheduleId || postTeachingPeriod?.id,
         subjectCode: postTeachingPeriod?.subjectCode || postTeachingCourse.code,
+        ...(postTeachingCourse.name ? { subjectName: postTeachingCourse.name } : {}),
+        ...(postTeachingPeriod?.periodNumber !== undefined && postTeachingPeriod?.periodNumber !== null && !Number.isNaN(Number(postTeachingPeriod.periodNumber))
+          ? { periodNumber: Number(postTeachingPeriod.periodNumber) } : {}),
         level: postTeachingPeriod?.level || postTeachingPeriod?.className || (postTeachingCourse as any).level,
         room: postTeachingPeriod?.room || postTeachingCourse.room,
         // ผู้บันทึก — ให้ประวัติอยู่กับครูคนนี้แม้ภายหลังเปลี่ยนครูผู้สอนของคาบ (ไม่มี staffId = ไม่ใส่ ห้ามเดา)
@@ -1712,8 +1716,15 @@ export function TeacherPortal() {
                                 <h4 className="text-sm font-bold text-white">
                                   {course?.code || record.subjectCode} {course
                                     ? formatCourseTitle(course.courseName, course.level, course.roomName)
-                                    : [record.level, record.room].filter(Boolean).join(' ')}
+                                    : [record.subjectName, [record.level, record.room].filter(Boolean).join(' ')].filter(Boolean).join(' - ')}
                                 </h4>
+                                <div className="text-[11px] text-slate-300 mt-0.5">
+                                  {[
+                                    periodOfRecord(record) !== null ? `คาบที่ ${periodOfRecord(record)}` : '',
+                                    (course?.code || record.subjectCode) ? `รหัสวิชา ${course?.code || record.subjectCode}` : '',
+                                    (course?.courseName || record.subjectName) ? `วิชา ${course?.courseName || record.subjectName}` : '',
+                                  ].filter(Boolean).join(' • ')}
+                                </div>
                                 {authorNote && (
                                   <div className="text-[11px] text-sky-300 mt-0.5">{authorNote}</div>
                                 )}
