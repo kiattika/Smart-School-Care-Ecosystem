@@ -56,17 +56,48 @@ function docDayKey(raw: RawScheduleDoc): string {
   return '';
 }
 
-const PALETTE = ['#e11d48', '#2563eb', '#d97706', '#059669', '#7c3aed', '#0891b2', '#c2410c', '#4f46e5'];
+/**
+ * สีตามตัวอักษรแรกของรหัสวิชา — กลุ่มสาระหลัก + กิจกรรม (ก) แต่ละตัวอักษรได้สีคนละเฉดรอบวงล้อสี
+ * (เรียงตามสีที่ห่างกันมากที่สุด เพื่อให้แยกออกในตารางที่ติดกัน)
+ */
+export const LETTER_COLORS: Record<string, string> = {
+  'ท': '#dc2626', // ภาษาไทย — แดง
+  'ส': '#ea580c', // สังคมศึกษาฯ — ส้ม
+  'ง': '#ca8a04', // การงานอาชีพ — เหลืองทอง
+  'ก': '#65a30d', // กิจกรรมพัฒนาผู้เรียน — เขียวมะนาว
+  'ว': '#16a34a', // วิทยาศาสตร์ฯ — เขียว
+  'พ': '#0284c7', // สุขศึกษาและพลศึกษา — ฟ้า
+  'ค': '#3730a3', // คณิตศาสตร์ — น้ำเงินเข้ม
+  'อ': '#7c3aed', // ภาษาอังกฤษ — ม่วง
+  'ศ': '#c026d3', // ศิลปะ — ม่วงบานเย็น
+};
 
-/** สีการ์ด: HR/CZ เขียวน้ำทะเล, PLC แดงกุหลาบ, นอกนั้นตามตัวอักษรแรกของรหัสวิชา (วิชากลุ่มเดียวกันสีเดียวกัน) */
+/** HR/CZ/PLC ไม่ใช่รหัสวิชาตามกลุ่มสาระ จึงมีสีเฉพาะ */
+const SPECIAL_COLORS: Record<string, string> = { HR: '#0d9488', CZ: '#0d9488', PLC: '#db2777' };
+
+/** ตัวอักษรอื่น (ภาษาต่างประเทศที่ 2 ฯลฯ) — สีเฉพาะที่ไม่ซ้ำกับตารางด้านบน */
+const FALLBACK_PALETTE = ['#92400e', '#475569', '#9f1239', '#0f766e', '#6d28d9', '#a16207'];
+
 export function subjectColor(code: string): string {
   const c = (code || '').trim().toUpperCase();
-  if (c === 'HR' || c === 'CZ') return '#14b8a6';
-  if (c === 'PLC') return '#e11d48';
   if (!c) return '#64748b';
-  let h = 0;
-  for (const ch of Array.from(c)[0]) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
-  return PALETTE[h % PALETTE.length];
+  if (SPECIAL_COLORS[c]) return SPECIAL_COLORS[c];
+  const first = Array.from((code || '').trim())[0];
+  if (LETTER_COLORS[first]) return LETTER_COLORS[first];
+  return FALLBACK_PALETTE[(first.codePointAt(0) || 0) % FALLBACK_PALETTE.length];
+}
+
+/** เรียงตามรหัสครู (staff id) แบบตัวเลขตามธรรมชาติ: sci-2 < sci-10 < sci-20 */
+export function compareStaffId(a: string, b: string): number {
+  return a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' });
+}
+
+/** ค้นหาครูจากรหัสหรือชื่อ (ไม่สนตัวพิมพ์/ช่องว่างซ้ำ); คำค้นว่าง = ทุกคน */
+export function matchesStaffQuery(s: { id: string; name: string }, query: string): boolean {
+  const q = query.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!q) return true;
+  const hay = `${s.id} ${s.name}`.toLowerCase().replace(/\s+/g, ' ');
+  return q.split(' ').every(part => hay.includes(part));
 }
 
 /** ชื่อบุคลากรสำหรับแสดงในตัวเลือก — ลำดับเดียวกับหน้าตารางภาระงานสอน */
