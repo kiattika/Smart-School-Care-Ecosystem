@@ -2109,6 +2109,28 @@ service cloud.firestore {
       allow delete: if myStaffId() != '' && resource.data.teacherStaffId == myStaffId();
     }
 
+    // 39.5 รายชื่อนักเรียนวิชา AP (หลายห้องเรียนคาบเดียวกัน) — ครูผู้สอนคัดเอง/ยืนยันรายชื่อของตนเอง
+    //      doc id = {semesterId}_{courseKey}_{staffId}; บุคลากรทุกคนอ่านได้ (ใช้ตรวจนักเรียนตกหล่น ไม่ใช่ข้อมูลอ่อนไหว);
+    //      ลบไม่ได้ (แก้ทับได้) นักเรียน/ผู้ปกครองไม่มี claim staffId จึงอ่านไม่ได้
+    function apRosterOk(d, rid) {
+      return d.keys().hasOnly(['semesterId', 'courseKey', 'courseName', 'ownerStaffId', 'levels', 'studentIds', 'updatedAt'])
+        && d.ownerStaffId == myStaffId()
+        && d.semesterId is string && d.courseKey is string && d.courseKey.size() > 0 && d.courseKey.size() <= 40
+        && d.courseName is string && d.courseName.size() <= 200
+        && rid == d.semesterId + '_' + d.courseKey + '_' + myStaffId()
+        && d.levels is list && d.levels.size() >= 1 && d.levels.size() <= 8
+        && d.studentIds is list && d.studentIds.size() <= 200
+        && d.updatedAt == request.time;
+    }
+
+    match /ap_rosters/{rid} {
+      allow read: if myStaffId() != '';
+      allow create: if myStaffId() != '' && apRosterOk(request.resource.data, rid);
+      allow update: if myStaffId() != '' && resource.data.ownerStaffId == myStaffId()
+                       && apRosterOk(request.resource.data, rid);
+      allow delete: if false;
+    }
+
     // 40. สรุปสารสนเทศโรงเรียนสำหรับหน้าสาธารณะ /info — อ่านได้ทุกคนแม้ไม่ล็อกอิน (เป็นตัวเลขรวมที่ซ่อนช่อง <5 แล้วเท่านั้น
     //     ไม่มีข้อมูลรายบุคคล); client เขียนไม่ได้เด็ดขาด (Cloud Function scheduledPublicSummary/refreshPublicSummary ใช้ Admin SDK)
     //     อ่านได้เฉพาะเอกสาร 'current' เอกสารเดียว — ห้ามเพิ่มข้อมูลละเอียดลงเอกสารนี้

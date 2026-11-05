@@ -5757,4 +5757,37 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(mDeleteDoc(mDoc(me(), 'user_preferences/u-me')));
     });
   });
+  describe('ap_rosters — รายชื่อนักเรียนวิชา AP ที่ครูคัดเอง', () => {
+    const teacherA = () => asUser('u-ta', ['SUBJECT_TEACHER'], { staffId: 'tch-a' }).firestore();
+    const teacherB = () => asUser('u-tb', ['SUBJECT_TEACHER'], { staffId: 'tch-b' }).firestore();
+    const stu = () => asUser('u-stu-ap', ['STUDENT']).firestore();
+    const body = (over: Record<string, unknown> = {}) => ({
+      semesterId: '2569_2', courseKey: 'ว31201', courseName: 'ฟิสิกส์ AP', ownerStaffId: 'tch-a',
+      levels: ['ม.6/1', 'ม.6/2'], studentIds: ['10001', '10002'], updatedAt: mServerTimestamp(), ...over,
+    });
+    const path = '2569_2_ว31201_tch-a';
+
+    it('ครูเจ้าของสร้าง/แก้ทับได้ ครูอื่นแก้ของคนอื่นไม่ได้ แต่ทุกบุคลากรอ่านได้', async () => {
+      await assertSucceeds(mSetDoc(mDoc(teacherA(), `ap_rosters/${path}`), body()));
+      await assertSucceeds(mSetDoc(mDoc(teacherA(), `ap_rosters/${path}`), body({ studentIds: ['10001'] })));
+      await assertFails(mSetDoc(mDoc(teacherB(), `ap_rosters/${path}`), body({ studentIds: [] })));
+      await assertSucceeds(mGetDoc(mDoc(teacherB(), `ap_rosters/${path}`)));
+    });
+
+    it('ปฏิเสธ: สร้างในนามครูอื่น / id ไม่ตรงรูปแบบ / คีย์แปลกปลอม / เวลาไม่ใช่เซิร์ฟเวอร์ / ลบ', async () => {
+      await assertFails(mSetDoc(mDoc(teacherB(), `ap_rosters/${path}`), body()));
+      await assertFails(mSetDoc(mDoc(teacherA(), 'ap_rosters/anything'), body()));
+      await assertFails(mSetDoc(mDoc(teacherA(), `ap_rosters/${path}`), body({ role: 'x' })));
+      await assertFails(mSetDoc(mDoc(teacherA(), `ap_rosters/${path}`), body({ updatedAt: new Date() })));
+      await assertFails(mSetDoc(mDoc(teacherA(), `ap_rosters/${path}`), body({ levels: [] })));
+      await assertSucceeds(mSetDoc(mDoc(teacherA(), `ap_rosters/${path}`), body()));
+      await assertFails(mDeleteDoc(mDoc(teacherA(), `ap_rosters/${path}`)));
+    });
+
+    it('นักเรียน (ไม่มี staffId) อ่านและเขียนไม่ได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => { await ctx.firestore().doc(`ap_rosters/${path}`).set({ semesterId: '2569_2', ownerStaffId: 'tch-a' }); });
+      await assertFails(mGetDoc(mDoc(stu(), `ap_rosters/${path}`)));
+      await assertFails(mSetDoc(mDoc(stu(), `ap_rosters/${path}`), body()));
+    });
+  });
 });

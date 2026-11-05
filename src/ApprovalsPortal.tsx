@@ -13,6 +13,7 @@ import { SupervisionEmbedded } from './components/supervision/SupervisionWorkspa
 import { subscribeLateAttendanceRequests } from './services/firestoreService';
 import { LateAttendanceRequestRecord } from './types';
 import { resolveLateRequest } from './lib/lateAttendanceFlow';
+import { ApFallThroughReport } from './components/ap/ApFallThroughReport';
 
 /**
  * ApprovalsPortal — หน้าสำหรับ role ระดับบริหารที่ทำหน้าที่ "อนุมัติ" เท่านั้น
@@ -45,8 +46,8 @@ import { resolveLateRequest } from './lib/lateAttendanceFlow';
 
 // แท็บเพิ่มเติมที่ ACADEMIC_HEAD มีสิทธิ์จริงตาม firestore.rules (เขียน elective_activities_config
 // และ house_config ได้) — role อื่นไม่เห็นแท็บเหล่านี้เลย เพราะไม่มีสิทธิ์เขียนจริง
-const EXTRA_TAB_ROLES: Record<string, Array<'elective' | 'house'>> = {
-  ACADEMIC_HEAD: ['elective', 'house'],
+const EXTRA_TAB_ROLES: Record<string, Array<'elective' | 'house' | 'ap'>> = {
+  ACADEMIC_HEAD: ['elective', 'house', 'ap'],
 };
 
 // role ที่เห็น tab "เช็คชื่อย้อนหลัง" — DIRECTOR เห็นแบบ read-only (กำกับดูแล)
@@ -76,7 +77,7 @@ export function ApprovalsPortal() {
   const lateAttendanceReadOnly = !LATE_ATTENDANCE_APPROVER_ROLES.includes(activeRole);
   const extraTabs = EXTRA_TAB_ROLES[activeRole] || [];
 
-  const [tab, setTab] = useState<'substitute' | 'late-attendance' | 'elective' | 'house' | 'supervision' | 'activity' | 'sub-analytics'>('substitute');
+  const [tab, setTab] = useState<'substitute' | 'late-attendance' | 'elective' | 'house' | 'ap' | 'supervision' | 'activity' | 'sub-analytics'>('substitute');
   // กระดิ่งงานค้างพามาที่แท็บนี้ (เฉพาะแท็บที่บทบาทนี้เห็นจริง)
   // แท็บเริ่มต้นของงานนิเทศแบบฝัง (กระดิ่ง "มีแผนรอตรวจ" พาไปแท็บ "ตรวจแผนการสอน")
   const [supervisionStart, setSupervisionStart] = useState<'plans' | ''>('');
@@ -143,6 +144,7 @@ export function ApprovalsPortal() {
             ...(SUPERVISION_TAB_ROLES.includes(activeRole) ? [{ id: 'supervision', label: 'งานนิเทศการสอน', icon: BookOpen }] : []),
             ...(canSeeLateAttendance ? [{ id: 'late-attendance', label: 'เช็คชื่อย้อนหลัง', icon: Clock, badge: pendingLateCount }] : []),
             // แท็บเพิ่มเติมตามสิทธิ์จริงใน firestore.rules — ตอนนี้มีแค่ ACADEMIC_HEAD (elective_activities_config/house_config)
+            ...(extraTabs.includes('ap') ? [{ id: 'ap', label: 'นักเรียนตกหล่นวิชา AP', icon: Users }] : []),
             ...(extraTabs.includes('elective') ? [{ id: 'elective', label: 'จัดการชุมนุม', icon: Users }] : []),
             ...(extraTabs.includes('house') ? [{ id: 'house', label: 'จัดการคณะสี', icon: Palette }] : []),
           ]}
@@ -155,6 +157,7 @@ export function ApprovalsPortal() {
         {tab === 'activity' && <ActivityOverviewPanel level={ACTIVITY_SCHOOL_ROLES.includes(activeRole) ? 'SCHOOL' : 'DEPARTMENT'} />}
         {tab === 'sub-analytics' && <SubstituteTeachingAnalyticsModule views={ACTIVITY_SCHOOL_ROLES.includes(activeRole) ? ['EXECUTIVE'] : ['HOD']} />}
         {tab === 'supervision' && <SupervisionEmbedded startTab={supervisionStart || undefined} />}
+        {tab === 'ap' && extraTabs.includes('ap') && <ApFallThroughReport />}
         {tab === 'elective' && extraTabs.includes('elective') && <ElectiveActivityManagerPage />}
         {tab === 'house' && extraTabs.includes('house') && <HouseManagerPage />}
         {tab === 'late-attendance' && canSeeLateAttendance && (

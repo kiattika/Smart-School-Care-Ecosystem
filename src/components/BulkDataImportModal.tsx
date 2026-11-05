@@ -845,6 +845,8 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
         primaryTeacherName: string;
         unlinkedTeacherName: string | null;
         unlinkedTeacherEmail: string | null;
+        // วิชา AP: หลายชั้น/ห้อง (ม.6/1, ม.6/2) คาบเดียวกันห้องกายภาพเดียวกันได้ doc id เดียวกัน — รวมทุกชั้นไว้ ไม่ให้ชั้นหลังทับชั้นก่อน
+        levels: string[];
       }>();
       if (importType === 'COURSE') {
         for (const row of validRows) {
@@ -855,8 +857,12 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
             const scheduleDocId = scheduleDocIdFor(parsedData.subjectCode, parsedData.room, parsedData.level, slot.dayOfWeek, slot.periodNumber, parsedData.subjectType, teacherKey, sem);
             const entry = mergedTeachersByScheduleId.get(scheduleDocId) || {
               teacherIds: [], primaryTeacherId: null, primaryTeacherEmail: null, primaryTeacherName: '',
-              unlinkedTeacherName: null, unlinkedTeacherEmail: null,
+              unlinkedTeacherName: null, unlinkedTeacherEmail: null, levels: [],
             };
+            {
+              const lv = String(parsedData.level || '').trim();
+              if (lv && !entry.levels.includes(lv)) entry.levels.push(lv);
+            }
             if (parsedData.matchedTeacherId) {
               if (!entry.teacherIds.includes(parsedData.matchedTeacherId)) entry.teacherIds.push(parsedData.matchedTeacherId);
               if (!entry.primaryTeacherId) {
@@ -1014,7 +1020,9 @@ export function BulkDataImportModal({ isOpen, onClose, initialImportType, onImpo
                   subjectCode: parsedData.subjectCode,
                   subjectName: parsedData.subjectName,
                   room: parsedData.room || '',
-                  level: parsedData.level || '',
+                  level: (merged?.levels?.length ?? 0) > 1 ? merged!.levels[0] : (parsedData.level || ''),
+                  // ทุกชั้นที่รวมกันในคาบนี้ (วิชา AP) — มีชั้นเดียว = เก็บเหมือนเดิมเพื่อให้อ่านย้อนหลังได้
+                  levels: merged?.levels?.length ? merged.levels : (parsedData.level ? [parsedData.level] : []),
                   credits: parsedData.credits ?? 0,
                   teacherIds,
                   teacherId: primaryTeacherId,

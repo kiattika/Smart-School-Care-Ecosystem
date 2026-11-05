@@ -72,6 +72,11 @@ import { StudentAssessmentDetailModal } from './components/StudentAssessmentDeta
 import { ActiveLearningClassroom } from './components/ActiveLearningClassroom';
 import { TeachingLoadTable } from './components/TeachingLoadTable';
 import { ClassroomSeatingManager } from './components/ClassroomSeatingManager';
+import { ApRosterEditor } from './components/ap/ApRosterEditor';
+import { ApFallThroughReport } from './components/ap/ApFallThroughReport';
+import { subscribeApRosters } from './services/apRosterService';
+import { isApCourse, apLevelsForSchedule, apCandidates, resolveApRoster, apCourseKey, type ApRosterDoc } from './lib/apCourses';
+import { semesterIdOf } from './lib/lessonPlans';
 import { ClassroomLeaderboard } from './components/ClassroomLeaderboard';
 import { GPSGeofenceCheckinModal } from './components/GPSGeofenceCheckinModal';
 import { SubstituteTeachingModule } from './components/SubstituteTeachingModule';
@@ -129,6 +134,7 @@ export function TeacherPortal() {
   // ภาคเรียนปัจจุบัน ("ภาค/ปี") ของสมุดคะแนน — จากการตั้งค่าโรงเรียน/ปฏิทิน ไม่ฝังตายตัว
   const currentSem = useCurrentSemester();
   const currentTerm = `${currentSem.term}/${currentSem.academicYear}`;
+
   const myDepartmentId = user?.profile?.assignments?.departmentId || '';
   const myDepartmentName = myDepartmentId ? departmentNameOf(myDepartmentId) : '';
 
@@ -177,6 +183,27 @@ export function TeacherPortal() {
     clearError: clearFsError,
     updateScheduleAttendance
   } = useTeacherFirestoreSchedule();
+
+  // วิชา AP: นักเรียนหลายห้อง (ม.6/1, 6/2) เรียนคาบเดียวกัน — ครูคัดรายชื่อเอง (ap_rosters) ดูเงื่อนไขใน src/lib/apCourses.ts
+  const apSemesterId = semesterIdOf(currentSem.academicYear, currentSem.term);
+  const [apRosters, setApRosters] = useState<ApRosterDoc[]>([]);
+  const [apEditorOpen, setApEditorOpen] = useState(false);
+  const [apReportOpen, setApReportOpen] = useState(false);
+  useEffect(() => {
+    if (!user?.staffId) { setApRosters([]); return; }
+    return subscribeApRosters(apSemesterId, setApRosters, (e) => console.warn('subscribeApRosters:', e.message));
+  }, [apSemesterId, user?.staffId]);
+  /** ห้อง/ชั้นทั้งหมดที่รวมกันของวิชา AP รหัสนี้ (ไม่ใช่ AP = null) */
+  const apLevelsForCode = React.useCallback((code: string, name: string): string[] | null => {
+    if (!isApCourse(name)) return null;
+    const mine = (fsSchedules as any[]).filter(sc => String(sc.subjectCode || sc.courseCode || '') === code);
+    const out: string[] = [];
+    for (const sc of mine) for (const l of apLevelsForSchedule(sc, fsSchedules as any[])) if (!out.some(o => isSameRoom(o, l))) out.push(l);
+    return out;
+  }, [fsSchedules]);
+  const apRosterForCode = React.useCallback((code: string): ApRosterDoc | null =>
+    apRosters.find(r => r.courseKey === apCourseKey(code) && r.ownerStaffId === (user?.staffId || '')) || null,
+  [apRosters, user?.staffId]);
 
   // ปฏิทินโรงเรียน (school_calendar_events) — วันหยุดพิเศษ + วันเปิด-ปิดภาคเรียน เรียกที่ระดับบนสุด
   // ของ component เสมอ (ไม่เรียกใน IIFE ข้างล่างที่ render แบบมีเงื่อนไข — จะผิดกฎ hooks)
@@ -581,6 +608,12 @@ export function TeacherPortal() {
 
     setGradebookLoading(true);
 
+    // วิชา AP: รายชื่อ = นักเรียนทุกห้องที่รวมกัน ที่ครูยืนยัน (คะแนนยังเก็บใต้ className ของวิชา เหมือนเดิม)
+    const apLv = apLevelsForCode(courseCode, selectedCourse?.name || '');
+    if (apLv && apLv.length > 0) {
+      setGradebookStudents(resolveApRoster(apCandidates(students || [], apLv), apRosterForCode(courseCode)));
+      setGradebookLoading(false);
+    } else
     // ชุมนุม: รายชื่อมาจาก activity_enrollments (effect ด้านล่าง) ไม่ใช่ getStudentsByClass
     if (!selectedGradebookCourseId.startsWith('elective_')) getStudentsByClass(targetClassName).then((fetchedStudents) => {
       if (fetchedStudents && fetchedStudents.length > 0) {
@@ -612,7 +645,7 @@ export function TeacherPortal() {
         }
       });
     });
-  }, [selectedGradebookCourseId, currentTerm]);
+  }, [selectedGradebookCourseId, currentTerm, apRosters, students?.length]);
 
   // รายชื่อนักเรียนในชุมนุมที่เลือกในสมุดบันทึกคะแนน — real-time จาก activity_enrollments (สมัครจริงเท่านั้น)
   const [gradebookElectiveEnrollments, setGradebookElectiveEnrollments] = useState<ActivityEnrollment[] | null>(null);
@@ -679,6 +712,10 @@ export function TeacherPortal() {
     }
   };
 
+  // วิชา AP ที่เปิดอยู่ (ชุมนุมไม่ใช่) — ห้อง/ชั้นที่รวมกัน; ไม่ใช่ AP = null
+  const activeApLevels = !activeCourseIsElective && activeCourse ? apLevelsForCode(activeCourse.code || '', activeCourse.name || '') : null;
+  const activeApRoster = activeApLevels && activeCourse ? apRosterForCode(activeCourse.code || '') : null;
+
   // Dynamic classroom layout configuration
   const courseStudents = useMemo(() => {
     if (activeCourseIsElective) {
@@ -687,6 +724,9 @@ export function TeacherPortal() {
         .map(e => (students || []).find(s => s.studentId === e.studentId))
         .filter((s): s is Student => !!s);
     }
+    if (activeApLevels) {
+      return resolveApRoster(apCandidates(students || [], activeApLevels), apRosterForCode(activeCourse?.code || ''));
+    }
     const targetRoom = activeCourse?.room;
     if (!targetRoom) return [];
 
@@ -694,7 +734,7 @@ export function TeacherPortal() {
       isSameRoom(s.room, targetRoom) ||
       isSameRoom((s as any).className, targetRoom)
     );
-  }, [activeCourse?.room, students, activeCourseIsElective, electiveEnrollments]);
+  }, [activeCourse?.room, activeCourse?.code, students, activeCourseIsElective, electiveEnrollments, activeApLevels, apRosterForCode]);
 
   const unassignedStudents = courseStudents.filter(s => s.seatIndex === null);
   
@@ -2569,6 +2609,24 @@ export function TeacherPortal() {
 
           {/* Main Seating Manager with Categories, Layout Templates, Locking & Random Picker */}
           <main className="flex-1 flex flex-col overflow-hidden">
+            {/* วิชา AP: หลายห้องเรียนรวมกัน — ครูคัดนักเรียนที่ไม่ได้เลือกวิชานี้ออก แล้วยืนยันรายชื่อ */}
+            {activeApLevels && activeCourse && (
+              <div className="bg-indigo-950/20 border-b border-indigo-800/40 px-4 py-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <p className="text-xs text-indigo-200">
+                  <span className="font-bold">วิชา AP</span> — รวมห้อง {activeApLevels.join(', ') || '-'} · {activeApRoster
+                    ? `รายชื่อที่ยืนยันแล้ว ${courseStudents.length} คน`
+                    : `ยังไม่ได้ยืนยันรายชื่อ (แสดงทุกคน ${courseStudents.length} คน)`}
+                </p>
+                <div className="flex gap-2">
+                  <button onClick={() => setApReportOpen(true)} className="px-3 py-1.5 rounded-lg border border-indigo-500/40 text-indigo-200 hover:bg-indigo-500/10 text-xs font-bold">
+                    ตรวจนักเรียนตกหล่น
+                  </button>
+                  <button onClick={() => setApEditorOpen(true)} className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold">
+                    {activeApRoster ? 'แก้ไขรายชื่อ AP' : 'จัดรายชื่อ AP'}
+                  </button>
+                </div>
+              </div>
+            )}
             {/* รายชื่อผู้สมัครชุมนุม (ELECTIVE) — ถอนชื่อนักเรียนที่ไม่ผ่าน/เต็มได้ ที่นั่งว่างทันที */}
             {activeCourseIsElective && (
               <div className="bg-teal-950/20 border-b border-teal-800/40 p-4 space-y-2 shrink-0">
@@ -2602,7 +2660,7 @@ export function TeacherPortal() {
               onBackToDashboard={() => { setActiveCourse(null); setRetroactiveAttendanceMode(false); setAttendanceDateOverride(null); setLeaveDateOverride(null); }}
               onSelectStudentDetail={(s) => setAssessmentModalStudent(s)}
               attendanceOnly={retroactiveAttendanceMode}
-              overrideStudents={activeCourseIsElective ? courseStudents : undefined}
+              overrideStudents={activeCourseIsElective || activeApLevels ? courseStudents : undefined}
             />
           </main>
         </div>
@@ -2617,6 +2675,32 @@ export function TeacherPortal() {
       )}
         </motion.div>
       </AnimatePresence>
+
+      {apReportOpen && user?.staffId && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true">
+          <div className="bg-slate-900 border border-slate-700/60 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-bold text-white">ตรวจนักเรียนตกหล่นวิชา AP (คาบที่ฉันสอน)</h2>
+              <button onClick={() => setApReportOpen(false)} aria-label="ปิด" className="text-slate-400 hover:text-white"><X className="w-4 h-4" /></button>
+            </div>
+            <ApFallThroughReport onlyStaffId={user.staffId} />
+          </div>
+        </div>
+      )}
+
+      {apEditorOpen && activeApLevels && activeCourse && user?.staffId && (
+        <ApRosterEditor
+          semesterId={apSemesterId}
+          code={activeCourse.code || ''}
+          courseName={activeCourse.name || ''}
+          ownerStaffId={user.staffId}
+          levels={activeApLevels}
+          candidates={apCandidates<Student>(students || [], activeApLevels).map(st => ({ studentId: st.studentId, name: st.name, room: st.room, className: (st as any).className, studentNo: (st as any).studentNo }))}
+          confirmedIds={activeApRoster ? activeApRoster.studentIds : null}
+          onClose={() => setApEditorOpen(false)}
+          onSaved={() => { setApEditorOpen(false); setToast('ยืนยันรายชื่อวิชา AP แล้ว'); setTimeout(() => setToast(null), 3000); }}
+        />
+      )}
 
       {/* ถอนชื่อนักเรียนออกจากชุมนุม (ELECTIVE) — ต้องระบุเหตุผล เช่น "ไม่ผ่านคัดเลือก นศท" */}
       {removingEnrollment && (
