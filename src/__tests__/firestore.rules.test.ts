@@ -5745,7 +5745,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(mSetDoc(ref(), { theme: 'dark', role: 'SUPER_ADMIN', updatedAt: mServerTimestamp() }, { merge: true }));
       await assertFails(mSetDoc(ref(), { photoUrl: 'https://evil.example/x.jpg', updatedAt: mServerTimestamp() }, { merge: true }));
       await assertFails(mSetDoc(ref(), { photoUrl: 'javascript:alert(1)', updatedAt: mServerTimestamp() }, { merge: true }));
-      await assertFails(mSetDoc(ref(), { theme: 'dark', updatedAt: new Date() }, { merge: true }));
+      await assertFails(mSetDoc(ref(), { theme: 'dark', updatedAt: new Date('2020-01-01T00:00:00Z') }, { merge: true })); // เวลาคงที่ในอดีต: new Date() อาจบังเอิญเท่ากับ request.time (มิลลิวินาทีเดียวกัน) จนเทสต์สุ่มล้ม
     });
 
     it('บุคลากรอ่านของผู้อื่นได้ แต่นักเรียนอ่านของครูไม่ได้ และลบไม่ได้', async () => {
@@ -5778,7 +5778,7 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(mSetDoc(mDoc(teacherB(), `ap_rosters/${path}`), body()));
       await assertFails(mSetDoc(mDoc(teacherA(), 'ap_rosters/anything'), body()));
       await assertFails(mSetDoc(mDoc(teacherA(), `ap_rosters/${path}`), body({ role: 'x' })));
-      await assertFails(mSetDoc(mDoc(teacherA(), `ap_rosters/${path}`), body({ updatedAt: new Date() })));
+      await assertFails(mSetDoc(mDoc(teacherA(), `ap_rosters/${path}`), body({ updatedAt: new Date('2020-01-01T00:00:00Z') })));
       await assertFails(mSetDoc(mDoc(teacherA(), `ap_rosters/${path}`), body({ levels: [] })));
       await assertSucceeds(mSetDoc(mDoc(teacherA(), `ap_rosters/${path}`), body()));
       await assertFails(mDeleteDoc(mDoc(teacherA(), `ap_rosters/${path}`)));
