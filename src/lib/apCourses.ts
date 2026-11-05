@@ -14,13 +14,26 @@ export function isApCourse(name: string | undefined | null): boolean {
   return /(?<![A-Za-z])AP(?![A-Za-z])/.test(String(name || ''));
 }
 
-/** ห้อง/ชั้นที่รวมกันในคาบนี้ — `levels` (ใหม่) มาก่อน ไม่มี = ชั้นเดี่ยวตามเดิม */
+/**
+ * ช่องระดับชั้นในไฟล์ตารางสอนอาจเป็นข้อความเดียวที่รวมหลายห้อง เช่น "M.6/1, M.6/2" (วิชา AP) —
+ * แยกด้วย , ; & + / "และ" ก่อนเทียบกับห้องนักเรียน (isSameRoom เทียบได้ทีละห้อง จึงต้องแยกก่อนเสมอ)
+ * หมายเหตุ: "/" ในรูป 6/1 เป็นตัวคั่นห้อง ไม่แยก
+ */
+export function splitLevels(raw: unknown): string[] {
+  const out: string[] = [];
+  for (const part of String(raw ?? '').split(/\s*(?:,|;|،|&|\+)\s*|\s+และ\s+/)) {
+    const s = part.trim();
+    if (s && !out.some(o => isSameRoom(o, s))) out.push(s);
+  }
+  return out;
+}
+
+/** ห้อง/ชั้นที่รวมกันในคาบนี้ — `levels` (ใหม่) มาก่อน ไม่มี = ชั้นเดี่ยวตามเดิม; แต่ละค่าแยกห้องที่ติดกันเป็นข้อความเดียวให้ด้วย */
 export function levelsOfSchedule(sch: { levels?: unknown; level?: unknown }): string[] {
   const raw = Array.isArray(sch.levels) ? sch.levels : [];
   const out: string[] = [];
   for (const v of [...raw, sch.level]) {
-    const s = String(v ?? '').trim();
-    if (s && !out.some(o => isSameRoom(o, s))) out.push(s);
+    for (const s of splitLevels(v)) if (!out.some(o => isSameRoom(o, s))) out.push(s);
   }
   return out;
 }
