@@ -1694,6 +1694,25 @@ service cloud.firestore {
       allow delete: if myStaffId() != '' && resource.data.teacherStaffId == myStaffId();
     }
 
+    function apRosterOk(d, rid) {
+      return d.keys().hasOnly(['semesterId', 'courseKey', 'courseName', 'ownerStaffId', 'levels', 'studentIds', 'updatedAt'])
+        && d.ownerStaffId == myStaffId()
+        && d.semesterId is string && d.courseKey is string && d.courseKey.size() > 0 && d.courseKey.size() <= 40
+        && d.courseName is string && d.courseName.size() <= 200
+        && rid == d.semesterId + '_' + d.courseKey + '_' + myStaffId()
+        && d.levels is list && d.levels.size() >= 1 && d.levels.size() <= 8
+        && d.studentIds is list && d.studentIds.size() <= 200
+        && d.updatedAt == request.time;
+    }
+
+    match /ap_rosters/{rid} {
+      allow read: if myStaffId() != '';
+      allow create: if myStaffId() != '' && apRosterOk(request.resource.data, rid);
+      allow update: if myStaffId() != '' && resource.data.ownerStaffId == myStaffId()
+                       && apRosterOk(request.resource.data, rid);
+      allow delete: if false;
+    }
+
     match /public_summary/{docId} {
       allow get: if docId == 'current';
       allow list, write: if false;
