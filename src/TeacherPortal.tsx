@@ -22,6 +22,7 @@ import { MyTeachingStatsPanel } from './components/stats/TeacherStatsPanels';
 import { visibleSidebarItems, resolveActiveSidebarId } from './components/shared/portalSidebarLogic';
 import {
   BookOpen as NavCoursesIcon,
+  CalendarCog as NavWeekTimetableIcon,
   MapPin as NavGpsIcon,
   Layers as NavLoadIcon,
   Trophy as NavLeaderboardIcon,
@@ -38,6 +39,7 @@ import { useRealStudents } from './hooks/useRealStudents';
 import { useTeacherActivityStudentCount } from './hooks/useCourseActivityPoints';
 import { useLeaveStudentIds } from './hooks/useApprovedLeaveDays';
 import { Pp5Sheet } from './components/teacher/Pp5Sheet';
+import { TeacherWeekTimetable } from './components/teacher/TeacherWeekTimetable';
 import { buildPp5Rows, attendanceForCourse } from './lib/pp5';
 import { scoreSettingToForm } from './lib/scoreSettings';
 import { subscribeCourseScoreSettings, saveCourseScoreSetting } from './services/courseScoreSettingService';
@@ -482,7 +484,7 @@ export function TeacherPortal() {
   const [viewingRecord, setViewingRecord] = useState<PostTeachingRecord | null>(null);
 
   // New States for Dashboard Navigation
-  const [dashboardTab, setDashboardTab] = useState<'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats' | 'conduct'>('courses');
+  const [dashboardTab, setDashboardTab] = useState<'courses' | 'week-timetable' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats' | 'conduct'>('courses');
   // กระดิ่งงานค้างพามาที่แท็บนี้ (คำขอสอนแทนรอยืนยัน / ผลคำขอเช็คชื่อย้อนหลังของฉัน) — ออกจากห้องเรียนกลับหน้าแดชบอร์ดก่อน
   useConsumeBellNav(user?.activeRole || 'SUBJECT_TEACHER', ['substitutions', 'courses', 'my-lesson-plans', 'my-supervision', 'conduct'], (t) => { setView('dashboard'); setDashboardTab(t as typeof dashboardTab); });
   const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
@@ -503,13 +505,14 @@ export function TeacherPortal() {
   const activityStudentCount = useTeacherActivityStudentCount();
   const availableDashboardTabs = useMemo(() => {
     const rawTabs: Array<{
-      id: 'courses' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats' | 'conduct';
+      id: 'courses' | 'week-timetable' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats' | 'conduct';
       label: string;
       icon: React.ComponentType<{ className?: string }>;
       count: number;
       hideForRoles?: string[];
     }> = [
       { id: 'courses', label: 'ตารางสอนและการเข้าเรียน', icon: NavCoursesIcon, count: myCourses.length },
+      { id: 'week-timetable', label: 'ตารางสอนรายสัปดาห์ (ตรวจสอบ)', icon: NavWeekTimetableIcon, count: 0 },
       { id: 'attendance-stats', label: 'สถิติการเข้าเรียนรายบุคคล', icon: NavAttendanceStatsIcon, count: 0 },
       { id: 'gps-geofence', label: 'พิกัดดาวเทียม & เช็คอิน (GPS Geofence)', icon: NavGpsIcon, count: 0 },
       { id: 'teaching-load', label: 'ตารางภาระงานสอน (Teaching Load)', icon: NavLoadIcon, count: 6, hideForRoles: ['SUBJECT_TEACHER'] },
@@ -2077,6 +2080,12 @@ export function TeacherPortal() {
                     })()}
                   </div>
                 )}
+              </div>
+            )}
+
+            {dashboardTab === 'week-timetable' && (
+              <div className="animate-in fade-in duration-300">
+                <TeacherWeekTimetable ownStaffId={staffIdOf(user)} />
               </div>
             )}
 
