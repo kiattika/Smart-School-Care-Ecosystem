@@ -368,9 +368,14 @@ service cloud.firestore {
                     || (isSeatingTeacher() && seatLayoutIdIsMine(layoutId)
                         && resource.data.get('ownerStaffId', '') == myStaffId());
 
-      match /{document=**} {
+      match /groups/{groupId} {
         allow read: if isSignedIn();
         allow write: if hasRole('SUPER_ADMIN') || (isSeatingTeacher() && seatLayoutIdIsMine(layoutId));
+
+        match /seats/{seatId} {
+          allow read: if isSignedIn();
+          allow write: if hasRole('SUPER_ADMIN') || (isSeatingTeacher() && seatLayoutIdIsMine(layoutId));
+        }
       }
     }
 
