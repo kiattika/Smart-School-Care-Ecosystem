@@ -446,26 +446,54 @@ service cloud.firestore {
     }
 
     // 13. Seating Layouts & Subcollections (groups, seats)
+    // ผังที่นั่ง 1 ใบ = 1 ครูเจ้าของ (ดู src/lib/seatingLayoutKey.ts): id ต้องขึ้นต้น `seat_{myStaffId}__` และ
+    // ownerStaffId ต้องเป็น staffId ของผู้เขียน — ครูแก้ผังของครูท่านอื่นไม่ได้ (อยากได้เหมือนกันให้คัดลอกเป็นสำเนา)
+    // ผังรุ่นเก่า (id `layout_…` ไม่มี ownerStaffId) และแม่แบบ: เขียนได้เฉพาะ SUPER_ADMIN; อ่านได้ทุกคนที่ล็อกอิน (ไม่มีข้อมูลนักเรียน)
+    function isSeatingTeacher() {
+      return hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER');
+    }
+    // layoutId (หรือ id ผังที่อ้างถึง) เป็นของ staffId ของผู้เขียนจริง — ตรวจจากโครงสร้าง id ไม่ต้อง get() เอกสารผัง
+    function seatLayoutIdIsMine(layoutId) {
+      return layoutId is string
+        && myStaffId() is string && myStaffId() != ''
+        && layoutId.split('__').size() >= 2
+        && layoutId.split('__')[0] == 'seat_' + myStaffId();
+    }
     match /seating_layouts/{layoutId} {
       allow read: if isSignedIn();
-      allow write: if hasRole('SUPER_ADMIN') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER');
+      allow create: if hasRole('SUPER_ADMIN')
+                    || (isSeatingTeacher() && seatLayoutIdIsMine(layoutId)
+                        && request.resource.data.get('ownerStaffId', '') == myStaffId());
+      allow update: if hasRole('SUPER_ADMIN')
+                    || (isSeatingTeacher() && seatLayoutIdIsMine(layoutId)
+                        && resource.data.get('ownerStaffId', '') == myStaffId()
+                        && request.resource.data.get('ownerStaffId', '') == myStaffId());
+      allow delete: if hasRole('SUPER_ADMIN')
+                    || (isSeatingTeacher() && seatLayoutIdIsMine(layoutId)
+                        && resource.data.get('ownerStaffId', '') == myStaffId());
 
       match /{document=**} {
         allow read: if isSignedIn();
-        allow write: if hasRole('SUPER_ADMIN') || hasRole('SUBJECT_TEACHER') || hasRole('HOMEROOM_TEACHER');
+        allow write: if hasRole('SUPER_ADMIN') || (isSeatingTeacher() && seatLayoutIdIsMine(layoutId));
       }
     }
 
     // 14. Seating Assignments (History and Active)
+    // เขียนได้เฉพาะเจ้าของผัง (layoutId ขึ้นต้น seat_{myStaffId}__) และห้ามย้ายรายการไปผังอื่น; ประวัติลบ/แก้ย้อนหลังโดยครูท่านอื่นไม่ได้
     match /seating_assignments/{assignmentId} {
       allow read: if hasRole('SUPER_ADMIN') || 
                      isExec() || 
                      hasRole('SUBJECT_TEACHER') || 
                      hasRole('HOMEROOM_TEACHER') || 
                      (isSignedIn() && (resource.data.studentId == request.auth.uid || resource.data.parentUid == request.auth.uid));
-      allow write: if hasRole('SUPER_ADMIN') || 
-                      hasRole('SUBJECT_TEACHER') || 
-                      hasRole('HOMEROOM_TEACHER');
+      allow create: if hasRole('SUPER_ADMIN')
+                    || (isSeatingTeacher() && seatLayoutIdIsMine(request.resource.data.get('layoutId', '')));
+      allow update: if hasRole('SUPER_ADMIN')
+                    || (isSeatingTeacher()
+                        && seatLayoutIdIsMine(resource.data.get('layoutId', ''))
+                        && request.resource.data.get('layoutId', '') == resource.data.get('layoutId', ''));
+      allow delete: if hasRole('SUPER_ADMIN')
+                    || (isSeatingTeacher() && seatLayoutIdIsMine(resource.data.get('layoutId', '')));
     }
 
     // 15. Gate Attendance Logs

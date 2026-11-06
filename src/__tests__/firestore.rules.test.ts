@@ -1022,51 +1022,102 @@ describe.skipIf(!EMULATOR_HOST)('Firestore Security Rules Engine Unit Tests', ()
       await assertFails(asAnonymous().firestore().doc('seating_layouts/layout_m58').get());
     });
 
-    it('allows teachers and SUPER_ADMIN to create and update seating layouts and nested groups/seats', async () => {
+    it('ครูเจ้าของผัง (id seat_{staffId}__… + ownerStaffId ตรง) สร้าง/แก้ผังและกลุ่ม/ที่นั่งย่อยได้; SUPER_ADMIN เขียนได้', async () => {
+      const T1 = (r: string = 'SUBJECT_TEACHER') => asUser('uid-t1', [r], { staffId: 'tch-1' });
       await assertSucceeds(
-        asRole('SUBJECT_TEACHER').firestore().doc('seating_layouts/layout_new').set({
-          name: 'New Layout',
-          room: 'ม.5/8',
-          category: 'CLASSROOM'
+        T1().firestore().doc('seating_layouts/seat_tch-1__C_5-8_546').set({
+          name: 'New Layout', room: 'ม.5/8', category: 'CLASSROOM', ownerStaffId: 'tch-1', targetKey: 'C_5-8_546'
         })
       );
       await assertSucceeds(
-        asRole('HOMEROOM_TEACHER').firestore().doc('seating_layouts/layout_new/groups/group_1').set({
-          name: 'Group 1',
-          capacity: 4
-        })
+        T1().firestore().doc('seating_layouts/seat_tch-1__C_5-8_546').update({ isLocked: true })
       );
       await assertSucceeds(
-        asRole('SUPER_ADMIN').firestore().doc('seating_layouts/layout_new/groups/group_1/seats/seat_1').set({
-          seatNumber: 1
-        })
+        T1('HOMEROOM_TEACHER').firestore().doc('seating_layouts/seat_tch-1__C_5-8_546/groups/group_1').set({ name: 'Group 1', capacity: 4 })
+      );
+      await assertSucceeds(
+        asRole('SUPER_ADMIN').firestore().doc('seating_layouts/seat_tch-1__C_5-8_546/groups/group_1/seats/seat_1').set({ seatNumber: 1 })
       );
       await assertFails(
-        asUser('student-101', ['STUDENT']).firestore().doc('seating_layouts/layout_new').set({
-          name: 'Hacked Layout'
-        })
+        asUser('student-101', ['STUDENT']).firestore().doc('seating_layouts/seat_tch-1__C_5-8_546').set({ name: 'Hacked Layout' })
       );
+    });
+
+    it('ครูแก้/สร้างผังในชื่อครูท่านอื่นไม่ได้ (id ไม่ใช่ของตน / ownerStaffId ปลอม / ไม่มี staffId)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('seating_layouts/seat_tch-2__C_5-8_546').set({ name: 'ของครู 2', ownerStaffId: 'tch-2', totalCapacity: 40 });
+        await ctx.firestore().doc('seating_layouts/seat_tch-2__C_5-8_546/groups/g1').set({ name: 'G', capacity: 2 });
+      });
+      const t1 = asUser('uid-t1', ['SUBJECT_TEACHER'], { staffId: 'tch-1' });
+      // แก้/ลบผังของครู 2
+      await assertFails(t1.firestore().doc('seating_layouts/seat_tch-2__C_5-8_546').update({ isLocked: true }));
+      await assertFails(t1.firestore().doc('seating_layouts/seat_tch-2__C_5-8_546').delete());
+      await assertFails(t1.firestore().doc('seating_layouts/seat_tch-2__C_5-8_546/groups/g1').set({ name: 'แอบแก้', capacity: 9 }));
+      // สร้างผังด้วย id ของครู 2 (จองที่ล่วงหน้า) / ใส่ ownerStaffId เป็นครู 2
+      await assertFails(t1.firestore().doc('seating_layouts/seat_tch-2__C_5-9_546').set({ name: 'x', ownerStaffId: 'tch-1' }));
+      await assertFails(t1.firestore().doc('seating_layouts/seat_tch-1__C_5-9_546').set({ name: 'x', ownerStaffId: 'tch-2' }));
+      await assertFails(t1.firestore().doc('seating_layouts/seat_tch-1__C_5-9_546').set({ name: 'ไม่มี owner' }));
+      // id คล้ายกันแต่เป็นรหัสอื่น (tch-1 ไม่ใช่ prefix ของ tch-10)
+      await assertFails(t1.firestore().doc('seating_layouts/seat_tch-10__C_5-9_546').set({ name: 'x', ownerStaffId: 'tch-1' }));
+      // ไม่มี claim staffId
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('seating_layouts/seat_tch-1__C_5-9_546').set({ name: 'x', ownerStaffId: 'tch-1' }));
+      // ครูอ่านผังของครู 2 ได้ (ไว้คัดลอก)
+      await assertSucceeds(t1.firestore().doc('seating_layouts/seat_tch-2__C_5-8_546').get());
+      await assertSucceeds(t1.firestore().doc('seating_layouts/seat_tch-2__C_5-8_546/groups/g1').get());
+    });
+
+    it('ผังรุ่นเก่า (ไม่มี ownerStaffId) แก้ได้เฉพาะ SUPER_ADMIN', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('seating_layouts/layout_old').set({ name: 'เก่า', totalCapacity: 40 });
+      });
+      await assertFails(asUser('uid-t1', ['SUBJECT_TEACHER'], { staffId: 'tch-1' }).firestore().doc('seating_layouts/layout_old').update({ isLocked: true }));
+      await assertSucceeds(asRole('SUPER_ADMIN').firestore().doc('seating_layouts/layout_old').update({ isLocked: true }));
+    });
+
+    it('ค้นผังของครูท่านอื่นที่ห้องเดียวกันด้วย targetKey ได้ (listLayoutsByTargetKey)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('seating_layouts/seat_tch-2__C_5-8_546').set({ name: 'ของครู 2', ownerStaffId: 'tch-2', targetKey: 'C_5-8_546' });
+      });
+      const t1 = asUser('uid-t1', ['SUBJECT_TEACHER'], { staffId: 'tch-1' });
+      const snap = await assertSucceeds(getDocs(query(collection(t1.firestore(), 'seating_layouts'), where('targetKey', '==', 'C_5-8_546'))));
+      expect(snap.docs.map(d => d.id)).toEqual(['seat_tch-2__C_5-8_546']);
     });
   });
 
   // 14. seating_assignments collection
   describe('seating_assignments collection', () => {
-    it('allows teachers and admins to read and write assignments', async () => {
+    it('เจ้าของผังเขียนรายการนั่งได้ ครูทุกคน/ผู้บริหารอ่านได้', async () => {
+      const t1 = asUser('uid-t1', ['SUBJECT_TEACHER'], { staffId: 'tch-1' });
       await assertSucceeds(
-        asRole('SUBJECT_TEACHER').firestore().doc('seating_assignments/assign_001').set({
-          layoutId: 'layout_m58',
+        t1.firestore().doc('seating_assignments/assign_001').set({
+          layoutId: 'seat_tch-1__C_5-8_546',
           studentId: 'std_38501',
           seatId: 'seat_1',
           effectiveFrom: '2026-08-25T08:00:00Z',
           effectiveTo: null
         })
       );
-      await assertSucceeds(
-        asRole('HOMEROOM_TEACHER').firestore().doc('seating_assignments/assign_001').get()
-      );
-      await assertSucceeds(
-        asRole('EXECUTIVE').firestore().doc('seating_assignments/assign_001').get()
-      );
+      await assertSucceeds(t1.firestore().doc('seating_assignments/assign_001').update({ effectiveTo: '2026-09-01T00:00:00Z' }));
+      await assertSucceeds(asRole('HOMEROOM_TEACHER').firestore().doc('seating_assignments/assign_001').get());
+      await assertSucceeds(asRole('EXECUTIVE').firestore().doc('seating_assignments/assign_001').get());
+    });
+
+    it('ครูเขียน/แก้/ลบรายการนั่งของผังครูท่านอื่นไม่ได้ และย้ายรายการไปผังอื่นไม่ได้', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await ctx.firestore().doc('seating_assignments/assign_of_t2').set({
+          layoutId: 'seat_tch-2__C_5-8_546', studentId: 'std_1', seatId: 'seat_1', effectiveFrom: '2026-08-25T08:00:00Z', effectiveTo: null,
+        });
+        await ctx.firestore().doc('seating_assignments/assign_of_t1').set({
+          layoutId: 'seat_tch-1__C_5-8_546', studentId: 'std_2', seatId: 'seat_2', effectiveFrom: '2026-08-25T08:00:00Z', effectiveTo: null,
+        });
+      });
+      const t1 = asUser('uid-t1', ['SUBJECT_TEACHER'], { staffId: 'tch-1' });
+      await assertFails(t1.firestore().doc('seating_assignments/assign_x').set({ layoutId: 'seat_tch-2__C_5-8_546', studentId: 'std_3', seatId: 's', effectiveFrom: 'x' }));
+      await assertFails(t1.firestore().doc('seating_assignments/assign_of_t2').update({ effectiveTo: '2026-09-01T00:00:00Z' }));
+      await assertFails(t1.firestore().doc('seating_assignments/assign_of_t2').delete());
+      await assertFails(t1.firestore().doc('seating_assignments/assign_of_t1').update({ layoutId: 'seat_tch-2__C_5-8_546' }));
+      await assertFails(t1.firestore().doc('seating_assignments/assign_nolayout').set({ studentId: 'std_3', seatId: 's', effectiveFrom: 'x' }));
+      await assertFails(asRole('SUBJECT_TEACHER').firestore().doc('seating_assignments/assign_nostaff').set({ layoutId: 'seat_tch-1__C_5-8_546', studentId: 'std_3', seatId: 's', effectiveFrom: 'x' }));
     });
 
     it('allows a student to read their own seating assignment', async () => {
