@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classKeyOf, physicalRoomKeyOf, seatingTargetFor, seatingTargetLabel, layoutBelongsTo, SEAT_NO_ROOM } from '../lib/seatingLayoutKey';
+import { classKeyOf, physicalRoomOnly, physicalRoomKeyOf, seatingTargetFor, seatingTargetLabel, layoutBelongsTo, SEAT_NO_ROOM } from '../lib/seatingLayoutKey';
 import { listSeatingPlanItems } from '../lib/seatingPlanTargets';
 
 describe('seatingLayoutKey', () => {
@@ -17,6 +17,13 @@ describe('seatingLayoutKey', () => {
     expect(physicalRoomKeyOf(' [953] ')).toBe('953');
     expect(physicalRoomKeyOf('')).toBe(SEAT_NO_ROOM);
     expect(physicalRoomKeyOf(undefined)).toBe(SEAT_NO_ROOM);
+  });
+
+  it('room ที่ fallback เป็นชื่อชั้น = ไม่ระบุห้องกายภาพ', () => {
+    expect(physicalRoomOnly('ม.5/8')).toBe('');
+    expect(physicalRoomOnly('M.4/2')).toBe('');
+    expect(physicalRoomOnly('953')).toBe('953');
+    expect(physicalRoomOnly(undefined)).toBe('');
   });
 
   it('วิชาเดียวกันสอนต่างห้องกายภาพ = คนละผัง; ต่างวิชาห้องเดียวกัน = ผังเดียวกัน (คีย์ไม่มีรหัสวิชา)', () => {

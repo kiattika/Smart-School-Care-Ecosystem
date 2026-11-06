@@ -31,6 +31,15 @@ export function classKeyOf(level: string | null | undefined): string | null {
   return m ? `${Number(m[1])}-${Number(m[2])}` : null;
 }
 
+/**
+ * ช่อง room ของตารางสอนบางแถวไม่มีห้องกายภาพ ระบบจึง fallback เป็นชื่อชั้น (เช่น "ม.5/8") —
+ * ถ้าค่านั้นหน้าตาเป็นชั้น/ห้องเรียน ถือว่า "ไม่ระบุห้องกายภาพ" (คืนค่าว่าง) ไม่เอามาเป็นห้อง
+ */
+export function physicalRoomOnly(room: string | null | undefined): string {
+  const r = String(room ?? '').trim();
+  return r && !classKeyOf(r) ? r : '';
+}
+
 /** ห้องกายภาพ (เช่น 546, "[953]") → ส่วนของคีย์; ว่าง = `noroom` */
 export function physicalRoomKeyOf(room: string | null | undefined): string {
   const cleaned = String(room ?? '').replace(/[\[\]]/g, '').trim();

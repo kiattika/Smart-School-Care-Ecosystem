@@ -8,7 +8,7 @@
 import { isApCourse, apLevelsForSchedule, levelsOfSchedule } from './apCourses';
 import { isStaffAssigned } from './staffIdentity';
 import { normalizeEmail } from './normalizeEmail';
-import { classKeyOf, seatingTargetFor, seatingTargetLabel, type SeatingLayoutKind, type SeatingTarget } from './seatingLayoutKey';
+import { classKeyOf, physicalRoomOnly, seatingTargetFor, seatingTargetLabel, type SeatingLayoutKind, type SeatingTarget } from './seatingLayoutKey';
 import type { RawScheduleDoc } from './studentDaySchedule';
 
 export interface SeatingPlanItem {
@@ -53,7 +53,7 @@ export function listSeatingPlanItems(input: {
 
     const code = String(raw.subjectCode || raw.courseCode || '').trim();
     const name = String(raw.subjectName || raw.courseName || '').trim();
-    const physicalRoom = String(raw.room || '').trim();
+    const physicalRoom = physicalRoomOnly(String(raw.room || ''));
     const ap = isApCourse(name);
 
     let kind: SeatingLayoutKind;

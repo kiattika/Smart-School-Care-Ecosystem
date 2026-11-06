@@ -7,6 +7,7 @@ import { cn, parseThaiSchedule, isSameRoom, formatCourseTitle } from "./lib/util
 import React, { useState, useEffect, useMemo } from 'react';
 import { useTeacherFirestoreSchedule, isTeacherEmailMatch } from './hooks/useTeacherFirestoreSchedule';
 import { isStaffAssigned, isStaffIn, staffIdOf } from './lib/staffIdentity';
+import { seatingTargetFor, physicalRoomOnly } from './lib/seatingLayoutKey';
 import { canViewPostTeachingRecord, postTeachingAuthorNote } from './lib/postTeachingVisibility';
 import { useDepartments } from './hooks/useDepartments';
 import { useCurrentSemester } from './hooks/useCurrentSemester';
@@ -23,6 +24,7 @@ import { visibleSidebarItems, resolveActiveSidebarId } from './components/shared
 import {
   BookOpen as NavCoursesIcon,
   CalendarCog as NavWeekTimetableIcon,
+  LayoutGrid as NavSeatingPlanIcon,
   MapPin as NavGpsIcon,
   Layers as NavLoadIcon,
   Trophy as NavLeaderboardIcon,
@@ -75,6 +77,7 @@ import { StudentAssessmentDetailModal } from './components/StudentAssessmentDeta
 import { ActiveLearningClassroom } from './components/ActiveLearningClassroom';
 import { TeachingLoadTable } from './components/TeachingLoadTable';
 import { ClassroomSeatingManager } from './components/ClassroomSeatingManager';
+import { TeacherSeatingPlanner } from './components/teacher/TeacherSeatingPlanner';
 import { ApRosterEditor } from './components/ap/ApRosterEditor';
 import { ApFallThroughReport } from './components/ap/ApFallThroughReport';
 import { subscribeApRosters } from './services/apRosterService';
@@ -484,7 +487,7 @@ export function TeacherPortal() {
   const [viewingRecord, setViewingRecord] = useState<PostTeachingRecord | null>(null);
 
   // New States for Dashboard Navigation
-  const [dashboardTab, setDashboardTab] = useState<'courses' | 'week-timetable' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats' | 'conduct'>('courses');
+  const [dashboardTab, setDashboardTab] = useState<'courses' | 'week-timetable' | 'seating-plan' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats' | 'conduct'>('courses');
   // กระดิ่งงานค้างพามาที่แท็บนี้ (คำขอสอนแทนรอยืนยัน / ผลคำขอเช็คชื่อย้อนหลังของฉัน) — ออกจากห้องเรียนกลับหน้าแดชบอร์ดก่อน
   useConsumeBellNav(user?.activeRole || 'SUBJECT_TEACHER', ['substitutions', 'courses', 'my-lesson-plans', 'my-supervision', 'conduct'], (t) => { setView('dashboard'); setDashboardTab(t as typeof dashboardTab); });
   const [isTeacherGPSModalOpen, setIsTeacherGPSModalOpen] = useState(false);
@@ -505,7 +508,7 @@ export function TeacherPortal() {
   const activityStudentCount = useTeacherActivityStudentCount();
   const availableDashboardTabs = useMemo(() => {
     const rawTabs: Array<{
-      id: 'courses' | 'week-timetable' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats' | 'conduct';
+      id: 'courses' | 'week-timetable' | 'seating-plan' | 'teaching-load' | 'leaderboard' | 'substitutions' | 'records' | 'gradebook' | 'gps-geofence' | 'attendance-stats' | 'my-supervision' | 'my-teaching-projects' | 'my-lesson-plans' | 'my-plc' | 'my-portfolio' | 'my-stats' | 'conduct';
       label: string;
       icon: React.ComponentType<{ className?: string }>;
       count: number;
@@ -513,6 +516,7 @@ export function TeacherPortal() {
     }> = [
       { id: 'courses', label: 'ตารางสอนและการเข้าเรียน', icon: NavCoursesIcon, count: myCourses.length },
       { id: 'week-timetable', label: 'ตารางสอนรายสัปดาห์ (ตรวจสอบ)', icon: NavWeekTimetableIcon, count: 0 },
+      { id: 'seating-plan', label: 'จัดผังที่นั่ง (ล่วงหน้า)', icon: NavSeatingPlanIcon, count: 0 },
       { id: 'attendance-stats', label: 'สถิติการเข้าเรียนรายบุคคล', icon: NavAttendanceStatsIcon, count: 0 },
       { id: 'gps-geofence', label: 'พิกัดดาวเทียม & เช็คอิน (GPS Geofence)', icon: NavGpsIcon, count: 0 },
       { id: 'teaching-load', label: 'ตารางภาระงานสอน (Teaching Load)', icon: NavLoadIcon, count: 6, hideForRoles: ['SUBJECT_TEACHER'] },
@@ -720,6 +724,16 @@ export function TeacherPortal() {
   const activeApLevels = !activeCourseIsElective && activeCourse ? apLevelsForCode(activeCourse.code || '', activeCourse.name || '') : null;
   const activeApRoster = activeApLevels && activeCourse ? apRosterForCode(activeCourse.code || '') : null;
 
+  // ผังที่นั่งของคาบที่เปิดอยู่: ผูกกับครูเจ้าของ + ชั้น/ห้องเรียน + ห้องกายภาพ (ไม่รวมรหัสวิชา) — ดู lib/seatingLayoutKey
+  const activeSeatingTarget = useMemo(() => {
+    if (!activeCourse) return null;
+    const ownerStaffId = staffIdOf(user);
+    if (activeElectiveConfigId) return seatingTargetFor({ ownerStaffId, kind: 'ELECTIVE', activityId: activeElectiveConfigId });
+    if (activeApLevels) return seatingTargetFor({ ownerStaffId, kind: 'AP', code: activeCourse.code, physicalRoom: activeCourse.physicalRoom });
+    return seatingTargetFor({ ownerStaffId, level: activeCourse.level || activeCourse.room, physicalRoom: activeCourse.physicalRoom });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCourse?.id, activeCourse?.code, activeCourse?.level, activeCourse?.room, activeCourse?.physicalRoom, activeElectiveConfigId, activeApLevels?.join('|'), user?.staffId]);
+
   // Dynamic classroom layout configuration
   const courseStudents = useMemo(() => {
     if (activeCourseIsElective) {
@@ -869,7 +883,7 @@ export function TeacherPortal() {
     if (res.conditionNote) { setToast(`อนุมัติแบบมีเงื่อนไข: ${res.conditionNote} — ${CONDITION_REMINDER_TH}`); setTimeout(() => setToast(null), 8000); }
     setAttendanceDateOverride(req.teachingDate);
     setLeaveDateOverride(req.teachingDate);
-    setActiveCourse({ ...course, periodIndex: req.periodNumber, room: req.level || course.room, level: req.level || course.level });
+    setActiveCourse({ ...course, periodIndex: req.periodNumber, room: req.level || course.room, level: req.level || course.level, physicalRoom: physicalRoomOnly(course.room) });
     setCurrentPeriod(PERIODS[req.periodNumber] || `คาบ ${req.periodNumber}`);
     setRetroactiveAttendanceMode(true);
     setView('class');
@@ -1532,7 +1546,8 @@ export function TeacherPortal() {
                           periodIndex: pIndex,
                           periodRange,
                           room: periodItem?.className || course.room,
-                          level: periodItem?.className || course.level
+                          level: periodItem?.className || course.level,
+                          physicalRoom: physicalRoomOnly(periodItem?.room)
                         } as any);
                         setCurrentPeriod(PERIODS[pIndex] || `คาบ ${pIndex}`);
                         setView('class');
@@ -1549,7 +1564,7 @@ export function TeacherPortal() {
                         if (cond) { setToast(`อนุมัติแบบมีเงื่อนไข: ${cond} — ${CONDITION_REMINDER_TH}`); setTimeout(() => setToast(null), 8000); }
                         // อนุมัติแล้ว → เข้าเช็คชื่อย้อนหลังได้ (โหมดเช็คชื่ออย่างเดียว)
                         if (course) {
-                          setActiveCourse({ ...course, periodIndex: periodItem.periodNumber, room: periodItem.className || course.room, level: periodItem.className || course.level });
+                          setActiveCourse({ ...course, periodIndex: periodItem.periodNumber, room: periodItem.className || course.room, level: periodItem.className || course.level, physicalRoom: physicalRoomOnly(periodItem.room) });
                           setCurrentPeriod(PERIODS[periodItem.periodNumber] || `คาบ ${periodItem.periodNumber}`);
                           setRetroactiveAttendanceMode(true);
                           setView('class');
@@ -1597,7 +1612,8 @@ export function TeacherPortal() {
                           ...course,
                           periodIndex: pIndex,
                           room: periodItem?.className || course.room,
-                          level: periodItem?.className || course.level
+                          level: periodItem?.className || course.level,
+                          physicalRoom: physicalRoomOnly(periodItem?.room)
                         });
                         setCurrentPeriod(PERIODS[pIndex] || `คาบ ${pIndex}`);
                         setView('class');
@@ -2087,6 +2103,17 @@ export function TeacherPortal() {
               <div className="animate-in fade-in duration-300">
                 <TeacherWeekTimetable ownStaffId={staffIdOf(user)} />
               </div>
+            )}
+
+            {dashboardTab === 'seating-plan' && (
+              <TeacherSeatingPlanner
+                ownStaffId={staffIdOf(user)}
+                ownEmail={user?.email}
+                schedules={fsSchedules as any[]}
+                students={students}
+                apRosterForCode={apRosterForCode}
+                schedulesLoading={fsLoading}
+              />
             )}
 
             {dashboardTab === 'teaching-load' && (
@@ -2681,6 +2708,7 @@ export function TeacherPortal() {
               onSelectStudentDetail={(s) => setAssessmentModalStudent(s)}
               attendanceOnly={retroactiveAttendanceMode}
               overrideStudents={activeCourseIsElective || activeApLevels ? courseStudents : undefined}
+              target={activeSeatingTarget}
             />
           </main>
         </div>
