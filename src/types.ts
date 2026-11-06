@@ -301,6 +301,8 @@ export interface Course {
   teacherEmail?: string;
   roleLabel?: string;
   level?: string;   // ระดับชั้น เช่น "ม.5/8" (แยกจาก room ที่เป็นห้องกายภาพ เช่น "943")
+  /** ห้องกายภาพของคาบที่กำลังเข้าสอน (จาก schedules.room) — ใช้ระบุผังที่นั่ง; ไม่มี = ไม่ระบุ (ห้ามเดา) */
+  physicalRoom?: string;
   // TASK 2 (สมุดบันทึกคะแนน): วิชาหลัก (MAIN) กรอกคะแนนตัวเลขปกติ วิชากิจกรรม (ACTIVITY) เลือกผ่าน/ไม่ผ่านแทน
   subjectType?: 'MAIN' | 'ACTIVITY';
   credits?: number;

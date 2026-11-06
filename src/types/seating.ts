@@ -35,6 +35,11 @@ export interface SeatingLayout {
   teacherId?: string;
   teacherEmail?: string;
   teacherName?: string;
+  /** ครูเจ้าของผัง = staff doc id (claim staffId) — rules ให้เจ้าของเท่านั้นแก้ผังนี้ */
+  ownerStaffId?: string;
+  /** คีย์ชั้น/ห้อง(+ห้องกายภาพ) ไม่รวมครู — ใช้หา "ผังของครูท่านอื่นที่ห้องเดียวกัน" ไว้คัดลอก */
+  targetKey?: string;
+  kind?: 'CLASS' | 'AP' | 'ELECTIVE';
   category: SeatingCategory;
   isTemplate?: boolean;
   isLocked?: boolean;
