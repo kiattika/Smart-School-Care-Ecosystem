@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, DoorOpen, LayoutGrid, School, Users } from 'lucide-react';
 import type { Course, Student } from '../../types';
 import { ClassroomSeatingManager } from '../ClassroomSeatingManager';
@@ -35,6 +35,13 @@ export function TeacherSeatingPlanner({ ownStaffId, ownEmail, schedules, student
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = items.find(i => i.target.layoutId === selectedId) || null;
 
+  useEffect(() => {
+    if (!selectedId) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedId(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedId]);
+
   if (!ownStaffId) {
     return <p className="text-sm text-slate-400 p-6">ไม่พบรหัสบุคลากรของบัญชีนี้ จึงยังจัดผังที่นั่งไม่ได้</p>;
   }
@@ -53,14 +60,17 @@ export function TeacherSeatingPlanner({ ownStaffId, ownEmail, schedules, student
       attendanceTaken: false,
     };
     return (
-      <div className="space-y-3 animate-in fade-in duration-300">
-        <button
-          onClick={() => setSelectedId(null)}
-          className="flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" /> กลับไปรายการผัง
-        </button>
-        <div className="h-[78vh] min-h-[520px] flex flex-col border border-slate-800/80 rounded-2xl overflow-hidden">
+      <div className="fixed inset-0 z-[60] flex flex-col bg-slate-950 animate-in fade-in duration-200" role="dialog" aria-label="จัดผังที่นั่ง">
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-slate-800/80 bg-slate-900 shrink-0">
+          <button
+            onClick={() => setSelectedId(null)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-xs font-bold text-slate-100 hover:bg-slate-700 hover:text-slate-50 transition-colors"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" /> กลับไปรายการผัง
+          </button>
+          <span className="text-xs text-slate-400 truncate">{selected.label} · กด Esc เพื่อกลับ</span>
+        </div>
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
           <ClassroomSeatingManager
             course={course}
             students={students}
