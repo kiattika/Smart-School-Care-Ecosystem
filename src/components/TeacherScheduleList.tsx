@@ -420,7 +420,7 @@ export const TeacherScheduleList: React.FC<TeacherScheduleListProps> = ({
                 <div 
                   key={period.id} 
                   id={`period-live-${period.id}`}
-                  className="bg-gradient-to-r from-emerald-950/40 via-[#161f30] to-emerald-950/20 border-2 border-emerald-500 rounded-xl p-5 shadow-[0_0_20px_rgba(16,185,129,0.2)] relative overflow-hidden flex flex-col gap-3 transition-all duration-300"
+                  className="bg-emerald-950/30 border-2 border-emerald-500 rounded-xl p-5 shadow-[0_0_20px_rgba(16,185,129,0.2)] relative overflow-hidden flex flex-col gap-3 transition-all duration-300"
                 >
                   <div className="absolute top-0 right-0 bg-emerald-500 text-slate-950 text-[10px] font-extrabold px-3.5 py-1 rounded-bl-lg tracking-wider uppercase flex items-center gap-1.5 z-10">
                     <span className="w-1.5 h-1.5 bg-slate-950 rounded-full animate-ping" />
