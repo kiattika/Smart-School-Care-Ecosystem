@@ -472,9 +472,16 @@ service cloud.firestore {
                     || (isSeatingTeacher() && seatLayoutIdIsMine(layoutId)
                         && resource.data.get('ownerStaffId', '') == myStaffId());
 
-      match /{document=**} {
+      // ระบุ groups/seats ตรง ๆ — ห้ามใช้ {document=**} ที่นี่: rules_version 2 ให้ wildcard นี้จับ "ศูนย์ segment"
+      // = ตัวเอกสารผังเองด้วย ทำให้ข้ามเงื่อนไข ownerStaffId ของ create/update ด้านบน
+      match /groups/{groupId} {
         allow read: if isSignedIn();
         allow write: if hasRole('SUPER_ADMIN') || (isSeatingTeacher() && seatLayoutIdIsMine(layoutId));
+
+        match /seats/{seatId} {
+          allow read: if isSignedIn();
+          allow write: if hasRole('SUPER_ADMIN') || (isSeatingTeacher() && seatLayoutIdIsMine(layoutId));
+        }
       }
     }
 
