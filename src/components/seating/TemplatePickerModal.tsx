@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Copy, Layout, Sparkles, X, Check, Search, Users, Grid } from 'lucide-react';
 import { SeatingLayout } from '../../types/seating';
 import { getSharedLayoutTemplatesFromFirestore } from '../../services/seatingService';
+import { SEATING_PRESETS } from '../../lib/seatingPresets';
+import { PresetPreview } from './PresetPreview';
 
 interface TemplatePickerModalProps {
   isOpen: boolean;
@@ -38,48 +40,7 @@ export const TemplatePickerModal: React.FC<TemplatePickerModalProps> = ({
 
   if (!isOpen) return null;
 
-  const defaultPresets = [
-    {
-      id: 'preset_standard_40',
-      name: 'แถวคู่มาตรฐาน (4 แถวคู่ 40 ที่นั่ง)',
-      category: 'CLASSROOM',
-      totalCapacity: 40,
-      description: 'จัดโต๊ะ 4 คู่แถวยาว (แถวละ 10 คน) เหมาะสำหรับห้องเรียนทั่วไป ม.4 - ม.6',
-      groupsCount: 4
-    },
-    {
-      id: 'preset_lab_pods_36',
-      name: 'โต๊ะแล็บทดลอง (6 กลุ่ม x 6 ที่นั่ง = 36 คน)',
-      category: 'LAB',
-      totalCapacity: 36,
-      description: 'แบ่ง 6 กลุ่ม โต๊ะสี่เหลี่ยมหันหน้าเข้าหากัน สำหรับคาบแล็บวิทย์ ฟิสิกส์ เคมี ชีวะ',
-      groupsCount: 6
-    },
-    {
-      id: 'preset_large_groups_40',
-      name: 'กลุ่มแล็บใหญ่ (8 กลุ่ม x 5 ที่นั่ง = 40 คน)',
-      category: 'ACTIVE_LEARNING',
-      totalCapacity: 40,
-      description: 'แบ่ง 8 กลุ่มย่อย สำหรับกิจกรรม Active Learning และการทำงานโครงงาน',
-      groupsCount: 8
-    },
-    {
-      id: 'preset_u_shape_32',
-      name: 'จัดโต๊ะรูปตัว U / เกือกม้า (32 ที่นั่ง)',
-      category: 'SEMINAR',
-      totalCapacity: 32,
-      description: 'จัดโต๊ะล้อมรอบเวทีกลาง สำหรับการนำเสนอ สัมมนา และอภิปราย',
-      groupsCount: 3
-    },
-    {
-      id: 'preset_exam_grid_40',
-      name: 'โต๊ะสอบแถวเดี่ยวแยกอิสระ (5 แถว x 8 ที่นั่ง = 40 คน)',
-      category: 'EXAM',
-      totalCapacity: 40,
-      description: 'แถวเดี่ยวระยะห่างมาตรฐาน สำหรับการสอบกลางภาค / ปลายภาค ป้องกันการทุจริต',
-      groupsCount: 5
-    }
-  ];
+  const defaultPresets = SEATING_PRESETS;
 
   const filteredRemote = remoteTemplates.filter(t => 
     t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -146,6 +107,7 @@ export const TemplatePickerModal: React.FC<TemplatePickerModalProps> = ({
                   }}
                 >
                   <div>
+                    <PresetPreview groups={preset.preview} />
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-xs font-bold text-white group-hover:text-emerald-300 transition-colors">
                         {preset.name}

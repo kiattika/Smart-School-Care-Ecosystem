@@ -767,6 +767,29 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
       setGroups(generateDefaultStandardGroups());
       setAssignments({});
       setSaveToast('ปรับใช้แม่แบบ "แถวคู่มาตรฐาน (40 ที่นั่ง)" เรียบร้อยแล้ว');
+    } else if (templateId === 'preset_double_5_40') {
+      const newGroups: SeatingGroup[] = [];
+      for (let g = 1; g <= 5; g++) {
+        const gId = `group_d5_${g}`;
+        const seats: SeatingSeat[] = [];
+        for (let s = 1; s <= 8; s++) {
+          seats.push({ id: `seat_${gId}_${s}`, groupId: gId, seatNumber: s, label: `${g}-${s}`, status: 'ACTIVE' });
+        }
+        newGroups.push({
+          id: gId,
+          layoutId,
+          name: `แถวที่ ${g} (โต๊ะคู่)`,
+          capacity: 8,
+          order: g,
+          positionX: (g - 1) * 280,
+          positionY: 0,
+          shape: 'ROW',
+          seats
+        });
+      }
+      setGroups(newGroups);
+      setAssignments({});
+      setSaveToast('ปรับใช้แม่แบบ "แถวคู่ 5 แถว (40 ที่นั่ง)" เรียบร้อยแล้ว');
     } else if (templateId === 'preset_lab_pods_36') {
       const newGroups: SeatingGroup[] = [];
       for (let g = 1; g <= 6; g++) {
