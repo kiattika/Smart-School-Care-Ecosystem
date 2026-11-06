@@ -48,6 +48,9 @@ export async function saveSeatingLayoutToFirestore(
       teacherId: layout.teacherId || '',
       teacherEmail: layout.teacherEmail || '',
       teacherName: layout.teacherName || '',
+      ...(layout.ownerStaffId ? { ownerStaffId: layout.ownerStaffId } : {}),
+      ...(layout.targetKey ? { targetKey: layout.targetKey } : {}),
+      ...(layout.kind ? { kind: layout.kind } : {}),
       category: layout.category || 'CLASSROOM',
       isTemplate: !!layout.isTemplate,
       isLocked: !!layout.isLocked,
@@ -85,6 +88,20 @@ export async function saveSeatingLayoutToFirestore(
             label: seat.label || `${seat.seatNumber}`
           }, { merge: true });
         }
+      }
+    }
+
+    // 2.5 ลบกลุ่ม/ที่นั่งเดิมที่ถูกเอาออกจากผังแล้ว (เดิม merge อย่างเดียว → ใช้แม่แบบ/คัดลอกผังแล้วของเก่ายังค้างอยู่ตอนโหลดใหม่)
+    if (groups || layout.groups) {
+      const keepGroupIds = new Set(actualGroups.map(g => g.id));
+      const existingGroups = await getDocs(collection(db, `${LAYOUTS_COL}/${layout.id}/groups`));
+      for (const gd of existingGroups.docs) {
+        const keepSeatIds = keepGroupIds.has(gd.id)
+          ? new Set((actualGroups.find(g => g.id === gd.id)?.seats || []).map(st => st.id))
+          : new Set<string>();
+        const seatDocs = await getDocs(collection(db, `${LAYOUTS_COL}/${layout.id}/groups/${gd.id}/seats`));
+        for (const sd of seatDocs.docs) if (!keepSeatIds.has(sd.id)) batch.delete(sd.ref);
+        if (!keepGroupIds.has(gd.id)) batch.delete(gd.ref);
       }
     }
 
@@ -158,6 +175,8 @@ export async function getSeatingLayoutFromFirestore(layoutId: string): Promise<S
         id: groupId,
         name: gData.name || `กลุ่ม ${gData.groupIndex + 1}`,
         groupIndex: gData.groupIndex ?? 0,
+        // ลำดับกลุ่ม (เริ่ม 1) — เดิมไม่โหลดกลับมา ทำให้ป้ายที่นั่งที่เพิ่มทีหลังเป็น "undefined-9"
+        order: (gData.groupIndex ?? 0) + 1,
         capacity: gData.capacity || seats.length,
         positionX: gData.positionX ?? 0,
         positionY: gData.positionY ?? 0,
@@ -180,6 +199,9 @@ export async function getSeatingLayoutFromFirestore(layoutId: string): Promise<S
       teacherId: layoutData.teacherId || '',
       teacherEmail: layoutData.teacherEmail || '',
       teacherName: layoutData.teacherName || '',
+      ...(layoutData.ownerStaffId ? { ownerStaffId: String(layoutData.ownerStaffId) } : {}),
+      ...(layoutData.targetKey ? { targetKey: String(layoutData.targetKey) } : {}),
+      ...(layoutData.kind ? { kind: layoutData.kind } : {}),
       category: layoutData.category || 'CLASSROOM',
       isTemplate: !!layoutData.isTemplate,
       isLocked: !!layoutData.isLocked,
@@ -405,4 +427,42 @@ export async function getStudentSeatingHistory(studentId: string): Promise<Seati
     console.warn(`Error fetching seating history for student '${studentId}':`, error);
     return [];
   }
+}
+
+
+export interface LayoutSummary {
+  id: string;
+  ownerStaffId: string;
+  teacherName: string;
+  totalCapacity: number;
+  updatedAt: string;
+}
+
+/**
+ * ผังของ "ครูท่านอื่น" ที่ชั้น/ห้อง(+ห้องกายภาพ)เดียวกัน — ไว้ให้ครูเลือกคัดลอกเป็นสำเนาของตน
+ * ต้องมี field `targetKey` (ผังที่สร้างก่อนมีระบบนี้ไม่มี จึงไม่โผล่ — ตามที่ตกลง เริ่มใหม่หมด)
+ */
+export async function listLayoutsByTargetKey(targetKey: string, excludeLayoutId: string): Promise<LayoutSummary[]> {
+  const snap = await getDocs(query(collection(db, LAYOUTS_COL), where('targetKey', '==', targetKey)));
+  return snap.docs
+    .filter(d => d.id !== excludeLayoutId && !!d.data().ownerStaffId)
+    .map(d => {
+      const x = d.data();
+      return {
+        id: d.id,
+        ownerStaffId: String(x.ownerStaffId),
+        teacherName: String(x.teacherName || ''),
+        totalCapacity: Number(x.totalCapacity || 0),
+        updatedAt: String(x.updatedAt || ''),
+      };
+    })
+    .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+}
+
+/** ประวัติการนั่งทั้งผัง (ทั้งที่ยัง active และปิดแล้ว) — ใหม่→เก่า */
+export async function getLayoutHistoryFromFirestore(layoutId: string): Promise<SeatingAssignment[]> {
+  const snap = await getDocs(query(collection(db, ASSIGNMENTS_COL), where('layoutId', '==', layoutId)));
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() } as SeatingAssignment))
+    .sort((a, b) => (b.effectiveFrom || '').localeCompare(a.effectiveFrom || ''));
 }

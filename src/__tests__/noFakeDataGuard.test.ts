@@ -99,7 +99,7 @@ describe('no-fake-data guard — hardcoded room / count / label fallbacks (item 
     expect(hook).toContain('const requesterEmail = user?.email;\n    if (!requesterEmail) {');
     const csm = readSource(path.join(srcDir, 'components/ClassroomSeatingManager.tsx'));
     expect(csm).toContain('const requireActorUid = (): string | null => {');
-    expect((csm.match(/const actorUid = requireActorUid\(\);\n\s+if \(!actorUid\) return;/g) || []).length).toBe(3);
+    expect((csm.match(/const actorUid = requireActorUid\(\);\n\s+if \(!actorUid\) return;/g) || []).length).toBe(4);
     expect(csm).toContain("if (!props.course || !props.course.room) {");
     const modal = readSource(path.join(srcDir, 'components/seating/TakeAttendanceModal.tsx'));
     expect(modal).toContain('if (!teacherId) {');

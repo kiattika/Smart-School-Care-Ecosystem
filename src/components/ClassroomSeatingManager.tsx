@@ -43,6 +43,11 @@ import { QuickPointAwardModal } from './QuickPointAwardModal';
 import { RandomStudentPickerModal, ClassroomDeskGroup } from './RandomStudentPickerModal';
 import { buildDeskGroupsForPicker } from '../lib/seatingPicker';
 import { SeatHistoryModal } from './seating/SeatHistoryModal';
+import { CopyLayoutModal } from './seating/CopyLayoutModal';
+import { LayoutHistoryModal } from './seating/LayoutHistoryModal';
+import { layoutBelongsTo, type SeatingTarget } from '../lib/seatingLayoutKey';
+import { staffIdOf } from '../lib/staffIdentity';
+import { remapLayoutForCopy } from '../lib/seatingCopy';
 import { TemplatePickerModal } from './seating/TemplatePickerModal';
 import { CreateGroupModal } from './seating/CreateGroupModal';
 import { TakeAttendanceModal } from './seating/TakeAttendanceModal';
@@ -60,7 +65,8 @@ import {
   unassignSeatInFirestore,
   swapStudentSeatsInFirestore,
   getSharedLayoutTemplatesFromFirestore,
-  cloneLayoutTemplateInFirestore
+  cloneLayoutTemplateInFirestore,
+  type LayoutSummary
 } from '../services/seatingService';
 
 interface ClassroomSeatingManagerProps {
@@ -74,6 +80,10 @@ interface ClassroomSeatingManagerProps {
   /** ใช้รายชื่อนี้แทนการกรองด้วย room ภายใน — สำหรับกิจกรรม ELECTIVE (ชุมนุม) ที่นักเรียนคละห้อง
    *  มาสมัครเอง (ดู TeacherPortal.tsx courseStudents/useElectiveActivities) */
   overrideStudents?: Student[];
+  /** ผังที่ใช้ (คีย์ชั้น/ห้อง+ห้องกายภาพ+ครูเจ้าของ — ดู lib/seatingLayoutKey) — ไม่มี = empty state ไม่ query/เขียน */
+  target: SeatingTarget | null;
+  /** โหมดจัดผังล่วงหน้า (เมนู "จัดผังที่นั่ง"): ซ่อนสุ่ม/เช็คชื่อ/ให้คะแนน เหลือเฉพาะงานจัดที่นั่ง */
+  planMode?: boolean;
 }
 
 /**
@@ -81,6 +91,19 @@ interface ClassroomSeatingManagerProps {
  * และไม่ query/เขียนผังห้องเรียนใดๆ (ดู CLAUDE.md กฎ no-fake-data)
  */
 export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (props) => {
+  const staffId = staffIdOf(useStore(st => st.user));
+  if (props.course && props.course.room && (!props.target || !layoutBelongsTo(props.target.layoutId, staffId))) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 p-10 text-center text-slate-400" data-testid="seating-no-target">
+        <p className="text-sm">ไม่พบรหัสบุคลากรของคุณ หรือยังระบุชั้น/ห้องเรียนของผังนี้ไม่ได้ จึงยังแสดงผังที่นั่งไม่ได้</p>
+        {props.onBackToDashboard && (
+          <button onClick={props.onBackToDashboard} className="text-xs text-indigo-400 hover:text-indigo-300 underline">
+            กลับไปหน้าหลัก
+          </button>
+        )}
+      </div>
+    );
+  }
   if (!props.course || !props.course.room) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 p-10 text-center text-slate-400" data-testid="seating-no-course">
@@ -93,17 +116,19 @@ export const ClassroomSeatingManager: React.FC<ClassroomSeatingManagerProps> = (
       </div>
     );
   }
-  return <ClassroomSeatingManagerInner {...props} course={props.course} />;
+  return <ClassroomSeatingManagerInner {...props} course={props.course} target={props.target!} />;
 };
 
-const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { course: Course }> = ({
+const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { course: Course; target: SeatingTarget }> = ({
   course,
   students,
   onBackToDashboard,
   onSelectStudentDetail,
   onTakeAttendance,
   attendanceOnly = false,
-  overrideStudents
+  overrideStudents,
+  target,
+  planMode = false,
 }) => {
 
   const { 
@@ -114,14 +139,14 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
     addActiveLearningPoints,
   } = useStore();
 
-  const courseSubjectId = course?.code || course?.id || 'default-subject';
     // คะแนนกิจกรรมของ "วิชานี้" เท่านั้น (ภาคเรียนปัจจุบัน) — ไม่ใช้ยอดรวมทุกวิชาใน store
   const courseKey = courseActivityKey({ id: course?.id, code: course?.code, level: course?.level });
   const coursePoints = useCourseActivityPoints(courseKey, course?.id);
   // ปุ่ม +1 ลัดต้องผูกวิชา/ภาคเรียนเหมือนตัวสุ่มตอบ ไม่งั้น log ไม่มี courseId → ไปรวมเป็น "ไม่ระบุวิชา"
   const { academicYear: alYear, term: alTerm, isConfigured: alConfigured } = useCurrentSemester();
-  const courseClassId = course.room; // wrapper รับประกันว่ามีห้อง — ไม่มี = empty state ไม่ query/เขียน
-  const layoutId = `layout_${courseSubjectId}_${courseClassId.replace(/[^a-zA-Z0-9]/g, '_')}`;
+  // wrapper รับประกันว่ามีห้อง + target ของเจ้าของจริง — ไม่มี = empty state ไม่ query/เขียน
+  const layoutId = target.layoutId;
+  const ownerStaffId = staffIdOf(user) as string;
 
   // Filter students for this course/room — ELECTIVE (ชุมนุม) ส่ง overrideStudents มาจาก enrollment
   // แทน เพราะนักเรียนคละห้องมาสมัครเอง กรองด้วย room ไม่ได้ (ดู TeacherPortal.tsx courseStudents)
@@ -143,6 +168,10 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
     room: course.room,
     teacherId: user?.uid ?? '',
     teacherEmail: user?.email ?? '',
+    teacherName: user?.displayName ?? '',
+    ownerStaffId,
+    targetKey: target.targetKey,
+    kind: target.kind,
     category: 'CLASSROOM',
     isTemplate: false,
     isLocked: false,
@@ -181,6 +210,8 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
   const [showTemplateModal, setShowTemplateModal] = useState<boolean>(false);
   const [showCreateGroupModal, setShowCreateGroupModal] = useState<boolean>(false);
   const [showRandomPicker, setShowRandomPicker] = useState<boolean>(false);
+  const [showCopyModal, setShowCopyModal] = useState<boolean>(false);
+  const [showLayoutHistory, setShowLayoutHistory] = useState<boolean>(false);
   const [showAttendanceModal, setShowAttendanceModal] = useState<boolean>(false);
   const [selectedSeatForHistory, setSelectedSeatForHistory] = useState<{ seat: SeatingSeat; group: SeatingGroup } | null>(null);
   const [selectedStudentForHistory, setSelectedStudentForHistory] = useState<Student | null>(null);
@@ -246,7 +277,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
   );
   const hasAttendanceRecords = Object.keys(currentAttendance).length > 0;
   // Gated strictly when real student attendance statuses exist
-  const isAttendanceDone = hasAttendanceRecords;
+  const isAttendanceDone = planMode || hasAttendanceRecords;
 
   // Derived Total Capacity
   const totalCapacity = useMemo(() => {
@@ -365,7 +396,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
     courseStudents.slice(0, seats.length).forEach((student, i) => {
       const { g, st } = seats[i];
       initialAssign[st.id] = {
-        id: `assign_${st.id}_${student.studentId}`,
+        id: `assign_${layoutId}_${st.id}_${student.studentId}`,
         layoutId,
         groupId: g.id,
         seatId: st.id,
@@ -391,6 +422,10 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
         ...layoutMeta,
         teacherId: actorUid,
         teacherEmail: user?.email ?? '',
+        teacherName: user?.displayName ?? layoutMeta.teacherName ?? '',
+        ownerStaffId,
+        targetKey: target.targetKey,
+        kind: target.kind,
         totalCapacity,
         zoomScale,
         isLocked: lockedNow,
@@ -499,7 +534,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
           id: `seat_${groupId}_${Date.now()}_${nextNum}`,
           groupId,
           seatNumber: nextNum,
-          label: `${group.order}-${nextNum}`,
+          label: `${group.order ?? ((group.groupIndex ?? 0) + 1)}-${nextNum}`,
           status: 'ACTIVE'
         };
         currentSeats.push(newSeat);
@@ -561,11 +596,13 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
     });
 
     const newAssignment: SeatingAssignment = {
-      id: `assign_${seat.id}_${student.studentId}_${Date.now()}`,
+      id: `assign_${layoutId}_${seat.id}_${student.studentId}_${Date.now()}`,
       layoutId,
       groupId: group.id,
       seatId: seat.id,
       studentId: student.studentId,
+      seatLabel: seat.label || String(seat.seatNumber),
+      groupName: group.name,
       studentName: student.name,
       studentNo: student.studentNo,
       effectiveFrom: now,
@@ -642,16 +679,16 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
       const next = { ...prev };
       if (assignA && assignB) {
         // Swap both
-        next[seatAId] = { ...assignB, seatId: seatAId, effectiveFrom: now, id: `assign_${seatAId}_${assignB.studentId}_${Date.now()}` };
-        next[seatBId] = { ...assignA, seatId: seatBId, effectiveFrom: now, id: `assign_${seatBId}_${assignA.studentId}_${Date.now()}` };
+        next[seatAId] = { ...assignB, seatId: seatAId, effectiveFrom: now, id: `assign_${layoutId}_${seatAId}_${assignB.studentId}_${Date.now()}` };
+        next[seatBId] = { ...assignA, seatId: seatBId, effectiveFrom: now, id: `assign_${layoutId}_${seatBId}_${assignA.studentId}_${Date.now()}` };
       } else if (assignA && !assignB) {
         // Move A to B
         delete next[seatAId];
-        next[seatBId] = { ...assignA, seatId: seatBId, effectiveFrom: now, id: `assign_${seatBId}_${assignA.studentId}_${Date.now()}` };
+        next[seatBId] = { ...assignA, seatId: seatBId, effectiveFrom: now, id: `assign_${layoutId}_${seatBId}_${assignA.studentId}_${Date.now()}` };
       } else if (!assignA && assignB) {
         // Move B to A
         delete next[seatBId];
-        next[seatAId] = { ...assignB, seatId: seatAId, effectiveFrom: now, id: `assign_${seatAId}_${assignB.studentId}_${Date.now()}` };
+        next[seatAId] = { ...assignB, seatId: seatAId, effectiveFrom: now, id: `assign_${layoutId}_${seatAId}_${assignB.studentId}_${Date.now()}` };
       }
       return next;
     });
@@ -689,7 +726,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
       if (idx < availableSeats.length) {
         const { seat, group } = availableSeats[idx];
         const assign: SeatingAssignment = {
-          id: `assign_${seat.id}_${student.studentId}_${Date.now()}_${idx}`,
+          id: `assign_${layoutId}_${seat.id}_${student.studentId}_${Date.now()}_${idx}`,
           layoutId,
           groupId: group.id,
           seatId: seat.id,
@@ -852,6 +889,41 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
     setTimeout(() => setSaveToast(null), 3000);
   };
 
+  // คัดลอกผังจากครูท่านอื่น (ชั้น/ห้องเดียวกัน) → สำเนาของตน; ยังไม่เขียนขึ้นระบบจนกว่าจะกด "บันทึกผัง"
+  const handleCopyFromOther = async (source: LayoutSummary) => {
+    const actorUid = requireActorUid();
+    if (!actorUid) return;
+    try {
+      const src = await getSeatingLayoutFromFirestore(source.id);
+      if (!src || src.groups.length === 0) {
+        setSaveToast('ผังต้นทางว่างเปล่า ไม่มีอะไรให้คัดลอก');
+        setTimeout(() => setSaveToast(null), 3000);
+        return;
+      }
+      const roster = new Map<string, { name?: string; studentNo?: number }>(courseStudents.map(st => [st.studentId, { name: st.name, studentNo: st.studentNo }]));
+      const copied = remapLayoutForCopy({
+        sourceGroups: src.groups,
+        sourceAssignments: src.assignments,
+        targetLayoutId: layoutId,
+        roster,
+        actorUid,
+        nowIso: new Date().toISOString(),
+      });
+      setGroups(copied.groups);
+      setAssignments(Object.fromEntries(copied.assignments.map(a => [a.seatId, a])));
+      setShowCopyModal(false);
+      setSaveToast(
+        `คัดลอกผังจาก ${source.teacherName || source.ownerStaffId} แล้ว${copied.skippedStudents > 0 ? ` (ข้ามนักเรียน ${copied.skippedStudents} คนที่ไม่อยู่ในรายชื่อห้องนี้)` : ''} — กด "บันทึกผัง" เพื่อยืนยัน`
+      );
+      setTimeout(() => setSaveToast(null), 6000);
+    } catch (err) {
+      console.error('Error copying layout:', err);
+      setSaveToast(`❌ คัดลอกผังไม่สำเร็จ${(err as { code?: string })?.code ? ` (${(err as { code?: string }).code})` : ''}`);
+      setTimeout(() => setSaveToast(null), 5000);
+      throw err;
+    }
+  };
+
   // Convert current dynamic groups to pickable "desk" units for RandomStudentPickerModal.
   // ROW/GRID ("แถวโต๊ะคู่") ถูกหั่นเป็นโต๊ะละ 2 ที่นั่ง — ไม่งั้น "สุ่มโต๊ะ" จะได้ทั้งแถว ดู buildDeskGroupsForPicker
   const classroomGroupsForPicker: ClassroomDeskGroup[] = useMemo(
@@ -918,13 +990,35 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
             </span>
           ) : (
           <>
-          {/* Random Picker Button */}
+          {/* Random Picker Button — เมนูจัดผังล่วงหน้าไม่มีการสุ่ม (สุ่มใช้ในคาบสอนจริงเท่านั้น) */}
+          {!planMode && (
           <button
             onClick={() => setShowRandomPicker(true)}
             className="px-3 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-indigo-600/20"
           >
             <Sparkles className="w-3.5 h-3.5 animate-spin [animation-duration:6s]" />
             <span>สุ่มนักเรียน (Fair Pick)</span>
+          </button>
+          )}
+
+          {/* คัดลอกผังจากครูท่านอื่นที่ห้องเดียวกัน */}
+          <button
+            onClick={() => setShowCopyModal(true)}
+            disabled={isLayoutLocked}
+            title="คัดลอกผังของครูท่านอื่นที่สอนห้องเดียวกันมาเป็นสำเนาของคุณ"
+            className="px-3 py-2 bg-[#181c28] hover:bg-slate-800 border border-slate-700/80 disabled:opacity-40 text-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+          >
+            <Copy className="w-3.5 h-3.5 text-emerald-400" />
+            <span>คัดลอกผังจากครูท่านอื่น</span>
+          </button>
+
+          {/* ประวัติผังทั้งห้อง */}
+          <button
+            onClick={() => setShowLayoutHistory(true)}
+            className="px-3 py-2 bg-[#181c28] hover:bg-slate-800 border border-slate-700/80 text-slate-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+          >
+            <History className="w-3.5 h-3.5 text-indigo-400" />
+            <span>ประวัติที่นั่ง</span>
           </button>
 
           {/* Template Picker */}
@@ -1347,7 +1441,7 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
                                 )}
 
                                 {/* Quick Point Increment */}
-                                {!isAbsent && !attendanceOnly && (
+                                {!isAbsent && !attendanceOnly && !planMode && (
                                   <button
                                     onClick={e => {
                                       e.stopPropagation();
@@ -1403,6 +1497,20 @@ const ClassroomSeatingManagerInner: React.FC<ClassroomSeatingManagerProps & { co
         layoutId={layoutId}
         selectedSeat={selectedSeatForHistory}
         allLocalAssignments={allAssignmentsHistory}
+      />
+
+      <CopyLayoutModal
+        isOpen={showCopyModal}
+        onClose={() => setShowCopyModal(false)}
+        targetKey={target.targetKey}
+        ownLayoutId={layoutId}
+        willReplace={Object.keys(assignments).length > 0}
+        onPick={handleCopyFromOther}
+      />
+      <LayoutHistoryModal
+        isOpen={showLayoutHistory}
+        onClose={() => setShowLayoutHistory(false)}
+        layoutId={layoutId}
       />
 
       {/* Random Student Picker Modal (Adapted to dynamic classroom groups) */}
